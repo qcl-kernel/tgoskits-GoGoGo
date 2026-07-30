@@ -12,6 +12,16 @@ use super::{
 };
 use crate::{fs_core::FsContext, os::sync::SleepMutex as Mutex};
 
+/// Upper bound on the per-call kernel bounce buffer for uncached (device) I/O.
+///
+/// Large enough to carry a whole jumbo frame (a header-less TUN's 65535-byte
+/// `MAX_MTU` plus a 14-byte Ethernet header for a TAP), so a packet-oriented
+/// char device delivers exactly one datagram per `read_at`/`write_at`, rather
+/// than the tail of a packet being dropped (read) or a single frame being split
+/// into several short packets (write) at a fixed small chunk boundary. Very
+/// large stream transfers stay bounded to this size and loop.
+const MAX_DIRECT_IO_CHUNK: usize = 128 * 1024;
+
 /// Low-level interface for file operations.
 #[derive(Clone)]
 pub enum FileBackend {
@@ -48,13 +58,19 @@ impl FileBackend {
         match self {
             Self::Cached(cached) => cached.read_at(dst, offset),
             Self::Direct(loc) => {
+                // Size the kernel bounce to the caller's request (capped), so a
+                // packet-oriented char device (TUN/TAP) delivers a whole datagram
+                // in a single `read_at` instead of a fixed small fragment whose
+                // tail is dropped together with the consumed packet. Mirrors Linux,
+                // whose char-device `->read_iter` sees the full iov and returns one
+                // packet; a stream device is unaffected (a larger single read
+                // returns the same bytes in fewer iterations).
+                let cap = dst.remaining_mut().clamp(1, MAX_DIRECT_IO_CHUNK);
+                let mut bounce = alloc::vec![0u8; cap];
                 let mut total = 0;
                 while !dst.is_full() {
-                    let read = match dst.read_from(&mut ax_io::read_fn(|buf| {
-                        loc.entry().as_file()?.read_at(buf, offset).inspect(|read| {
-                            offset += *read as u64;
-                        })
-                    })) {
+                    let want = dst.remaining_mut().min(bounce.len());
+                    let read = match loc.entry().as_file()?.read_at(&mut bounce[..want], offset) {
                         Ok(read) => read,
                         Err(VfsError::WouldBlock) if total > 0 => break,
                         Err(err) => return Err(err),
@@ -62,7 +78,12 @@ impl FileBackend {
                     if read == 0 {
                         break;
                     }
-                    total += read;
+                    offset += read as u64;
+                    let written = dst.write(&bounce[..read])?;
+                    total += written;
+                    if written < read {
+                        break;
+                    }
                 }
                 Ok(total)
             }
@@ -74,8 +95,14 @@ impl FileBackend {
         match self {
             Self::Cached(cached) => cached.write_at(src, offset),
             Self::Direct(loc) => {
+                // Size the kernel bounce to the caller's request (capped) so a
+                // packet-oriented char device (TUN/TAP) receives a whole datagram
+                // in one `write_at`, rather than several fixed-size slices that
+                // each become a separate short packet. Mirrors Linux, whose
+                // char-device `->write_iter` consumes the full iov as one packet.
+                let cap = src.remaining().clamp(1, MAX_DIRECT_IO_CHUNK);
                 let mut total = 0;
-                let mut buf = [0; ax_io::DEFAULT_BUF_SIZE];
+                let mut buf = alloc::vec![0u8; cap];
                 while !src.is_empty() {
                     let limit = src.remaining().min(buf.len());
                     let read = src.read(&mut buf[..limit])?;
