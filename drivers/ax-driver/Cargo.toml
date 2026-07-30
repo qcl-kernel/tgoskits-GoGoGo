@@ -42,6 +42,7 @@ nvme = ["block", "pci", "dep:nvme-driver"]
 cvsd = [
     "block",
     "dep:cv181x-sdhci",
+    "dep:sdhci-host",
     "dep:sdmmc-protocol",
     "sdmmc-protocol/rdif",
 ]

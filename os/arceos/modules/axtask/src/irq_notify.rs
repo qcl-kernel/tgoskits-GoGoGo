@@ -66,6 +66,12 @@ impl IrqNotify {
     pub fn wait(&self) {
         self.wait.wait_until(|| self.drain());
     }
+
+    /// Like [`wait`](Self::wait) but returns early after `dur` elapses.
+    #[track_caller]
+    pub fn wait_timeout(&self, dur: core::time::Duration) -> bool {
+        self.wait.wait_timeout_until(dur, || self.drain())
+    }
 }
 
 #[cfg(axtest)]
