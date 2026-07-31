@@ -283,6 +283,22 @@ pub fn sys_mmap(
             .ok_or(AxError::NoMemory)?
     };
 
+    // RLIMIT_AS: a process may not grow its total mapped address space past the
+    // soft limit. Mirrors Linux `may_expand_vm()` (mm/mmap.c): reject the mapping
+    // when `mm->total_vm + npages > rlimit(RLIMIT_AS) >> PAGE_SHIFT`. Checked here,
+    // after any MAP_FIXED unmap has already shrunk `total_vm` (matching Linux's
+    // do_munmap-then-may_expand_vm ordering in mmap_region) and before the new
+    // mapping is committed. `vm_stat` accounts in 4 KiB pages, so the byte limit
+    // is converted to the same unit. `RLIM_INFINITY` (u64::MAX) disables the cap.
+    let rlimit_as = curr.as_thread().proc_data.rlim.read()[RLIMIT_AS].current;
+    if rlimit_as != u64::MAX {
+        let npages = (length / PAGE_SIZE_4K) as u64;
+        let limit_pages = rlimit_as / PAGE_SIZE_4K as u64;
+        if aspace.vm_stat.vss_pages().saturating_add(npages) > limit_pages {
+            return Err(AxError::NoMemory);
+        }
+    }
+
     // IonBufferFile 特殊处理：直接线性映射物理地址，跳过通用 file_mmap/device_mmap 路径。
     // 这样可以避免通用路径中 `range.start += offset` 对 Ion buffer 的错误偏移。
     #[cfg(feature = "sg2002")]
@@ -827,6 +843,22 @@ pub fn sys_mremap(
     let old_size = old_size.align_up(page_size);
     let new_size = new_size.align_up(page_size);
     let src_offset = addr - vma_start;
+
+    // RLIMIT_AS: growing a mapping counts its delta against the address-space
+    // limit, exactly as Linux mremap does via `may_expand_vm(mm, flags,
+    // (new_len - old_len) >> PAGE_SHIFT)` (mm/mremap.c). A pure move or shrink
+    // (new_size <= old_size) never grows total_vm, so only the growth delta is
+    // checked. `RLIM_INFINITY` (u64::MAX) disables the cap.
+    if new_size > old_size {
+        let rlimit_as = curr.as_thread().proc_data.rlim.read()[RLIMIT_AS].current;
+        if rlimit_as != u64::MAX {
+            let npages = ((new_size - old_size) / PAGE_SIZE_4K) as u64;
+            let limit_pages = rlimit_as / PAGE_SIZE_4K as u64;
+            if aspace.vm_stat.vss_pages().saturating_add(npages) > limit_pages {
+                return Err(AxError::NoMemory);
+            }
+        }
+    }
 
     if dontunmap && !matches!(&src_backend, Backend::Cow(cow) if cow.is_anonymous()) {
         return Err(AxError::InvalidInput);
