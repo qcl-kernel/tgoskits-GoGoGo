@@ -405,6 +405,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "arceos-virtnet-echo"
+version = "0.1.0"
+dependencies = [
+ "ax-net",
+ "ax-std",
+]
+
+[[package]]
+name = "arceos-virtnet-uplink"
+version = "0.1.0"
+dependencies = [
+ "ax-net",
+ "ax-std",
+]
+
+[[package]]
 name = "arm-gic-driver"
 version = "0.17.9"
 dependencies = [
@@ -1593,6 +1609,47 @@ dependencies = [
 ]
 
 [[package]]
+name = "axvirtio-blk"
+version = "0.1.0"
+dependencies = [
+ "ax-memory-addr",
+ "axaddrspace",
+ "axvirtio-common",
+ "axvm-types",
+ "log",
+]
+
+[[package]]
+name = "axvirtio-common"
+version = "0.1.0"
+dependencies = [
+ "ax-kspin",
+ "ax-memory-addr",
+ "axaddrspace",
+ "axvm-types",
+ "log",
+]
+
+[[package]]
+name = "axvirtio-net"
+version = "0.1.0"
+dependencies = [
+ "ax-kspin",
+ "ax-memory-addr",
+ "axaddrspace",
+ "axvirtio-common",
+ "axvm-types",
+ "log",
+]
+
+[[package]]
+name = "axvirtio-switch"
+version = "0.1.0"
+dependencies = [
+ "ax-kspin",
+]
+
+[[package]]
 name = "axvisor"
 version = "0.5.22"
 dependencies = [
@@ -1600,18 +1657,27 @@ dependencies = [
  "ax-crate-interface",
  "ax-driver",
  "ax-hal",
+ "ax-kspin",
+ "ax-runtime",
  "ax-std",
  "axbacktrace",
  "axbuild",
+ "axdevice",
+ "axdevice_base",
  "axplat-dyn",
  "axtest",
+ "axvirtio-net",
+ "axvirtio-switch",
  "axvm",
+ "axvm-types",
  "axvmconfig",
  "clap",
  "log",
  "prettyplease",
  "proc-macro2",
  "quote",
+ "rd-net",
+ "rdrive",
  "spin",
  "syn 2.0.119",
  "tokio",

@@ -120,6 +120,7 @@ Current Axvisor LoongArch QEMU bring-up uses the dynamic UEFI platform path. The
 - On x86 QEMU, initialize LAPIC/x2APIC once and keep APIC IDs as firmware IDs, not logical CPU indices. Use x2APIC MSRs when x2APIC is enabled, bound IPI delivery waits, reject xAPIC AP startup/IPI destinations above 255, and keep external IOAPIC INTx programming in the runtime `X86IoApicIntc` path instead of someboot or HAL bypass helpers.
 - On AArch64, keep the someboot `hv` feature scoped to the EL2 kernel path. For non-`hv` EL1 boot, choose the EL1 arch timer at runtime from the boot EL: use CNTP when EL2 is available and CNTV when EL2 is unavailable, and keep the FDT timer interrupt index consistent with the selected mode.
 - On AArch64, program one-shot intervals through the 64-bit CVAL compare registers and a wrapping absolute deadline. Do not use the 32-bit TVAL registers when the interval may exceed their range.
+- On AArch64, enabling the architected timer during early platform init must keep the timer interrupt masked. Runtime code should unmask it only through the explicit timer IRQ enable path after GIC private IRQ setup and the OS timer handler registration are ready; otherwise a programmed EL1/EL2 timer deadline can become an unhandled PPI during early boot.
 - On AArch64 secondary entry, preserve the CPU metadata pointer explicitly across MMU-enable and EL-transition helpers. Naked asm should consume the helper return register instead of assuming scratch registers survive Rust calls.
 - For RK3576 ROCK 4D firmware, DTB, serial, SMP, CRU/PMU, and board-validation
   requirements, follow the dedicated checklist in
@@ -135,6 +136,11 @@ Current Axvisor LoongArch QEMU bring-up uses the dynamic UEFI platform path. The
 ## SMP Bring-Up Rules
 
 1. Discover enabled CPUs from firmware data and keep firmware IDs separate from logical CPU IDs.
+   For an Axvisor AArch64 guest that must retain a guest-visible MPIDR while
+   running on another host CPU, keep `phys_cpu_ids` as the guest CPU identity
+   and provide an explicit `phys_cpu_sets` affinity mask. Guest FDT enrichment
+   preserves an explicit mask and only derives one from the host FDT when the
+   mask is omitted.
 2. Bound-check CPU indices and avoid assuming hart/apic/mpidr/cpuid values are dense.
 3. Prepare one boot argument block per secondary CPU with stack, page table, kernel entry, typed per-CPU area, and logical ID.
 4. Flush boot arguments and page tables before `cpu_on`.
