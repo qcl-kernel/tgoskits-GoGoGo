@@ -24,6 +24,9 @@ if SPEC is None or SPEC.loader is None:
 PLOT = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(PLOT)
 
+SUMMARY_HEADER_PREFIX = "| 轮次 | 场景 |"
+SUMMARY_COLUMN_COUNT = 9
+
 
 def parse_iterations(cell: str) -> list[int]:
     """Expand one Markdown iteration cell into its CSV iteration numbers."""
@@ -54,26 +57,129 @@ def parse_p99_9_values(cell: str, count: int) -> list[Optional[float]]:
     return values
 
 
-def load_report_p99_9() -> dict[int, Optional[float]]:
+def load_report_p99_9(report_path: Path = REPORT) -> dict[int, Optional[float]]:
     """Read p99.9 values from the report's iteration summary table."""
+    lines = report_path.read_text(encoding="utf-8").splitlines()
+    summary_headers = [
+        index for index, line in enumerate(lines) if line.startswith(SUMMARY_HEADER_PREFIX)
+    ]
+    if not summary_headers:
+        raise ValueError("summary table not found")
+    if len(summary_headers) != 1:
+        raise ValueError("multiple summary tables found")
+
+    header_index = summary_headers[0]
+    header_cells = lines[header_index].strip().split("|")[1:-1]
+    if len(header_cells) != SUMMARY_COLUMN_COUNT:
+        raise ValueError(
+            f"summary table header: expected {SUMMARY_COLUMN_COUNT} columns, "
+            f"found {len(header_cells)}"
+        )
+
     values = {}
-    in_summary = False
-    for line in REPORT.read_text(encoding="utf-8").splitlines():
-        if line.startswith("| 轮次 | 场景 |"):
-            in_summary = True
-            continue
-        if not in_summary:
-            continue
+    data_rows = 0
+    for line in lines[header_index + 1 :]:
         if not line.startswith("|"):
             break
 
         cells = [cell.strip() for cell in line.strip().split("|")[1:-1]]
-        if not cells or cells[0].startswith("---"):
+        if len(cells) != SUMMARY_COLUMN_COUNT:
+            raise ValueError(
+                f"summary table row: expected {SUMMARY_COLUMN_COUNT} columns, "
+                f"found {len(cells)}"
+            )
+        if cells[0].startswith("---"):
             continue
+        data_rows += 1
         iterations = parse_iterations(cells[0])
         p99_9_values = parse_p99_9_values(cells[4], len(iterations))
-        values.update(zip(iterations, p99_9_values))
+        for iteration, p99_9_value in zip(iterations, p99_9_values):
+            if iteration in values:
+                raise ValueError(f"duplicate iteration {iteration} in summary table")
+            values[iteration] = p99_9_value
+    if data_rows == 0:
+        raise ValueError("summary table contains no data rows")
     return values
+
+
+class ReportParserValidationTests(unittest.TestCase):
+    HEADER = (
+        "| 轮次 | 场景 | 回调/预期 | p99 | p99.9 | 最大延迟 | "
+        ">100 us | >500 us | >1 ms |"
+    )
+    RULE = "| ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |"
+
+    def load_report_text(self, report_text: str) -> dict[int, Optional[float]]:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            report_path = Path(temp_dir) / "report.md"
+            report_path.write_text(report_text, encoding="utf-8")
+            return load_report_p99_9(report_path)
+
+    def test_rejects_missing_summary_table(self) -> None:
+        with self.assertRaisesRegex(ValueError, "summary table not found"):
+            self.load_report_text("# Report without an iteration summary\n")
+
+    def test_rejects_multiple_summary_tables(self) -> None:
+        report = "\n".join(
+            (
+                self.HEADER,
+                self.RULE,
+                "| 1 | first | 1/1 | 0 us | 0 us | 0 us | 0 | 0 | 0 |",
+                "",
+                self.HEADER,
+                self.RULE,
+                "| 2 | second | 1/1 | 0 us | 0 us | 0 us | 0 | 0 | 0 |",
+            )
+        )
+        with self.assertRaisesRegex(ValueError, "multiple summary tables"):
+            self.load_report_text(report)
+
+    def test_rejects_empty_summary_table(self) -> None:
+        report = "\n".join((self.HEADER, self.RULE, ""))
+        with self.assertRaisesRegex(ValueError, "summary table contains no data rows"):
+            self.load_report_text(report)
+
+    def test_rejects_malformed_summary_row(self) -> None:
+        report = "\n".join(
+            (self.HEADER, self.RULE, "| 1 | truncated | 1/1 | 0 us | 0 us |")
+        )
+        with self.assertRaisesRegex(ValueError, "expected 9 columns"):
+            self.load_report_text(report)
+
+    def test_rejects_duplicate_iteration_coverage(self) -> None:
+        report = "\n".join(
+            (
+                self.HEADER,
+                self.RULE,
+                "| 1--2 | range | 1/1 | 0 us | 0 us | 0 us | 0 | 0 | 0 |",
+                "| 2 | overlap | 1/1 | 0 us | 1 us | 1 us | 0 | 0 | 0 |",
+            )
+        )
+        with self.assertRaisesRegex(ValueError, "duplicate iteration 2"):
+            self.load_report_text(report)
+
+    def test_rejects_descending_iteration_range(self) -> None:
+        with self.assertRaisesRegex(ValueError, "descending iteration range"):
+            parse_iterations("3--1")
+
+    def test_rejects_p99_9_count_mismatch(self) -> None:
+        with self.assertRaisesRegex(ValueError, "does not match 3 iterations"):
+            parse_p99_9_values("1/2 us", 3)
+
+    def test_preserves_valid_p99_9_semantics(self) -> None:
+        report = "\n".join(
+            (
+                self.HEADER,
+                self.RULE,
+                "| 1 | missing | 1/1 | NA | NA | NA | 0 | 0 | 0 |",
+                "| 2--3 | repeated | 1/1 | 0 us | 5 us | 5 us | 0 | 0 | 0 |",
+                "| 4--5 | split | 1/1 | 0/0 us | 6/7 us | 7/8 us | 0 | 0 | 0 |",
+            )
+        )
+        self.assertEqual(
+            self.load_report_text(report),
+            {1: None, 2: 5.0, 3: 5.0, 4: 6.0, 5: 7.0},
+        )
 
 
 class ReportArtifactTests(unittest.TestCase):
