@@ -2,6 +2,7 @@
 
 use alloc::{format, vec::Vec};
 
+use ax_kernel_guard::IrqSave;
 use ax_memory_addr::VirtAddr;
 use axaddrspace::NestedPageTableOps;
 use axvm_types::{VmArchPerCpuOps, VmArchVcpuOps, VmVcpuState};
@@ -138,11 +139,20 @@ pub(crate) trait ArchOps {
 
         let run_result = vcpu.with_current_cpu_set(|| -> AxVmResult<_> {
             loop {
-                crate::runtime::vcpus::inject_pending_interrupts::<Self>(vm.id(), vcpu_id, vcpu);
-
-                drain_and_inject_dispatched_interrupts::<Self>(vm, vcpu_id, vcpu);
-
-                let exit = vcpu.run()?;
+                let exit = {
+                    // Keep a producer IPI from being handled in the gap after
+                    // the final software-IRQ drain but before guest entry. If
+                    // an IPI arrives after either drain, it remains physically
+                    // pending and forces a VM exit immediately after entry.
+                    let _entry_irq_guard = IrqSave::new();
+                    crate::runtime::vcpus::inject_pending_interrupts::<Self>(
+                        vm.id(),
+                        vcpu_id,
+                        vcpu,
+                    );
+                    drain_and_inject_dispatched_interrupts::<Self>(vm, vcpu_id, vcpu);
+                    vcpu.run()?
+                };
                 trace!("{exit:#x?}");
                 match Self::handle_vcpu_exit_bound(vm, vcpu, exit)? {
                     BoundVcpuExit::Continue => continue,

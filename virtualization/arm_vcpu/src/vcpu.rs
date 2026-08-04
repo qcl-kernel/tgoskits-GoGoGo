@@ -256,6 +256,8 @@ impl<H: ArmHostOps> ArmVcpu<H> {
 
         let mut hcr_el2 =
             HCR_EL2::VM::Enable + HCR_EL2::TSC::EnableTrapEl1SmcToEl2 + HCR_EL2::RW::EL1IsAarch64;
+        const HCR_EL2_TID3: u64 = 1 << 18;
+        hcr_el2.value |= HCR_EL2_TID3;
 
         if !config.passthrough_interrupt {
             // Set HCR_EL2.IMO will trap IRQs to EL2 while enabling virtual IRQs.
@@ -532,4 +534,33 @@ fn vtcr_for_config(levels: usize, gpa_bits: usize, pa_bits: usize) -> u64 {
         + VTCR_EL2::IRGN0::NormalWBRAWA;
 
     val.value
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    struct TestHostOps;
+
+    impl ArmHostOps for TestHostOps {
+        fn inject_virtual_interrupt(_vector: u8) -> ArmVcpuResult {
+            Ok(())
+        }
+
+        fn fetch_pending_host_irq() -> Option<usize> {
+            None
+        }
+
+        fn handle_current_host_irq() {}
+    }
+
+    #[test]
+    fn setup_traps_guest_id_register_reads() {
+        const HCR_EL2_TID3: u64 = 1 << 18;
+        let mut vcpu = ArmVcpu::<TestHostOps>::new(0, 0, ArmVcpuCreateConfig::default()).unwrap();
+
+        vcpu.setup(ArmVcpuSetupConfig::default()).unwrap();
+
+        assert_ne!(vcpu.guest_system_regs.hcr_el2 & HCR_EL2_TID3, 0);
+    }
 }

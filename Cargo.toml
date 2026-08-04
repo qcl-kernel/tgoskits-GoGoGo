@@ -198,6 +198,10 @@ axklib = { version = "0.7.7", path = "components/axklib" }
 axplat-dyn = { version = "0.7.14", path = "platforms/axplat-dyn", default-features = false }
 axpoll = { version = "0.5.3", path = "components/axpoll" }
 axvisor = { version = "0.5.23", path = "os/axvisor" }
+axvirtio-blk = { version = "0.1.0", path = "virtualization/axvirtio-blk" }
+axvirtio-common = { version = "0.1.0", path = "virtualization/axvirtio-common" }
+axvirtio-net = { version = "0.1.0", path = "virtualization/axvirtio-net" }
+axvirtio-switch = { version = "0.1.0", path = "virtualization/axvirtio-switch" }
 axvm = { version = "0.5.25", path = "virtualization/axvm", default-features = false }
 axvm-types = { version = "0.7.2", path = "virtualization/axvm-types" }
 axvmconfig = { version = "0.8.3", path = "virtualization/axvmconfig", default-features = false }

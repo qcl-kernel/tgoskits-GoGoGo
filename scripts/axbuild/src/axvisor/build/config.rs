@@ -12,6 +12,9 @@ pub const AXVISOR_PACKAGE: &str = "axvisor";
 pub struct AxvisorBoardConfig {
     #[serde(flatten, default)]
     pub(crate) build_info: BuildInfo,
+    /// Commands executed by the Axvisor test runner before building this group.
+    #[serde(default)]
+    pub prebuild_commands: Vec<Vec<String>>,
     #[serde(default)]
     pub vm_configs: Vec<PathBuf>,
 }

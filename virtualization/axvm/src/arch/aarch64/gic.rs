@@ -2,11 +2,34 @@
 
 use arm_gic_driver::v3::{
     ICH_ELRSR_EL2, ICH_HCR_EL2, ICH_LR_EL2, ICH_VTR_EL2, ReadWriteable, Readable, ich_lr_el2_get,
-    ich_lr_el2_write,
+    ich_lr_el2_modify, ich_lr_el2_write,
 };
 use ax_memory_addr::{PhysAddr, VirtAddr};
 
-use crate::host::{HostMemory, default_host};
+use crate::{
+    host::{HostMemory, default_host},
+    irq::edge::{EdgeDeliveryState, RepeatedEdgeAction, repeated_edge_action},
+};
+
+fn decode_lr_state(raw: u64) -> EdgeDeliveryState {
+    match raw {
+        1 => EdgeDeliveryState::Pending,
+        2 => EdgeDeliveryState::Active,
+        3 => EdgeDeliveryState::PendingAndActive,
+        _ => EdgeDeliveryState::Idle,
+    }
+}
+
+fn synchronize_virtual_interrupt_state() {
+    // SAFETY: `isb` has no memory operands and only makes the preceding GIC
+    // system-register writes visible before the next guest entry.
+    unsafe { core::arch::asm!("isb", options(nostack, preserves_flags)) };
+}
+
+pub(crate) fn enable_virtual_interrupt_interface() {
+    ICH_HCR_EL2.modify(ICH_HCR_EL2::EN::SET);
+    synchronize_virtual_interrupt_state();
+}
 
 fn with_gic<T>(f: impl FnOnce(&mut rdif_intc::Intc) -> T) -> T {
     let mut gic = rdrive::get_one::<rdif_intc::Intc>()
@@ -64,11 +87,20 @@ fn inject_interrupt_gic_v3(vector: usize) {
         }
 
         let lr_val = ich_lr_el2_get(i);
-        if lr_val.read(ICH_LR_EL2::VINTID) == vector as u64
-            && lr_val.matches_any(&[ICH_LR_EL2::STATE::Pending, ICH_LR_EL2::STATE::Active])
-        {
-            debug!("Virtual interrupt {vector} already pending/active in LR{i}, skipping");
-            return;
+        if lr_val.read(ICH_LR_EL2::VINTID) == vector as u64 {
+            let state = decode_lr_state(lr_val.read(ICH_LR_EL2::STATE));
+            match repeated_edge_action(state) {
+                RepeatedEdgeAction::AlreadyPending => {
+                    debug!("Virtual interrupt {vector} already pending in LR{i}");
+                    return;
+                }
+                RepeatedEdgeAction::MarkPendingWhileActive => {
+                    ich_lr_el2_modify(i, ICH_LR_EL2::STATE::PendingAndActive);
+                    synchronize_virtual_interrupt_state();
+                    debug!("Virtual interrupt {vector} marked pending-and-active in LR{i}");
+                    return;
+                }
+            }
         }
     }
 
@@ -85,8 +117,9 @@ fn inject_interrupt_gic_v3(vector: usize) {
 
     if !ICH_HCR_EL2.is_set(ICH_HCR_EL2::EN) {
         warn!("Virtual interrupt interface not enabled, enabling now");
-        ICH_HCR_EL2.modify(ICH_HCR_EL2::EN::SET);
+        enable_virtual_interrupt_interface();
     }
+    synchronize_virtual_interrupt_state();
 
     debug!("Virtual interrupt {vector} injected successfully in LR{free_lr}");
 }

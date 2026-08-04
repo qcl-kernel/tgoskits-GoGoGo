@@ -13,25 +13,25 @@ use ax_kspin::{SpinNoIrq as TimerBankLock, SpinNoIrqGuard as TimerBankLockGuard}
 #[cfg(target_arch = "aarch64")]
 use crate::host;
 
-const CNTP_CTL_ENABLE: u32 = 1 << 0;
-const CNTP_CTL_IMASK: u32 = 1 << 1;
-const CNTP_CTL_ISTATUS: u32 = 1 << 2;
+const CNTV_CTL_ENABLE: u32 = 1 << 0;
+const CNTV_CTL_IMASK: u32 = 1 << 1;
+const CNTV_CTL_ISTATUS: u32 = 1 << 2;
 #[cfg(any(test, target_arch = "aarch64"))]
-const CNTP_PPI: u8 = 30;
+const CNTV_PPI: u8 = 27;
 #[cfg(any(test, target_arch = "aarch64"))]
 const NANOS_PER_SECOND: u64 = 1_000_000_000;
 const TIMER_TOKEN_NONE: usize = usize::MAX;
 const TIMER_REMAINING_NONE: u64 = u64::MAX;
 
-pub struct CntpTimerState {
-    banks: TimerBankLock<BTreeMap<(usize, usize), Arc<CntpTimerBank>>>,
+pub struct CntvTimerState {
+    banks: TimerBankLock<BTreeMap<(usize, usize), Arc<CntvTimerBank>>>,
     #[cfg(test)]
     test_identity: TimerBankLock<(usize, usize)>,
     #[cfg(test)]
     test_counter_ticks: AtomicU64,
 }
 
-struct CntpTimerBank {
+struct CntvTimerBank {
     #[cfg(any(test, target_arch = "aarch64"))]
     vm_id: usize,
     #[cfg(any(test, target_arch = "aarch64"))]
@@ -46,7 +46,7 @@ struct CntpTimerBank {
     test_counter_ticks: AtomicU64,
 }
 
-impl CntpTimerState {
+impl CntvTimerState {
     pub(super) fn new() -> Self {
         Self {
             banks: TimerBankLock::new(BTreeMap::new()),
@@ -101,20 +101,20 @@ impl CntpTimerState {
         }
     }
 
-    fn current_bank(&self) -> Arc<CntpTimerBank> {
+    fn current_bank(&self) -> Arc<CntvTimerBank> {
         let (vm_id, vcpu_id) = self.current_timer_identity();
         #[cfg(test)]
         let test_counter_ticks = self.test_counter_ticks.load(Ordering::Acquire);
         let mut banks = lock_timer_banks(&self.banks);
         Arc::clone(banks.entry((vm_id, vcpu_id)).or_insert_with(|| {
-            let bank = Arc::new(CntpTimerBank::new(vm_id, vcpu_id));
+            let bank = Arc::new(CntvTimerBank::new(vm_id, vcpu_id));
             #[cfg(test)]
             bank.set_test_counter_ticks(test_counter_ticks);
             bank
         }))
     }
 
-    fn snapshot_banks(&self) -> alloc::vec::Vec<Arc<CntpTimerBank>> {
+    fn snapshot_banks(&self) -> alloc::vec::Vec<Arc<CntvTimerBank>> {
         lock_timer_banks(&self.banks).values().cloned().collect()
     }
 
@@ -148,7 +148,7 @@ impl CntpTimerState {
     }
 }
 
-impl Default for CntpTimerState {
+impl Default for CntvTimerState {
     fn default() -> Self {
         Self::new()
     }
@@ -156,15 +156,15 @@ impl Default for CntpTimerState {
 
 #[cfg(test)]
 fn lock_timer_banks(
-    banks: &TimerBankLock<BTreeMap<(usize, usize), Arc<CntpTimerBank>>>,
-) -> TimerBankLockGuard<'_, BTreeMap<(usize, usize), Arc<CntpTimerBank>>> {
-    banks.lock().expect("CNTP timer test lock poisoned")
+    banks: &TimerBankLock<BTreeMap<(usize, usize), Arc<CntvTimerBank>>>,
+) -> TimerBankLockGuard<'_, BTreeMap<(usize, usize), Arc<CntvTimerBank>>> {
+    banks.lock().expect("CNTV timer test lock poisoned")
 }
 
 #[cfg(not(test))]
 fn lock_timer_banks(
-    banks: &TimerBankLock<BTreeMap<(usize, usize), Arc<CntpTimerBank>>>,
-) -> TimerBankLockGuard<'_, BTreeMap<(usize, usize), Arc<CntpTimerBank>>> {
+    banks: &TimerBankLock<BTreeMap<(usize, usize), Arc<CntvTimerBank>>>,
+) -> TimerBankLockGuard<'_, BTreeMap<(usize, usize), Arc<CntvTimerBank>>> {
     banks.lock()
 }
 
@@ -174,12 +174,12 @@ fn lock_test_identity(
 ) -> TimerBankLockGuard<'_, (usize, usize)> {
     identity
         .lock()
-        .expect("CNTP timer test identity lock poisoned")
+        .expect("CNTV timer test identity lock poisoned")
 }
 
 #[cfg(test)]
 fn lock_timer_bank(bank: &TimerBankLock<()>) -> TimerBankLockGuard<'_, ()> {
-    bank.lock().expect("CNTP timer test bank lock poisoned")
+    bank.lock().expect("CNTV timer test bank lock poisoned")
 }
 
 #[cfg(not(test))]
@@ -187,7 +187,7 @@ fn lock_timer_bank(bank: &TimerBankLock<()>) -> TimerBankLockGuard<'_, ()> {
     bank.lock()
 }
 
-impl CntpTimerBank {
+impl CntvTimerBank {
     fn new(vm_id: usize, vcpu_id: usize) -> Self {
         #[cfg(not(any(test, target_arch = "aarch64")))]
         let _ = (vm_id, vcpu_id);
@@ -223,12 +223,12 @@ impl CntpTimerBank {
     fn read_ctl(&self) -> u32 {
         let ctl = self.ctl.load(Ordering::Acquire);
         let expired =
-            ctl & CNTP_CTL_ENABLE != 0 && self.counter_ticks() >= self.cval.load(Ordering::Acquire);
+            ctl & CNTV_CTL_ENABLE != 0 && self.counter_ticks() >= self.cval.load(Ordering::Acquire);
 
         if expired {
-            ctl | CNTP_CTL_ISTATUS
+            ctl | CNTV_CTL_ISTATUS
         } else {
-            ctl & !CNTP_CTL_ISTATUS
+            ctl & !CNTV_CTL_ISTATUS
         }
     }
 
@@ -237,7 +237,7 @@ impl CntpTimerBank {
         self.suspended_remaining_ticks
             .store(TIMER_REMAINING_NONE, Ordering::Release);
         self.ctl.store(
-            value & (CNTP_CTL_ENABLE | CNTP_CTL_IMASK),
+            value & (CNTV_CTL_ENABLE | CNTV_CTL_IMASK),
             Ordering::Release,
         );
         self.rearm_locked();
@@ -273,7 +273,7 @@ impl CntpTimerBank {
             .wrapping_add(1);
         self.cancel_pending_timer_locked();
         let ctl = self.ctl.load(Ordering::Acquire);
-        if ctl & CNTP_CTL_ENABLE == 0 || ctl & CNTP_CTL_IMASK != 0 {
+        if ctl & CNTV_CTL_ENABLE == 0 || ctl & CNTV_CTL_IMASK != 0 {
             return;
         }
 
@@ -324,7 +324,7 @@ impl CntpTimerBank {
         let _guard = lock_timer_bank(&self.lifecycle);
         self.generation.fetch_add(1, Ordering::AcqRel);
         let ctl = self.ctl.load(Ordering::Acquire);
-        let remaining_ticks = if ctl & CNTP_CTL_ENABLE != 0 {
+        let remaining_ticks = if ctl & CNTV_CTL_ENABLE != 0 {
             self.cval
                 .load(Ordering::Acquire)
                 .saturating_sub(self.counter_ticks())
@@ -367,7 +367,7 @@ impl CntpTimerBank {
         if !self.is_armed_for(expected_generation) {
             return;
         }
-        host::queue_virtual_interrupt(self.vm_id, self.vcpu_id, CNTP_PPI);
+        host::queue_virtual_interrupt(self.vm_id, self.vcpu_id, CNTV_PPI);
     }
 
     #[cfg(test)]
@@ -378,7 +378,7 @@ impl CntpTimerBank {
         {
             return None;
         }
-        Some((self.vm_id, self.vcpu_id, CNTP_PPI))
+        Some((self.vm_id, self.vcpu_id, CNTV_PPI))
     }
 
     #[cfg(any(test, target_arch = "aarch64"))]
@@ -388,7 +388,7 @@ impl CntpTimerBank {
         }
 
         let ctl = self.ctl.load(Ordering::Acquire);
-        ctl & CNTP_CTL_ENABLE != 0 && ctl & CNTP_CTL_IMASK == 0
+        ctl & CNTV_CTL_ENABLE != 0 && ctl & CNTV_CTL_IMASK == 0
     }
 
     fn counter_ticks(&self) -> u64 {
@@ -427,7 +427,7 @@ fn counter_ticks() -> u64 {
     let value: u64;
 
     unsafe {
-        asm!("mrs {value}, CNTPCT_EL0", value = out(reg) value);
+        asm!("mrs {value}, CNTVCT_EL0", value = out(reg) value);
     }
     value
 }
@@ -473,66 +473,66 @@ mod tests {
 
     #[test]
     fn banks_timer_state_per_vcpu_identity() {
-        let state = CntpTimerState::new();
+        let state = CntvTimerState::new();
 
         state.set_test_current_identity(11, 0);
         state.write_cval(0x1111);
-        state.write_ctl(CNTP_CTL_ENABLE | CNTP_CTL_IMASK);
+        state.write_ctl(CNTV_CTL_ENABLE | CNTV_CTL_IMASK);
 
         state.set_test_current_identity(11, 1);
         state.write_cval(0x2222);
-        state.write_ctl(CNTP_CTL_ENABLE);
+        state.write_ctl(CNTV_CTL_ENABLE);
 
         state.set_test_current_identity(11, 0);
         assert_eq!(state.read_cval(), 0x1111);
-        assert_eq!(state.read_ctl() & (CNTP_CTL_ENABLE | CNTP_CTL_IMASK), 0x3);
+        assert_eq!(state.read_ctl() & (CNTV_CTL_ENABLE | CNTV_CTL_IMASK), 0x3);
 
         state.set_test_current_identity(11, 1);
         assert_eq!(state.read_cval(), 0x2222);
-        assert_eq!(state.read_ctl() & (CNTP_CTL_ENABLE | CNTP_CTL_IMASK), 0x1);
+        assert_eq!(state.read_ctl() & (CNTV_CTL_ENABLE | CNTV_CTL_IMASK), 0x1);
     }
 
     #[test]
-    fn resolves_ppi30_delivery_target_from_each_vcpu_bank() {
-        let state = CntpTimerState::new();
+    fn resolves_ppi27_delivery_target_from_each_vcpu_bank() {
+        let state = CntvTimerState::new();
 
         state.set_test_current_identity(11, 0);
         state.write_cval(0);
-        state.write_ctl(CNTP_CTL_ENABLE);
+        state.write_ctl(CNTV_CTL_ENABLE);
         let vcpu0_target = state.current_fire_target_for_test();
 
         state.set_test_current_identity(11, 1);
         state.write_cval(0);
-        state.write_ctl(CNTP_CTL_ENABLE);
+        state.write_ctl(CNTV_CTL_ENABLE);
         let vcpu1_target = state.current_fire_target_for_test();
 
-        assert_eq!(vcpu0_target, Some((11, 0, CNTP_PPI)));
-        assert_eq!(vcpu1_target, Some((11, 1, CNTP_PPI)));
+        assert_eq!(vcpu0_target, Some((11, 0, CNTV_PPI)));
+        assert_eq!(vcpu1_target, Some((11, 1, CNTV_PPI)));
 
         state.set_test_current_identity(11, 0);
-        state.write_ctl(CNTP_CTL_ENABLE | CNTP_CTL_IMASK);
+        state.write_ctl(CNTV_CTL_ENABLE | CNTV_CTL_IMASK);
         assert_eq!(state.current_fire_target_for_test(), None);
 
         state.set_test_current_identity(11, 1);
         assert_eq!(
             state.current_fire_target_for_test(),
-            Some((11, 1, CNTP_PPI))
+            Some((11, 1, CNTV_PPI))
         );
     }
 
     #[test]
     fn reset_invalidates_stale_callbacks_for_all_banks() {
-        let state = CntpTimerState::new();
+        let state = CntvTimerState::new();
 
         state.set_test_current_identity(11, 0);
         state.write_cval(0);
-        state.write_ctl(CNTP_CTL_ENABLE);
+        state.write_ctl(CNTV_CTL_ENABLE);
         let bank0 = state.current_bank();
         let generation0 = bank0.generation.load(Ordering::Acquire);
 
         state.set_test_current_identity(11, 1);
         state.write_cval(0);
-        state.write_ctl(CNTP_CTL_ENABLE);
+        state.write_ctl(CNTV_CTL_ENABLE);
         let bank1 = state.current_bank();
         let generation1 = bank1.generation.load(Ordering::Acquire);
 
@@ -543,17 +543,17 @@ mod tests {
 
         state.set_test_current_identity(11, 0);
         assert_eq!(state.read_cval(), 0);
-        assert_eq!(state.read_ctl() & (CNTP_CTL_ENABLE | CNTP_CTL_IMASK), 0);
+        assert_eq!(state.read_ctl() & (CNTV_CTL_ENABLE | CNTV_CTL_IMASK), 0);
     }
 
     #[test]
     fn suspend_resume_preserves_remaining_ticks_for_enabled_bank() {
-        let state = CntpTimerState::new();
+        let state = CntvTimerState::new();
 
         state.set_test_current_identity(11, 0);
         state.set_test_counter_ticks(100);
         state.write_cval(1_100);
-        state.write_ctl(CNTP_CTL_ENABLE);
+        state.write_ctl(CNTV_CTL_ENABLE);
         assert_eq!(state.read_tval(), 1_000);
         assert_eq!(state.current_fire_target_for_test(), None);
 
@@ -575,23 +575,23 @@ mod tests {
         state.set_test_counter_ticks(5_400);
         assert_eq!(
             state.current_fire_target_for_test(),
-            Some((11, 0, CNTP_PPI))
+            Some((11, 0, CNTV_PPI))
         );
     }
 
     #[test]
     fn suspend_invalidates_stale_callbacks_and_resume_rearms_all_banks() {
-        let state = CntpTimerState::new();
+        let state = CntvTimerState::new();
 
         state.set_test_current_identity(11, 0);
         state.write_cval(0);
-        state.write_ctl(CNTP_CTL_ENABLE);
+        state.write_ctl(CNTV_CTL_ENABLE);
         let bank0 = state.current_bank();
         let generation0 = bank0.generation.load(Ordering::Acquire);
 
         state.set_test_current_identity(11, 1);
         state.write_cval(0x2222);
-        state.write_ctl(CNTP_CTL_ENABLE | CNTP_CTL_IMASK);
+        state.write_ctl(CNTV_CTL_ENABLE | CNTV_CTL_IMASK);
         let bank1 = state.current_bank();
         let generation1 = bank1.generation.load(Ordering::Acquire);
 
@@ -602,14 +602,14 @@ mod tests {
 
         state.set_test_current_identity(11, 1);
         assert_eq!(state.read_cval(), 0x2222);
-        assert_eq!(state.read_ctl() & (CNTP_CTL_ENABLE | CNTP_CTL_IMASK), 0x3);
+        assert_eq!(state.read_ctl() & (CNTV_CTL_ENABLE | CNTV_CTL_IMASK), 0x3);
 
         state.resume();
 
         state.set_test_current_identity(11, 0);
         assert_eq!(
             state.current_fire_target_for_test(),
-            Some((11, 0, CNTP_PPI))
+            Some((11, 0, CNTV_PPI))
         );
         state.set_test_current_identity(11, 1);
         assert_eq!(state.current_fire_target_for_test(), None);

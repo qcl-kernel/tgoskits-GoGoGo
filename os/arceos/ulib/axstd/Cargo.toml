@@ -34,6 +34,9 @@ smp = ["ax-runtime/smp", "ax-kspin/smp", "ax-posix-api/smp"]
 # Floating point/SIMD
 fp-simd = ["ax-hal/fp-simd"]
 
+# Force CNTP for an EL1 guest whose hypervisor virtualizes the physical timer.
+el1-phys-timer = ["ax-runtime/el1-phys-timer"]
+
 # User space support
 uspace = ["ax-runtime/uspace"]
 

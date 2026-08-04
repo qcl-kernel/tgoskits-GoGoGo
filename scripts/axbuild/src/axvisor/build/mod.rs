@@ -13,8 +13,8 @@ use anyhow::{Context, anyhow};
 pub(crate) use config::AxvisorBoardFile;
 pub use config::{AXVISOR_PACKAGE, AxvisorBoardConfig};
 pub(crate) use load::{
-    default_build_info_path, load_board_file, load_target_from_build_config,
-    resolve_build_info_path,
+    default_build_info_path, load_board_file, load_prebuild_commands,
+    load_target_from_build_config, resolve_build_info_path,
 };
 use ostool::build::config::Cargo;
 

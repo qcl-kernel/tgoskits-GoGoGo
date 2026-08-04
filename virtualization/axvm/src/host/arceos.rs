@@ -111,6 +111,10 @@ pub(crate) fn cpu_mask_from_raw_bits(bits: usize) -> api::task::AxCpuMask {
     api::task::AxCpuMask::from_raw_bits(bits)
 }
 
+pub(crate) fn host_cpu_count() -> usize {
+    modules::ax_hal::cpu_num()
+}
+
 pub(crate) type ArceOsCpuMask = api::task::AxCpuMask;
 pub(crate) type ArceOsAxTaskExt = modules::ax_task::AxTaskExt;
 pub(crate) type ArceOsAxTaskRef = modules::ax_task::AxTaskRef;
@@ -138,6 +142,14 @@ pub(crate) fn wait_queue_wait_until(
     condition: impl Fn() -> bool,
 ) {
     api::task::ax_wait_queue_wait_until(queue, condition, None);
+}
+
+pub(crate) fn wait_queue_wait_timeout_until(
+    queue: &api::task::AxWaitQueueHandle,
+    duration: Duration,
+    condition: impl Fn() -> bool,
+) -> bool {
+    api::task::ax_wait_queue_wait_until(queue, condition, Some(duration))
 }
 
 pub(crate) fn wait_queue_wake(queue: &api::task::AxWaitQueueHandle, count: u32) {

@@ -18,23 +18,23 @@ use alloc::{sync::Arc, vec, vec::Vec};
 
 use axdevice_base::Device;
 
-mod cntp_timer;
-pub use cntp_timer::CntpTimerState as VtimerState;
+mod cntv_timer;
+pub use cntv_timer::CntvTimerState as VtimerState;
 
-mod cntp_cval_el0;
-pub use cntp_cval_el0::SysCntpCvalEl0;
+mod cntv_cval_el0;
+pub use cntv_cval_el0::SysCntvCvalEl0;
 
-mod cntp_ctl_el0;
-pub use cntp_ctl_el0::SysCntpCtlEl0;
+mod cntv_ctl_el0;
+pub use cntv_ctl_el0::SysCntvCtlEl0;
 
-mod cntpct_el0;
-pub use cntpct_el0::SysCntpctEl0;
+mod cntvct_el0;
+pub use cntvct_el0::SysCntvctEl0;
 
-mod cntp_tval_el0;
-pub use cntp_tval_el0::SysCntpTvalEl0;
+mod cntv_tval_el0;
+pub use cntv_tval_el0::SysCntvTvalEl0;
 
 /// Create the concrete system-register devices backed by per-vCPU timer banks.
-pub fn new_sysreg_devices() -> (SysCntpCvalEl0, SysCntpCtlEl0, SysCntpctEl0, SysCntpTvalEl0) {
+pub fn new_sysreg_devices() -> (SysCntvCvalEl0, SysCntvCtlEl0, SysCntvctEl0, SysCntvTvalEl0) {
     let (_timer, cval, ctl, counter, tval) = new_sysreg_devices_with_state();
 
     (cval, ctl, counter, tval)
@@ -43,19 +43,19 @@ pub fn new_sysreg_devices() -> (SysCntpCvalEl0, SysCntpCtlEl0, SysCntpctEl0, Sys
 /// Create the concrete system-register devices and their shared timer state.
 pub fn new_sysreg_devices_with_state() -> (
     Arc<VtimerState>,
-    SysCntpCvalEl0,
-    SysCntpCtlEl0,
-    SysCntpctEl0,
-    SysCntpTvalEl0,
+    SysCntvCvalEl0,
+    SysCntvCtlEl0,
+    SysCntvctEl0,
+    SysCntvTvalEl0,
 ) {
     let timer = Arc::new(VtimerState::new());
 
     (
         Arc::clone(&timer),
-        SysCntpCvalEl0::from_state(Arc::clone(&timer)),
-        SysCntpCtlEl0::from_state(Arc::clone(&timer)),
-        SysCntpctEl0::new(),
-        SysCntpTvalEl0::from_state(timer),
+        SysCntvCvalEl0::from_state(Arc::clone(&timer)),
+        SysCntvCtlEl0::from_state(Arc::clone(&timer)),
+        SysCntvctEl0::new(),
+        SysCntvTvalEl0::from_state(timer),
     )
 }
 

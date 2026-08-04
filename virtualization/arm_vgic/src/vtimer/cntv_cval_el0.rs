@@ -23,58 +23,58 @@ use axdevice_base::{
 };
 use log::debug;
 
-use super::cntp_timer::CntpTimerState;
+use super::cntv_timer::CntvTimerState;
 
-const CNTP_CVAL_EL0_ADDR: u32 = SystemRegType::CNTP_CVAL_EL0 as u32;
+const CNTV_CVAL_EL0_ADDR: u32 = SystemRegType::CNTV_CVAL_EL0 as u32;
 
-impl SysCntpCvalEl0 {
-    /// Reads CNTP_CVAL_EL0.
+impl SysCntvCvalEl0 {
+    /// Reads CNTV_CVAL_EL0.
     pub fn read_register(&self, _width: AccessWidth) -> DeviceResult<usize> {
         Ok(self.state.read_cval() as usize)
     }
 
-    /// Writes CNTP_CVAL_EL0.
+    /// Writes CNTV_CVAL_EL0.
     pub fn write_register(&self, _width: AccessWidth, val: usize) -> DeviceResult {
-        debug!("Write to virtual timer register CNTP_CVAL_EL0, value: {val}");
+        debug!("Write to virtual timer register CNTV_CVAL_EL0, value: {val}");
         self.state.write_cval(val as u64);
         Ok(())
     }
 }
 
-/// System register emulation for CNTP_CVAL_EL0.
+/// System register emulation for CNTV_CVAL_EL0.
 ///
-/// Provides virtualization support for the physical timer compare register.
-pub struct SysCntpCvalEl0 {
-    state: Arc<CntpTimerState>,
+/// Provides virtualization support for the virtual timer compare register.
+pub struct SysCntvCvalEl0 {
+    state: Arc<CntvTimerState>,
     resources: [Resource; 1],
 }
 
-impl SysCntpCvalEl0 {
-    /// Creates a new CNTP_CVAL_EL0 register emulator.
+impl SysCntvCvalEl0 {
+    /// Creates a new CNTV_CVAL_EL0 register emulator.
     pub fn new() -> Self {
-        Self::from_state(Arc::new(CntpTimerState::new()))
+        Self::from_state(Arc::new(CntvTimerState::new()))
     }
 
-    pub(super) fn from_state(state: Arc<CntpTimerState>) -> Self {
+    pub(super) fn from_state(state: Arc<CntvTimerState>) -> Self {
         Self {
             state,
             resources: [Resource::SysReg {
-                addr: CNTP_CVAL_EL0_ADDR,
+                addr: CNTV_CVAL_EL0_ADDR,
                 count: 1,
             }],
         }
     }
 }
 
-impl Default for SysCntpCvalEl0 {
+impl Default for SysCntvCvalEl0 {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl Device for SysCntpCvalEl0 {
+impl Device for SysCntvCvalEl0 {
     fn name(&self) -> &str {
-        "aarch64-cntp-cval-el0"
+        "aarch64-cntv-cval-el0"
     }
 
     fn resources(&self) -> &[Resource] {
@@ -86,7 +86,7 @@ impl Device for SysCntpCvalEl0 {
         access: &BusAccess,
         _context: &mut dyn DeviceAccess,
     ) -> Result<BusResponse, DeviceError> {
-        if access.kind != BusKind::SysReg || access.addr != CNTP_CVAL_EL0_ADDR as u64 {
+        if access.kind != BusKind::SysReg || access.addr != CNTV_CVAL_EL0_ADDR as u64 {
             return Err(DeviceError::OutOfRange { addr: access.addr });
         }
         if access.is_read {

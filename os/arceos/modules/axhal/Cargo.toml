@@ -23,6 +23,7 @@ fp-simd = [
 ]
 xuantie-c9xx = ["ax-cpu/xuantie-c9xx"]
 rtc = ["axplat-dyn/rtc"]
+el1-phys-timer = ["axplat-dyn/el1-phys-timer"]
 paging = [
     "dep:ax-alloc",
     "dep:ax-page-table-multiarch",

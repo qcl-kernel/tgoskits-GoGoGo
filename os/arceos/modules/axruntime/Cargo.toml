@@ -10,6 +10,7 @@ version = "0.10.6"
 [features]
 default = []
 
+el1-phys-timer = ["ax-hal/el1-phys-timer"]
 ext-ld = []
 std-compat = []
 host-test = [

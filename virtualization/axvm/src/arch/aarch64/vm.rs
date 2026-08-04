@@ -310,7 +310,9 @@ impl DeviceFactory for Aarch64GitsFactory {
     }
 }
 
-fn register_device_factories(registry: &mut DeviceFactoryRegistry) -> DeviceManagerResult {
+pub(crate) fn register_device_factories(
+    registry: &mut DeviceFactoryRegistry,
+) -> DeviceManagerResult {
     registry.register(Arc::new(Aarch64VgicFactory))?;
     registry.register(Arc::new(Aarch64GicRedistributorFactory))?;
     registry.register(Arc::new(Aarch64GicDistributorFactory))?;

@@ -1,5 +1,10 @@
 #[cfg(all(target_arch = "riscv64", feature = "hv"))]
-use core::sync::atomic::{AtomicBool, AtomicPtr, AtomicUsize, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicUsize};
+#[cfg(any(
+    all(target_arch = "aarch64", feature = "hv"),
+    all(target_arch = "riscv64", feature = "hv")
+))]
+use core::sync::atomic::{AtomicPtr, Ordering};
 
 #[cfg(any(all(target_arch = "riscv64", feature = "hv"), test))]
 use ax_plat::irq::IrqOutcome;
@@ -10,7 +15,10 @@ use ax_plat::irq::{
 #[cfg(all(target_arch = "loongarch64", feature = "hv"))]
 mod loongarch64_hv;
 
-#[cfg(all(target_arch = "riscv64", feature = "hv"))]
+#[cfg(any(
+    all(target_arch = "aarch64", feature = "hv"),
+    all(target_arch = "riscv64", feature = "hv")
+))]
 static VIRTUAL_IRQ_INJECTOR: AtomicPtr<()> = AtomicPtr::new(core::ptr::null_mut());
 #[cfg(all(target_arch = "riscv64", feature = "hv"))]
 static VIRTUAL_IRQ_TARGET_CPU: AtomicUsize = AtomicUsize::new(usize::MAX);
@@ -20,7 +28,10 @@ static VIRTUAL_IRQ_AFFINITY_CONFIGURED: [AtomicBool; RISCV_PLIC_SOURCE_COUNT] =
 #[cfg(any(all(target_arch = "riscv64", feature = "hv"), test))]
 const RISCV_PLIC_SOURCE_COUNT: usize = 1024;
 
-#[cfg(all(target_arch = "riscv64", feature = "hv"))]
+#[cfg(any(
+    all(target_arch = "aarch64", feature = "hv"),
+    all(target_arch = "riscv64", feature = "hv")
+))]
 pub fn register_virtual_irq_injector(injector: fn(usize) -> bool) {
     VIRTUAL_IRQ_INJECTOR.store(injector as *mut (), Ordering::Release);
 }
@@ -81,6 +92,11 @@ impl IrqIf for IrqIfImpl {
             let cpu = current_irq_cpu();
             let outcome = dispatch_irq_on(irq, cpu);
             if !outcome.handled {
+                #[cfg(all(target_arch = "aarch64", feature = "hv"))]
+                if is_aarch64_guest_forwardable(irq) && inject_virtual_irq(irq.hwirq.0 as usize) {
+                    return Some(irq);
+                }
+
                 #[cfg(all(target_arch = "loongarch64", feature = "hv"))]
                 if is_loongarch_guest_forwardable(irq)
                     && loongarch64_hv::inject_virtual_irq(irq.hwirq.0 as usize)
@@ -136,6 +152,14 @@ impl IrqIf for IrqIfImpl {
     }
 }
 
+#[cfg(all(target_arch = "aarch64", feature = "hv"))]
+fn is_aarch64_guest_forwardable(irq: IrqId) -> bool {
+    const CNTV_PPI: u32 = 27;
+
+    somehal::irq::domain_is_kind(irq.domain, somehal::irq::IrqDomainKind::AArch64Gic)
+        && irq.hwirq.0 == CNTV_PPI
+}
+
 fn current_irq_cpu() -> CpuId {
     CpuId(ax_plat::percpu::this_cpu_id())
 }
@@ -167,13 +191,17 @@ fn is_loongarch_guest_forwardable(irq: IrqId) -> bool {
         || somehal::irq::domain_is_kind(irq.domain, somehal::irq::IrqDomainKind::LoongArchPchPic)
 }
 
-#[cfg(all(target_arch = "riscv64", feature = "hv"))]
+#[cfg(any(
+    all(target_arch = "aarch64", feature = "hv"),
+    all(target_arch = "riscv64", feature = "hv")
+))]
 fn inject_virtual_irq(irq: usize) -> bool {
+    #[cfg(all(target_arch = "riscv64", feature = "hv"))]
     route_virtual_irq_to_target_cpu(irq);
 
     let injector = VIRTUAL_IRQ_INJECTOR.load(Ordering::Acquire);
     if injector.is_null() {
-        trace!("skip RISC-V virtual IRQ {irq}: injector is not registered");
+        trace!("skip virtual IRQ {irq}: injector is not registered");
         return false;
     }
     unsafe { core::mem::transmute::<*mut (), fn(usize) -> bool>(injector)(irq) }

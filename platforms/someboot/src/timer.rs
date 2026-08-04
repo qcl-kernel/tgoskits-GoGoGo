@@ -34,6 +34,15 @@ pub const fn select_aarch64_timer_mode(kernel_in_el2: bool, el2_available: bool)
     }
 }
 
+/// Returns whether `ID_AA64PFR0_EL1` reports an implemented EL2.
+pub const fn aarch64_el2_is_available(id_aa64pfr0_el1: u64) -> bool {
+    const EL2_SHIFT: u32 = 8;
+    const FEATURE_MASK: u64 = 0xf;
+    const NOT_IMPLEMENTED: u64 = 0xf;
+
+    (id_aa64pfr0_el1 >> EL2_SHIFT) & FEATURE_MASK != NOT_IMPLEMENTED
+}
+
 pub const fn aarch64_timer_irq_index(mode: ArchTimerMode) -> usize {
     match mode {
         ArchTimerMode::El1Phys => 1,
@@ -231,6 +240,13 @@ mod tests {
             select_aarch64_timer_mode(false, false),
             ArchTimerMode::El1Virt
         );
+    }
+
+    #[test]
+    fn detects_el2_from_processor_feature_register() {
+        assert!(aarch64_el2_is_available(0));
+        assert!(aarch64_el2_is_available(1 << 8));
+        assert!(!aarch64_el2_is_available(0xf << 8));
     }
 
     #[test]

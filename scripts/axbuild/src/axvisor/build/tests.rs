@@ -653,3 +653,67 @@ log = "Info"
             .ends_with("scripts/targets/std/pie/loongarch64-unknown-linux-musl.json")
     );
 }
+
+#[test]
+fn load_prebuild_commands_preserves_program_and_arguments() {
+    let root = tempdir().unwrap();
+    let config_path = root.path().join("build.toml");
+    fs::write(
+        &config_path,
+        r#"
+target = "aarch64-unknown-none-softfloat"
+features = []
+log = "Info"
+prebuild_commands = [["cargo", "xtask", "arceos", "build"]]
+"#,
+    )
+    .unwrap();
+
+    let commands = load_prebuild_commands(&config_path).unwrap();
+
+    assert_eq!(commands, vec![vec!["cargo", "xtask", "arceos", "build"]]);
+}
+
+#[test]
+fn load_prebuild_commands_rejects_empty_command() {
+    let root = tempdir().unwrap();
+    let config_path = root.path().join("build.toml");
+    fs::write(
+        &config_path,
+        r#"
+target = "aarch64-unknown-none-softfloat"
+features = []
+log = "Info"
+prebuild_commands = [[]]
+"#,
+    )
+    .unwrap();
+
+    let error = load_prebuild_commands(&config_path).unwrap_err();
+
+    assert!(error.to_string().contains("must not be empty"));
+}
+
+#[test]
+fn load_prebuild_commands_reports_malformed_config() {
+    let root = tempdir().unwrap();
+    let config_path = root.path().join("build.toml");
+    fs::write(
+        &config_path,
+        r#"
+target = "aarch64-unknown-none-softfloat"
+features = []
+log = "Info"
+prebuild_commands = "cargo xtask arceos build"
+"#,
+    )
+    .unwrap();
+
+    let error = load_prebuild_commands(&config_path).unwrap_err();
+
+    assert!(
+        error
+            .to_string()
+            .contains("failed to parse Axvisor build config")
+    );
+}

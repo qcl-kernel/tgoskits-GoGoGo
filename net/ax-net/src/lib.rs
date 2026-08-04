@@ -162,8 +162,7 @@ static WIFI_CONTROLS: LazyLock<Mutex<Vec<(alloc::string::String, rd_net::WifiCon
 
 static NET_IRQ_NOTIFY: IrqNotify = IrqNotify::new();
 
-const DHCP_BOOTSTRAP_ATTEMPTS: usize = 200;
-const DHCP_BOOTSTRAP_POLL_INTERVAL: Duration = Duration::from_millis(10);
+const DHCP_BOOTSTRAP_TIMEOUT: Duration = Duration::from_secs(10);
 
 fn get_service() -> ax_sync::MutexGuard<'static, Service> {
     SERVICE
@@ -484,7 +483,16 @@ fn poll_until_idle(ownership: PollOwnership) {
         }
 
         while POLL_AGAIN.swap(false, Ordering::AcqRel) {
-            while get_service().poll(&mut SOCKET_SET.inner.lock()) {}
+            let mut rounds = 0usize;
+            while get_service().poll(&mut SOCKET_SET.inner.lock()) {
+                rounds += 1;
+                if rounds.is_multiple_of(64) {
+                    // A continuously-due protocol timer must not monopolize a
+                    // cooperative FIFO CPU. No service/socket lock survives
+                    // the completed poll call above.
+                    ax_task::yield_now();
+                }
+            }
         }
         POLLING_INTERFACES.store(false, Ordering::Release);
         if !POLL_AGAIN.load(Ordering::Acquire) {
@@ -801,6 +809,10 @@ fn net_poll_worker() {
         drain_deferred_poll_wakes();
         poll_until_idle(PollOwnership::Opportunistic);
         drain_deferred_poll_wakes();
+        // FIFO is cooperative. A socket or DHCP deadline that remains due can
+        // make the next delay zero, so explicitly let application tasks observe
+        // the state transition before the poll worker iterates again.
+        ax_task::yield_now();
     }
 }
 
@@ -982,20 +994,33 @@ impl Drop for DnsSocketGuard {
 }
 
 fn wait_for_dhcp_bootstrap() {
-    for _ in 0..DHCP_BOOTSTRAP_ATTEMPTS {
+    let start = ax_hal::time::monotonic_time_nanos();
+    let timeout = u64::try_from(DHCP_BOOTSTRAP_TIMEOUT.as_nanos()).unwrap_or(u64::MAX);
+    let deadline = start.saturating_add(timeout);
+    loop {
         request_poll();
         if get_service().dhcp_configured() {
             return;
         }
-        ax_task::sleep(DHCP_BOOTSTRAP_POLL_INTERVAL);
+        if ax_hal::time::monotonic_time_nanos() >= deadline {
+            warn!("DHCP bootstrap timed out");
+            return;
+        }
+        ax_task::yield_now();
     }
-    warn!("DHCP bootstrap timed out");
 }
 
 #[cfg(test)]
 pub(crate) mod test_support {
     use alloc::{boxed::Box, sync::Arc, vec, vec::Vec};
-    use std::sync::{Mutex as StdMutex, MutexGuard, Once};
+    use std::{
+        panic::{AssertUnwindSafe, catch_unwind, resume_unwind},
+        sync::{
+            Mutex as StdMutex, Once, OnceLock,
+            mpsc::{self, Sender},
+        },
+        thread,
+    };
 
     use ax_sync::Mutex;
     use smoltcp::wire::{IpAddress, Ipv4Address, Ipv4Cidr};
@@ -1016,8 +1041,43 @@ pub(crate) mod test_support {
 
     static NETWORK_TEST_LOCK: StdMutex<()> = StdMutex::new(());
 
-    pub(crate) fn network_test_guard() -> MutexGuard<'static, ()> {
-        NETWORK_TEST_LOCK.lock().unwrap()
+    type NetworkTestJob = Box<dyn FnOnce() + Send + 'static>;
+
+    pub(crate) fn run_in_network_test(f: impl FnOnce() + Send + 'static) {
+        let _guard = NETWORK_TEST_LOCK.lock().unwrap();
+        let (result_tx, result_rx) = mpsc::channel();
+        network_test_worker()
+            .send(Box::new(move || {
+                let result = catch_unwind(AssertUnwindSafe(f));
+                result_tx
+                    .send(result)
+                    .expect("network test result receiver must remain alive");
+            }))
+            .expect("network test worker must remain alive");
+        if let Err(err) = result_rx
+            .recv()
+            .expect("network test worker must report test result")
+        {
+            resume_unwind(err);
+        }
+    }
+
+    fn network_test_worker() -> &'static Sender<NetworkTestJob> {
+        static WORKER: OnceLock<Sender<NetworkTestJob>> = OnceLock::new();
+
+        WORKER.get_or_init(|| {
+            let (job_tx, job_rx) = mpsc::channel::<NetworkTestJob>();
+            thread::Builder::new()
+                .name("ax-net-test".into())
+                .spawn(move || {
+                    ax_task::init_scheduler();
+                    for job in job_rx {
+                        job();
+                    }
+                })
+                .expect("network test worker must start");
+            job_tx
+        })
     }
 
     pub(crate) fn init_split_route_network() {

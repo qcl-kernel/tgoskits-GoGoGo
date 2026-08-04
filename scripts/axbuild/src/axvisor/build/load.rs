@@ -19,6 +19,25 @@ pub(crate) fn load_board_file(path: &Path) -> anyhow::Result<AxvisorBoardFile> {
     )
 }
 
+pub(crate) fn load_prebuild_commands(path: &Path) -> anyhow::Result<Vec<Vec<String>>> {
+    let content = crate::build::read_toml_with_rejector(
+        path,
+        "Axvisor build config",
+        reject_unsupported_axvisor_fields,
+    )?;
+    let commands = toml::from_str::<AxvisorBoardFile>(&content)
+        .with_context(|| format!("failed to parse Axvisor build config {}", path.display()))?
+        .config
+        .prebuild_commands;
+    if commands.iter().any(Vec::is_empty) {
+        anyhow::bail!(
+            "Axvisor prebuild command in {} must not be empty",
+            path.display()
+        );
+    }
+    Ok(commands)
+}
+
 pub(crate) fn resolve_build_info_path(
     axvisor_dir: &Path,
     target: &str,

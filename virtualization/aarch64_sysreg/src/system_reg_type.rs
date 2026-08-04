@@ -857,10 +857,14 @@ pub enum SystemRegType {
     AMEVTYPER114_EL0 = 0x3cf41e,
     /// System register AMEVTYPER115_EL0
     AMEVTYPER115_EL0 = 0x3ef41e,
+    /// System register ID_AA64PFR0_EL1
+    ID_AA64PFR0_EL1  = 0x300008,
     /// System register CNTFRQ_EL0
     CNTFRQ_EL0       = 0x30f800,
     /// System register CNTPCT_EL0
     CNTPCT_EL0       = 0x32f800,
+    /// System register CNTVCT_EL0
+    CNTVCT_EL0       = 0x34f800,
     /// System register CNTP_TVAL_EL0
     CNTP_TVAL_EL0    = 0x30f804,
     /// System register CNTP_CTL_EL0
@@ -1742,8 +1746,10 @@ impl Display for SystemRegType {
             SystemRegType::AMEVTYPER113_EL0 => write!(f, "AMEVTYPER113_EL0"),
             SystemRegType::AMEVTYPER114_EL0 => write!(f, "AMEVTYPER114_EL0"),
             SystemRegType::AMEVTYPER115_EL0 => write!(f, "AMEVTYPER115_EL0"),
+            SystemRegType::ID_AA64PFR0_EL1 => write!(f, "ID_AA64PFR0_EL1"),
             SystemRegType::CNTFRQ_EL0 => write!(f, "CNTFRQ_EL0"),
             SystemRegType::CNTPCT_EL0 => write!(f, "CNTPCT_EL0"),
+            SystemRegType::CNTVCT_EL0 => write!(f, "CNTVCT_EL0"),
             SystemRegType::CNTP_TVAL_EL0 => write!(f, "CNTP_TVAL_EL0"),
             SystemRegType::CNTP_CTL_EL0 => write!(f, "CNTP_CTL_EL0"),
             SystemRegType::CNTP_CVAL_EL0 => write!(f, "CNTP_CVAL_EL0"),
@@ -2401,8 +2407,10 @@ impl From<usize> for SystemRegType {
             0x3af41e => Self::AMEVTYPER113_EL0,
             0x3cf41e => Self::AMEVTYPER114_EL0,
             0x3ef41e => Self::AMEVTYPER115_EL0,
+            0x300008 => Self::ID_AA64PFR0_EL1,
             0x30f800 => Self::CNTFRQ_EL0,
             0x32f800 => Self::CNTPCT_EL0,
+            0x34f800 => Self::CNTVCT_EL0,
             0x30f804 => Self::CNTP_TVAL_EL0,
             0x32f804 => Self::CNTP_CTL_EL0,
             0x34f804 => Self::CNTP_CVAL_EL0,

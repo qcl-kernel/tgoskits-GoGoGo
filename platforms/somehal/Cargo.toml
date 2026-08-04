@@ -11,6 +11,7 @@ version = "0.8.2"
 
 [features]
 axtest = []
+el1-phys-timer = ["someboot/el1-phys-timer"]
 efi = ["someboot/efi"]
 hv = ["mmu", "someboot/hv", "dep:ax-cpu"]
 mmu = ["someboot/mmu"]

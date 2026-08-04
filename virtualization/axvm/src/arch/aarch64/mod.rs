@@ -44,6 +44,7 @@ use cpu_up::{CpuUpExit, CpuUpOps};
 pub use images::ImageLoader;
 use ipi::SendIpiExit;
 use sysreg::{SysRegReadExit, SysRegWriteExit};
+pub(crate) use vm::register_device_factories;
 
 pub(crate) struct Aarch64Arch;
 
@@ -62,6 +63,14 @@ impl ArchOps for Aarch64Arch {
 
     fn has_hardware_support() -> bool {
         arm_vcpu::has_hardware_support()
+    }
+
+    fn before_first_run(_vm: &crate::AxVMRef, _vcpu: &crate::vm::AxVCpuRef<Self::VCpu>) {
+        gic::enable_virtual_interrupt_interface();
+    }
+
+    fn register_platform_irq_injector() {
+        crate::irq::register_aarch64_virtual_irq_injector(inject_virtual_irq);
     }
 
     fn clean_dcache_range(addr: VirtAddr, size: usize) {
@@ -109,7 +118,7 @@ impl ArchOps for Aarch64Arch {
                     data,
                 },
             ),
-            ArmVmExit::SysRegRead { addr, reg } => sysreg::handle_read(
+            ArmVmExit::SysRegRead { addr, reg } => handle_sysreg_read(
                 vm,
                 vcpu,
                 SysRegReadExit {
@@ -212,6 +221,140 @@ impl ArchOps for Aarch64Arch {
         })
     }
 }
+
+fn inject_virtual_irq(irq_id: usize) -> bool {
+    const CNTV_PPI: usize = 27;
+
+    if irq_id != CNTV_PPI {
+        trace!("skip AArch64 virtual IRQ {irq_id}: only CNTV PPI is forwarded");
+        return false;
+    }
+
+    let Some(vm_id) = crate::current_vm_id() else {
+        trace!("skip AArch64 virtual IRQ {irq_id}: no current VM context");
+        return false;
+    };
+    let Some(vcpu_id) = crate::current_vcpu_id() else {
+        trace!("skip AArch64 virtual IRQ {irq_id}: no current vCPU context");
+        return false;
+    };
+
+    if let Err(err) = crate::runtime::vcpus::queue_interrupt(vm_id, vcpu_id, irq_id) {
+        warn!("failed to inject AArch64 virtual IRQ {irq_id}: {err:?}");
+        return false;
+    }
+    true
+}
+
+fn handle_sysreg_read(
+    vm: &crate::AxVMRef,
+    vcpu: &crate::vm::AxVCpuRef<AxvmArmVcpu>,
+    exit: SysRegReadExit,
+) -> AxVmResult<BoundVcpuExit<Aarch64DeferredRunWork>> {
+    if let Some(value) = read_virtualized_id_register(exit.addr.addr()) {
+        vcpu.set_gpr(exit.reg, value as usize);
+        return Ok(BoundVcpuExit::Continue);
+    }
+
+    sysreg::handle_read(vm, vcpu, exit)
+}
+
+fn read_virtualized_id_register(addr: usize) -> Option<u64> {
+    let value = match addr {
+        ID_AA64PFR0_EL1_SYSREG => Some(virtualize_id_aa64pfr0_el1(read_id_aa64pfr0_el1())),
+        ID_AA64PFR1_EL1_SYSREG => Some(read_id_aa64pfr1_el1()),
+        ID_AA64DFR0_EL1_SYSREG => Some(virtualize_id_aa64dfr0_el1(read_id_aa64dfr0_el1())),
+        ID_AA64ISAR0_EL1_SYSREG => Some(read_id_aa64isar0_el1()),
+        ID_AA64ISAR1_EL1_SYSREG => Some(read_id_aa64isar1_el1()),
+        ID_AA64MMFR0_EL1_SYSREG => Some(read_id_aa64mmfr0_el1()),
+        ID_AA64MMFR1_EL1_SYSREG => Some(read_id_aa64mmfr1_el1()),
+        ID_AA64MMFR2_EL1_SYSREG => Some(read_id_aa64mmfr2_el1()),
+        _ if is_id_aa64_feature_register(addr) => Some(0),
+        _ => None,
+    }?;
+    Some(value)
+}
+
+const ID_AA64PFR0_EL1_SYSREG: usize = 0x300008;
+const ID_AA64PFR1_EL1_SYSREG: usize = 0x320008;
+const ID_AA64DFR0_EL1_SYSREG: usize = 0x30000a;
+const ID_AA64ISAR0_EL1_SYSREG: usize = 0x30000c;
+const ID_AA64ISAR1_EL1_SYSREG: usize = 0x32000c;
+const ID_AA64MMFR0_EL1_SYSREG: usize = 0x30000e;
+const ID_AA64MMFR1_EL1_SYSREG: usize = 0x32000e;
+const ID_AA64MMFR2_EL1_SYSREG: usize = 0x34000e;
+
+fn is_id_aa64_feature_register(addr: usize) -> bool {
+    const ID_AA64_OP0_OP1_CRN: usize = 0x300000;
+    const CRN_MASK: usize = 0x3fc000;
+    const CRM_MASK: usize = 0x1e;
+    const CRM_PFR: usize = 0x8;
+    const CRM_DFR: usize = 0xa;
+    const CRM_ISAR: usize = 0xc;
+    const CRM_MMFR: usize = 0xe;
+
+    addr & CRN_MASK == ID_AA64_OP0_OP1_CRN
+        && matches!(addr & CRM_MASK, CRM_PFR | CRM_DFR | CRM_ISAR | CRM_MMFR)
+}
+
+fn virtualize_id_aa64pfr0_el1(value: u64) -> u64 {
+    const EL2_SHIFT: u32 = 8;
+    const FEATURE_MASK: u64 = 0xf;
+    const NOT_IMPLEMENTED: u64 = 0xf;
+
+    (value & !(FEATURE_MASK << EL2_SHIFT)) | (NOT_IMPLEMENTED << EL2_SHIFT)
+}
+
+fn virtualize_id_aa64dfr0_el1(value: u64) -> u64 {
+    const PMUVER_SHIFT: u32 = 8;
+    const FEATURE_MASK: u64 = 0xf;
+
+    value & !(FEATURE_MASK << PMUVER_SHIFT)
+}
+
+#[cfg(target_arch = "aarch64")]
+fn read_id_aa64pfr0_el1() -> u64 {
+    let value: u64;
+    // SAFETY: This reads an architectural ID register from the host CPU while
+    // handling a trapped guest read. It has no side effects.
+    unsafe {
+        core::arch::asm!("mrs {value}, ID_AA64PFR0_EL1", value = out(reg) value);
+    }
+    value
+}
+
+#[cfg(not(target_arch = "aarch64"))]
+fn read_id_aa64pfr0_el1() -> u64 {
+    0
+}
+
+macro_rules! read_id_register {
+    ($name:ident, $register:literal) => {
+        #[cfg(target_arch = "aarch64")]
+        fn $name() -> u64 {
+            let value: u64;
+            // SAFETY: This reads an architectural ID register from the host CPU
+            // while handling a trapped guest read. It has no side effects.
+            unsafe {
+                core::arch::asm!(concat!("mrs {value}, ", $register), value = out(reg) value);
+            }
+            value
+        }
+
+        #[cfg(not(target_arch = "aarch64"))]
+        fn $name() -> u64 {
+            0
+        }
+    };
+}
+
+read_id_register!(read_id_aa64pfr1_el1, "ID_AA64PFR1_EL1");
+read_id_register!(read_id_aa64dfr0_el1, "ID_AA64DFR0_EL1");
+read_id_register!(read_id_aa64isar0_el1, "ID_AA64ISAR0_EL1");
+read_id_register!(read_id_aa64isar1_el1, "ID_AA64ISAR1_EL1");
+read_id_register!(read_id_aa64mmfr0_el1, "ID_AA64MMFR0_EL1");
+read_id_register!(read_id_aa64mmfr1_el1, "ID_AA64MMFR1_EL1");
+read_id_register!(read_id_aa64mmfr2_el1, "ID_AA64MMFR2_EL1");
 
 struct AxvmArmHostOps;
 
@@ -413,6 +556,45 @@ mod tests {
         assert_eq!(
             arm_sys_reg_addr_to_ax(ArmSysRegAddr::new(0x3a_3016)).addr(),
             0x3a_3016
+        );
+    }
+
+    #[test]
+    fn virtualized_id_aa64pfr0_hides_el2_from_guest() {
+        const EL2_SHIFT: u32 = 8;
+        const FEATURE_MASK: u64 = 0xf;
+        let host_value = 0x1234_5678_9abc_def0;
+
+        let guest_value = virtualize_id_aa64pfr0_el1(host_value);
+
+        assert_eq!((guest_value >> EL2_SHIFT) & FEATURE_MASK, 0xf);
+        assert_eq!(
+            guest_value & !(FEATURE_MASK << EL2_SHIFT),
+            host_value & !(FEATURE_MASK << EL2_SHIFT)
+        );
+    }
+
+    #[test]
+    fn virtualized_id_registers_cover_linux_early_feature_reads() {
+        assert!(read_virtualized_id_register(ID_AA64PFR0_EL1_SYSREG).is_some());
+        assert!(read_virtualized_id_register(ID_AA64DFR0_EL1_SYSREG).is_some());
+        assert!(read_virtualized_id_register(ID_AA64MMFR0_EL1_SYSREG).is_some());
+        assert_eq!(read_virtualized_id_register(0x36000c), Some(0));
+        assert!(read_virtualized_id_register(0x3f_ffff).is_none());
+    }
+
+    #[test]
+    fn virtualized_id_aa64dfr0_hides_unvirtualized_pmu_from_guest() {
+        const PMUVER_SHIFT: u32 = 8;
+        const FEATURE_MASK: u64 = 0xf;
+        let host_value = 0x1234_5678_9abc_def0;
+
+        let guest_value = virtualize_id_aa64dfr0_el1(host_value);
+
+        assert_eq!((guest_value >> PMUVER_SHIFT) & FEATURE_MASK, 0);
+        assert_eq!(
+            guest_value & !(FEATURE_MASK << PMUVER_SHIFT),
+            host_value & !(FEATURE_MASK << PMUVER_SHIFT)
         );
     }
 }
