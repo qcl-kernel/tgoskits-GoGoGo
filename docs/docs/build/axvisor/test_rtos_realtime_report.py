@@ -4,7 +4,9 @@
 from __future__ import annotations
 
 import importlib.util
+import os
 import re
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -14,6 +16,7 @@ from typing import Optional
 SCRIPT_DIR = Path(__file__).resolve().parent
 CSV = SCRIPT_DIR / "rtos-realtime-iterations.csv"
 REPORT = SCRIPT_DIR / "rtos-realtime-report.md"
+RUNNER = SCRIPT_DIR / "test_rtos_realtime_plot.sh"
 MODULE_PATH = SCRIPT_DIR / "plot_rtos_realtime_iterations.py"
 SPEC = importlib.util.spec_from_file_location("rtos_realtime_plot", MODULE_PATH)
 if SPEC is None or SPEC.loader is None:
@@ -74,6 +77,25 @@ def load_report_p99_9() -> dict[int, Optional[float]]:
 
 
 class ReportArtifactTests(unittest.TestCase):
+    @unittest.skipIf(
+        os.environ.get("RTBENCH_HOSTILE_SCRIPT_DIR_CHILD") == "1",
+        "avoid recursively invoking the plot test runner",
+    )
+    def test_runner_ignores_inherited_script_dir(self) -> None:
+        with tempfile.TemporaryDirectory() as hostile_script_dir:
+            environment = os.environ.copy()
+            environment["SCRIPT_DIR"] = hostile_script_dir
+            environment["RTBENCH_HOSTILE_SCRIPT_DIR_CHILD"] = "1"
+            result = subprocess.run(
+                ["bash", str(RUNNER)],
+                capture_output=True,
+                check=False,
+                env=environment,
+                text=True,
+            )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("[rtbench-plot] source contract passed", result.stdout)
+
     def test_report_p99_9_matches_csv(self) -> None:
         rows = PLOT.load_rows(CSV)
         csv_values = {

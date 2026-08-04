@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-SCRIPT_DIR="${SCRIPT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SCRIPT="$SCRIPT_DIR/plot_rtos_realtime_iterations.py"
 BEHAVIOR_TEST="$SCRIPT_DIR/test_plot_rtos_realtime_iterations.py"
 rg -q --fixed-strings 'tail_ax.set_yscale("symlog"' "$SCRIPT" || {
