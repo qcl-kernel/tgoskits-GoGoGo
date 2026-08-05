@@ -122,7 +122,7 @@ pub struct AxVMConfigParams {
     ///
     /// Defaults to [`HostTimerPolicy::Periodic`] through [`Default`].
     pub host_timer_policy: HostTimerPolicy,
-    /// Controls whether the pinned host vCPU task yields after a completed run slice.
+    /// Controls whether the host vCPU task yields after a completed run slice.
     ///
     /// Defaults to `false`.
     pub host_vcpu_yield: bool,
