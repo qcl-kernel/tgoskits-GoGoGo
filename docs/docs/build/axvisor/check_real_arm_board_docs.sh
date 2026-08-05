@@ -220,6 +220,10 @@ for path in sys.argv[1:]:
     if vm_id is None:
         print(f"FAIL missing base.id in realtime VM config: {path}", file=sys.stderr)
         failed = True
+    elif type(vm_id) is not int or vm_id < 0:
+        print(f"FAIL base.id must be a non-negative integer in realtime VM config: {path}", file=sys.stderr)
+        failed = True
+        vm_id = None
 
     phys_cpu_ids = base.get("phys_cpu_ids")
     if not isinstance(phys_cpu_ids, list) or not phys_cpu_ids:
@@ -229,8 +233,8 @@ for path in sys.argv[1:]:
         )
         failed = True
         phys_cpu_ids = None
-    elif any(not isinstance(cpu_id, int) or isinstance(cpu_id, bool) for cpu_id in phys_cpu_ids):
-        print(f"FAIL base.phys_cpu_ids must contain integers in realtime VM config: {path}", file=sys.stderr)
+    elif any(type(cpu_id) is not int or cpu_id < 0 for cpu_id in phys_cpu_ids):
+        print(f"FAIL base.phys_cpu_ids must contain non-negative integers in realtime VM config: {path}", file=sys.stderr)
         failed = True
         phys_cpu_ids = None
 
