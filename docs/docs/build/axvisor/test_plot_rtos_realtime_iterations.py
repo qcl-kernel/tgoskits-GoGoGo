@@ -21,6 +21,15 @@ PLOT = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(PLOT)
 
 
+def png_chunk(chunk_type: bytes, chunk_data: bytes = b"") -> bytes:
+    payload = chunk_type + chunk_data
+    return (
+        struct.pack(">I", len(chunk_data))
+        + payload
+        + struct.pack(">I", zlib.crc32(payload) & 0xFFFFFFFF)
+    )
+
+
 def read_png_text_metadata(path: Path) -> dict[str, str]:
     data = path.read_bytes()
     if not data.startswith(b"\x89PNG\r\n\x1a\n"):
@@ -28,6 +37,7 @@ def read_png_text_metadata(path: Path) -> dict[str, str]:
 
     metadata = {}
     offset = 8
+    saw_iend = False
     while offset < len(data):
         if len(data) - offset < 12:
             raise ValueError("truncated PNG chunk")
@@ -48,7 +58,14 @@ def read_png_text_metadata(path: Path) -> dict[str, str]:
             metadata[keyword.decode("latin-1")] = value.decode("latin-1")
         offset = chunk_end
         if chunk_type == b"IEND":
+            if length != 0:
+                raise ValueError("PNG IEND chunk must be empty")
+            if offset != len(data):
+                raise ValueError("trailing data after PNG IEND chunk")
+            saw_iend = True
             break
+    if not saw_iend:
+        raise ValueError("missing PNG IEND chunk")
     return metadata
 
 
@@ -100,6 +117,30 @@ class PlotBehaviorTests(unittest.TestCase):
         metadata = read_png_text_metadata(PLOT.DEFAULT_OUTPUT)
         expected = hashlib.sha256(PLOT.DEFAULT_CSV.read_bytes()).hexdigest()
         self.assertEqual(metadata.get("rtos-realtime-csv-sha256"), expected)
+
+    def test_png_metadata_rejects_missing_iend(self) -> None:
+        self.assert_malformed_png(png_chunk(b"tEXt", b"key\0value"))
+
+    def test_png_metadata_rejects_non_empty_iend(self) -> None:
+        self.assert_malformed_png(png_chunk(b"IEND", b"unexpected"))
+
+    def test_png_metadata_rejects_trailing_bytes_after_iend(self) -> None:
+        self.assert_malformed_png(png_chunk(b"IEND") + b"trailing")
+
+    def test_png_metadata_rejects_truncated_chunk(self) -> None:
+        self.assert_malformed_png(struct.pack(">I", 4) + b"tEXt")
+
+    def test_png_metadata_rejects_bad_chunk_crc(self) -> None:
+        chunk = bytearray(png_chunk(b"IEND"))
+        chunk[-1] ^= 0xFF
+        self.assert_malformed_png(bytes(chunk))
+
+    def assert_malformed_png(self, chunks: bytes) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            malformed = Path(temp_dir) / "malformed.png"
+            malformed.write_bytes(b"\x89PNG\r\n\x1a\n" + chunks)
+            with self.assertRaises(ValueError):
+                read_png_text_metadata(malformed)
 
 
 if __name__ == "__main__":
