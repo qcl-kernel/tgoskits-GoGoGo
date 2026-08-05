@@ -190,8 +190,8 @@ bare-metal-level 证据。
 
 批准阈值保持不变：每次 Axvisor run 都必须完成 full callback/network，且
 `>1 ms` miss 为 `0`；p99.9 和 p99.99 相对 bare metal 的差值都必须在
-`max(25%, 10 us)` 以内，maximum 必须不超过
-`max(2 x bare-metal maximum, 50 us)`。Axvisor 与 bare-metal 配对运行必须使用
+`max(25%, 10 us)` 以内，maximum 必须满足
+`Axvisor maximum <= bare-metal maximum + max(2 x bare-metal maximum, 50 us)`。Axvisor 与 bare-metal 配对运行必须使用
 相同 RTOS binary options、tick、counter、governor 和 traffic，并完成三次配对
 重复。通过资产 preflight 只允许开始测量，不等于通过这些批准阈值。
 

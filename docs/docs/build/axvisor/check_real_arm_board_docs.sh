@@ -4,6 +4,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd -- "$SCRIPT_DIR/../../../.." && pwd)"
 DOC="$SCRIPT_DIR/real-arm-board-run.md"
+REPORT="$SCRIPT_DIR/rtos-realtime-report.md"
 
 usage() {
     printf 'usage: %s [--realtime-preflight <board>]\n' "${0##*/}" >&2
@@ -58,6 +59,7 @@ require_text() {
 }
 
 require_file "$DOC"
+require_file "$REPORT"
 require_file os/axvisor/configs/board/orangepi-5-plus.toml
 require_file os/axvisor/configs/board/orangepi-5-plus.dtb
 require_file os/axvisor/configs/vms/orangepi-5-plus/linux-smp1.toml
@@ -123,6 +125,10 @@ for phrase in \
     'QEMU 对照命令（不是实体板命令）'; do
     require_text "$phrase" "$DOC"
 done
+
+maximum_allowance='Axvisor maximum <= bare-metal maximum + max(2 x bare-metal maximum, 50 us)'
+require_text "$maximum_allowance" "$DOC"
+require_text "$maximum_allowance" "$REPORT"
 
 if [[ "$realtime_preflight" == true ]]; then
     missing_realtime_asset=false

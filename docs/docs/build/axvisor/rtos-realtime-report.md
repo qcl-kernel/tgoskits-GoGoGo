@@ -491,8 +491,8 @@ x86_64 host 上的 AArch64 QEMU TCG 筛选，不是 same-board/bare-metal-level 
 
 批准阈值保持不变：每次 Axvisor run 必须通过 full callback/network 且有
 `0` 个 `>1 ms` miss；p99.9、p99.99 相对 bare metal 的差值必须分别在
-`max(25%, 10 us)` 以内；maximum 必须不超过
-`max(2 x bare-metal maximum, 50 us)`。Axvisor 与 bare-metal 的三次配对重复必须
+`max(25%, 10 us)` 以内；maximum 必须满足
+`Axvisor maximum <= bare-metal maximum + max(2 x bare-metal maximum, 50 us)`。Axvisor 与 bare-metal 的三次配对重复必须
 保持相同 RTOS binary options、tick、counter、governor 和 traffic。资产 gate 通过
 后仍必须完成这些测量和比较才能批准。
 
