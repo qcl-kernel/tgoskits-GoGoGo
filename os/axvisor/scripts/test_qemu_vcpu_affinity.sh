@@ -43,7 +43,8 @@ cp "$HELPER_SOURCE" "$HELPER"
 chmod +x "$RUNNER" "$HELPER"
 
 write_default_artifacts() {
-  local include_host_policy_diagnostic="${1:-true}"
+  local host_policy_diagnostic="${1:-correct}"
+  local include_runtime_witness="${2:-true}"
   printf 'name = "linux-net-1"\n' >"${FIXTURE_CONFIGS}/linux-net-1.toml"
   printf 'name = "linux-net-2"\n' >"${FIXTURE_CONFIGS}/linux-net-2.toml"
   printf 'name = "zephyr-net"\n' >"${FIXTURE_CONFIGS}/zephyr-net.toml"
@@ -52,10 +53,31 @@ extern const unsigned char vm_config_1[];
 extern const unsigned char vm_config_2[];
 extern const unsigned char vm_config_3[];
 EOF
-  if [ "$include_host_policy_diagnostic" = true ]; then
+  case "$host_policy_diagnostic" in
+  correct)
     cat >>"$EMBED_C" <<'EOF'
 __attribute__((used)) static const char host_policy_diagnostic[] =
     "configured host policy: timer={:?}, vcpu_yield={}, vcpu_idle={:?}";
+EOF
+    ;;
+  incorrect)
+    cat >>"$EMBED_C" <<'EOF'
+__attribute__((used)) static const char host_policy_diagnostic[] =
+    "configured host policy without selected-value placeholders";
+EOF
+    ;;
+  absent) ;;
+  *) fail "unsupported host-policy diagnostic fixture: ${host_policy_diagnostic}" ;;
+  esac
+  if [ "$include_runtime_witness" = true ]; then
+    [ "$host_policy_diagnostic" != absent ] \
+      || fail "runtime witness fixture requires diagnostic bytes"
+    cat >>"$EMBED_C" <<'EOF'
+
+__attribute__((noinline, externally_visible))
+void axvisor_log_configured_host_policy(void) {
+    __asm__ volatile("" : : "r"(host_policy_diagnostic) : "memory");
+}
 EOF
   fi
   cat >>"$EMBED_C" <<'EOF'
@@ -67,6 +89,13 @@ __attribute__((used)) static const void *const embedded_vm_configs[] = {
 };
 
 int main(void) {
+EOF
+  if [ "$include_runtime_witness" = true ]; then
+    cat >>"$EMBED_C" <<'EOF'
+    axvisor_log_configured_host_policy();
+EOF
+  fi
+  cat >>"$EMBED_C" <<'EOF'
     return embedded_vm_configs[0] == 0;
 }
 EOF
@@ -157,7 +186,15 @@ DEFAULT_LOG="${TEST_ROOT}/logs/default.log"
 expect_success "valid default artifacts" run_validate "$DEFAULT_LOG"
 assert_manifest "${DEFAULT_LOG}.build-manifest.tsv"
 
-write_default_artifacts false
+write_default_artifacts correct false
+expect_failure "marker-only host policy diagnostic" "runtime host policy diagnostic witness is absent" \
+  run_validate "${TEST_ROOT}/logs/marker-only-host-policy-diagnostic.log"
+
+write_default_artifacts incorrect true
+expect_failure "host policy witness without correct marker" "required host policy diagnostic is absent" \
+  run_validate "${TEST_ROOT}/logs/witness-without-host-policy-diagnostic.log"
+
+write_default_artifacts absent false
 expect_failure "missing host policy diagnostic" "required host policy diagnostic is absent" \
   run_validate "${TEST_ROOT}/logs/missing-host-policy-diagnostic.log"
 

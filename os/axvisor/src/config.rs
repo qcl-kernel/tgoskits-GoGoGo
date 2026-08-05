@@ -37,10 +37,8 @@ use axvm::{
 use axvm::{AxVmError, AxVmResult};
 use axvmconfig::AxVMCrateConfig;
 
-/// Artifact marker used to reject builds without the complete host-policy diagnostic.
-#[used]
-static HOST_POLICY_DIAGNOSTIC: [u8; 65] =
-    *b"configured host policy: timer={:?}, vcpu_yield={}, vcpu_idle={:?}";
+const HOST_POLICY_DIAGNOSTIC_MARKER: &str =
+    "configured host policy: timer={:?}, vcpu_yield={}, vcpu_idle={:?}";
 
 #[cfg(all(
     feature = "fs",
@@ -147,13 +145,7 @@ pub fn init_guest_vm(raw_cfg: &str) -> Result<usize> {
 
     vm_config.set_boot_policy(guest_boot_policy(prepared_config, &image_provider));
 
-    info!(
-        "VM[{}] configured host policy: timer={:?}, vcpu_yield={}, vcpu_idle={:?}",
-        vm_config.id(),
-        vm_config.host_timer_policy(),
-        vm_config.host_vcpu_yield(),
-        vm_config.host_vcpu_idle_policy()
-    );
+    log_configured_host_policy(&vm_config);
     info!("Creating VM[{}] {:?}", vm_config.id(), vm_config.name());
 
     // Create VM.
@@ -197,6 +189,19 @@ pub fn init_guest_vm(raw_cfg: &str) -> Result<usize> {
     }
 
     Ok(vm_id)
+}
+
+#[unsafe(export_name = "axvisor_log_configured_host_policy")]
+#[inline(never)]
+fn log_configured_host_policy(vm_config: &AxVMConfig) {
+    info!(
+        target: HOST_POLICY_DIAGNOSTIC_MARKER,
+        "VM[{}] configured host policy: timer={:?}, vcpu_yield={}, vcpu_idle={:?}",
+        vm_config.id(),
+        vm_config.host_timer_policy(),
+        vm_config.host_vcpu_yield(),
+        vm_config.host_vcpu_idle_policy()
+    );
 }
 
 pub(crate) fn build_axvm_config(cfg: &AxVMCrateConfig) -> AxVMConfig {

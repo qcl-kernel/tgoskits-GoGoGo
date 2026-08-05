@@ -79,12 +79,16 @@ rg -q --fixed-strings "host_timer_policy" "$SETUP_SOURCE" || {
   echo "[rtbench-precision] missing per-VM host timer policy" >&2
   exit 1
 }
-rg -q --fixed-strings \
-  'configured host policy: timer={:?}, vcpu_yield={}' \
-  "$AXVISOR_CONFIG_SOURCE" || {
-  echo "[rtbench-precision] missing configured VM host policy startup diagnostic" >&2
-  exit 1
-}
+for pattern in \
+  'configured host policy: timer={:?}, vcpu_yield={}, vcpu_idle={:?}' \
+  '#[unsafe(export_name = "axvisor_log_configured_host_policy")]' \
+  'target: HOST_POLICY_DIAGNOSTIC_MARKER' \
+  'log_configured_host_policy(&vm_config)'; do
+  rg -q --fixed-strings "$pattern" "$AXVISOR_CONFIG_SOURCE" || {
+    echo "[rtbench-precision] missing runtime-coupled host policy diagnostic: ${pattern}" >&2
+    exit 1
+  }
+done
 require_source "late_cycles * 1000000LL" "cycle-based deadline thresholds"
 require_source "K_SEM_DEFINE(rtbench_done" "benchmark completion semaphore"
 require_source "k_sem_give(&rtbench_done)" "benchmark completion signal"

@@ -25,7 +25,7 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
-for tool in realpath sha256sum cmp mktemp mv rm dirname python3 rust-objcopy; do
+for tool in realpath sha256sum cmp mktemp mv rm awk dirname nm python3 rust-objcopy; do
   command -v "$tool" >/dev/null 2>&1 || die "required tool is unavailable: ${tool}"
 done
 
@@ -115,6 +115,16 @@ for config_path in config_paths:
         )
         raise SystemExit(1)
 PY
+
+HOST_POLICY_WITNESS=axvisor_log_configured_host_policy
+if ! nm -g --defined-only --format=posix "$ELF_PATH" \
+  | awk -v witness="$HOST_POLICY_WITNESS" '
+      $1 == witness && $2 == "T" { count += 1 }
+      END { exit count == 1 ? 0 : 1 }
+    '
+then
+  die "runtime host policy diagnostic witness is absent from ELF: ${HOST_POLICY_WITNESS}: ${ELF_PATH}"
+fi
 
 verify_input_unchanged() {
   local role="$1"
