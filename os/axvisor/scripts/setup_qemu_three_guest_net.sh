@@ -8,7 +8,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 AXVISOR_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 REPO_ROOT="$(cd "${AXVISOR_ROOT}/../.." && pwd)"
 IMAGE_ROOT="${AXVISOR_THREE_GUEST_IMAGE_ROOT:-/tmp/.axvisor-images}"
-GUEST_REGISTRY="${AXVISOR_THREE_GUEST_REGISTRY:-https://raw.githubusercontent.com/arceos-hypervisor/axvisor-guest/refs/heads/main/registry/v0.0.26.toml}"
+GUEST_REGISTRY="${AXVISOR_THREE_GUEST_REGISTRY:-https://raw.githubusercontent.com/arceos-hypervisor/axvisor-guest/504cabb5e07e506e2692b010e01204d20587f030/registry/v0.0.26.toml}"
 LINUX_IMAGE_NAME="qemu_aarch64_linux"
 GENERATED_ROOT="${REPO_ROOT}/tmp/vmconfigs/three-guest-net"
 ROOTFS_TARGET="${REPO_ROOT}/tmp/rootfs.img"
@@ -39,6 +39,42 @@ case "$HOST_VCPU_IDLE_POLICY" in
   *) die "AXVISOR_THREE_GUEST_HOST_VCPU_IDLE_POLICY must be halt or busy" ;;
 esac
 
+preflight_common() {
+  local command_name description
+  while IFS=$'\t' read -r command_name description; do
+    command -v "$command_name" >/dev/null 2>&1 \
+      || die "${command_name} is required ${description}"
+  done <<'EOF'
+python3	to patch and validate three-guest TOML configs
+rg	to validate the three-guest network inputs
+cpio	to build deterministic Linux guest initramfs archives
+file	to validate the selected static BusyBox
+mktemp	to isolate and atomically publish generated artifacts
+sort	to order deterministic Linux guest initramfs members
+touch	to normalize deterministic Linux guest initramfs metadata
+find	to enumerate Linux guest initramfs members and image artifacts
+cp	to stage selected guest artifacts
+chmod	to set guest initramfs executable modes
+mv	to atomically publish generated artifacts
+rm	to clean private temporary staging
+mkdir	to create private artifact directories
+ln	to create the BusyBox shell link
+EOF
+  python3 -c 'import tomllib' >/dev/null 2>&1 \
+    || die "python3 tomllib is required to patch and validate three-guest TOML configs"
+}
+
+preflight_rtos_build() {
+  command -v cmake >/dev/null 2>&1 \
+    || die "cmake is required to configure the checked-in Zephyr network guest"
+  command -v ninja >/dev/null 2>&1 \
+    || die "ninja is required to build the checked-in Zephyr network guest"
+  command -v readelf >/dev/null 2>&1 \
+    || die "readelf is required to determine the Zephyr guest entry point"
+  command -v awk >/dev/null 2>&1 \
+    || die "awk is required to parse the Zephyr guest entry point"
+}
+
 find_kernel() {
   local image_dir="$1"
   local candidate
@@ -60,16 +96,13 @@ find_kernel() {
 pull_guest_image() {
   local image_name="$1"
   local image_dir="${IMAGE_ROOT}/${image_name}"
-  if [ -d "$image_dir" ]; then
-    printf '%s\n' "$image_dir"
-    return 0
-  fi
 
   command -v cargo >/dev/null 2>&1 || die "cargo is required to pull ${image_name}"
   mkdir -p "$IMAGE_ROOT"
   echo "[three-guest-net] pulling ${image_name} from ${GUEST_REGISTRY}" >&2
   if ! (cd "$REPO_ROOT" && \
     TGOS_IMAGE_LOCAL_STORAGE="${IMAGE_ROOT}/managed" \
+    TGOS_IMAGE_REGISTRY_FALLBACK_URL="$GUEST_REGISTRY" \
     cargo xtask image pull \
       --registry "$GUEST_REGISTRY" \
       --output-dir "$IMAGE_ROOT" \
@@ -120,8 +153,8 @@ prepare_rtos_kernel() {
   local extra_cflags="${AXVISOR_THREE_GUEST_ZEPHYR_EXTRA_CFLAGS:--Did_aa64isar2_el1=S3_0_C0_C6_2}"
 
   [ -d "$zephyr_base" ] || die "ZEPHYR_BASE is required to build the checked-in network guest; set ZEPHYR_BASE or provide AXVISOR_THREE_GUEST_RTOS_IMAGE"
-  command -v cmake >/dev/null 2>&1 || die "cmake is required to build the checked-in Zephyr network guest"
   [ -f "${zephyr_app}/CMakeLists.txt" ] || die "missing checked-in Zephyr guest at ${zephyr_app}"
+  preflight_rtos_build
 
   local -a cmake_args=(
     -S "$zephyr_app"
@@ -157,12 +190,6 @@ prepare_rtos_kernel() {
 
 prepare_rootfs() {
   local source="${AXVISOR_THREE_GUEST_ROOTFS:-}"
-  if [ -z "$source" ] && [ -f "$ROOTFS_TARGET" ]; then
-    source="$ROOTFS_TARGET"
-  fi
-  if [ -z "$source" ] && [ -f "${REPO_ROOT}/tmp/axbuild/rootfs/rootfs-aarch64-alpine.img" ]; then
-    source="${REPO_ROOT}/tmp/axbuild/rootfs/rootfs-aarch64-alpine.img"
-  fi
 
   if [ -z "$source" ]; then
     command -v cargo >/dev/null 2>&1 || die "cargo is required to prepare the QEMU rootfs"
@@ -182,18 +209,34 @@ prepare_rootfs() {
   printf '%s\n' "$ROOTFS_TARGET"
 }
 
-prepare_linux_initramfs() {
-  local busybox="${IMAGE_ROOT}/linux-net-busybox"
-  local staging_root="${IMAGE_ROOT}/linux-net-initramfs"
-
-  command -v debugfs >/dev/null 2>&1 || die "debugfs is required to extract busybox from the Linux rootfs"
+prepare_linux_initramfs() (
   command -v cpio >/dev/null 2>&1 || die "cpio is required to build the Linux guest initramfs"
   command -v file >/dev/null 2>&1 || die "file is required to validate the Linux initramfs busybox"
-  mkdir -p "$IMAGE_ROOT" "$staging_root/bin"
+  command -v mktemp >/dev/null 2>&1 || die "mktemp is required to isolate initramfs staging"
+  command -v sort >/dev/null 2>&1 || die "sort is required for deterministic initramfs ordering"
+  command -v touch >/dev/null 2>&1 || die "touch is required for deterministic initramfs metadata"
+  mkdir -p "$IMAGE_ROOT"
+
+  local staging_root
+  staging_root="$(mktemp -d "${IMAGE_ROOT}/linux-net-initramfs.XXXXXX")"
+  local -a temporary_directories=("$staging_root")
+  local -a temporary_outputs=()
+  cleanup_initramfs() {
+    rm -rf -- "${temporary_directories[@]}"
+    if [ "${#temporary_outputs[@]}" -gt 0 ]; then
+      rm -f -- "${temporary_outputs[@]}"
+    fi
+  }
+  trap cleanup_initramfs EXIT INT TERM
+  mkdir -p "$staging_root/bin"
+
+  local busybox="${staging_root}/rootfs-busybox"
   if [ -n "${AXVISOR_THREE_GUEST_BUSYBOX:-}" ]; then
     busybox="${AXVISOR_THREE_GUEST_BUSYBOX}"
     [ -f "$busybox" ] || die "static BusyBox does not exist: ${busybox}"
   else
+    command -v debugfs >/dev/null 2>&1 \
+      || die "debugfs is required to extract BusyBox from the Linux rootfs"
     local debugfs_log="${IMAGE_ROOT}/debugfs-busybox.log"
     if ! debugfs -R "dump /bin/busybox ${busybox}" "$ROOTFS_TARGET" >"$debugfs_log" 2>&1; then
       die "unable to extract /bin/busybox from ${ROOTFS_TARGET}; see ${debugfs_log}"
@@ -204,34 +247,54 @@ prepare_linux_initramfs() {
   # The rootfs BusyBox is commonly dynamic, while the tiny initramfs has no
   # loader. Prefer the static binary shipped in the downloaded guest image.
   if ! file -L "$busybox" | rg -q "statically linked"; then
+    command -v gzip >/dev/null 2>&1 \
+      || die "gzip is required to extract static BusyBox from the guest initramfs"
     local guest_initramfs="${IMAGE_ROOT}/${LINUX_IMAGE_NAME}/initramfs.cpio.gz"
-    local static_root="${IMAGE_ROOT}/linux-net-static-busybox"
+    local static_root
+    static_root="$(mktemp -d "${IMAGE_ROOT}/linux-net-static-busybox.XXXXXX")"
+    temporary_directories+=("$static_root")
     [ -f "$guest_initramfs" ] || die "dynamic BusyBox requires a static guest initramfs: ${guest_initramfs}"
     mkdir -p "${static_root}/bin"
-    if [ ! -s "${static_root}/bin/busybox" ]; then
-      gzip -dc "$guest_initramfs" | (cd "$static_root" && cpio --quiet -id bin/busybox) \
-        || die "unable to extract static BusyBox from ${guest_initramfs}"
-    fi
+    gzip -dc "$guest_initramfs" | (cd "$static_root" && cpio --quiet -id bin/busybox) \
+      || die "unable to extract static BusyBox from ${guest_initramfs}"
     busybox="${static_root}/bin/busybox"
   fi
   file -L "$busybox" | rg -q "statically linked" \
     || die "Linux initramfs BusyBox must be statically linked: ${busybox}"
 
+  local busybox_snapshot="${IMAGE_ROOT}/linux-net-busybox.selected"
+  local busybox_tmp
+  busybox_tmp="$(mktemp "${IMAGE_ROOT}/.linux-net-busybox.selected.tmp.XXXXXX")"
+  temporary_outputs+=("$busybox_tmp")
+  cp "$busybox" "$busybox_tmp"
+  chmod 0755 "$busybox_tmp"
+  mv -f -- "$busybox_tmp" "$busybox_snapshot"
+  temporary_outputs=("${temporary_outputs[@]:0:${#temporary_outputs[@]}-1}")
+  busybox="$busybox_snapshot"
+
   cp "$busybox" "$staging_root/bin/busybox"
   ln -sfn busybox "$staging_root/bin/sh"
+  printf '%s\n' "$busybox"
 
-  local init_name init_src output
+  local init_name init_src output output_tmp
   for init_name in 1 2; do
     init_src="${AXVISOR_ROOT}/guests/linux-net/init-linux-${init_name}"
     output="${IMAGE_ROOT}/linux-net-${init_name}-initramfs.cpio"
     [ -f "$init_src" ] || die "missing Linux guest init script: ${init_src}"
     cp "$init_src" "$staging_root/init"
     chmod 0755 "$staging_root/init" "$staging_root/bin/busybox"
-    (cd "$staging_root" && find . -print0 | cpio --null --quiet -o -H newc > "$output") \
+    find "$staging_root" -exec touch -h -d @0 {} +
+    output_tmp="$(mktemp "${IMAGE_ROOT}/.linux-net-${init_name}-initramfs.cpio.tmp.XXXXXX")"
+    temporary_outputs+=("$output_tmp")
+    (cd "$staging_root" && \
+      find . -print0 | LC_ALL=C sort -z \
+        | cpio --null --quiet --reproducible --owner=0:0 -o -H newc >"$output_tmp") \
       || die "unable to build Linux guest initramfs: ${output}"
+    mv -f -- "$output_tmp" "$output"
+    temporary_outputs=("${temporary_outputs[@]:0:${#temporary_outputs[@]}-1}")
     printf '%s\n' "$output"
   done
-}
+)
 
 patch_vm_config() {
   local template="$1"
@@ -244,44 +307,287 @@ patch_vm_config() {
   local host_timer_policy="${8:-}"
   local host_vcpu_yield="${9:-}"
   local host_vcpu_idle_policy="${10:-}"
-  mkdir -p "$(dirname "$output")"
-  local -a sed_args=(
-    -e 's|^image_location =.*|image_location = "memory"|' \
-    -e "s|^kernel_path =.*|kernel_path = \"${kernel}\"|"
+  local -a patches=(
+    kernel.image_location string memory
+    kernel.kernel_path string "$kernel"
   )
   if [ -n "$entry_point" ]; then
-    sed_args+=("-e" "s|^entry_point =.*|entry_point = ${entry_point}|")
+    patches+=(kernel.entry_point integer "$entry_point")
   fi
   if [ -n "$ramdisk" ]; then
-    sed_args+=("-e" "s|^ramdisk_path =.*|ramdisk_path = \"${ramdisk}\"|")
+    patches+=(kernel.ramdisk_path string "$ramdisk")
   fi
   if [ -n "$ramdisk_load_addr" ]; then
-    sed_args+=("-e" "s|^ramdisk_load_addr =.*|ramdisk_load_addr = ${ramdisk_load_addr}|")
+    patches+=(kernel.ramdisk_load_addr integer "$ramdisk_load_addr")
   fi
   if [ -n "$phys_cpu" ]; then
-    sed_args+=(
-      "-e" "s|^phys_cpu_ids =.*|phys_cpu_ids = [${phys_cpu}]|"
-      "-e" "s|^  \[\"gppt-gicr\", 0x080a_0000, 0x2_0000, 0, 0x20, \[1, 0x2_0000, [0-9][0-9]*\]\]|  [\"gppt-gicr\", 0x080a_0000, 0x2_0000, 0, 0x20, [1, 0x2_0000, ${phys_cpu}]]|"
-    )
+    patches+=(base.phys_cpu_ids cpu-array "$phys_cpu")
+    patches+=(devices.emu_devices gicr-cpu "$phys_cpu")
   fi
   if [ -n "$host_timer_policy" ]; then
-    sed_args+=("-e" "s|^host_timer_policy =.*|host_timer_policy = \"${host_timer_policy}\"|")
+    patches+=(base.host_timer_policy string "$host_timer_policy")
   fi
   if [ -n "$host_vcpu_yield" ]; then
-    sed_args+=("-e" "s|^host_vcpu_yield =.*|host_vcpu_yield = ${host_vcpu_yield}|")
+    patches+=(base.host_vcpu_yield boolean "$host_vcpu_yield")
   fi
   if [ -n "$host_vcpu_idle_policy" ]; then
-    sed_args+=("-e" "s|^host_vcpu_idle_policy =.*|host_vcpu_idle_policy = \"${host_vcpu_idle_policy}\"|")
+    patches+=(base.host_vcpu_idle_policy string "$host_vcpu_idle_policy")
   fi
-  sed "${sed_args[@]}" "$template" > "$output"
+
+  command -v python3 >/dev/null 2>&1 \
+    || die "python3 with tomllib is required to patch VM configs"
+  [ -f "$template" ] || die "VM config template does not exist: ${template}"
+  mkdir -p "$(dirname "$output")"
+  python3 - "$template" "$output" "${patches[@]}" <<'PY'
+import json
+import os
+import pathlib
+import re
+import stat
+import sys
+import tempfile
+import tomllib
+
+
+class PatchError(Exception):
+    pass
+
+
+def toml_value(value):
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, int):
+        return str(value)
+    if isinstance(value, str):
+        return json.dumps(value, ensure_ascii=True)
+    if isinstance(value, list):
+        return "[" + ", ".join(toml_value(item) for item in value) + "]"
+    raise PatchError(f"unsupported TOML value type: {type(value).__name__}")
+
+
+def parse_integer(raw, target):
+    try:
+        value = tomllib.loads(f"value = {raw}\n")["value"]
+    except tomllib.TOMLDecodeError as exc:
+        raise PatchError(f"invalid integer for {target}: {raw}: {exc}") from exc
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise PatchError(f"invalid integer for {target}: {raw}")
+    return value
+
+
+def replacement_value(kind, raw, target, document):
+    if kind == "string":
+        return raw
+    if kind == "integer":
+        return parse_integer(raw, target)
+    if kind == "boolean":
+        if raw not in ("true", "false"):
+            raise PatchError(f"invalid boolean for {target}: {raw}")
+        return raw == "true"
+    if kind == "cpu-array":
+        return [parse_integer(raw, target)]
+    if kind == "gicr-cpu":
+        pcpu = parse_integer(raw, target)
+        rows = document["devices"]["emu_devices"]
+        matches = [row for row in rows if isinstance(row, list) and row and row[0] == "gppt-gicr"]
+        if len(matches) != 1:
+            raise PatchError(
+                f"requested TOML target devices.emu_devices must contain exactly one gppt-gicr row; found {len(matches)}"
+            )
+        if not isinstance(matches[0][-1], list) or len(matches[0][-1]) != 3:
+            raise PatchError("gppt-gicr affinity must be a three-element array")
+        matches[0][-1][-1] = pcpu
+        return rows
+    raise PatchError(f"unsupported patch type for {target}: {kind}")
+
+
+def key_span(lines, section, key):
+    current_section = None
+    starts = []
+    table_re = re.compile(r"^\s*\[([^]]+)]\s*(?:#.*)?$")
+    key_re = re.compile(rf"^\s*{re.escape(key)}\s*=")
+    for index, line in enumerate(lines):
+        table = table_re.match(line)
+        if table:
+            current_section = table.group(1).strip()
+            continue
+        if current_section == section and key_re.match(line):
+            starts.append(index)
+    if len(starts) != 1:
+        raise PatchError(
+            f"requested TOML key {section}.{key} must occur exactly once; found {len(starts)}"
+        )
+
+    start = starts[0]
+    for end in range(start, len(lines)):
+        fragment = f"[{section}]\n" + "".join(lines[start : end + 1])
+        try:
+            parsed = tomllib.loads(fragment)
+        except tomllib.TOMLDecodeError:
+            continue
+        if key in parsed.get(section, {}):
+            return start, end
+    raise PatchError(f"unable to determine TOML value span for {section}.{key}")
+
+
+def main():
+    template_path = pathlib.Path(sys.argv[1])
+    output_path = pathlib.Path(sys.argv[2])
+    raw_specs = sys.argv[3:]
+    if len(raw_specs) % 3:
+        raise PatchError("internal patch specification is incomplete")
+
+    template_text = template_path.read_text()
+    try:
+        document = tomllib.loads(template_text)
+    except tomllib.TOMLDecodeError as exc:
+        raise PatchError(f"invalid VM config template {template_path}: {exc}") from exc
+
+    lines = template_text.splitlines(keepends=True)
+    replacements = []
+    for target, kind, raw in zip(raw_specs[0::3], raw_specs[1::3], raw_specs[2::3]):
+        section, key = target.split(".", 1)
+        table = document.get(section)
+        if not isinstance(table, dict) or key not in table:
+            raise PatchError(f"requested TOML key {target} is absent from {template_path}")
+        value = replacement_value(kind, raw, target, document)
+        start, end = key_span(lines, section, key)
+        indentation = lines[start][: len(lines[start]) - len(lines[start].lstrip())]
+        replacements.append((start, end, f"{indentation}{key} = {toml_value(value)}\n"))
+        table[key] = value
+
+    for start, end, replacement in sorted(replacements, reverse=True):
+        lines[start : end + 1] = [replacement]
+    output_text = "".join(lines)
+    try:
+        tomllib.loads(output_text)
+    except tomllib.TOMLDecodeError as exc:
+        raise PatchError(f"patched VM config is invalid TOML: {exc}") from exc
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    descriptor, temporary_name = tempfile.mkstemp(
+        prefix=f".{output_path.name}.tmp.", dir=output_path.parent
+    )
+    temporary_path = pathlib.Path(temporary_name)
+    try:
+        os.fchmod(descriptor, stat.S_IMODE(template_path.stat().st_mode))
+        with os.fdopen(descriptor, "w") as temporary:
+            temporary.write(output_text)
+            temporary.flush()
+            os.fsync(temporary.fileno())
+        with temporary_path.open("rb") as generated:
+            tomllib.load(generated)
+        os.replace(temporary_path, output_path)
+        directory_fd = os.open(output_path.parent, os.O_RDONLY)
+        try:
+            os.fsync(directory_fd)
+        finally:
+            os.close(directory_fd)
+    finally:
+        temporary_path.unlink(missing_ok=True)
+
+
+try:
+    main()
+except (OSError, PatchError) as exc:
+    print(f"[three-guest-net] ERROR: {exc}", file=sys.stderr)
+    raise SystemExit(1)
+PY
 }
 
+write_artifact_manifest() {
+  local manifest_path="$1"
+  shift
+  command -v python3 >/dev/null 2>&1 \
+    || die "python3 is required to write the artifact manifest"
+  mkdir -p "$(dirname "$manifest_path")"
+  python3 - "$manifest_path" "$@" <<'PY'
+import hashlib
+import os
+import pathlib
+import re
+import stat
+import sys
+import tempfile
+
+
+class ManifestError(Exception):
+    pass
+
+
+def sha256(path):
+    digest = hashlib.sha256()
+    with path.open("rb") as artifact:
+        for chunk in iter(lambda: artifact.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def main():
+    manifest_path = pathlib.Path(sys.argv[1])
+    raw_artifacts = sys.argv[2:]
+    if len(raw_artifacts) % 2:
+        raise ManifestError("internal artifact manifest specification is incomplete")
+
+    records = []
+    labels = set()
+    for label, raw_path in zip(raw_artifacts[0::2], raw_artifacts[1::2]):
+        if not re.fullmatch(r"[a-z0-9][a-z0-9-]*", label):
+            raise ManifestError(f"invalid artifact label: {label!r}")
+        if label in labels:
+            raise ManifestError(f"duplicate artifact label: {label}")
+        labels.add(label)
+        path = pathlib.Path(raw_path)
+        if not path.is_file():
+            raise ManifestError(f"artifact does not exist: {label}: {path}")
+        canonical = path.resolve()
+        if "\t" in str(canonical) or "\n" in str(canonical):
+            raise ManifestError(f"artifact path contains TAB or newline: {label}: {canonical}")
+        records.append((label, canonical, sha256(canonical)))
+
+    content = "version\t1\n" + "".join(
+        f"{label}\t{path}\t{digest}\n" for label, path, digest in records
+    )
+    manifest_path.parent.mkdir(parents=True, exist_ok=True)
+    descriptor, temporary_name = tempfile.mkstemp(
+        prefix=f".{manifest_path.name}.tmp.", dir=manifest_path.parent
+    )
+    temporary_path = pathlib.Path(temporary_name)
+    try:
+        os.fchmod(descriptor, stat.S_IRUSR | stat.S_IWUSR | stat.S_IRGRP | stat.S_IROTH)
+        with os.fdopen(descriptor, "w") as temporary:
+            temporary.write(content)
+            temporary.flush()
+            os.fsync(temporary.fileno())
+        os.replace(temporary_path, manifest_path)
+        directory_fd = os.open(manifest_path.parent, os.O_RDONLY)
+        try:
+            os.fsync(directory_fd)
+        finally:
+            os.close(directory_fd)
+    finally:
+        temporary_path.unlink(missing_ok=True)
+
+
+try:
+    main()
+except (ManifestError, OSError) as exc:
+    print(f"[three-guest-net] ERROR: {exc}", file=sys.stderr)
+    raise SystemExit(1)
+PY
+}
+
+main() {
+preflight_common
 linux_kernel="$(prepare_linux_kernel)"
 prepare_rtos_kernel
 rtos_kernel="$PREPARED_RTOS_KERNEL"
 prepare_rootfs >/dev/null
-mapfile -t linux_initramfs < <(prepare_linux_initramfs)
-[ "${#linux_initramfs[@]}" -eq 2 ] || die "expected two Linux initramfs images"
+mapfile -t prepared_initramfs < <(prepare_linux_initramfs)
+[ "${#prepared_initramfs[@]}" -eq 3 ] \
+  || die "expected one selected BusyBox and two Linux initramfs images"
+selected_busybox="${prepared_initramfs[0]}"
+linux_initramfs=("${prepared_initramfs[@]:1}")
 
 patch_vm_config \
   "${AXVISOR_ROOT}/configs/vms/qemu/aarch64/linux-net-1.toml" \
@@ -309,7 +615,22 @@ patch_vm_config \
   "$HOST_VCPU_YIELD" \
   "$HOST_VCPU_IDLE_POLICY"
 
-bash "${SCRIPT_DIR}/verify_three_guest_net.sh"
+AXVISOR_THREE_GUEST_VERIFY_VM_ROOT="$GENERATED_ROOT" \
+AXVISOR_THREE_GUEST_VERIFY_EXPECTED_IDLE_POLICY="$HOST_VCPU_IDLE_POLICY" \
+  bash "${SCRIPT_DIR}/verify_three_guest_net.sh"
+
+manifest_path="${GENERATED_ROOT}/artifacts.tsv"
+write_artifact_manifest \
+  "$manifest_path" \
+  linux-kernel "$linux_kernel" \
+  rtos-kernel "$rtos_kernel" \
+  rootfs "$ROOTFS_TARGET" \
+  busybox "$selected_busybox" \
+  linux-1-initramfs "${linux_initramfs[0]}" \
+  linux-2-initramfs "${linux_initramfs[1]}" \
+  linux-1-vm-config "${GENERATED_ROOT}/linux-net-1.toml" \
+  linux-2-vm-config "${GENERATED_ROOT}/linux-net-2.toml" \
+  zephyr-vm-config "${GENERATED_ROOT}/zephyr-net.toml"
 
 cat <<EOF
 
@@ -323,6 +644,7 @@ cat <<EOF
   vCPU idle:   ${HOST_VCPU_IDLE_POLICY}
   Rootfs:       ${ROOTFS_TARGET}
   VM configs:   ${GENERATED_ROOT}
+  Manifest:     ${manifest_path}
 
 Run:
   cd ${REPO_ROOT}
@@ -339,3 +661,8 @@ Guest network:
   Linux-2: 192.168.77.12/24, MAC 52:54:00:77:00:02
   Zephyr:  192.168.77.13/24, MAC 52:54:00:77:00:03
 EOF
+}
+
+if [ "${BASH_SOURCE[0]}" = "$0" ]; then
+  main "$@"
+fi

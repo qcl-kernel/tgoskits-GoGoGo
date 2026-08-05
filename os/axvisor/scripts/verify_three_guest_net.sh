@@ -3,8 +3,10 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 AXVISOR_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
-VM_ROOT="${AXVISOR_ROOT}/configs/vms/qemu/aarch64"
-QEMU_CONFIG="${AXVISOR_ROOT}/configs/qemu/qemu-aarch64-three-guest-net.toml"
+VM_ROOT="${AXVISOR_THREE_GUEST_VERIFY_VM_ROOT:-${AXVISOR_ROOT}/configs/vms/qemu/aarch64}"
+QEMU_CONFIG="${AXVISOR_THREE_GUEST_VERIFY_QEMU_CONFIG:-${AXVISOR_ROOT}/configs/qemu/qemu-aarch64-three-guest-net.toml}"
+EXPECTED_IDLE_POLICY="${AXVISOR_THREE_GUEST_VERIFY_EXPECTED_IDLE_POLICY:-halt}"
+TOPOLOGY_ONLY="${AXVISOR_THREE_GUEST_VERIFY_TOPOLOGY_ONLY:-0}"
 
 fail() {
   echo "[three-guest-net] ERROR: $*" >&2
@@ -18,62 +20,163 @@ require_line() {
   rg -q --fixed-strings "$pattern" "$file" || fail "${description} (${file})"
 }
 
-validate_vm() {
-  local file="$1"
-  local id="$2"
-  local ram_start="$3"
-  local nic="$4"
-  local pcpu="$5"
+case "$EXPECTED_IDLE_POLICY" in
+  halt|busy) ;;
+  *) fail "expected Zephyr host vCPU idle policy must be halt or busy" ;;
+esac
+case "$TOPOLOGY_ONLY" in
+  0|1) ;;
+  *) fail "AXVISOR_THREE_GUEST_VERIFY_TOPOLOGY_ONLY must be 0 or 1" ;;
+esac
 
-  [ -f "$file" ] || fail "missing VM config: ${file}"
-  require_line "$file" "id = ${id}" "missing VM id ${id}"
-  require_line "$file" "[${ram_start}, 0x1000_0000, 0x7, 2]" "VM ${id} must use identity-mapped guest RAM for passthrough DMA"
-  require_line "$file" '["/intc@8000000"]' "VM ${id} must expose the QEMU GIC platform device"
-  require_line "$file" "[\"/timer\"]" "VM ${id} must expose the virtual timer FDT node"
-  require_line "$file" "[\"/psci\"]" "VM ${id} must expose the PSCI FDT node"
-  require_line "$file" "[\"/pl011@9000000\"]" "VM ${id} must expose the QEMU console FDT node"
-  require_line "$file" "[\"${nic}\"]" "VM ${id} must select its assigned virtio-mmio NIC"
-  require_line "$file" '["gppt-gicd", 0x0800_0000, 0x1_0000, 0, 0x21, []]' "VM ${id} must use a GPPT GIC distributor"
-  require_line "$file" "[\"gppt-gicr\", 0x080a_0000, 0x2_0000, 0, 0x20, [1, 0x2_0000, ${pcpu}]]" "VM ${id} must map its GIC redistributor to physical CPU ${pcpu}"
+command -v python3 >/dev/null 2>&1 \
+  || fail "python3 with tomllib is required for structured topology validation"
+python3 -c 'import tomllib' >/dev/null 2>&1 \
+  || fail "python3 tomllib is required for structured topology validation"
 
-  local nic_count
-  nic_count="$(rg -c 'virtio_mmio@' "$file")"
-  [ "$nic_count" -eq 1 ] || fail "VM ${id} selects ${nic_count} virtio-mmio NICs; expected exactly one"
-}
+python3 - "$VM_ROOT" "$QEMU_CONFIG" "$EXPECTED_IDLE_POLICY" <<'PY'
+import pathlib
+import re
+import sys
+import tomllib
 
-validate_vm "${VM_ROOT}/linux-net-1.toml" 1 0x8000_0000 /virtio_mmio@a000000 0
-validate_vm "${VM_ROOT}/linux-net-2.toml" 2 0x9000_0000 /virtio_mmio@a000200 1
-validate_vm "${VM_ROOT}/zephyr-net.toml" 3 0xa000_0000 /virtio_mmio@a000400 2
-require_line "${VM_ROOT}/linux-net-1.toml" "ramdisk_load_addr = 0x8c00_0000" "Linux-1 must provide an initramfs load address"
-require_line "${VM_ROOT}/linux-net-2.toml" "ramdisk_load_addr = 0x9c00_0000" "Linux-2 must provide an initramfs load address"
 
-for linux_config in \
-  "${VM_ROOT}/linux-net-1.toml" \
-  "${VM_ROOT}/linux-net-2.toml"; do
-  if rg -q --fixed-strings "host_vcpu_idle_policy" "$linux_config"; then
-    fail "Linux VM config must not select a host vCPU idle policy (${linux_config})"
-  fi
-done
+class ConfigError(Exception):
+    pass
 
-zephyr_idle_policy_count="$(rg -c '^host_vcpu_idle_policy = ' "${VM_ROOT}/zephyr-net.toml" || true)"
-zephyr_idle_policy_count="${zephyr_idle_policy_count:-0}"
-[ "$zephyr_idle_policy_count" -eq 1 ] \
-  || fail "Zephyr VM config must contain exactly one host vCPU idle policy"
-rg -q '^host_vcpu_idle_policy = "halt"$' "${VM_ROOT}/zephyr-net.toml" \
-  || fail "Zephyr VM config must use exactly the safe halt host vCPU idle policy"
 
-topology_inputs=(
-  "${VM_ROOT}/linux-net-1.toml"
-  "${VM_ROOT}/linux-net-2.toml"
-  "${VM_ROOT}/zephyr-net.toml"
-  "$QEMU_CONFIG"
+def report_exception(exception_type, exception, traceback):
+    if issubclass(exception_type, (ConfigError, OSError)):
+        print(f"[three-guest-net] ERROR: {exception}", file=sys.stderr)
+        return
+    sys.__excepthook__(exception_type, exception, traceback)
+
+
+sys.excepthook = report_exception
+
+
+def load(path):
+    if not path.is_file():
+        raise ConfigError(f"missing topology config: {path}")
+    try:
+        with path.open("rb") as source:
+            return tomllib.load(source)
+    except tomllib.TOMLDecodeError as exc:
+        raise ConfigError(f"invalid TOML in {path}: {exc}") from exc
+
+
+def table(document, name, path):
+    value = document.get(name)
+    if not isinstance(value, dict):
+        raise ConfigError(f"missing [{name}] table in {path}")
+    return value
+
+
+def walk_live(value, path=""):
+    if isinstance(value, dict):
+        for key, child in value.items():
+            child_path = f"{path}.{key}" if path else str(key)
+            yield child_path, str(key)
+            yield from walk_live(child, child_path)
+    elif isinstance(value, list):
+        for index, child in enumerate(value):
+            yield from walk_live(child, f"{path}[{index}]")
+    elif isinstance(value, str):
+        yield path, value
+
+
+def count_key(value, expected):
+    if isinstance(value, dict):
+        return sum(key == expected for key in value) + sum(
+            count_key(child, expected) for child in value.values()
+        )
+    if isinstance(value, list):
+        return sum(count_key(child, expected) for child in value)
+    return 0
+
+
+def require(condition, message):
+    if not condition:
+        raise ConfigError(message)
+
+
+vm_root = pathlib.Path(sys.argv[1])
+qemu_path = pathlib.Path(sys.argv[2])
+expected_idle_policy = sys.argv[3]
+specifications = (
+    ("linux-net-1.toml", 1, 0x80000000, "/virtio_mmio@a000000", 0),
+    ("linux-net-2.toml", 2, 0x90000000, "/virtio_mmio@a000200", 1),
+    ("zephyr-net.toml", 3, 0xA0000000, "/virtio_mmio@a000400", 2),
 )
-forbidden_topology="$(
-  rg -n -i \
-    'ivc|shared[[:space:]_-]*mem(ory)?|shmem|virtio[[:space:]_-]*vsock|vhost[[:space:]_-]*vsock' \
-    "${topology_inputs[@]}" || true
-)"
-[ -z "$forbidden_topology" ] || fail "topology must remain virtio-net only: ${forbidden_topology}"
+documents = {}
+
+for filename, vm_id, ram_start, nic, pcpu in specifications:
+    path = vm_root / filename
+    document = load(path)
+    documents[filename] = document
+    base = table(document, "base", path)
+    kernel = table(document, "kernel", path)
+    devices = table(document, "devices", path)
+    require(base.get("id") == vm_id, f"VM {vm_id} has an unexpected or missing live id ({path})")
+    require(base.get("phys_cpu_ids") == [pcpu], f"VM {vm_id} must run on physical CPU {pcpu} ({path})")
+    required_ram = [ram_start, 0x10000000, 0x7, 2]
+    require(required_ram in kernel.get("memory_regions", []), f"VM {vm_id} must use identity-mapped guest RAM for passthrough DMA ({path})")
+
+    passthrough = devices.get("passthrough_devices")
+    require(isinstance(passthrough, list), f"VM {vm_id} has no passthrough device list ({path})")
+    live_devices = [row[0] for row in passthrough if isinstance(row, list) and len(row) == 1 and isinstance(row[0], str)]
+    for required_device in ("/intc@8000000", "/timer", "/psci", "/pl011@9000000", nic):
+        require(live_devices.count(required_device) == 1, f"VM {vm_id} must expose exactly one {required_device} ({path})")
+    nic_devices = [device for device in live_devices if device.startswith("/virtio_mmio@")]
+    require(nic_devices == [nic], f"VM {vm_id} must select exactly its assigned virtio-net MMIO device ({path})")
+
+    emulated = devices.get("emu_devices")
+    require(isinstance(emulated, list), f"VM {vm_id} has no emulated device list ({path})")
+    gicd = ["gppt-gicd", 0x08000000, 0x10000, 0, 0x21, []]
+    gicr = ["gppt-gicr", 0x080A0000, 0x20000, 0, 0x20, [1, 0x20000, pcpu]]
+    require(emulated.count(gicd) == 1, f"VM {vm_id} must use exactly one GPPT GIC distributor ({path})")
+    require(emulated.count(gicr) == 1, f"VM {vm_id} must map its GIC redistributor to physical CPU {pcpu} ({path})")
+
+linux_1 = documents["linux-net-1.toml"]
+linux_2 = documents["linux-net-2.toml"]
+for filename, document, load_address in (
+    ("linux-net-1.toml", linux_1, 0x8C000000),
+    ("linux-net-2.toml", linux_2, 0x9C000000),
+):
+    require(document["kernel"].get("ramdisk_load_addr") == load_address, f"{filename} has an unexpected initramfs load address")
+    require(count_key(document, "host_vcpu_idle_policy") == 0, f"Linux VM config must not select a host vCPU idle policy ({vm_root / filename})")
+
+zephyr = documents["zephyr-net.toml"]
+require(count_key(zephyr, "host_vcpu_idle_policy") == 1, "Zephyr VM config must contain exactly one host vCPU idle policy")
+require(zephyr["base"].get("host_vcpu_idle_policy") == expected_idle_policy, f"Zephyr VM config must use exactly host vCPU idle policy {expected_idle_policy!r}")
+
+qemu = load(qemu_path)
+qemu_args = qemu.get("args")
+require(isinstance(qemu_args, list) and all(isinstance(arg, str) for arg in qemu_args), f"QEMU args must be an array of strings ({qemu_path})")
+required_network = (
+    "hubport,id=net0,hubid=77",
+    "hubport,id=net1,hubid=77",
+    "hubport,id=net2,hubid=77",
+    "virtio-net-device,netdev=net0,bus=virtio-mmio-bus.0,mac=52:54:00:77:00:01",
+    "virtio-net-device,netdev=net1,bus=virtio-mmio-bus.1,mac=52:54:00:77:00:02",
+    "virtio-net-device,netdev=net2,bus=virtio-mmio-bus.2,mac=52:54:00:77:00:03",
+)
+for network_arg in required_network:
+    require(qemu_args.count(network_arg) == 1, f"QEMU network topology must contain exactly one live {network_arg} ({qemu_path})")
+
+for source_path, document in tuple((vm_root / name, data) for name, data in documents.items()) + ((qemu_path, qemu),):
+    for value_path, live_value in walk_live(document):
+        compact = re.sub(r"[^a-z0-9]+", "", live_value.lower())
+        if "ivc" in compact or "sharedmemory" in compact or "shmem" in compact or "vsock" in compact:
+            raise ConfigError(f"topology must remain virtio-net only; forbidden live value at {source_path}:{value_path}: {live_value!r}")
+PY
+
+if [ "$TOPOLOGY_ONLY" = 1 ]; then
+  echo "[three-guest-net] structured topology checks passed"
+  exit 0
+fi
+
+command -v rg >/dev/null 2>&1 || fail "rg is required for source topology validation"
 
 ZEPHYR_APP="${AXVISOR_ROOT}/guests/zephyr-net"
 require_line "${ZEPHYR_APP}/prj.conf" "CONFIG_NET_CONFIG_AUTO_INIT=n" "Zephyr must configure networking from main"
@@ -96,17 +199,6 @@ require_line "${ZEPHYR_APP}/virtnet.overlay" "interrupts = <GIC_SPI 18 IRQ_TYPE_
 require_line "${AXVISOR_ROOT}/guests/linux-net/init-linux-1" "ping -c 1 -W 2 192.168.77.13" "Linux-1 must verify IPv4 connectivity to Zephyr"
 require_line "${AXVISOR_ROOT}/guests/linux-net/init-linux-2" "ping -c 1 -W 2 192.168.77.13" "Linux-2 must verify IPv4 connectivity to Zephyr"
 require_line "${AXVISOR_ROOT}/guests/linux-net/init-linux-1" "wget -q -O - http://192.168.77.12:8080/" "Linux-1 must verify TCP connectivity to Linux-2"
-
-[ -f "$QEMU_CONFIG" ] || fail "missing QEMU config: ${QEMU_CONFIG}"
-for net in \
-  'hubport,id=net0,hubid=77' \
-  'hubport,id=net1,hubid=77' \
-  'hubport,id=net2,hubid=77' \
-  'virtio-net-device,netdev=net0,bus=virtio-mmio-bus.0,mac=52:54:00:77:00:01' \
-  'virtio-net-device,netdev=net1,bus=virtio-mmio-bus.1,mac=52:54:00:77:00:02' \
-  'virtio-net-device,netdev=net2,bus=virtio-mmio-bus.2,mac=52:54:00:77:00:03'; do
-  require_line "$QEMU_CONFIG" "$net" "QEMU network topology is missing ${net}"
-done
 
 if [ "$#" -gt 1 ]; then
   fail "usage: $0 [qemu-host.dtb]"
