@@ -200,7 +200,7 @@ prepare_rootfs() {
     echo "[three-guest-net] pulling the AArch64 QEMU rootfs" >&2
     (cd "$REPO_ROOT" && \
       TGOS_IMAGE_LOCAL_STORAGE="$rootfs_store" \
-      cargo xtask image pull --arch aarch64)
+      cargo xtask image pull --arch aarch64 >&2)
     source="$(find "$rootfs_store" -type f -name 'rootfs-aarch64-alpine.img' -print -quit)"
   fi
 

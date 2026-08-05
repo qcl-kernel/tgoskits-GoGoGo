@@ -462,6 +462,7 @@ printf '%s\n' \
   '  mkdir -p "${output_dir}/${image_name}"' \
   '  printf "%s\\n" "registry-verified kernel" >"${output_dir}/${image_name}/qemu-aarch64"' \
   'elif printf "%s\\n" "$*" | grep -q -- "--arch aarch64"; then' \
+  '  printf "%s\\n" "image pull: fetched rootfs-aarch64-alpine.img"' \
   '  mkdir -p "$TGOS_IMAGE_LOCAL_STORAGE"' \
   '  printf "%s\\n" "registry-verified rootfs" >"${TGOS_IMAGE_LOCAL_STORAGE}/rootfs-aarch64-alpine.img"' \
   'fi' \
@@ -487,6 +488,8 @@ printf '%s\n' "$observed_pull" \
   || fail_test "guest image pull did not use the pinned registry"
 
 rootfs_target="${provenance_root}/rootfs-target.img"
+rootfs_pull_stderr="${provenance_root}/rootfs-pull.stderr"
+expected_registry_rootfs="${provenance_images}/rootfs-managed/rootfs-aarch64-alpine.img"
 printf '%s\n' 'blind cached rootfs' >"$rootfs_target"
 rootfs_log_lines_before="$(wc -l <"$provenance_log")"
 selected_registry_rootfs="$(PATH="${provenance_bin}:${PATH}" \
@@ -499,11 +502,18 @@ FAKE_CARGO_LOG="$provenance_log" \
     ROOTFS_TARGET="$4"
     unset AXVISOR_THREE_GUEST_ROOTFS
     prepare_rootfs
-  ' bash "$SETUP_SOURCE" "$provenance_images" "$provenance_repo" "$rootfs_target"
+  ' bash "$SETUP_SOURCE" "$provenance_images" "$provenance_repo" "$rootfs_target" \
+    2>"$rootfs_pull_stderr"
 )"
 [ "$(wc -l <"$provenance_log")" -eq "$((rootfs_log_lines_before + 1))" ] \
   || fail_test "non-explicit rootfs cache bypassed the image-tool checksum boundary"
-rg -q --fixed-strings 'registry-verified rootfs' "$selected_registry_rootfs" \
+[ "$(printf '%s\n' "$selected_registry_rootfs" | wc -l)" -eq 1 ] \
+  || fail_test "default rootfs selection wrote image-pull status into its path result"
+[ "$selected_registry_rootfs" = "$expected_registry_rootfs" ] \
+  || fail_test "default rootfs selection did not return exactly the created rootfs path"
+rg -q --fixed-strings 'image pull: fetched rootfs-aarch64-alpine.img' "$rootfs_pull_stderr" \
+  || fail_test "default rootfs selection discarded image-pull diagnostics"
+rg -q --fixed-strings 'registry-verified rootfs' "$expected_registry_rootfs" \
   || fail_test "rootfs selection did not use image-tool-validated bytes"
 rg -q --fixed-strings 'blind cached rootfs' "$rootfs_target" \
   || fail_test "rootfs selection mutated the stable destination before publication"
