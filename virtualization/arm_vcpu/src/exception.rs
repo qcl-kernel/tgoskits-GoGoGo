@@ -23,7 +23,7 @@ use crate::{
         exception_data_abort_access_reg, exception_data_abort_access_reg_width,
         exception_data_abort_access_width, exception_data_abort_handleable,
         exception_data_abort_is_permission_fault, exception_data_abort_is_translate_fault,
-        exception_esr, exception_fault_addr, exception_next_instruction_step,
+        exception_esr, exception_fault_addr, exception_iss, exception_next_instruction_step,
         exception_sysreg_addr, exception_sysreg_direction_write, exception_sysreg_gpr,
     },
 };
@@ -115,6 +115,9 @@ pub fn handle_exception_sync(ctx: &mut TrapFrame) -> ArmVcpuResult<ArmVmExit> {
                 ],
             })
         }
+        Some(ESR_EL2::EC::Value::TrappedWFIorWFE) => {
+            handle_trapped_wfx(ctx, exception_iss(), exception_next_instruction_step())
+        }
         Some(ESR_EL2::EC::Value::TrappedMsrMrs) => handle_system_register(ctx),
         Some(ESR_EL2::EC::Value::SMC64) => {
             let elr = ctx.exception_pc();
@@ -138,6 +141,21 @@ pub fn handle_exception_sync(ctx: &mut TrapFrame) -> ArmVcpuResult<ArmVmExit> {
             );
         }
     }
+}
+
+fn handle_trapped_wfx(
+    ctx: &mut TrapFrame,
+    iss: usize,
+    instruction_step: usize,
+) -> ArmVcpuResult<ArmVmExit> {
+    const WFX_ISS_WFE: usize = 1 << 0;
+
+    if iss & WFX_ISS_WFE != 0 {
+        return Err(ArmVcpuError::Unsupported);
+    }
+
+    ctx.set_exception_pc(ctx.exception_pc() + instruction_step);
+    Ok(ArmVmExit::WaitForInterrupt)
 }
 
 fn handle_data_abort(context_frame: &mut TrapFrame) -> ArmVcpuResult<ArmVmExit> {
@@ -370,4 +388,31 @@ fn invalid_exception_el2(tf: &mut TrapFrame, kind: TrapKind, source: TrapSource)
         "Invalid exception {:?} from {:?}:\n{:#x?}",
         kind, source, tf
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn trapped_wfi_advances_pc_by_exception_instruction_step() {
+        let mut ctx = TrapFrame::default();
+        ctx.set_exception_pc(0x8000);
+
+        let exit = handle_trapped_wfx(&mut ctx, 0, 8).unwrap();
+
+        assert!(matches!(exit, ArmVmExit::WaitForInterrupt));
+        assert_eq!(ctx.exception_pc(), 0x8008);
+    }
+
+    #[test]
+    fn trapped_wfe_is_unsupported_and_preserves_pc() {
+        let mut ctx = TrapFrame::default();
+        ctx.set_exception_pc(0x9000);
+
+        let result = handle_trapped_wfx(&mut ctx, 1, 4);
+
+        assert!(matches!(result, Err(ArmVcpuError::Unsupported)));
+        assert_eq!(ctx.exception_pc(), 0x9000);
+    }
 }

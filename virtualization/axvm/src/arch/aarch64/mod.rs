@@ -52,6 +52,13 @@ pub(crate) enum Aarch64DeferredRunWork {
     ExternalInterrupt { vector: usize },
 }
 
+fn wait_for_interrupt_exit() -> BoundVcpuExit<Aarch64DeferredRunWork> {
+    BoundVcpuExit::Complete(VcpuRunAction {
+        waits_for_event: false,
+        stop_reason: None,
+    })
+}
+
 impl CpuUpOps for Aarch64Arch {}
 
 impl ArchOps for Aarch64Arch {
@@ -129,6 +136,7 @@ impl ArchOps for Aarch64Arch {
                     },
                 ))
             }
+            ArmVmExit::WaitForInterrupt => Ok(wait_for_interrupt_exit()),
             ArmVmExit::CpuDown { state } => {
                 warn!(
                     "VM[{}] run VCpu[{}] CpuDown state {state:#x}",
@@ -379,6 +387,17 @@ mod tests {
     #[test]
     fn axvm_arm_vcpu_uses_arm_exit_type() {
         assert_arm_exit_type::<AxvmArmVcpu>();
+    }
+
+    #[test]
+    fn wait_for_interrupt_completes_without_waiting_for_an_event() {
+        let exit = wait_for_interrupt_exit();
+
+        let BoundVcpuExit::Complete(action) = exit else {
+            panic!("WFI must complete the current run slice");
+        };
+        assert!(!action.waits_for_event);
+        assert_eq!(action.stop_reason, None);
     }
 
     #[test]
