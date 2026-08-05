@@ -210,6 +210,16 @@ static void add_ns(struct timespec *value, uint64_t nanoseconds)
 	}
 }
 
+static void check_clock_nanosleep_result(int result)
+{
+	if (result == 0 || result == EINTR) {
+		return;
+	}
+	fprintf(stderr, "clock_nanosleep(CLOCK_MONOTONIC): %s (error %d)\n",
+		strerror(result), result);
+	exit(EXIT_FAILURE);
+}
+
 static void sample_schedstat(const char *output_path, unsigned long duration_ms,
 			     unsigned long interval_us, int tid_count, char **tid_text)
 {
@@ -328,9 +338,13 @@ static void sample_schedstat(const char *output_path, unsigned long duration_ms,
 			break;
 		}
 		add_ns(&deadline, (uint64_t)interval_us * 1000ULL);
-		while (clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, &deadline, NULL) ==
-		       EINTR) {
-		}
+		int sleep_result;
+
+		do {
+			sleep_result = clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME,
+						       &deadline, NULL);
+		} while (sleep_result == EINTR);
+		check_clock_nanosleep_result(sleep_result);
 	}
 	if (fclose(output) != 0) {
 		die("close schedstat output");
@@ -346,6 +360,18 @@ static void sample_schedstat(const char *output_path, unsigned long duration_ms,
 
 int main(int argc, char **argv)
 {
+#ifdef AXVISOR_SCHED_PROBE_TEST
+	if (argc == 3 && strcmp(argv[1], "test-clock-nanosleep-result") == 0) {
+		const unsigned long result = parse_unsigned(argv[2], "clock-nanosleep-result");
+
+		if (result > INT_MAX) {
+			fprintf(stderr, "clock-nanosleep-result out of range: %s\n", argv[2]);
+			return EXIT_FAILURE;
+		}
+		check_clock_nanosleep_result((int)result);
+		return EXIT_SUCCESS;
+	}
+#endif
 	if (argc == 4 && strcmp(argv[1], "timestamp-stream") == 0) {
 		timestamp_stream(argv[2], argv[3]);
 		return EXIT_SUCCESS;

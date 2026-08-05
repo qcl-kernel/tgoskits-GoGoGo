@@ -293,7 +293,17 @@ fi
 [ ! -e "$FOREIGN_OUTPUT" ] || fail "failed foreign-TID build left a partial output"
 
 PROBE="${TEST_ROOT}/qemu_sched_probe"
-cc -std=c11 -O2 -Wall -Wextra -Werror -o "$PROBE" "$PROBE_SOURCE"
+cc -std=c11 -O2 -Wall -Wextra -Werror -DAXVISOR_SCHED_PROBE_TEST \
+  -o "$PROBE" "$PROBE_SOURCE"
+
+NANOSLEEP_ERROR_LOG="${TEST_ROOT}/clock-nanosleep-error.log"
+if LC_ALL=C "$PROBE" test-clock-nanosleep-result 22 2>"$NANOSLEEP_ERROR_LOG"; then
+  fail "probe accepted a non-EINTR clock_nanosleep error"
+fi
+rg -q --fixed-strings \
+  'clock_nanosleep(CLOCK_MONOTONIC): Invalid argument (error 22)' \
+  "$NANOSLEEP_ERROR_LOG" \
+  || fail "probe did not report the clock_nanosleep return code and message"
 
 RAW_CONSOLE="${TEST_ROOT}/console.log"
 TIMESTAMPED_CONSOLE="${TEST_ROOT}/console-monotonic.tsv"
