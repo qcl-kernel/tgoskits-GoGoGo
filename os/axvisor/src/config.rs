@@ -37,6 +37,11 @@ use axvm::{
 use axvm::{AxVmError, AxVmResult};
 use axvmconfig::AxVMCrateConfig;
 
+/// Artifact marker used to reject builds without the complete host-policy diagnostic.
+#[used]
+static HOST_POLICY_DIAGNOSTIC: [u8; 65] =
+    *b"configured host policy: timer={:?}, vcpu_yield={}, vcpu_idle={:?}";
+
 #[cfg(all(
     feature = "fs",
     any(
