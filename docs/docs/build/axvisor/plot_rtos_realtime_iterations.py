@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import hashlib
 from pathlib import Path
 from typing import Callable, Iterable, Mapping, Optional, Sequence
 
@@ -21,6 +22,7 @@ from matplotlib.ticker import MaxNLocator
 SCRIPT_DIR = Path(__file__).resolve().parent
 DEFAULT_CSV = SCRIPT_DIR / "rtos-realtime-iterations.csv"
 DEFAULT_OUTPUT = SCRIPT_DIR / "rtos-realtime-iterations.png"
+CSV_SHA256_METADATA_KEY = "rtos-realtime-csv-sha256"
 
 SINGLE_GUEST = "Single guest"
 THREE_GUEST_NETWORK = "Three guest network"
@@ -194,6 +196,7 @@ def _style_axis(ax: Axes, title: str, ylabel: str) -> None:
 
 def plot_rtos_realtime_iterations(csv_path: Path = DEFAULT_CSV, output_path: Path = DEFAULT_OUTPUT) -> Path:
     """Generate the reproducible RTOS iteration figure and return its path."""
+    csv_sha256 = hashlib.sha256(csv_path.read_bytes()).hexdigest()
     rows = load_rows(csv_path)
     if not rows:
         raise ValueError("CSV contains no benchmark rows")
@@ -384,7 +387,13 @@ def plot_rtos_realtime_iterations(csv_path: Path = DEFAULT_CSV, output_path: Pat
         color="#7b858d",
     )
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    fig.savefig(output_path, dpi=150, bbox_inches="tight", facecolor="white")
+    fig.savefig(
+        output_path,
+        dpi=150,
+        bbox_inches="tight",
+        facecolor="white",
+        metadata={CSV_SHA256_METADATA_KEY: csv_sha256},
+    )
     plt.close(fig)
     return output_path
 

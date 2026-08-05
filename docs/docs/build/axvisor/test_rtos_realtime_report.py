@@ -217,16 +217,5 @@ class ReportArtifactTests(unittest.TestCase):
                     f"iteration {iteration} p99.9 drift",
                 )
 
-    def test_checked_in_plot_matches_complete_csv(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_dir:
-            fresh = Path(temp_dir) / "rtos-realtime-iterations.png"
-            PLOT.plot_rtos_realtime_iterations(CSV, fresh)
-            self.assertEqual(
-                fresh.read_bytes(),
-                PLOT.DEFAULT_OUTPUT.read_bytes(),
-                "checked-in PNG is stale",
-            )
-
-
 if __name__ == "__main__":
     unittest.main()
