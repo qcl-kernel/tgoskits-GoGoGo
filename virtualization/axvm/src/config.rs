@@ -118,7 +118,13 @@ pub struct AxVMConfigParams {
     pub memory_regions: Vec<VmMemConfig>,
     pub boot_policy: GuestBootPolicy,
     pub interrupt_mode: VMInterruptMode,
+    /// Controls periodic host timer behavior for pCPUs running this VM.
+    ///
+    /// Defaults to [`HostTimerPolicy::Periodic`] through [`Default`].
     pub host_timer_policy: HostTimerPolicy,
+    /// Controls whether the pinned host vCPU task yields after a completed run slice.
+    ///
+    /// Defaults to `false`.
     pub host_vcpu_yield: bool,
     /// Host behavior when the VM's vCPU is idle.
     pub host_vcpu_idle_policy: HostVcpuIdlePolicy,
