@@ -313,7 +313,7 @@ fn dispatch_post_exit(
     if host_task.stop_if_requested() {
         return VcpuLoopControl::Break;
     }
-    if host_vcpu_yield && !waits_for_event {
+    if host_vcpu_yield {
         host_task.yield_now();
     }
     VcpuLoopControl::Continue
@@ -518,15 +518,18 @@ mod tests {
     }
 
     #[test]
-    fn post_exit_dispatch_wait_consumes_control_before_optional_yield() {
+    fn post_exit_dispatch_waits_before_optional_yield() {
         let mut host = RecordingPostExitHostTask::default();
 
         assert_eq!(
             dispatch_post_exit(true, true, &mut host),
             VcpuLoopControl::Continue
         );
-        assert_eq!(host.events, ["wait", "suspend_check", "stop_check"]);
-        assert_eq!(host.yield_count, 0);
+        assert_eq!(
+            host.events,
+            ["wait", "suspend_check", "stop_check", "yield"]
+        );
+        assert_eq!(host.yield_count, 1);
     }
 
     #[test]
