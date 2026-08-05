@@ -667,7 +667,9 @@ verify_generated_set() {
 
 publish_generated_set() {
   local staged_root="$1"
-  python3 - "$GENERATED_BASE" "$GENERATED_ROOT" "$staged_root" <<'PY'
+  local failure_injection="${2:-}"
+  python3 - "$GENERATED_BASE" "$GENERATED_ROOT" "$staged_root" "$failure_injection" <<'PY'
+import errno
 import os
 import pathlib
 import sys
@@ -677,7 +679,15 @@ import tempfile
 base = pathlib.Path(sys.argv[1])
 current = pathlib.Path(sys.argv[2])
 staged = pathlib.Path(sys.argv[3])
+failure_injection = sys.argv[4]
 temporary_dir = None
+
+
+def inject_failure(step):
+    if failure_injection == step:
+        raise OSError(errno.EIO, f"injected {step} failure")
+
+
 try:
     if staged.parent.resolve() != base.resolve():
         raise ValueError(f"staged set must be a direct child of {base}: {staged}")
@@ -685,16 +695,30 @@ try:
         raise ValueError(f"published generated root must be a symlink: {current}")
     temporary_dir = pathlib.Path(tempfile.mkdtemp(prefix=".publish.", dir=base))
     temporary_link = temporary_dir / "current"
+    inject_failure("current-link")
     temporary_link.symlink_to(staged.name)
+    inject_failure("current-replace")
     os.replace(temporary_link, current)
-    directory_fd = os.open(base, os.O_RDONLY)
-    try:
-        os.fsync(directory_fd)
-    finally:
-        os.close(directory_fd)
 except (OSError, ValueError) as exc:
     print(f"[three-guest-net] ERROR: unable to atomically publish generated set: {exc}", file=sys.stderr)
     raise SystemExit(1)
+else:
+    try:
+        inject_failure("fsync-after-replace")
+        directory_fd = os.open(base, os.O_RDONLY)
+        try:
+            os.fsync(directory_fd)
+        finally:
+            os.close(directory_fd)
+    except OSError as exc:
+        try:
+            print(
+                "[three-guest-net] WARNING: generated set committed; "
+                f"directory durability sync failed: {exc}",
+                file=sys.stderr,
+            )
+        except OSError:
+            pass
 finally:
     if temporary_dir is not None:
         try:
@@ -705,9 +729,11 @@ PY
 }
 
 publish_rootfs_compatibility() {
-  local rootfs_source="${GENERATED_ROOT}/rootfs.img"
+  local artifact_root="${1:-$GENERATED_ROOT}"
+  local rootfs_source="${artifact_root}/rootfs.img"
+  local compatibility_target="${GENERATED_ROOT}/rootfs.img"
   [ -f "$rootfs_source" ] \
-    || die "published immutable rootfs does not exist: ${rootfs_source}"
+    || die "staged immutable rootfs does not exist: ${rootfs_source}"
 
   local destination_dir destination_name temporary_dir temporary_link
   destination_dir="$(dirname "$ROOTFS_TARGET")"
@@ -715,7 +741,7 @@ publish_rootfs_compatibility() {
   mkdir -p "$destination_dir"
   temporary_dir="$(mktemp -d "${destination_dir}/.${destination_name}.link.XXXXXX")"
   temporary_link="${temporary_dir}/${destination_name}"
-  if ! ln -s "$rootfs_source" "$temporary_link"; then
+  if ! ln -s "$compatibility_target" "$temporary_link"; then
     rm -rf -- "$temporary_dir"
     die "unable to stage rootfs compatibility symlink: ${ROOTFS_TARGET}"
   fi
@@ -809,9 +835,9 @@ write_artifact_manifest \
   linux-2-vm-config "${staged_root}/linux-net-2.toml" \
   zephyr-vm-config "${staged_root}/zephyr-net.toml"
 validate_staged_manifest "$staged_manifest" "$staged_root"
+publish_rootfs_compatibility "$staged_root"
 publish_generated_set "$staged_root"
 published=true
-publish_rootfs_compatibility
 manifest_path="${GENERATED_ROOT}/artifacts.tsv"
 
 cat <<EOF

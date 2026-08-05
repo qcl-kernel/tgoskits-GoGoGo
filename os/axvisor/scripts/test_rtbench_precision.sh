@@ -801,102 +801,31 @@ set -e
 printf '%s\n' "$canonical_qemu_error" | rg -q 'virtio-net only.*shared_mem_backend' \
   || fail_test "canonical QEMU topology failure lacked the forbidden live value"
 
-publication_root="${functional_root}/publication-fixture"
-publication_bin="${publication_root}/bin"
-mkdir -p "$publication_bin"
-cp "${full_verify_bin}/file" "${publication_bin}/file"
-
-published_set_snapshot() {
-  python3 - "$1" <<'PY'
-import hashlib
-import os
-import pathlib
-import sys
-
-current = pathlib.Path(sys.argv[1])
-digest = hashlib.sha256()
-digest.update(os.readlink(current).encode())
-for name in ("artifacts.tsv", "linux-net-1.toml", "linux-net-2.toml", "zephyr-net.toml"):
-    digest.update(name.encode())
-    digest.update((current / name).read_bytes())
-print(digest.hexdigest())
-PY
-}
-
-for failure_step in config verification manifest post-switch; do
-  failure_root="${publication_root}/${failure_step}"
-  published_root="${failure_root}/published"
-  old_run="${published_root}/old-complete-set"
-  mkdir -p "$old_run" "${failure_root}/images"
-  for published_name in artifacts.tsv linux-net-1.toml linux-net-2.toml zephyr-net.toml; do
-    printf 'old complete %s\n' "$published_name" >"${old_run}/${published_name}"
-  done
-  ln -s old-complete-set "${published_root}/current"
-  published_before="$(published_set_snapshot "${published_root}/current")"
-
-  set +e
-  publication_error="$(
-    PATH="${publication_bin}:${PATH}" \
-    AXVISOR_THREE_GUEST_IMAGE_ROOT="${failure_root}/images" \
-    AXVISOR_THREE_GUEST_LINUX_IMAGE="${full_verify_root}/linux-kernel" \
-    AXVISOR_THREE_GUEST_RTOS_IMAGE="${full_verify_root}/rtos-kernel" \
-    AXVISOR_THREE_GUEST_RTOS_ENTRY_POINT=0xa0001114 \
-    AXVISOR_THREE_GUEST_BUSYBOX="${full_verify_root}/busybox" \
-    AXVISOR_THREE_GUEST_ROOTFS="${full_verify_root}/rootfs.img" \
-      bash -c '
-        set -euo pipefail
-        source "$1"
-        IMAGE_ROOT="$2/images"
-        GENERATED_BASE="$2/published"
-        GENERATED_ROOT="$GENERATED_BASE/current"
-        ROOTFS_TARGET="$2/rootfs-target.img"
-        QEMU_CONFIG="$3"
-        case "$4" in
-          config)
-            patch_calls=0
-            patch_vm_config() {
-              patch_calls=$((patch_calls + 1))
-              if [ "$patch_calls" -eq 3 ]; then
-                return 1
-              fi
-              printf "new partial config %s\n" "$patch_calls" >"$2"
-            }
-            ;;
-          verification)
-            verify_generated_set() { return 1; }
-            ;;
-          manifest)
-            write_artifact_manifest() { return 1; }
-            ;;
-          post-switch)
-            publish_generated_set() {
-              temporary_link="$GENERATED_BASE/.post-switch-current"
-              ln -s "${1##*/}" "$temporary_link"
-              mv -Tf -- "$temporary_link" "$GENERATED_ROOT"
-              return 1
-            }
-            ;;
-        esac
-        main
-      ' bash "$SETUP_SOURCE" "$failure_root" "$topology_qemu_config" "$failure_step" 2>&1
-  )"
-  publication_status=$?
-  set -e
-  [ "$publication_status" -ne 0 ] \
-    || fail_test "injected ${failure_step} failure was accepted"
-  if [ "$failure_step" = post-switch ]; then
-    [ -d "${published_root}/current" ] \
-      || fail_test "post-switch failure cleanup left the published link dangling"
-  else
-    [ "$(published_set_snapshot "${published_root}/current")" = "$published_before" ] \
-      || fail_test "injected ${failure_step} failure changed the published set"
-  fi
-done
-
 complete_publication_root="${functional_root}/complete-publication-fixture"
 complete_publication_bin="${complete_publication_root}/bin"
 mkdir -p "$complete_publication_bin"
 cp "${full_verify_bin}/file" "${complete_publication_bin}/file"
+complete_publication_real_ln="$(command -v ln)"
+complete_publication_real_mv="$(command -v mv)"
+printf '%s\n' \
+  '#!/usr/bin/env bash' \
+  'set -euo pipefail' \
+  'destination="${!#}"' \
+  'if [ "${AXVISOR_TEST_PUBLICATION_FAILURE:-}" = rootfs-link ]; then' \
+  '  case "$destination" in */.rootfs-target.img.link.*/rootfs-target.img) exit 1 ;; esac' \
+  'fi' \
+  'exec "$AXVISOR_TEST_REAL_LN" "$@"' \
+  >"${complete_publication_bin}/ln"
+printf '%s\n' \
+  '#!/usr/bin/env bash' \
+  'set -euo pipefail' \
+  'destination="${!#}"' \
+  'if [ "${AXVISOR_TEST_PUBLICATION_FAILURE:-}" = rootfs-replace ] && [ "$destination" = "$AXVISOR_TEST_ROOTFS_TARGET" ]; then' \
+  '  exit 1' \
+  'fi' \
+  'exec "$AXVISOR_TEST_REAL_MV" "$@"' \
+  >"${complete_publication_bin}/mv"
+chmod +x "${complete_publication_bin}/ln" "${complete_publication_bin}/mv"
 
 validated_manifest_snapshot() {
   python3 - "$1" <<'PY'
@@ -981,6 +910,10 @@ run_complete_publication_fixture() {
   AXVISOR_THREE_GUEST_BUSYBOX="${fixture_root}/selected-busybox" \
   AXVISOR_THREE_GUEST_ROOTFS="${fixture_root}/selected-rootfs.img" \
   AXVISOR_THREE_GUEST_HOST_VCPU_IDLE_POLICY="$idle_policy" \
+  AXVISOR_TEST_PUBLICATION_FAILURE="$failure_step" \
+  AXVISOR_TEST_REAL_LN="$complete_publication_real_ln" \
+  AXVISOR_TEST_REAL_MV="$complete_publication_real_mv" \
+  AXVISOR_TEST_ROOTFS_TARGET="${fixture_root}/rootfs-target.img" \
     bash -c '
       set -euo pipefail
       source "$1"
@@ -989,6 +922,7 @@ run_complete_publication_fixture() {
       GENERATED_ROOT="$GENERATED_BASE/current"
       ROOTFS_TARGET="$2/rootfs-target.img"
       QEMU_CONFIG="$3"
+      publication_failure="$4"
       case "$4" in
         config)
           patch_calls=0
@@ -1003,6 +937,12 @@ run_complete_publication_fixture() {
           ;;
         manifest)
           write_artifact_manifest() { return 1; }
+          ;;
+        current-link|current-replace|fsync-after-replace)
+          eval "$(declare -f publish_generated_set | sed '1s/publish_generated_set/publish_generated_set_injected/')"
+          publish_generated_set() {
+            publish_generated_set_injected "$1" "$publication_failure"
+          }
           ;;
       esac
       main
@@ -1038,6 +978,76 @@ for failure_step in config verification manifest; do
   [ "$(validated_manifest_snapshot "${complete_failure_root}/published/current")" = "$run_a_snapshot" ] \
     || fail_test "run B ${failure_step} failure invalidated run A artifact hashes"
 done
+
+published_runs_snapshot() {
+  find "$1" -mindepth 1 -maxdepth 1 -type d -name 'run.*' -printf '%f\n' \
+    | LC_ALL=C sort
+}
+
+commit_point_root="${complete_publication_root}/commit-point"
+mkdir -p "${commit_point_root}/images"
+printf '%s\n' 'commit A Linux kernel' >"${commit_point_root}/selected-linux-kernel"
+printf '%s\n' 'commit A RTOS kernel' >"${commit_point_root}/selected-rtos-kernel"
+printf '%s\n' 'commit A rootfs' >"${commit_point_root}/selected-rootfs.img"
+printf '%s\n' 'commit A BusyBox' >"${commit_point_root}/selected-busybox"
+chmod +x "${commit_point_root}/selected-busybox"
+printf '%s\n' 'legacy compatibility rootfs' >"${commit_point_root}/rootfs-target.img"
+run_complete_publication_fixture "$commit_point_root" >/dev/null \
+  || fail_test "commit-point run A setup failed"
+commit_a_target="$(readlink "${commit_point_root}/published/current")"
+commit_a_hashes="$(validated_manifest_snapshot "${commit_point_root}/published/current")" \
+  || fail_test "commit-point run A manifest was invalid"
+commit_a_compat_target="$(readlink "${commit_point_root}/rootfs-target.img")"
+commit_a_compat_hash="$(sha256sum -- "${commit_point_root}/rootfs-target.img")"
+commit_a_runs="$(published_runs_snapshot "${commit_point_root}/published")"
+
+printf '%s\n' 'commit B different Linux kernel' >"${commit_point_root}/selected-linux-kernel"
+printf '%s\n' 'commit B different RTOS kernel' >"${commit_point_root}/selected-rtos-kernel"
+printf '%s\n' 'commit B different rootfs' >"${commit_point_root}/selected-rootfs.img"
+printf '%s\n' 'commit B different BusyBox' >"${commit_point_root}/selected-busybox"
+
+for failure_step in rootfs-link rootfs-replace current-link current-replace fsync-after-replace; do
+  set +e
+  commit_failure_error="$(
+    run_complete_publication_fixture "$commit_point_root" "$failure_step" 2>&1
+  )"
+  commit_failure_status=$?
+  set -e
+  if [ "$failure_step" = fsync-after-replace ]; then
+    [ "$commit_failure_status" -eq 0 ] \
+      || fail_test "post-commit fsync injection returned failure after switching current"
+    printf '%s\n' "$commit_failure_error" | rg -q 'WARNING:.*durability' \
+      || fail_test "post-commit fsync injection did not report a durability warning"
+    break
+  fi
+  [ "$commit_failure_status" -ne 0 ] \
+    || fail_test "injected ${failure_step} publication failure was accepted"
+  [ "$(readlink "${commit_point_root}/published/current")" = "$commit_a_target" ] \
+    || fail_test "injected ${failure_step} failure changed current from run A"
+  [ "$(validated_manifest_snapshot "${commit_point_root}/published/current")" = "$commit_a_hashes" ] \
+    || fail_test "injected ${failure_step} failure invalidated run A hashes"
+  [ "$(readlink "${commit_point_root}/rootfs-target.img")" = "$commit_a_compat_target" ] \
+    || fail_test "injected ${failure_step} failure changed the compatibility link target"
+  [ "$(sha256sum -- "${commit_point_root}/rootfs-target.img")" = "$commit_a_compat_hash" ] \
+    || fail_test "injected ${failure_step} failure changed compatibility content"
+  [ "$(published_runs_snapshot "${commit_point_root}/published")" = "$commit_a_runs" ] \
+    || fail_test "injected ${failure_step} failure left an unpublished run"
+done
+
+commit_b_target="$(readlink "${commit_point_root}/published/current")"
+[ "$commit_b_target" != "$commit_a_target" ] \
+  || fail_test "post-commit fsync warning did not leave the new run committed"
+validated_manifest_snapshot "${commit_point_root}/published/current" >/dev/null \
+  || fail_test "post-commit fsync warning left an invalid new manifest"
+[ "$(validated_manifest_snapshot "${commit_point_root}/published/${commit_a_target}")" = "$commit_a_hashes" ] \
+  || fail_test "post-commit fsync warning invalidated old run A"
+[ "$(readlink "${commit_point_root}/rootfs-target.img")" = "$commit_a_compat_target" ] \
+  || fail_test "post-commit fsync warning changed the stable compatibility link target"
+cmp -s -- "${commit_point_root}/rootfs-target.img" "${commit_point_root}/selected-rootfs.img" \
+  || fail_test "post-commit fsync warning did not expose committed rootfs content"
+expected_commit_runs="$(printf '%s\n%s\n' "$commit_a_target" "$commit_b_target" | LC_ALL=C sort)"
+[ "$(published_runs_snapshot "${commit_point_root}/published")" = "$expected_commit_runs" ] \
+  || fail_test "post-commit fsync warning left unexpected staged runs"
 
 switch_root="${complete_publication_root}/halt-busy-halt"
 mkdir -p "${switch_root}/images"
