@@ -55,7 +55,7 @@ mktemp	to isolate and atomically publish generated artifacts
 sort	to order deterministic Linux guest initramfs members
 touch	to normalize deterministic Linux guest initramfs metadata
 find	to enumerate Linux guest initramfs members and image artifacts
-readlink	to compare rootfs source and destination paths before publication
+readlink	to resolve immutable artifact paths before publication
 cp	to stage selected guest artifacts
 chmod	to set guest initramfs executable modes
 mv	to atomically publish generated artifacts
@@ -197,7 +197,7 @@ prepare_rootfs() {
   if [ -z "$source" ]; then
     command -v cargo >/dev/null 2>&1 || die "cargo is required to prepare the QEMU rootfs"
     local rootfs_store="${IMAGE_ROOT}/rootfs-managed"
-    echo "[three-guest-net] pulling the AArch64 QEMU rootfs"
+    echo "[three-guest-net] pulling the AArch64 QEMU rootfs" >&2
     (cd "$REPO_ROOT" && \
       TGOS_IMAGE_LOCAL_STORAGE="$rootfs_store" \
       cargo xtask image pull --arch aarch64)
@@ -205,23 +205,27 @@ prepare_rootfs() {
   fi
 
   [ -f "$source" ] || die "QEMU rootfs image does not exist: ${source}"
-  mkdir -p "$(dirname "$ROOTFS_TARGET")"
-  if [ "$(readlink -f "$source")" != "$(readlink -f "$ROOTFS_TARGET")" ]; then
-    local rootfs_tmp
-    rootfs_tmp="$(mktemp "$(dirname "$ROOTFS_TARGET")/.${ROOTFS_TARGET##*/}.tmp.XXXXXX")"
-    if ! cp -- "$source" "$rootfs_tmp"; then
-      rm -f -- "$rootfs_tmp"
-      die "unable to copy QEMU rootfs image to destination staging: ${ROOTFS_TARGET}"
-    fi
-    if ! mv -f -- "$rootfs_tmp" "$ROOTFS_TARGET"; then
-      rm -f -- "$rootfs_tmp"
-      die "unable to atomically publish QEMU rootfs image: ${ROOTFS_TARGET}"
-    fi
+  printf '%s\n' "$source"
+}
+
+snapshot_artifact() {
+  local source="$1"
+  local destination="$2"
+  [ -f "$source" ] || die "selected artifact does not exist: ${source}"
+  local temporary
+  temporary="$(mktemp "${destination}.tmp.XXXXXX")"
+  if ! cp --reflink=auto -- "$source" "$temporary"; then
+    rm -f -- "$temporary"
+    die "unable to snapshot selected artifact: ${source}"
   fi
-  printf '%s\n' "$ROOTFS_TARGET"
+  if ! mv -f -- "$temporary" "$destination"; then
+    rm -f -- "$temporary"
+    die "unable to publish artifact snapshot inside staged run: ${destination}"
+  fi
 }
 
 prepare_linux_initramfs() (
+  local rootfs_source="${1:-$ROOTFS_TARGET}"
   command -v cpio >/dev/null 2>&1 || die "cpio is required to build the Linux guest initramfs"
   command -v file >/dev/null 2>&1 || die "file is required to validate the Linux initramfs busybox"
   command -v mktemp >/dev/null 2>&1 || die "mktemp is required to isolate initramfs staging"
@@ -250,8 +254,8 @@ prepare_linux_initramfs() (
     command -v debugfs >/dev/null 2>&1 \
       || die "debugfs is required to extract BusyBox from the Linux rootfs"
     local debugfs_log="${IMAGE_ROOT}/debugfs-busybox.log"
-    if ! debugfs -R "dump /bin/busybox ${busybox}" "$ROOTFS_TARGET" >"$debugfs_log" 2>&1; then
-      die "unable to extract /bin/busybox from ${ROOTFS_TARGET}; see ${debugfs_log}"
+    if ! debugfs -R "dump /bin/busybox ${busybox}" "$rootfs_source" >"$debugfs_log" 2>&1; then
+      die "unable to extract /bin/busybox from ${rootfs_source}; see ${debugfs_log}"
     fi
   fi
   [ -s "$busybox" ] || die "Linux BusyBox is empty: ${busybox}"
@@ -541,12 +545,6 @@ def main():
     if len(raw_artifacts) % 2:
         raise ManifestError("internal artifact manifest specification is incomplete")
 
-    published_root = os.environ.get("AXVISOR_THREE_GUEST_MANIFEST_PUBLISHED_ROOT")
-    published_config_labels = {
-        "linux-1-vm-config",
-        "linux-2-vm-config",
-        "zephyr-vm-config",
-    }
     records = []
     labels = set()
     for label, raw_path in zip(raw_artifacts[0::2], raw_artifacts[1::2]):
@@ -561,10 +559,7 @@ def main():
         canonical = path.resolve()
         if "\t" in str(canonical) or "\n" in str(canonical):
             raise ManifestError(f"artifact path contains TAB or newline: {label}: {canonical}")
-        recorded_path = canonical
-        if published_root and label in published_config_labels:
-            recorded_path = pathlib.Path(published_root).absolute() / path.name
-        records.append((label, recorded_path, sha256(canonical)))
+        records.append((label, canonical, sha256(canonical)))
 
     content = "version\t1\n" + "".join(
         f"{label}\t{path}\t{digest}\n" for label, path, digest in records
@@ -620,24 +615,41 @@ def sha256(path):
 
 
 manifest_path = pathlib.Path(sys.argv[1])
-staged_root = pathlib.Path(sys.argv[2])
-config_labels = {
-    "linux-1-vm-config",
-    "linux-2-vm-config",
-    "zephyr-vm-config",
+staged_root = pathlib.Path(sys.argv[2]).resolve()
+expected_names = {
+    "linux-kernel": "linux-kernel",
+    "rtos-kernel": "rtos-kernel",
+    "rootfs": "rootfs.img",
+    "busybox": "busybox",
+    "linux-1-initramfs": "linux-1-initramfs.cpio",
+    "linux-2-initramfs": "linux-2-initramfs.cpio",
+    "linux-1-vm-config": "linux-net-1.toml",
+    "linux-2-vm-config": "linux-net-2.toml",
+    "zephyr-vm-config": "zephyr-net.toml",
 }
 try:
     lines = manifest_path.read_text().splitlines()
     if not lines or lines[0] != "version\t1" or len(lines) != 10:
         raise ManifestError("artifact manifest must contain version plus exactly nine records")
+    seen = set()
     for line in lines[1:]:
         label, raw_path, expected = line.split("\t")
-        path = staged_root / pathlib.Path(raw_path).name if label in config_labels else pathlib.Path(raw_path)
+        if label not in expected_names or label in seen:
+            raise ManifestError(f"unexpected or duplicate artifact manifest label: {label}")
+        seen.add(label)
+        path = pathlib.Path(raw_path)
+        expected_path = staged_root / expected_names[label]
+        if path != expected_path:
+            raise ManifestError(
+                f"manifest artifact must belong to immutable staged run: {label}: {path}"
+            )
         if not path.is_file():
             raise ManifestError(f"manifest validation artifact does not exist: {label}: {path}")
         actual = sha256(path)
         if actual != expected:
             raise ManifestError(f"manifest checksum mismatch: {label}: expected {expected}, got {actual}")
+    if seen != set(expected_names):
+        raise ManifestError("artifact manifest does not contain the exact nine required labels")
 except (OSError, ValueError, ManifestError) as exc:
     print(f"[three-guest-net] ERROR: {exc}", file=sys.stderr)
     raise SystemExit(1)
@@ -692,13 +704,35 @@ finally:
 PY
 }
 
+publish_rootfs_compatibility() {
+  local rootfs_source="${GENERATED_ROOT}/rootfs.img"
+  [ -f "$rootfs_source" ] \
+    || die "published immutable rootfs does not exist: ${rootfs_source}"
+
+  local destination_dir destination_name temporary_dir temporary_link
+  destination_dir="$(dirname "$ROOTFS_TARGET")"
+  destination_name="${ROOTFS_TARGET##*/}"
+  mkdir -p "$destination_dir"
+  temporary_dir="$(mktemp -d "${destination_dir}/.${destination_name}.link.XXXXXX")"
+  temporary_link="${temporary_dir}/${destination_name}"
+  if ! ln -s "$rootfs_source" "$temporary_link"; then
+    rm -rf -- "$temporary_dir"
+    die "unable to stage rootfs compatibility symlink: ${ROOTFS_TARGET}"
+  fi
+  if ! mv -Tf -- "$temporary_link" "$ROOTFS_TARGET"; then
+    rm -rf -- "$temporary_dir"
+    die "unable to atomically publish rootfs compatibility symlink: ${ROOTFS_TARGET}"
+  fi
+  rm -rf -- "$temporary_dir"
+}
+
 main() (
 preflight_common
-linux_kernel="$(prepare_linux_kernel)"
+selected_linux_kernel="$(prepare_linux_kernel)"
 prepare_rtos_kernel
-rtos_kernel="$PREPARED_RTOS_KERNEL"
-prepare_rootfs >/dev/null
-mapfile -t prepared_initramfs < <(prepare_linux_initramfs)
+selected_rtos_kernel="$PREPARED_RTOS_KERNEL"
+selected_rootfs="$(prepare_rootfs)"
+mapfile -t prepared_initramfs < <(prepare_linux_initramfs "$selected_rootfs")
 [ "${#prepared_initramfs[@]}" -eq 3 ] \
   || die "expected one selected BusyBox and two Linux initramfs images"
 selected_busybox="${prepared_initramfs[0]}"
@@ -706,6 +740,7 @@ linux_initramfs=("${prepared_initramfs[@]:1}")
 
 mkdir -p "$GENERATED_BASE"
 staged_root="$(mktemp -d "${GENERATED_BASE}/run.XXXXXX")"
+staged_root="$(readlink -f "$staged_root")"
 published=false
 cleanup_generated_set() {
   if [ "$published" = false ]; then
@@ -718,19 +753,34 @@ cleanup_generated_set() {
 }
 trap cleanup_generated_set EXIT INT TERM
 
+linux_kernel="${staged_root}/linux-kernel"
+rtos_kernel="${staged_root}/rtos-kernel"
+rootfs="${staged_root}/rootfs.img"
+busybox="${staged_root}/busybox"
+linux_initramfs_snapshots=(
+  "${staged_root}/linux-1-initramfs.cpio"
+  "${staged_root}/linux-2-initramfs.cpio"
+)
+snapshot_artifact "$selected_linux_kernel" "$linux_kernel"
+snapshot_artifact "$selected_rtos_kernel" "$rtos_kernel"
+snapshot_artifact "$selected_rootfs" "$rootfs"
+snapshot_artifact "$selected_busybox" "$busybox"
+snapshot_artifact "${linux_initramfs[0]}" "${linux_initramfs_snapshots[0]}"
+snapshot_artifact "${linux_initramfs[1]}" "${linux_initramfs_snapshots[1]}"
+
 patch_vm_config \
   "${AXVISOR_ROOT}/configs/vms/qemu/aarch64/linux-net-1.toml" \
   "${staged_root}/linux-net-1.toml" \
   "$linux_kernel" \
   "" \
-  "${linux_initramfs[0]}" \
+  "${linux_initramfs_snapshots[0]}" \
   "0x8c00_0000"
 patch_vm_config \
   "${AXVISOR_ROOT}/configs/vms/qemu/aarch64/linux-net-2.toml" \
   "${staged_root}/linux-net-2.toml" \
   "$linux_kernel" \
   "" \
-  "${linux_initramfs[1]}" \
+  "${linux_initramfs_snapshots[1]}" \
   "0x9c00_0000"
 patch_vm_config \
   "${AXVISOR_ROOT}/configs/vms/qemu/aarch64/zephyr-net.toml" \
@@ -747,28 +797,28 @@ patch_vm_config \
 verify_generated_set "$staged_root"
 
 staged_manifest="${staged_root}/artifacts.tsv"
-AXVISOR_THREE_GUEST_MANIFEST_PUBLISHED_ROOT="$GENERATED_ROOT" \
 write_artifact_manifest \
   "$staged_manifest" \
   linux-kernel "$linux_kernel" \
   rtos-kernel "$rtos_kernel" \
-  rootfs "$ROOTFS_TARGET" \
-  busybox "$selected_busybox" \
-  linux-1-initramfs "${linux_initramfs[0]}" \
-  linux-2-initramfs "${linux_initramfs[1]}" \
+  rootfs "$rootfs" \
+  busybox "$busybox" \
+  linux-1-initramfs "${linux_initramfs_snapshots[0]}" \
+  linux-2-initramfs "${linux_initramfs_snapshots[1]}" \
   linux-1-vm-config "${staged_root}/linux-net-1.toml" \
   linux-2-vm-config "${staged_root}/linux-net-2.toml" \
   zephyr-vm-config "${staged_root}/zephyr-net.toml"
 validate_staged_manifest "$staged_manifest" "$staged_root"
 publish_generated_set "$staged_root"
 published=true
+publish_rootfs_compatibility
 manifest_path="${GENERATED_ROOT}/artifacts.tsv"
 
 cat <<EOF
 
 [three-guest-net] prepared successfully
-  Linux kernel: ${linux_kernel}
-  RTOS kernel:  ${rtos_kernel}
+  Linux kernel: ${GENERATED_ROOT}/linux-kernel
+  RTOS kernel:  ${GENERATED_ROOT}/rtos-kernel
   RTOS entry:   ${RTOS_ENTRY_POINT:-${AXVISOR_THREE_GUEST_RTOS_ENTRY_POINT:-template}}
   RTOS pCPU:    ${RTOS_PCPU}
   Host timer:  ${HOST_TIMER_POLICY}

@@ -489,7 +489,7 @@ printf '%s\n' "$observed_pull" \
 rootfs_target="${provenance_root}/rootfs-target.img"
 printf '%s\n' 'blind cached rootfs' >"$rootfs_target"
 rootfs_log_lines_before="$(wc -l <"$provenance_log")"
-PATH="${provenance_bin}:${PATH}" \
+selected_registry_rootfs="$(PATH="${provenance_bin}:${PATH}" \
 FAKE_CARGO_LOG="$provenance_log" \
   bash -c '
     set -euo pipefail
@@ -498,45 +498,61 @@ FAKE_CARGO_LOG="$provenance_log" \
     REPO_ROOT="$3"
     ROOTFS_TARGET="$4"
     unset AXVISOR_THREE_GUEST_ROOTFS
-    prepare_rootfs >/dev/null
+    prepare_rootfs
   ' bash "$SETUP_SOURCE" "$provenance_images" "$provenance_repo" "$rootfs_target"
+)"
 [ "$(wc -l <"$provenance_log")" -eq "$((rootfs_log_lines_before + 1))" ] \
   || fail_test "non-explicit rootfs cache bypassed the image-tool checksum boundary"
-rg -q --fixed-strings 'registry-verified rootfs' "$rootfs_target" \
-  || fail_test "rootfs target was not refreshed from image-tool-validated bytes"
+rg -q --fixed-strings 'registry-verified rootfs' "$selected_registry_rootfs" \
+  || fail_test "rootfs selection did not use image-tool-validated bytes"
+rg -q --fixed-strings 'blind cached rootfs' "$rootfs_target" \
+  || fail_test "rootfs selection mutated the stable destination before publication"
 
 rootfs_atomic_root="${functional_root}/rootfs-atomic-fixture"
 rootfs_atomic_bin="${rootfs_atomic_root}/bin"
 mkdir -p "$rootfs_atomic_bin"
 printf '%s\n' \
   '#!/bin/sh' \
-  'for destination do :; done' \
-  'printf "%s\\n" "partial rootfs" >"$destination"' \
   'exit 1' \
-  >"${rootfs_atomic_bin}/cp"
-chmod +x "${rootfs_atomic_bin}/cp"
-printf '%s\n' 'new rootfs bytes' >"${rootfs_atomic_root}/source.img"
+  >"${rootfs_atomic_bin}/mv"
+chmod +x "${rootfs_atomic_bin}/mv"
+mkdir -p "${rootfs_atomic_root}/published/run-a"
+printf '%s\n' 'immutable run A rootfs' >"${rootfs_atomic_root}/published/run-a/rootfs.img"
+ln -s run-a "${rootfs_atomic_root}/published/current"
 printf '%s\n' 'old complete rootfs' >"${rootfs_atomic_root}/target.img"
 rootfs_before_failure="$(sha256sum -- "${rootfs_atomic_root}/target.img")"
 set +e
 rootfs_atomic_error="$(
   PATH="${rootfs_atomic_bin}:${PATH}" \
-  AXVISOR_THREE_GUEST_ROOTFS="${rootfs_atomic_root}/source.img" \
     bash -c '
       set -euo pipefail
       source "$1"
+      GENERATED_ROOT="$2/published/current"
       ROOTFS_TARGET="$2/target.img"
-      prepare_rootfs >/dev/null
+      publish_rootfs_compatibility
     ' bash "$SETUP_SOURCE" "$rootfs_atomic_root" 2>&1
 )"
 rootfs_atomic_status=$?
 set -e
-[ "$rootfs_atomic_status" -ne 0 ] || fail_test "failed rootfs copy was accepted"
+[ "$rootfs_atomic_status" -ne 0 ] || fail_test "failed rootfs compatibility publication was accepted"
 [ "$(sha256sum -- "${rootfs_atomic_root}/target.img")" = "$rootfs_before_failure" ] \
-  || fail_test "failed rootfs copy exposed partial destination bytes"
-if find "$rootfs_atomic_root" -maxdepth 1 -name '.target.img.tmp.*' | rg -q .; then
-  fail_test "failed rootfs copy left a destination-side temporary file"
+  || fail_test "failed rootfs compatibility publication changed the existing regular file"
+if find "$rootfs_atomic_root" -maxdepth 1 -name '.target.img.tmp.*' -o -name '.target.img.link.*' | rg -q .; then
+  fail_test "failed rootfs compatibility publication left a destination-side temporary"
 fi
+bash -c '
+  set -euo pipefail
+  source "$1"
+  GENERATED_ROOT="$2/published/current"
+  ROOTFS_TARGET="$2/target.img"
+  publish_rootfs_compatibility
+' bash "$SETUP_SOURCE" "$rootfs_atomic_root"
+[ -L "${rootfs_atomic_root}/target.img" ] \
+  || fail_test "rootfs compatibility migration did not replace the regular file with a symlink"
+[ "$(readlink "${rootfs_atomic_root}/target.img")" = "${rootfs_atomic_root}/published/current/rootfs.img" ] \
+  || fail_test "rootfs compatibility symlink does not resolve through the atomic current switch"
+rg -q --fixed-strings 'immutable run A rootfs' "${rootfs_atomic_root}/target.img" \
+  || fail_test "rootfs compatibility symlink does not expose current immutable bytes"
 
 topology_fixture_root="${functional_root}/topology-fixture"
 topology_vm_root="${topology_fixture_root}/vms"
@@ -867,6 +883,211 @@ for failure_step in config verification manifest post-switch; do
   fi
 done
 
+complete_publication_root="${functional_root}/complete-publication-fixture"
+complete_publication_bin="${complete_publication_root}/bin"
+mkdir -p "$complete_publication_bin"
+cp "${full_verify_bin}/file" "${complete_publication_bin}/file"
+
+validated_manifest_snapshot() {
+  python3 - "$1" <<'PY'
+import hashlib
+import pathlib
+import sys
+import tomllib
+
+published = pathlib.Path(sys.argv[1])
+run = published.resolve()
+manifest = run / "artifacts.tsv"
+lines = manifest.read_text().splitlines()
+assert lines[0] == "version\t1" and len(lines) == 10
+expected_names = {
+    "linux-kernel": "linux-kernel",
+    "rtos-kernel": "rtos-kernel",
+    "rootfs": "rootfs.img",
+    "busybox": "busybox",
+    "linux-1-initramfs": "linux-1-initramfs.cpio",
+    "linux-2-initramfs": "linux-2-initramfs.cpio",
+    "linux-1-vm-config": "linux-net-1.toml",
+    "linux-2-vm-config": "linux-net-2.toml",
+    "zephyr-vm-config": "zephyr-net.toml",
+}
+digest = hashlib.sha256()
+records = {}
+for line in lines[1:]:
+    label, raw_path, expected = line.split("\t")
+    path = pathlib.Path(raw_path)
+    assert label in expected_names and label not in records, label
+    assert path == run / expected_names[label], (label, path, run)
+    assert path.is_file(), (label, path)
+    actual = hashlib.sha256(path.read_bytes()).hexdigest()
+    assert actual == expected, (label, expected, actual)
+    records[label] = path
+    digest.update(label.encode())
+    digest.update(expected.encode())
+assert set(records) == set(expected_names)
+linux_1 = tomllib.loads(records["linux-1-vm-config"].read_text())
+linux_2 = tomllib.loads(records["linux-2-vm-config"].read_text())
+zephyr = tomllib.loads(records["zephyr-vm-config"].read_text())
+assert linux_1["kernel"]["kernel_path"] == str(run / "linux-kernel")
+assert linux_2["kernel"]["kernel_path"] == str(run / "linux-kernel")
+assert linux_1["kernel"]["ramdisk_path"] == str(run / "linux-1-initramfs.cpio")
+assert linux_2["kernel"]["ramdisk_path"] == str(run / "linux-2-initramfs.cpio")
+assert zephyr["kernel"]["kernel_path"] == str(run / "rtos-kernel")
+print(digest.hexdigest())
+PY
+}
+
+manifest_semantic_snapshot() {
+  python3 - "$1" <<'PY'
+import hashlib
+import pathlib
+import sys
+
+run = pathlib.Path(sys.argv[1]).resolve()
+lines = (run / "artifacts.tsv").read_text().splitlines()
+digest = hashlib.sha256()
+for line in lines[1:]:
+    label, raw_path, _ = line.split("\t")
+    path = pathlib.Path(raw_path)
+    content = path.read_bytes()
+    if label.endswith("vm-config"):
+        content = content.replace(str(run).encode(), b"<IMMUTABLE-RUN>")
+    digest.update(label.encode())
+    digest.update(path.name.encode())
+    digest.update(hashlib.sha256(content).digest())
+print(digest.hexdigest())
+PY
+}
+
+run_complete_publication_fixture() {
+  local fixture_root="$1"
+  local failure_step="${2:-}"
+  local idle_policy="${3:-halt}"
+  PATH="${complete_publication_bin}:${PATH}" \
+  AXVISOR_THREE_GUEST_IMAGE_ROOT="${fixture_root}/images" \
+  AXVISOR_THREE_GUEST_LINUX_IMAGE="${fixture_root}/selected-linux-kernel" \
+  AXVISOR_THREE_GUEST_RTOS_IMAGE="${fixture_root}/selected-rtos-kernel" \
+  AXVISOR_THREE_GUEST_RTOS_ENTRY_POINT=0xa0001114 \
+  AXVISOR_THREE_GUEST_BUSYBOX="${fixture_root}/selected-busybox" \
+  AXVISOR_THREE_GUEST_ROOTFS="${fixture_root}/selected-rootfs.img" \
+  AXVISOR_THREE_GUEST_HOST_VCPU_IDLE_POLICY="$idle_policy" \
+    bash -c '
+      set -euo pipefail
+      source "$1"
+      IMAGE_ROOT="$2/images"
+      GENERATED_BASE="$2/published"
+      GENERATED_ROOT="$GENERATED_BASE/current"
+      ROOTFS_TARGET="$2/rootfs-target.img"
+      QEMU_CONFIG="$3"
+      case "$4" in
+        config)
+          patch_calls=0
+          patch_vm_config() {
+            patch_calls=$((patch_calls + 1))
+            if [ "$patch_calls" -eq 3 ]; then return 1; fi
+            printf "run B partial config %s\n" "$patch_calls" >"$2"
+          }
+          ;;
+        verification)
+          verify_generated_set() { return 1; }
+          ;;
+        manifest)
+          write_artifact_manifest() { return 1; }
+          ;;
+      esac
+      main
+    ' bash "$SETUP_SOURCE" "$fixture_root" "$topology_qemu_config" "$failure_step"
+}
+
+for failure_step in config verification manifest; do
+  complete_failure_root="${complete_publication_root}/${failure_step}"
+  mkdir -p "${complete_failure_root}/images"
+  printf '%s\n' "run A Linux kernel" >"${complete_failure_root}/selected-linux-kernel"
+  printf '%s\n' "run A RTOS kernel" >"${complete_failure_root}/selected-rtos-kernel"
+  printf '%s\n' "run A rootfs" >"${complete_failure_root}/selected-rootfs.img"
+  printf '%s\n' "run A BusyBox" >"${complete_failure_root}/selected-busybox"
+  chmod +x "${complete_failure_root}/selected-busybox"
+  printf '%s\n' "legacy rootfs before run A" >"${complete_failure_root}/rootfs-target.img"
+  run_complete_publication_fixture "$complete_failure_root" >/dev/null \
+    || fail_test "run A setup failed for ${failure_step} failure fixture"
+  run_a_target="$(readlink "${complete_failure_root}/published/current")"
+  run_a_snapshot="$(validated_manifest_snapshot "${complete_failure_root}/published/current")" \
+    || fail_test "run A manifest was invalid before ${failure_step} failure"
+
+  printf '%s\n' "run B different Linux kernel" >"${complete_failure_root}/selected-linux-kernel"
+  printf '%s\n' "run B different RTOS kernel" >"${complete_failure_root}/selected-rtos-kernel"
+  printf '%s\n' "run B different rootfs" >"${complete_failure_root}/selected-rootfs.img"
+  printf '%s\n' "run B different BusyBox" >"${complete_failure_root}/selected-busybox"
+  set +e
+  run_complete_publication_fixture "$complete_failure_root" "$failure_step" >/dev/null 2>&1
+  run_b_status=$?
+  set -e
+  [ "$run_b_status" -ne 0 ] || fail_test "run B ${failure_step} failure was accepted"
+  [ "$(readlink "${complete_failure_root}/published/current")" = "$run_a_target" ] \
+    || fail_test "run B ${failure_step} failure changed current from run A"
+  [ "$(validated_manifest_snapshot "${complete_failure_root}/published/current")" = "$run_a_snapshot" ] \
+    || fail_test "run B ${failure_step} failure invalidated run A artifact hashes"
+done
+
+switch_root="${complete_publication_root}/halt-busy-halt"
+mkdir -p "${switch_root}/images"
+printf '%s\n' 'stable Linux kernel' >"${switch_root}/selected-linux-kernel"
+printf '%s\n' 'stable RTOS kernel' >"${switch_root}/selected-rtos-kernel"
+printf '%s\n' 'stable rootfs' >"${switch_root}/selected-rootfs.img"
+printf '%s\n' 'stable BusyBox' >"${switch_root}/selected-busybox"
+chmod +x "${switch_root}/selected-busybox"
+printf '%s\n' 'legacy compatibility rootfs' >"${switch_root}/rootfs-target.img"
+
+halt_a_output="$(run_complete_publication_fixture "$switch_root" "" halt)" \
+  || fail_test "first halt immutable publication failed"
+halt_a_target="$(readlink "${switch_root}/published/current")"
+halt_a_run="${switch_root}/published/${halt_a_target}"
+halt_a_hashes="$(validated_manifest_snapshot "$halt_a_run")" \
+  || fail_test "first halt immutable manifest was invalid"
+halt_a_semantics="$(manifest_semantic_snapshot "$halt_a_run")"
+[ -L "${switch_root}/rootfs-target.img" ] \
+  || fail_test "successful setup did not migrate the compatibility rootfs to a symlink"
+[ "$(readlink "${switch_root}/rootfs-target.img")" = "${switch_root}/published/current/rootfs.img" ] \
+  || fail_test "successful setup compatibility rootfs does not resolve through current"
+printf '%s\n' "$halt_a_output" | rg -q --fixed-strings "Linux kernel: ${switch_root}/published/current/linux-kernel" \
+  || fail_test "setup summary did not expose the current immutable Linux kernel path"
+printf '%s\n' "$halt_a_output" | rg -q --fixed-strings "RTOS kernel:  ${switch_root}/published/current/rtos-kernel" \
+  || fail_test "setup summary did not expose the current immutable RTOS kernel path"
+
+run_complete_publication_fixture "$switch_root" "" busy >/dev/null \
+  || fail_test "busy immutable publication failed"
+busy_target="$(readlink "${switch_root}/published/current")"
+busy_run="${switch_root}/published/${busy_target}"
+[ "$busy_target" != "$halt_a_target" ] \
+  || fail_test "busy setup reused the first halt immutable run"
+busy_hashes="$(validated_manifest_snapshot "$busy_run")" \
+  || fail_test "busy immutable manifest was invalid"
+[ "$(validated_manifest_snapshot "$halt_a_run")" = "$halt_a_hashes" ] \
+  || fail_test "busy switch invalidated the first halt run"
+python3 - "$busy_run" <<'PY'
+import pathlib
+import tomllib
+import sys
+
+run = pathlib.Path(sys.argv[1])
+assert tomllib.loads((run / "zephyr-net.toml").read_text())["base"]["host_vcpu_idle_policy"] == "busy"
+PY
+
+run_complete_publication_fixture "$switch_root" "" halt >/dev/null \
+  || fail_test "second halt immutable publication failed"
+halt_b_target="$(readlink "${switch_root}/published/current")"
+halt_b_run="${switch_root}/published/${halt_b_target}"
+[ "$halt_b_target" != "$halt_a_target" ] && [ "$halt_b_target" != "$busy_target" ] \
+  || fail_test "halt/busy/halt setup did not create three independent immutable runs"
+validated_manifest_snapshot "$halt_b_run" >/dev/null \
+  || fail_test "second halt immutable manifest was invalid"
+[ "$(validated_manifest_snapshot "$halt_a_run")" = "$halt_a_hashes" ] \
+  || fail_test "second halt switch invalidated the first halt run"
+[ "$(validated_manifest_snapshot "$busy_run")" = "$busy_hashes" ] \
+  || fail_test "second halt switch invalidated the busy run"
+[ "$(manifest_semantic_snapshot "$halt_b_run")" = "$halt_a_semantics" ] \
+  || fail_test "repeated halt runs were not deterministic after normalizing immutable paths"
+
 preflight_root="${functional_root}/preflight-fixture"
 preflight_bin="${preflight_root}/bin"
 mkdir -p "$preflight_bin"
@@ -909,7 +1130,7 @@ readlink_preflight_status=$?
 set -e
 [ "$readlink_preflight_status" -ne 0 ] \
   || fail_test "common preflight accepted a missing readlink"
-printf '%s\n' "$readlink_preflight_error" | rg -q 'readlink is required.*rootfs' \
+printf '%s\n' "$readlink_preflight_error" | rg -q 'readlink is required.*immutable artifact' \
   || fail_test "missing readlink lacked a contextual preflight diagnostic"
 
 rtos_preflight_bin="${preflight_root}/rtos-bin"
