@@ -298,20 +298,6 @@ fn host_time_trait_only_exposes_common_clock_capabilities() {
 }
 
 #[test]
-fn aarch64_passthrough_spi_route_uses_vcpu_placement() {
-    let arch_vm = include_str!("../src/arch/aarch64/vm.rs");
-
-    assert!(
-        arch_vm.contains("config.phys_cpu_ls.get_vcpu_affinities_pcpu_ids()"),
-        "passthrough SPI routing must use the configured vCPU placement"
-    );
-    assert!(
-        !arch_vm.contains("vm.id() - 1"),
-        "VM id must not be used as a physical CPU routing heuristic"
-    );
-}
-
-#[test]
 fn vcpu_setup_context_keeps_named_capabilities() {
     let types = include_str!("../src/architecture/types.rs");
     let ops = include_str!("../src/architecture/ops.rs");

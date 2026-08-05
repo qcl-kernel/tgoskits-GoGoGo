@@ -15,7 +15,9 @@ use axvm_types::{
 
 use super::{Aarch64Arch, npt};
 use crate::{
-    AxVmError, AxVmResult, ax_err,
+    AxVmError, AxVmResult,
+    architecture::{Aarch64PassthroughSpiRoute, aarch64_passthrough_spi_routes},
+    ax_err,
     config::{AxVMConfig, HostVcpuIdlePolicy},
     vm::{
         AxVM, AxVMResources,
@@ -137,12 +139,11 @@ fn assign_passthrough_spis(config: &AxVMConfig, devices: &axdevice::DeviceRuntim
     if config.pass_through_spis().is_empty() {
         return Ok(());
     }
-    let cpu_id = config
-        .phys_cpu_ls
-        .get_vcpu_affinities_pcpu_ids()
-        .first()
-        .map(|(_, _, phys_cpu_id)| *phys_cpu_id)
-        .ok_or_else(|| AxVmError::interrupt("assign passthrough SPI", "missing vCPU placement"))?;
+    let routes = aarch64_passthrough_spi_routes(
+        &config.phys_cpu_ls.get_vcpu_affinities_pcpu_ids(),
+        config.pass_through_spis(),
+    )
+    .map_err(|_| AxVmError::interrupt("assign passthrough SPI", "missing vCPU placement"))?;
     let Ok(gicd) = devices.services().require::<Aarch64GicDistributorKey>() else {
         // A passthrough-only guest intentionally has no emulated GICD service:
         // its interrupt controller is described by the forwarded host FDT.
@@ -150,8 +151,8 @@ fn assign_passthrough_spis(config: &AxVMConfig, devices: &axdevice::DeviceRuntim
         return Ok(());
     };
 
-    for spi in config.pass_through_spis() {
-        gicd.assign_spi(*spi + 32, cpu_id, (0, 0, 0, cpu_id as _))
+    for route in routes {
+        gicd.assign_spi(route)
             .map_err(|error| AxVmError::interrupt("assign passthrough SPI", error))?;
     }
     Ok(())
@@ -159,12 +160,7 @@ fn assign_passthrough_spis(config: &AxVMConfig, devices: &axdevice::DeviceRuntim
 
 /// Typed architecture capability used only for passthrough SPI assignment.
 trait Aarch64GicDistributorOps: Send + Sync {
-    fn assign_spi(
-        &self,
-        irq: u32,
-        cpu_phys_id: usize,
-        target_cpu_affinity: (u8, u8, u8, u8),
-    ) -> DeviceManagerResult;
+    fn assign_spi(&self, route: Aarch64PassthroughSpiRoute) -> DeviceManagerResult;
 }
 
 struct Aarch64GicDistributorKey;
@@ -177,13 +173,8 @@ impl ServiceKey for Aarch64GicDistributorKey {
 }
 
 impl Aarch64GicDistributorOps for arm_vgic::v3::vgicd::VGicD {
-    fn assign_spi(
-        &self,
-        irq: u32,
-        cpu_phys_id: usize,
-        target_cpu_affinity: (u8, u8, u8, u8),
-    ) -> DeviceManagerResult {
-        self.assign_irq(irq, cpu_phys_id, target_cpu_affinity)
+    fn assign_spi(&self, route: Aarch64PassthroughSpiRoute) -> DeviceManagerResult {
+        self.assign_irq(route.irq, route.cpu_phys_id, route.target_cpu_affinity)
             .map_err(|error| DeviceManagerError::UnexpectedResponse {
                 operation: "assign passthrough SPI",
                 detail: alloc::format!("{error}"),

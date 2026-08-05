@@ -1,5 +1,7 @@
 //! Small capability boundaries implemented by the selected guest architecture.
 
+use alloc::vec::Vec;
+
 use crate::AxVmResult;
 
 /// Guest firmware preparation performed before common VM memory loading.
@@ -59,4 +61,85 @@ pub(crate) trait HostTimePlatform {
     }
 
     fn register_timer_callback() {}
+}
+
+#[allow(
+    dead_code,
+    reason = "used by AArch64 production and portable host tests"
+)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) struct Aarch64PassthroughSpiRoute {
+    pub(crate) irq: u32,
+    pub(crate) cpu_phys_id: usize,
+    pub(crate) target_cpu_affinity: (u8, u8, u8, u8),
+}
+
+#[allow(
+    dead_code,
+    reason = "used by AArch64 production and portable host tests"
+)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum Aarch64PassthroughSpiRouteError {
+    MissingVcpuPlacement,
+}
+
+#[allow(
+    dead_code,
+    reason = "used by AArch64 production and portable host tests"
+)]
+pub(crate) fn aarch64_passthrough_spi_routes(
+    vcpu_placements: &[(usize, Option<usize>, usize)],
+    passthrough_spis: &[u32],
+) -> Result<Vec<Aarch64PassthroughSpiRoute>, Aarch64PassthroughSpiRouteError> {
+    if passthrough_spis.is_empty() {
+        return Ok(Vec::new());
+    }
+    let cpu_phys_id = vcpu_placements
+        .first()
+        .map(|(_, _, cpu_phys_id)| *cpu_phys_id)
+        .ok_or(Aarch64PassthroughSpiRouteError::MissingVcpuPlacement)?;
+    Ok(passthrough_spis
+        .iter()
+        .map(|spi| Aarch64PassthroughSpiRoute {
+            irq: *spi + 32,
+            cpu_phys_id,
+            target_cpu_affinity: (0, 0, 0, cpu_phys_id as u8),
+        })
+        .collect())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn passthrough_spi_routes_use_configured_vcpu_placement_and_gic_offset() {
+        let routes =
+            aarch64_passthrough_spi_routes(&[(3, Some(1 << 11), 11), (4, None, 19)], &[0, 41])
+                .expect("configured placement must produce SPI routes");
+
+        assert_eq!(
+            routes,
+            alloc::vec![
+                Aarch64PassthroughSpiRoute {
+                    irq: 32,
+                    cpu_phys_id: 11,
+                    target_cpu_affinity: (0, 0, 0, 11),
+                },
+                Aarch64PassthroughSpiRoute {
+                    irq: 73,
+                    cpu_phys_id: 11,
+                    target_cpu_affinity: (0, 0, 0, 11),
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn passthrough_spi_routes_reject_missing_vcpu_placement() {
+        assert_eq!(
+            aarch64_passthrough_spi_routes(&[], &[18]),
+            Err(Aarch64PassthroughSpiRouteError::MissingVcpuPlacement)
+        );
+    }
 }
