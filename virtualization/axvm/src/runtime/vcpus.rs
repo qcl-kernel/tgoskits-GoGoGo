@@ -307,14 +307,16 @@ fn vcpu_run() {
     wait_for(&runtime, || vm.running());
 
     info!("VM[{}] VCpu[{}] running...", vm.id(), vcpu.id());
-    crate::runtime::apply_current_vcpu_host_timer_policy(&vm);
     CurrentArch::before_first_run(&vm, &vcpu);
     mark_vcpu_running(&vm);
 
     loop {
         CurrentArch::before_vcpu_run(&vm, &vcpu);
 
-        match CurrentArch::run_vcpu(&vm, &vcpu) {
+        let run_result = crate::runtime::run_vcpu_with_host_timer_policy(&vm, || {
+            CurrentArch::run_vcpu(&vm, &vcpu)
+        });
+        match run_result {
             Ok(VcpuRunAction {
                 stop_reason: Some(reason),
                 ..
@@ -341,20 +343,17 @@ fn vcpu_run() {
 
         // Check if the VM is suspended
         if vm.suspending() {
-            crate::runtime::restore_current_vcpu_host_timer_policy(&vm);
             debug!(
                 "VM[{}] VCpu[{}] is suspended, waiting for resume...",
                 vm_id, vcpu_id
             );
             wait_for(&runtime, || !vm.suspending());
-            crate::runtime::apply_current_vcpu_host_timer_policy(&vm);
             info!("VM[{}] VCpu[{}] resumed from suspend", vm_id, vcpu_id);
             continue;
         }
 
         // Check if the VM is stopping.
         if vm.stopping() {
-            crate::runtime::restore_current_vcpu_host_timer_policy(&vm);
             warn!(
                 "VM[{}] VCpu[{}] stopping because of VM stopping",
                 vm_id, vcpu_id

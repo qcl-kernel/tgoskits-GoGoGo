@@ -628,8 +628,8 @@ pub enum HostTimerPolicy {
     /// Keep the ArceOS periodic scheduler timer enabled.
     #[default]
     Periodic,
-    /// Disable the periodic scheduler timer after all default VMs start while
-    /// retaining task and AxVM one-shot deadlines.
+    /// Disable the periodic scheduler timer while a VM vCPU executes guest code,
+    /// while retaining task and AxVM one-shot deadlines.
     Tickless,
 }
 

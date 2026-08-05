@@ -25,7 +25,7 @@ use core::sync::atomic::{AtomicUsize, Ordering};
 #[allow(unused_imports)]
 pub(crate) use dispatcher::VcpuIrqDispatcher;
 
-use crate::{AxVmError, AxVmResult, StopReason, VmStatus, ax_err};
+use crate::{AxVmError, AxVmResult, StopReason, VmStatus, ax_err, config::HostTimerPolicy};
 
 /// The instantiated VM ref type (by `Arc`).
 pub type VMRef = crate::AxVMRef;
@@ -37,26 +37,66 @@ static VMM: crate::HostWaitQueueHandle = crate::HostWaitQueueHandle::new();
 /// The number of running VMs. This is used to determine when to exit the VMM.
 static RUNNING_VM_COUNT: AtomicUsize = AtomicUsize::new(0);
 
-pub(crate) fn apply_current_vcpu_host_timer_policy(vm: &VMRef) {
-    let policy = vm.with_config(|config| config.host_timer_policy());
-    if policy == crate::config::HostTimerPolicy::Tickless {
-        crate::host::task::set_current_cpu_periodic_timer_enabled(false);
-        info!(
-            "VM[{}] host periodic timer disabled on current vCPU pCPU",
-            vm.id()
-        );
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum PeriodicTimerState {
+    Enabled,
+    Disabled,
+}
+
+trait CurrentCpuPeriodicTimer {
+    fn set_periodic_timer_state(&self, state: PeriodicTimerState);
+}
+
+struct CurrentCpuTimerControl;
+
+impl CurrentCpuPeriodicTimer for CurrentCpuTimerControl {
+    fn set_periodic_timer_state(&self, state: PeriodicTimerState) {
+        crate::host::task::set_current_cpu_periodic_timer_enabled(matches!(
+            state,
+            PeriodicTimerState::Enabled
+        ));
     }
 }
 
-pub(crate) fn restore_current_vcpu_host_timer_policy(vm: &VMRef) {
-    let policy = vm.with_config(|config| config.host_timer_policy());
-    if policy == crate::config::HostTimerPolicy::Tickless {
-        crate::host::task::set_current_cpu_periodic_timer_enabled(true);
-        info!(
-            "VM[{}] host periodic timer restored on current vCPU pCPU",
-            vm.id()
-        );
+struct HostTimerPolicyScope<'a, T: CurrentCpuPeriodicTimer> {
+    timer: &'a T,
+    tickless: bool,
+}
+
+impl<'a, T: CurrentCpuPeriodicTimer> HostTimerPolicyScope<'a, T> {
+    fn enter(policy: HostTimerPolicy, timer: &'a T) -> Self {
+        let tickless = policy == HostTimerPolicy::Tickless;
+        if tickless {
+            timer.set_periodic_timer_state(PeriodicTimerState::Disabled);
+        }
+        Self { timer, tickless }
     }
+}
+
+impl<T: CurrentCpuPeriodicTimer> Drop for HostTimerPolicyScope<'_, T> {
+    fn drop(&mut self) {
+        if self.tickless {
+            self.timer
+                .set_periodic_timer_state(PeriodicTimerState::Enabled);
+        }
+    }
+}
+
+fn with_vcpu_host_timer_policy<T, R>(
+    policy: HostTimerPolicy,
+    timer: &T,
+    guest_run: impl FnOnce() -> R,
+) -> R
+where
+    T: CurrentCpuPeriodicTimer,
+{
+    let _scope = HostTimerPolicyScope::enter(policy, timer);
+    guest_run()
+}
+
+pub(crate) fn run_vcpu_with_host_timer_policy<R>(vm: &VMRef, guest_run: impl FnOnce() -> R) -> R {
+    let policy = vm.with_config(|config| config.host_timer_policy());
+    with_vcpu_host_timer_policy(policy, &CurrentCpuTimerControl, guest_run)
 }
 
 /// Initialize runtime state for already registered VMs.
@@ -162,7 +202,72 @@ const fn missing_vm_error(vm_id: usize) -> AxVmError {
 
 #[cfg(test)]
 mod tests {
+    use std::{
+        cell::RefCell,
+        panic::{AssertUnwindSafe, catch_unwind},
+        vec,
+        vec::Vec,
+    };
+
     use super::*;
+
+    #[derive(Default)]
+    struct RecordingTimerControl {
+        states: RefCell<Vec<PeriodicTimerState>>,
+    }
+
+    impl CurrentCpuPeriodicTimer for RecordingTimerControl {
+        fn set_periodic_timer_state(&self, state: PeriodicTimerState) {
+            self.states.borrow_mut().push(state);
+        }
+    }
+
+    #[test]
+    fn tickless_policy_is_scoped_to_a_successful_guest_run() {
+        let timer = RecordingTimerControl::default();
+
+        let result = with_vcpu_host_timer_policy(HostTimerPolicy::Tickless, &timer, || {
+            assert_eq!(*timer.states.borrow(), vec![PeriodicTimerState::Disabled]);
+            42
+        });
+
+        assert_eq!(result, 42);
+        assert_eq!(
+            *timer.states.borrow(),
+            vec![PeriodicTimerState::Disabled, PeriodicTimerState::Enabled]
+        );
+    }
+
+    #[test]
+    fn tickless_policy_is_restored_when_guest_run_returns_an_error() {
+        let timer = RecordingTimerControl::default();
+
+        let result: Result<(), &'static str> =
+            with_vcpu_host_timer_policy(HostTimerPolicy::Tickless, &timer, || Err("vm exit"));
+
+        assert_eq!(result, Err("vm exit"));
+        assert_eq!(
+            *timer.states.borrow(),
+            vec![PeriodicTimerState::Disabled, PeriodicTimerState::Enabled]
+        );
+    }
+
+    #[test]
+    fn tickless_policy_is_restored_when_guest_run_unwinds() {
+        let timer = RecordingTimerControl::default();
+
+        let result = catch_unwind(AssertUnwindSafe(|| {
+            with_vcpu_host_timer_policy(HostTimerPolicy::Tickless, &timer, || {
+                panic!("guest run panic")
+            });
+        }));
+
+        assert!(result.is_err());
+        assert_eq!(
+            *timer.states.borrow(),
+            vec![PeriodicTimerState::Disabled, PeriodicTimerState::Enabled]
+        );
+    }
 
     #[test]
     fn reset_counts_replacement_runtime_for_every_restartable_state() {

@@ -408,25 +408,6 @@ fn realtime_trace_covers_guest_and_host_timer_boundaries() {
 }
 
 #[test]
-fn tickless_host_timer_policy_is_applied_by_the_pinned_vcpu_task() {
-    let runtime = include_str!("../src/runtime/mod.rs");
-    let vcpus = include_str!("../src/runtime/vcpus.rs");
-    let host_task = include_str!("../src/host/task.rs");
-    let host_arceos = include_str!("../src/host/arceos.rs");
-    let axruntime = include_str!("../../../os/arceos/modules/axruntime/src/lib.rs");
-
-    assert!(runtime.contains("apply_current_vcpu_host_timer_policy"));
-    assert!(runtime.contains("restore_current_vcpu_host_timer_policy"));
-    assert!(vcpus.contains("apply_current_vcpu_host_timer_policy(&vm)"));
-    assert!(vcpus.contains("restore_current_vcpu_host_timer_policy(&vm)"));
-    assert!(host_task.contains("set_current_cpu_periodic_timer_enabled"));
-    assert!(host_arceos.contains("set_current_cpu_periodic_timer_enabled"));
-    assert!(!runtime.contains("run_on_cpu_sync"));
-    assert!(axruntime.contains("PERIODIC_TIMER_DISABLE_DEPTH"));
-    assert!(axruntime.contains("next_periodic_disable_depth"));
-}
-
-#[test]
 fn vcpu_slice_yield_is_optional_and_after_exit_processing() {
     let vcpus = include_str!("../src/runtime/vcpus.rs");
     let config = include_str!("../src/config.rs");
