@@ -287,16 +287,97 @@ fn vcpu_task_cpu_mask(vm_id: usize, vcpu_id: usize, requested_mask: usize) -> us
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum PostExitHostTaskAction {
+enum VcpuLoopControl {
     Continue,
-    Yield,
+    Break,
 }
 
-const fn post_exit_host_task_action(host_vcpu_yield: bool) -> PostExitHostTaskAction {
-    if host_vcpu_yield {
-        PostExitHostTaskAction::Yield
-    } else {
-        PostExitHostTaskAction::Continue
+trait PostExitHostTask {
+    fn wait_for_event(&mut self);
+    fn suspend_if_requested(&mut self) -> bool;
+    fn stop_if_requested(&mut self) -> bool;
+    fn yield_now(&mut self);
+}
+
+fn dispatch_post_exit(
+    waits_for_event: bool,
+    host_vcpu_yield: bool,
+    host_task: &mut impl PostExitHostTask,
+) -> VcpuLoopControl {
+    if waits_for_event {
+        host_task.wait_for_event();
+    }
+    if host_task.suspend_if_requested() {
+        return VcpuLoopControl::Continue;
+    }
+    if host_task.stop_if_requested() {
+        return VcpuLoopControl::Break;
+    }
+    if host_vcpu_yield && !waits_for_event {
+        host_task.yield_now();
+    }
+    VcpuLoopControl::Continue
+}
+
+struct AxVmPostExitHostTask<'a> {
+    vm: &'a VMRef,
+    runtime: &'a VmRuntimeHandle,
+    vm_id: usize,
+    vcpu_id: usize,
+}
+
+impl PostExitHostTask for AxVmPostExitHostTask<'_> {
+    fn wait_for_event(&mut self) {
+        wait(self.runtime);
+    }
+
+    fn suspend_if_requested(&mut self) -> bool {
+        if !self.vm.suspending() {
+            return false;
+        }
+
+        debug!(
+            "VM[{}] VCpu[{}] is suspended, waiting for resume...",
+            self.vm_id, self.vcpu_id
+        );
+        wait_for(self.runtime, || !self.vm.suspending());
+        info!(
+            "VM[{}] VCpu[{}] resumed from suspend",
+            self.vm_id, self.vcpu_id
+        );
+        true
+    }
+
+    fn stop_if_requested(&mut self) -> bool {
+        if !self.vm.stopping() {
+            return false;
+        }
+
+        warn!(
+            "VM[{}] VCpu[{}] stopping because of VM stopping",
+            self.vm_id, self.vcpu_id
+        );
+        if self.runtime.mark_vcpu_exiting() {
+            info!(
+                "VM[{}] VCpu[{}] last VCpu exiting, decreasing running VM count",
+                self.vm_id, self.vcpu_id
+            );
+
+            if let Err(err) = self.vm.finish_stop() {
+                warn!("VM[{}] finish stop failed: {err:?}", self.vm_id);
+            }
+            info!("VM[{}] state changed to Stopped", self.vm_id);
+
+            CurrentArch::on_last_vcpu_exit(self.vm);
+
+            sub_running_vm_count(1);
+            crate::host::task::wait_queue_wake(&super::VMM, 1);
+        }
+        true
+    }
+
+    fn yield_now(&mut self) {
+        crate::host::task::yield_now();
     }
 }
 
@@ -330,7 +411,7 @@ fn vcpu_run() {
         let run_result = crate::runtime::run_vcpu_with_host_timer_policy(&vm, || {
             CurrentArch::run_vcpu(&vm, &vcpu)
         });
-        match run_result {
+        let waits_for_event = match run_result {
             Ok(VcpuRunAction {
                 stop_reason: Some(reason),
                 ..
@@ -339,12 +420,13 @@ fn vcpu_run() {
                     warn!("VM[{vm_id}] shutdown failed: {err:?}");
                 }
                 notify_all_vcpus(vm_id);
+                false
             }
             Ok(VcpuRunAction {
                 waits_for_event: true,
                 ..
-            }) => wait(&runtime),
-            Ok(VcpuRunAction { .. }) => {}
+            }) => true,
+            Ok(VcpuRunAction { .. }) => false,
             Err(err) => {
                 error!("VM[{vm_id}] run VCpu[{vcpu_id}] get error {err:?}");
                 if let Err(err) = vm.stop(StopReason::Fault(format!("{err:?}"))) {
@@ -352,49 +434,20 @@ fn vcpu_run() {
                 }
                 // Notify all vCPUs to wake up to check the shutdown flag
                 notify_all_vcpus(vm_id);
+                false
             }
-        }
+        };
 
-        // Check if the VM is suspended
-        if vm.suspending() {
-            debug!(
-                "VM[{}] VCpu[{}] is suspended, waiting for resume...",
-                vm_id, vcpu_id
-            );
-            wait_for(&runtime, || !vm.suspending());
-            info!("VM[{}] VCpu[{}] resumed from suspend", vm_id, vcpu_id);
-            continue;
-        }
-
-        // Check if the VM is stopping.
-        if vm.stopping() {
-            warn!(
-                "VM[{}] VCpu[{}] stopping because of VM stopping",
-                vm_id, vcpu_id
-            );
-
-            if runtime.mark_vcpu_exiting() {
-                info!("VM[{vm_id}] VCpu[{vcpu_id}] last VCpu exiting, decreasing running VM count");
-
-                if let Err(err) = vm.finish_stop() {
-                    warn!("VM[{vm_id}] finish stop failed: {err:?}");
-                }
-                info!("VM[{}] state changed to Stopped", vm_id);
-
-                CurrentArch::on_last_vcpu_exit(&vm);
-
-                sub_running_vm_count(1);
-                crate::host::task::wait_queue_wake(&super::VMM, 1);
-            }
-
-            break;
-        }
-
-        let host_task_action =
-            vm.with_config(|config| post_exit_host_task_action(config.host_vcpu_yield()));
-        match host_task_action {
-            PostExitHostTaskAction::Continue => {}
-            PostExitHostTaskAction::Yield => crate::host::task::yield_now(),
+        let host_vcpu_yield = vm.with_config(|config| config.host_vcpu_yield());
+        let mut host_task = AxVmPostExitHostTask {
+            vm: &vm,
+            runtime: &runtime,
+            vm_id,
+            vcpu_id,
+        };
+        match dispatch_post_exit(waits_for_event, host_vcpu_yield, &mut host_task) {
+            VcpuLoopControl::Continue => {}
+            VcpuLoopControl::Break => break,
         }
     }
 
@@ -405,15 +458,104 @@ fn vcpu_run() {
 mod tests {
     use super::*;
 
+    #[derive(Default)]
+    struct RecordingPostExitHostTask {
+        suspending: bool,
+        stopping: bool,
+        yield_count: usize,
+        events: alloc::vec::Vec<&'static str>,
+    }
+
+    impl PostExitHostTask for RecordingPostExitHostTask {
+        fn wait_for_event(&mut self) {
+            self.events.push("wait");
+        }
+
+        fn suspend_if_requested(&mut self) -> bool {
+            self.events.push("suspend_check");
+            if self.suspending {
+                self.events.push("suspend");
+            }
+            self.suspending
+        }
+
+        fn stop_if_requested(&mut self) -> bool {
+            self.events.push("stop_check");
+            if self.stopping {
+                self.events.push("stop");
+            }
+            self.stopping
+        }
+
+        fn yield_now(&mut self) {
+            self.events.push("yield");
+            self.yield_count += 1;
+        }
+    }
+
     #[test]
-    fn post_exit_host_task_action_yields_only_when_enabled() {
+    fn post_exit_dispatch_continues_without_yield_when_disabled() {
+        let mut host = RecordingPostExitHostTask::default();
+
         assert_eq!(
-            post_exit_host_task_action(false),
-            PostExitHostTaskAction::Continue
+            dispatch_post_exit(false, false, &mut host),
+            VcpuLoopControl::Continue
         );
+        assert_eq!(host.events, ["suspend_check", "stop_check"]);
+        assert_eq!(host.yield_count, 0);
+    }
+
+    #[test]
+    fn post_exit_dispatch_yields_once_after_state_checks() {
+        let mut host = RecordingPostExitHostTask::default();
+
         assert_eq!(
-            post_exit_host_task_action(true),
-            PostExitHostTaskAction::Yield
+            dispatch_post_exit(false, true, &mut host),
+            VcpuLoopControl::Continue
         );
+        assert_eq!(host.events, ["suspend_check", "stop_check", "yield"]);
+        assert_eq!(host.yield_count, 1);
+    }
+
+    #[test]
+    fn post_exit_dispatch_wait_consumes_control_before_optional_yield() {
+        let mut host = RecordingPostExitHostTask::default();
+
+        assert_eq!(
+            dispatch_post_exit(true, true, &mut host),
+            VcpuLoopControl::Continue
+        );
+        assert_eq!(host.events, ["wait", "suspend_check", "stop_check"]);
+        assert_eq!(host.yield_count, 0);
+    }
+
+    #[test]
+    fn post_exit_dispatch_suspend_consumes_control_before_stop_and_yield() {
+        let mut host = RecordingPostExitHostTask {
+            suspending: true,
+            ..Default::default()
+        };
+
+        assert_eq!(
+            dispatch_post_exit(false, true, &mut host),
+            VcpuLoopControl::Continue
+        );
+        assert_eq!(host.events, ["suspend_check", "suspend"]);
+        assert_eq!(host.yield_count, 0);
+    }
+
+    #[test]
+    fn post_exit_dispatch_stop_breaks_before_optional_yield() {
+        let mut host = RecordingPostExitHostTask {
+            stopping: true,
+            ..Default::default()
+        };
+
+        assert_eq!(
+            dispatch_post_exit(false, true, &mut host),
+            VcpuLoopControl::Break
+        );
+        assert_eq!(host.events, ["suspend_check", "stop_check", "stop"]);
+        assert_eq!(host.yield_count, 0);
     }
 }
