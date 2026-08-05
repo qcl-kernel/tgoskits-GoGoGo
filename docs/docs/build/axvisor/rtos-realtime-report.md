@@ -2,6 +2,10 @@
 
 ## 结论
 
+截至 `2026-08-05`，same-board bare-metal acceptance 的目标是
+`board=orangepi-5-plus`，当前状态为外部硬件/资产 `BLOCKED`，不是实时性优化
+完成。当前没有真实板测量，CSV/PNG 保持不变；下述 QEMU 结果不能解除该阻塞。
+
 本轮迭代确认并修复了 RTOS 定时器完全不工作的配置问题：Axvisor 将
 Zephyr guest 放在 EL1 Non-secure，但 Zephyr 未按 Non-secure GIC 模型配置
 SGI/PPI。修复 `CONFIG_ARMV8_A_NS=y` 后，`k_sleep()` 返回，单 guest 和
@@ -448,9 +452,56 @@ console 的 smoke 得到 `2729 us`，因没有原始日志不写入 CSV；正式
 `/tmp/axvisor-iteration-140-r1.log` 至 `r3.log`，最大延迟
 `569/4996/2678 us`，确认该候选不能稳定复现历史最佳值，CSV 为迭代 `140--142`。
 
+## Same-board bare-metal acceptance 状态
+
+记录日期为 `2026-08-05`，目标为 `board=orangepi-5-plus`。在当前没有设置任何
+`AXVISOR_RT_*` 变量的环境中执行：
+
+```bash
+bash docs/docs/build/axvisor/check_real_arm_board_docs.sh   --realtime-preflight orangepi-5-plus   >/tmp/axvisor-orangepi-5-plus-realtime-preflight-after.log 2>&1
+```
+
+checker 按预期退出 `1`；这表示资产 gate 正确拒绝开始测量，不是 preflight 测试
+失败。`/tmp/axvisor-orangepi-5-plus-realtime-preflight-after.log` 的精确输出是：
+
+```text
+FAIL missing realtime input: AXVISOR_RT_BOARD_DTB
+FAIL missing realtime input: AXVISOR_RT_LINUX1_IMAGE
+FAIL missing realtime input: AXVISOR_RT_LINUX2_IMAGE
+FAIL missing realtime input: AXVISOR_RT_ZEPHYR_IMAGE
+FAIL missing realtime input: AXVISOR_RT_LINUX1_VM_CONFIG
+FAIL missing realtime input: AXVISOR_RT_LINUX2_VM_CONFIG
+FAIL missing realtime input: AXVISOR_RT_ZEPHYR_VM_CONFIG
+FAIL missing realtime input: AXVISOR_RT_POWER_RESET
+FAIL missing realtime input: AXVISOR_RT_SERIAL_CAPTURE
+FAIL missing realtime input: AXVISOR_RT_NET0_DEVICE
+FAIL missing realtime input: AXVISOR_RT_NET1_DEVICE
+FAIL missing realtime input: AXVISOR_RT_NET2_DEVICE
+FAIL missing realtime input: AXVISOR_RT_NET0_IRQ
+FAIL missing realtime input: AXVISOR_RT_NET1_IRQ
+FAIL missing realtime input: AXVISOR_RT_NET2_IRQ
+FAIL missing realtime input: AXVISOR_RT_TRAFFIC_PEER
+```
+
+全部 16 个外部 input 都缺失。当前 checked-in Orange Pi 5 Plus 资产不能运行要求的
+两个 Linux 加 Zephyr 网络负载：现有板级链路只覆盖单 Linux，RTOS 配置没有可用于
+三 guest workload 的独立网络设备/IRQ、唯一 VM id 和不重叠 pCPU 组合。preflight
+不发现、不回退到 QEMU artifact，也不使用虚拟板替代实体板。iteration 146 是
+x86_64 host 上的 AArch64 QEMU TCG 筛选，不是 same-board/bare-metal-level 结果。
+
+批准阈值保持不变：每次 Axvisor run 必须通过 full callback/network 且有
+`0` 个 `>1 ms` miss；p99.9、p99.99 相对 bare metal 的差值必须分别在
+`max(25%, 10 us)` 以内；maximum 必须不超过
+`max(2 x bare-metal maximum, 50 us)`。Axvisor 与 bare-metal 的三次配对重复必须
+保持相同 RTOS binary options、tick、counter、governor 和 traffic。资产 gate 通过
+后仍必须完成这些测量和比较才能批准。
+
+本次没有连接或控制实体板，也没有真实测量，因此不修改 CSV/PNG。当前 same-board
+结论保持外部硬件/资产 `BLOCKED`，不声明目标完成。
+
 ## 环境
 
-- 日期：2026-08-03
+- 报告更新日期：2026-08-05（本次仅运行 preflight，无物理测量）
 - Axvisor：QEMU AArch64，Cortex-A72，GICv3；正式配置 4 vCPU，SMP3 确认组合 3 vCPU
 - 模式：timer/GIC passthrough，Zephyr vCPU 固定到物理 CPU 2
 - 加速器：AArch64 guest 在 x86_64 宿主上使用 QEMU TCG；没有 KVM 加速
