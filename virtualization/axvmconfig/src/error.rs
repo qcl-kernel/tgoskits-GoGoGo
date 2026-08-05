@@ -2,7 +2,7 @@
 
 use alloc::string::{String, ToString};
 
-use crate::VMBootProtocol;
+use crate::{HostVcpuIdlePolicy, VMBootProtocol};
 
 /// Result type returned by AxVM configuration operations.
 pub type AxVmConfigResult<T = ()> = Result<T, AxVmConfigError>;
@@ -29,6 +29,14 @@ pub enum AxVmConfigError {
     UnsupportedBootProtocol {
         /// The unsupported boot protocol.
         protocol: VMBootProtocol,
+        /// The target architecture name.
+        arch: String,
+    },
+    /// The selected host vCPU idle policy is not available on the target architecture.
+    #[error("host vCPU idle policy {policy:?} is not supported on architecture {arch}")]
+    UnsupportedHostVcpuIdlePolicy {
+        /// The unsupported host vCPU idle policy.
+        policy: HostVcpuIdlePolicy,
         /// The target architecture name.
         arch: String,
     },

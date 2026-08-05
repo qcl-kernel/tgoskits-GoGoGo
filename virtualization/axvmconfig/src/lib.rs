@@ -620,6 +620,31 @@ fn boot_protocol_name(protocol: VMBootProtocol) -> &'static str {
     }
 }
 
+/// Host timer policy applied to the physical CPU running a VM vCPU.
+#[cfg_attr(all(feature = "std", any(windows, unix)), derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum HostTimerPolicy {
+    /// Keep the ArceOS periodic scheduler timer enabled.
+    #[default]
+    Periodic,
+    /// Disable the periodic scheduler timer after all default VMs start while
+    /// retaining task and AxVM one-shot deadlines.
+    Tickless,
+}
+
+/// Host behavior when a VM vCPU has no work to run.
+#[cfg_attr(all(feature = "std", any(windows, unix)), derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum HostVcpuIdlePolicy {
+    /// Halt the physical CPU until an interrupt arrives.
+    #[default]
+    Halt,
+    /// Keep the physical CPU running while the vCPU is idle.
+    Busy,
+}
+
 /// The configuration structure for the guest VM base info.
 #[cfg_attr(all(feature = "std", any(windows, unix)), derive(schemars::JsonSchema))]
 #[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
@@ -651,6 +676,15 @@ pub struct VMBaseConfig {
     ///
     ///   It will phrase an error if the number of vCpus is not equal to the length of `phys_cpu_sets` array.
     pub phys_cpu_sets: Option<Vec<usize>>,
+    /// Host timer policy for the physical CPUs assigned to this VM.
+    #[serde(default)]
+    pub host_timer_policy: HostTimerPolicy,
+    /// Yield the host scheduler once after each completed vCPU run slice.
+    #[serde(default)]
+    pub host_vcpu_yield: bool,
+    /// Host behavior when this VM's vCPU is idle.
+    #[serde(default)]
+    pub host_vcpu_idle_policy: HostVcpuIdlePolicy,
 }
 
 /// The configuration structure for the guest VM kernel.
@@ -887,8 +921,24 @@ pub struct AxVMCrateConfig {
 impl AxVMCrateConfig {
     /// Deserialize the toml string to `AxVMCrateConfig`.
     pub fn from_toml(raw_cfg_str: &str) -> AxVmConfigResult<Self> {
+        Self::from_toml_for_arch(raw_cfg_str, BUILD_TARGET_ARCH)
+    }
+
+    /// Deserialize and validate a TOML configuration for an architecture.
+    ///
+    /// # Errors
+    ///
+    /// Returns an [`AxVmConfigError`] if parsing fails or the configured boot
+    /// protocol or host vCPU idle policy is unsupported for `arch`.
+    pub fn from_toml_for_arch(raw_cfg_str: &str, arch: &str) -> AxVmConfigResult<Self> {
         let mut config: AxVMCrateConfig = toml::from_str(raw_cfg_str)?;
-        config.kernel.validate_boot_config()?;
+        config.kernel.validate_boot_config_for_arch(arch)?;
+        if config.base.host_vcpu_idle_policy == HostVcpuIdlePolicy::Busy && arch != "aarch64" {
+            return Err(AxVmConfigError::UnsupportedHostVcpuIdlePolicy {
+                policy: config.base.host_vcpu_idle_policy,
+                arch: arch.into(),
+            });
+        }
         config.kernel.configured_memory_region_count = config.kernel.memory_regions.len();
         Ok(config)
     }

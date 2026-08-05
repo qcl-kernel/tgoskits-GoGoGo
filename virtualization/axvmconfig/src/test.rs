@@ -13,9 +13,82 @@
 // limitations under the License.
 
 use crate::{
-    AddressSpacePolicy, AxVMCrateConfig, AxVmConfigError, EmulatedDeviceType, VMBootProtocol,
-    VMDevicesConfig, VMInterruptMode, VmMemMappingType,
+    AddressSpacePolicy, AxVMCrateConfig, AxVmConfigError, EmulatedDeviceType, HostTimerPolicy,
+    HostVcpuIdlePolicy, VMBootProtocol, VMDevicesConfig, VMInterruptMode, VmMemMappingType,
 };
+
+const MINIMAL_DIRECT_CONFIG: &str = r#"
+[base]
+id = 1
+name = "idle-policy"
+vm_type = 1
+cpu_num = 1
+
+[kernel]
+entry_point = 0x8020_0000
+kernel_path = "guest.bin"
+kernel_load_addr = 0x8020_0000
+memory_regions = []
+
+[devices]
+emu_devices = []
+passthrough_devices = []
+"#;
+
+#[test]
+fn omitted_host_vcpu_idle_policy_defaults_to_halt() {
+    let config = AxVMCrateConfig::from_toml(MINIMAL_DIRECT_CONFIG).unwrap();
+
+    assert_eq!(config.base.host_vcpu_idle_policy, HostVcpuIdlePolicy::Halt);
+}
+
+#[test]
+fn busy_host_vcpu_idle_policy_parses_on_aarch64() {
+    let raw = MINIMAL_DIRECT_CONFIG.replace(
+        "cpu_num = 1",
+        "cpu_num = 1\nhost_vcpu_idle_policy = \"busy\"",
+    );
+
+    let config = AxVMCrateConfig::from_toml_for_arch(&raw, "aarch64").unwrap();
+
+    assert_eq!(config.base.host_vcpu_idle_policy, HostVcpuIdlePolicy::Busy);
+}
+
+#[test]
+fn busy_host_vcpu_idle_policy_is_rejected_on_x86_64() {
+    let raw = MINIMAL_DIRECT_CONFIG.replace(
+        "cpu_num = 1",
+        "cpu_num = 1\nhost_vcpu_idle_policy = \"busy\"",
+    );
+
+    let error = AxVMCrateConfig::from_toml_for_arch(&raw, "x86_64").unwrap_err();
+
+    assert_eq!(
+        error,
+        AxVmConfigError::UnsupportedHostVcpuIdlePolicy {
+            policy: HostVcpuIdlePolicy::Busy,
+            arch: "x86_64".into(),
+        }
+    );
+}
+
+#[test]
+fn busy_host_vcpu_idle_policy_is_rejected_on_riscv64() {
+    let raw = MINIMAL_DIRECT_CONFIG.replace(
+        "cpu_num = 1",
+        "cpu_num = 1\nhost_vcpu_idle_policy = \"busy\"",
+    );
+
+    let error = AxVMCrateConfig::from_toml_for_arch(&raw, "riscv64").unwrap_err();
+
+    assert_eq!(
+        error,
+        AxVmConfigError::UnsupportedHostVcpuIdlePolicy {
+            policy: HostVcpuIdlePolicy::Busy,
+            arch: "riscv64".into(),
+        }
+    );
+}
 
 #[test]
 fn test_config_deser() {
@@ -27,6 +100,7 @@ vm_type = 1
 cpu_num = 2
 phys_cpu_sets = [3, 4]
 phys_cpu_ids = [0x500, 0x501]
+host_timer_policy = "tickless"
 
 [kernel]
 entry_point = 0xdeadbeef
@@ -73,6 +147,7 @@ interrupt_mode = "passthrough"
     assert_eq!(config.base.cpu_num, 2);
     assert_eq!(config.base.phys_cpu_ids, Some(vec![0x500, 0x501]));
     assert_eq!(config.base.phys_cpu_sets, Some(vec![3, 4]));
+    assert_eq!(config.base.host_timer_policy, HostTimerPolicy::Tickless);
 
     assert_eq!(config.kernel.entry_point, 0xdeadbeef);
     assert_eq!(config.kernel.image_location, Some("memory".to_string()));

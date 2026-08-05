@@ -21,6 +21,7 @@ pub use axvm_types::{
     PassThroughDeviceConfig, PassThroughPortConfig, ReservedAddressConfig, VMBootProtocol,
     VMInterruptMode, VMType, VmMemConfig, VmMemMappingType,
 };
+pub use axvmconfig::{HostTimerPolicy, HostVcpuIdlePolicy};
 
 use crate::arch::{ArchOps, CurrentArch};
 
@@ -92,6 +93,9 @@ pub struct AxVMConfig {
     // Physical interrupt sources forwarded to the guest in passthrough mode.
     passthrough_irq_list: Vec<u32>,
     interrupt_mode: VMInterruptMode,
+    host_timer_policy: HostTimerPolicy,
+    host_vcpu_yield: bool,
+    host_vcpu_idle_policy: HostVcpuIdlePolicy,
 }
 
 /// Parameters used to build an [`AxVMConfig`].
@@ -114,6 +118,10 @@ pub struct AxVMConfigParams {
     pub memory_regions: Vec<VmMemConfig>,
     pub boot_policy: GuestBootPolicy,
     pub interrupt_mode: VMInterruptMode,
+    pub host_timer_policy: HostTimerPolicy,
+    pub host_vcpu_yield: bool,
+    /// Host behavior when the VM's vCPU is idle.
+    pub host_vcpu_idle_policy: HostVcpuIdlePolicy,
 }
 
 impl AxVMConfig {
@@ -143,7 +151,52 @@ impl AxVMConfig {
             boot_policy: params.boot_policy,
             passthrough_irq_list,
             interrupt_mode: params.interrupt_mode,
+            host_timer_policy: params.host_timer_policy,
+            host_vcpu_yield: params.host_vcpu_yield,
+            host_vcpu_idle_policy: params.host_vcpu_idle_policy,
         }
+    }
+
+    /// Builds a runtime VM configuration from the parsed monitor configuration.
+    pub fn from_crate_config(config: &axvmconfig::AxVMCrateConfig) -> Self {
+        Self::new(AxVMConfigParams {
+            id: config.base.id,
+            name: config.base.name.clone(),
+            vm_type: VMType::from(config.base.vm_type),
+            phys_cpu_ls: PhysCpuList::new(
+                config.base.cpu_num,
+                config.base.phys_cpu_ids.clone(),
+                config.base.phys_cpu_sets.clone(),
+            ),
+            cpu_config: AxVCpuConfig {
+                bsp_entry: GuestPhysAddr::from(config.kernel.entry_point),
+                ap_entry: GuestPhysAddr::from(config.kernel.entry_point),
+            },
+            image_config: VMImageConfig {
+                kernel_load_gpa: GuestPhysAddr::from(config.kernel.kernel_load_addr),
+                loaded_from_filesystem: config.kernel.image_location.as_deref() == Some("fs"),
+                bios_load_gpa: crate::boot::boot_firmware_load_gpa(config),
+                dtb_load_gpa: config.kernel.dtb_load_addr.map(GuestPhysAddr::from),
+                ramdisk: config.kernel.ramdisk_load_addr.map(|addr| RamdiskInfo {
+                    load_gpa: GuestPhysAddr::from(addr),
+                    size: None,
+                }),
+            },
+            emu_devices: config.devices.emu_devices.clone(),
+            pass_through_irqs: config.devices.passthrough_irqs.clone(),
+            pass_through_devices: config.devices.passthrough_devices.clone(),
+            excluded_devices: config.devices.excluded_devices.clone(),
+            pass_through_addresses: config.devices.passthrough_addresses.clone(),
+            reserved_address_ranges: Vec::new(),
+            pass_through_ports: config.devices.passthrough_ports.clone(),
+            address_space_policy: config.devices.address_space_policy,
+            memory_regions: config.kernel.memory_regions.clone(),
+            boot_policy: GuestBootPolicy::KeepConfigured,
+            interrupt_mode: config.devices.interrupt_mode,
+            host_timer_policy: config.base.host_timer_policy,
+            host_vcpu_yield: config.base.host_vcpu_yield,
+            host_vcpu_idle_policy: config.base.host_vcpu_idle_policy,
+        })
     }
 
     #[cfg(test)]
@@ -164,6 +217,21 @@ impl AxVMConfig {
     /// Returns VM name.
     pub fn name(&self) -> String {
         self.name.clone()
+    }
+
+    /// Returns the host timer policy for the VM's vCPU placement.
+    pub fn host_timer_policy(&self) -> HostTimerPolicy {
+        self.host_timer_policy
+    }
+
+    /// Returns whether the vCPU task yields after each completed run slice.
+    pub fn host_vcpu_yield(&self) -> bool {
+        self.host_vcpu_yield
+    }
+
+    /// Returns the host behavior when the VM's vCPU is idle.
+    pub fn host_vcpu_idle_policy(&self) -> HostVcpuIdlePolicy {
+        self.host_vcpu_idle_policy
     }
 
     /// Returns configurations related to VM image load addresses.
@@ -446,5 +514,40 @@ mod tests {
         });
 
         assert_eq!(config.pass_through_irqs(), &vec![4, 17]);
+    }
+
+    #[test]
+    fn constructor_preserves_host_timer_policy() {
+        let config = AxVMConfig::new(AxVMConfigParams {
+            id: 3,
+            name: String::from("zephyr"),
+            phys_cpu_ls: PhysCpuList::new(1, Some(vec![2]), None),
+            host_timer_policy: HostTimerPolicy::Tickless,
+            ..Default::default()
+        });
+
+        assert_eq!(config.host_timer_policy(), HostTimerPolicy::Tickless);
+    }
+
+    #[test]
+    fn crate_config_mapping_preserves_configured_host_policy() {
+        let mut crate_config = axvmconfig::AxVMCrateConfig::default();
+        crate_config.base.host_timer_policy = HostTimerPolicy::Tickless;
+        crate_config.base.host_vcpu_yield = true;
+
+        let config = AxVMConfig::from_crate_config(&crate_config);
+
+        assert_eq!(config.host_timer_policy(), HostTimerPolicy::Tickless);
+        assert!(config.host_vcpu_yield());
+    }
+
+    #[test]
+    fn crate_config_mapping_preserves_host_vcpu_idle_policy() {
+        let mut crate_config = axvmconfig::AxVMCrateConfig::default();
+        crate_config.base.host_vcpu_idle_policy = HostVcpuIdlePolicy::Busy;
+
+        let config = AxVMConfig::from_crate_config(&crate_config);
+
+        assert_eq!(config.host_vcpu_idle_policy(), HostVcpuIdlePolicy::Busy);
     }
 }

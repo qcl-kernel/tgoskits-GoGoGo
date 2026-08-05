@@ -16,7 +16,7 @@
 //!
 //! This module provides functionality to generate VM configuration templates
 //! with sensible defaults based on user-provided parameters.
-use crate::{AxVMCrateConfig, VMBaseConfig, VMDevicesConfig, VMKernelConfig};
+use crate::{AxVMCrateConfig, HostVcpuIdlePolicy, VMBaseConfig, VMDevicesConfig, VMKernelConfig};
 
 /// Configuration parameters for generating a VM template.
 ///
@@ -65,6 +65,9 @@ pub fn get_vm_config_template(params: VmTemplateParams) -> AxVMCrateConfig {
             // Assign sequential CPU IDs starting from 0
             phys_cpu_ids: Some((0..params.cpu_num).collect()),
             phys_cpu_sets: None,
+            host_timer_policy: Default::default(),
+            host_vcpu_yield: false,
+            host_vcpu_idle_policy: HostVcpuIdlePolicy::Halt,
         },
         // Kernel and boot configuration
         kernel: VMKernelConfig {
@@ -97,5 +100,28 @@ pub fn get_vm_config_template(params: VmTemplateParams) -> AxVMCrateConfig {
             passthrough_addresses: vec![],            // No passthrough addresses by default
             passthrough_ports: vec![],                // No passthrough ports by default
         },
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::HostVcpuIdlePolicy;
+
+    #[test]
+    fn generated_template_uses_halt_host_vcpu_idle_policy() {
+        let config = get_vm_config_template(VmTemplateParams {
+            id: 1,
+            name: "template".into(),
+            vm_type: 1,
+            cpu_num: 1,
+            entry_point: 0x8020_0000,
+            kernel_path: "guest.bin".into(),
+            kernel_load_addr: 0x8020_0000,
+            image_location: "memory".into(),
+            cmdline: None,
+        });
+
+        assert_eq!(config.base.host_vcpu_idle_policy, HostVcpuIdlePolicy::Halt);
     }
 }

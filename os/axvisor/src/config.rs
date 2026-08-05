@@ -26,19 +26,16 @@ use anyhow::{Context, Result, bail};
 #[cfg(all(feature = "fs", target_arch = "x86_64"))]
 use axvm::InterruptTriggerMode;
 use axvm::{
-    AxVM, GuestPhysAddr,
+    AxVM,
     boot::{
-        BootImageProvider, StaticVmImage, boot_firmware_load_gpa, get_image_header,
-        guest_boot_policy, init_guest_boot_resources, prepare_guest_boot,
+        BootImageProvider, StaticVmImage, get_image_header, guest_boot_policy,
+        init_guest_boot_resources, prepare_guest_boot,
     },
-    config::{
-        AxVCpuConfig, AxVMConfig, AxVMConfigParams, GuestBootPolicy, PhysCpuList, RamdiskInfo,
-        VMImageConfig,
-    },
+    config::AxVMConfig,
 };
 #[cfg(feature = "fs")]
 use axvm::{AxVmError, AxVmResult};
-use axvmconfig::{AxVMCrateConfig, VMType};
+use axvmconfig::AxVMCrateConfig;
 
 #[cfg(all(
     feature = "fs",
@@ -145,7 +142,13 @@ pub fn init_guest_vm(raw_cfg: &str) -> Result<usize> {
 
     vm_config.set_boot_policy(guest_boot_policy(prepared_config, &image_provider));
 
-    // info!("after parse_vm_interrupt, crate VM[{}] with config: {:#?}", vm_config.id(), vm_config);
+    info!(
+        "VM[{}] configured host policy: timer={:?}, vcpu_yield={}, vcpu_idle={:?}",
+        vm_config.id(),
+        vm_config.host_timer_policy(),
+        vm_config.host_vcpu_yield(),
+        vm_config.host_vcpu_idle_policy()
+    );
     info!("Creating VM[{}] {:?}", vm_config.id(), vm_config.name());
 
     // Create VM.
@@ -192,41 +195,7 @@ pub fn init_guest_vm(raw_cfg: &str) -> Result<usize> {
 }
 
 pub(crate) fn build_axvm_config(cfg: &AxVMCrateConfig) -> AxVMConfig {
-    AxVMConfig::new(AxVMConfigParams {
-        id: cfg.base.id,
-        name: cfg.base.name.clone(),
-        vm_type: VMType::from(cfg.base.vm_type),
-        phys_cpu_ls: PhysCpuList::new(
-            cfg.base.cpu_num,
-            cfg.base.phys_cpu_ids.clone(),
-            cfg.base.phys_cpu_sets.clone(),
-        ),
-        cpu_config: AxVCpuConfig {
-            bsp_entry: GuestPhysAddr::from(cfg.kernel.entry_point),
-            ap_entry: GuestPhysAddr::from(cfg.kernel.entry_point),
-        },
-        image_config: VMImageConfig {
-            kernel_load_gpa: GuestPhysAddr::from(cfg.kernel.kernel_load_addr),
-            loaded_from_filesystem: cfg.kernel.image_location.as_deref() == Some("fs"),
-            bios_load_gpa: boot_firmware_load_gpa(cfg),
-            dtb_load_gpa: cfg.kernel.dtb_load_addr.map(GuestPhysAddr::from),
-            ramdisk: cfg.kernel.ramdisk_load_addr.map(|addr| RamdiskInfo {
-                load_gpa: GuestPhysAddr::from(addr),
-                size: None,
-            }),
-        },
-        emu_devices: cfg.devices.emu_devices.clone(),
-        pass_through_irqs: cfg.devices.passthrough_irqs.clone(),
-        pass_through_devices: cfg.devices.passthrough_devices.clone(),
-        excluded_devices: cfg.devices.excluded_devices.clone(),
-        pass_through_addresses: cfg.devices.passthrough_addresses.clone(),
-        reserved_address_ranges: Vec::new(),
-        pass_through_ports: cfg.devices.passthrough_ports.clone(),
-        address_space_policy: cfg.devices.address_space_policy,
-        memory_regions: cfg.kernel.memory_regions.clone(),
-        boot_policy: GuestBootPolicy::KeepConfigured,
-        interrupt_mode: cfg.devices.interrupt_mode,
-    })
+    AxVMConfig::from_crate_config(cfg)
 }
 
 fn sync_axvm_config_from_crate_config(vm_config: &mut AxVMConfig, cfg: &AxVMCrateConfig) {
