@@ -505,6 +505,39 @@ FAKE_CARGO_LOG="$provenance_log" \
 rg -q --fixed-strings 'registry-verified rootfs' "$rootfs_target" \
   || fail_test "rootfs target was not refreshed from image-tool-validated bytes"
 
+rootfs_atomic_root="${functional_root}/rootfs-atomic-fixture"
+rootfs_atomic_bin="${rootfs_atomic_root}/bin"
+mkdir -p "$rootfs_atomic_bin"
+printf '%s\n' \
+  '#!/bin/sh' \
+  'for destination do :; done' \
+  'printf "%s\\n" "partial rootfs" >"$destination"' \
+  'exit 1' \
+  >"${rootfs_atomic_bin}/cp"
+chmod +x "${rootfs_atomic_bin}/cp"
+printf '%s\n' 'new rootfs bytes' >"${rootfs_atomic_root}/source.img"
+printf '%s\n' 'old complete rootfs' >"${rootfs_atomic_root}/target.img"
+rootfs_before_failure="$(sha256sum -- "${rootfs_atomic_root}/target.img")"
+set +e
+rootfs_atomic_error="$(
+  PATH="${rootfs_atomic_bin}:${PATH}" \
+  AXVISOR_THREE_GUEST_ROOTFS="${rootfs_atomic_root}/source.img" \
+    bash -c '
+      set -euo pipefail
+      source "$1"
+      ROOTFS_TARGET="$2/target.img"
+      prepare_rootfs >/dev/null
+    ' bash "$SETUP_SOURCE" "$rootfs_atomic_root" 2>&1
+)"
+rootfs_atomic_status=$?
+set -e
+[ "$rootfs_atomic_status" -ne 0 ] || fail_test "failed rootfs copy was accepted"
+[ "$(sha256sum -- "${rootfs_atomic_root}/target.img")" = "$rootfs_before_failure" ] \
+  || fail_test "failed rootfs copy exposed partial destination bytes"
+if find "$rootfs_atomic_root" -maxdepth 1 -name '.target.img.tmp.*' | rg -q .; then
+  fail_test "failed rootfs copy left a destination-side temporary file"
+fi
+
 topology_fixture_root="${functional_root}/topology-fixture"
 topology_vm_root="${topology_fixture_root}/vms"
 topology_qemu_config="${topology_fixture_root}/qemu.toml"
@@ -558,6 +591,48 @@ set -e
 printf '%s\n' "$comments_only_error" | rg -q 'VM 1|QEMU network topology' \
   || fail_test "missing live topology lacked a contextual diagnostic"
 
+artifact_paths_root="${functional_root}/topology-artifact-paths"
+cp -a "$topology_fixture_root" "$artifact_paths_root"
+python3 - \
+  "${artifact_paths_root}/vms/linux-net-1.toml" \
+  "${artifact_paths_root}/vms/linux-net-2.toml" \
+  "${artifact_paths_root}/vms/zephyr-net.toml" \
+  "${artifact_paths_root}/qemu.toml" <<'PY'
+import pathlib
+import re
+import sys
+
+linux_1, linux_2, zephyr, qemu = map(pathlib.Path, sys.argv[1:])
+linux_1.write_text(re.sub(
+    r'^kernel_path = .*$',
+    'kernel_path = "/artifacts/shared_mem_backend/linux-kernel"',
+    linux_1.read_text(),
+    count=1,
+    flags=re.MULTILINE,
+))
+linux_2.write_text(re.sub(
+    r'^ramdisk_path = .*$',
+    'ramdisk_path = "/artifacts/ivc/linux-initramfs"',
+    linux_2.read_text(),
+    count=1,
+    flags=re.MULTILINE,
+))
+zephyr.write_text(re.sub(
+    r'^kernel_path = .*$',
+    'kernel_path = "/artifacts/vsock/zephyr-kernel"',
+    zephyr.read_text(),
+    count=1,
+    flags=re.MULTILINE,
+))
+qemu.write_text(qemu.read_text().replace(
+    'id=disk0,if=none,format=raw,file=${workspace}/tmp/rootfs.img',
+    'id=disk0,if=none,format=raw,file=/artifacts/shared-mem/rootfs-vsock.img',
+    1,
+))
+PY
+run_topology_fixture "${artifact_paths_root}/vms" "${artifact_paths_root}/qemu.toml" >/dev/null \
+  || fail_test "forbidden-looking artifact paths were treated as live transports"
+
 for forbidden_live_value in \
   'virtio,vsock' \
   'vhost-user-vsock-pci' \
@@ -577,7 +652,11 @@ path = pathlib.Path(sys.argv[1])
 value = sys.argv[2]
 text = path.read_text()
 marker = "]\nfail_regex"
-path.write_text(text.replace(marker, f"  {json.dumps(value)},\n]\nfail_regex", 1))
+path.write_text(text.replace(
+    marker,
+    f"  \"-device\",\n  {json.dumps(value)},\n]\nfail_regex",
+    1,
+))
 PY
   set +e
   forbidden_error="$(
@@ -651,6 +730,143 @@ set -e
 printf '%s\n' "$full_verify_error" | rg -q 'Zephyr must configure networking from main' \
   || fail_test "full setup verification failure lacked the expected source diagnostic"
 
+canonical_qemu_root="${functional_root}/canonical-qemu-fixture"
+canonical_qemu_bin="${canonical_qemu_root}/bin"
+canonical_qemu_config="${canonical_qemu_root}/qemu-aarch64-three-guest-net.toml"
+mkdir -p "$canonical_qemu_bin" "${canonical_qemu_root}/images"
+cp "${full_verify_bin}/file" "${canonical_qemu_bin}/file"
+cp "$topology_qemu_config" "$canonical_qemu_config"
+python3 - "$canonical_qemu_config" <<'PY'
+import pathlib
+
+path = pathlib.Path(__import__("sys").argv[1])
+text = path.read_text()
+marker = "]\nfail_regex"
+path.write_text(text.replace(
+    marker,
+    '  "-device",\n  "shared_mem_backend",\n]\nfail_regex',
+    1,
+))
+PY
+set +e
+canonical_qemu_error="$(
+  PATH="${canonical_qemu_bin}:${PATH}" \
+  AXVISOR_THREE_GUEST_VERIFY_QEMU_CONFIG="$topology_qemu_config" \
+  AXVISOR_THREE_GUEST_IMAGE_ROOT="${canonical_qemu_root}/images" \
+  AXVISOR_THREE_GUEST_LINUX_IMAGE="${full_verify_root}/linux-kernel" \
+  AXVISOR_THREE_GUEST_RTOS_IMAGE="${full_verify_root}/rtos-kernel" \
+  AXVISOR_THREE_GUEST_RTOS_ENTRY_POINT=0xa0001114 \
+  AXVISOR_THREE_GUEST_BUSYBOX="${full_verify_root}/busybox" \
+  AXVISOR_THREE_GUEST_ROOTFS="${full_verify_root}/rootfs.img" \
+    bash -c '
+      set -euo pipefail
+      source "$1"
+      IMAGE_ROOT="$2/images"
+      GENERATED_ROOT="$2/generated"
+      ROOTFS_TARGET="$2/rootfs-target.img"
+      QEMU_CONFIG="$2/qemu-aarch64-three-guest-net.toml"
+      main
+    ' bash "$SETUP_SOURCE" "$canonical_qemu_root" 2>&1
+)"
+canonical_qemu_status=$?
+set -e
+[ "$canonical_qemu_status" -ne 0 ] \
+  || fail_test "inherited verifier QEMU override hid forbidden canonical topology"
+printf '%s\n' "$canonical_qemu_error" | rg -q 'virtio-net only.*shared_mem_backend' \
+  || fail_test "canonical QEMU topology failure lacked the forbidden live value"
+
+publication_root="${functional_root}/publication-fixture"
+publication_bin="${publication_root}/bin"
+mkdir -p "$publication_bin"
+cp "${full_verify_bin}/file" "${publication_bin}/file"
+
+published_set_snapshot() {
+  python3 - "$1" <<'PY'
+import hashlib
+import os
+import pathlib
+import sys
+
+current = pathlib.Path(sys.argv[1])
+digest = hashlib.sha256()
+digest.update(os.readlink(current).encode())
+for name in ("artifacts.tsv", "linux-net-1.toml", "linux-net-2.toml", "zephyr-net.toml"):
+    digest.update(name.encode())
+    digest.update((current / name).read_bytes())
+print(digest.hexdigest())
+PY
+}
+
+for failure_step in config verification manifest post-switch; do
+  failure_root="${publication_root}/${failure_step}"
+  published_root="${failure_root}/published"
+  old_run="${published_root}/old-complete-set"
+  mkdir -p "$old_run" "${failure_root}/images"
+  for published_name in artifacts.tsv linux-net-1.toml linux-net-2.toml zephyr-net.toml; do
+    printf 'old complete %s\n' "$published_name" >"${old_run}/${published_name}"
+  done
+  ln -s old-complete-set "${published_root}/current"
+  published_before="$(published_set_snapshot "${published_root}/current")"
+
+  set +e
+  publication_error="$(
+    PATH="${publication_bin}:${PATH}" \
+    AXVISOR_THREE_GUEST_IMAGE_ROOT="${failure_root}/images" \
+    AXVISOR_THREE_GUEST_LINUX_IMAGE="${full_verify_root}/linux-kernel" \
+    AXVISOR_THREE_GUEST_RTOS_IMAGE="${full_verify_root}/rtos-kernel" \
+    AXVISOR_THREE_GUEST_RTOS_ENTRY_POINT=0xa0001114 \
+    AXVISOR_THREE_GUEST_BUSYBOX="${full_verify_root}/busybox" \
+    AXVISOR_THREE_GUEST_ROOTFS="${full_verify_root}/rootfs.img" \
+      bash -c '
+        set -euo pipefail
+        source "$1"
+        IMAGE_ROOT="$2/images"
+        GENERATED_BASE="$2/published"
+        GENERATED_ROOT="$GENERATED_BASE/current"
+        ROOTFS_TARGET="$2/rootfs-target.img"
+        QEMU_CONFIG="$3"
+        case "$4" in
+          config)
+            patch_calls=0
+            patch_vm_config() {
+              patch_calls=$((patch_calls + 1))
+              if [ "$patch_calls" -eq 3 ]; then
+                return 1
+              fi
+              printf "new partial config %s\n" "$patch_calls" >"$2"
+            }
+            ;;
+          verification)
+            verify_generated_set() { return 1; }
+            ;;
+          manifest)
+            write_artifact_manifest() { return 1; }
+            ;;
+          post-switch)
+            publish_generated_set() {
+              temporary_link="$GENERATED_BASE/.post-switch-current"
+              ln -s "${1##*/}" "$temporary_link"
+              mv -Tf -- "$temporary_link" "$GENERATED_ROOT"
+              return 1
+            }
+            ;;
+        esac
+        main
+      ' bash "$SETUP_SOURCE" "$failure_root" "$topology_qemu_config" "$failure_step" 2>&1
+  )"
+  publication_status=$?
+  set -e
+  [ "$publication_status" -ne 0 ] \
+    || fail_test "injected ${failure_step} failure was accepted"
+  if [ "$failure_step" = post-switch ]; then
+    [ -d "${published_root}/current" ] \
+      || fail_test "post-switch failure cleanup left the published link dangling"
+  else
+    [ "$(published_set_snapshot "${published_root}/current")" = "$published_before" ] \
+      || fail_test "injected ${failure_step} failure changed the published set"
+  fi
+done
+
 preflight_root="${functional_root}/preflight-fixture"
 preflight_bin="${preflight_root}/bin"
 mkdir -p "$preflight_bin"
@@ -672,6 +888,29 @@ set -e
 [ "$preflight_status" -ne 0 ] || fail_test "common preflight accepted a missing rg"
 printf '%s\n' "$preflight_error" | rg -q 'rg is required.*three-guest' \
   || fail_test "missing common command lacked a contextual preflight diagnostic"
+
+readlink_preflight_bin="${preflight_root}/without-readlink"
+mkdir -p "$readlink_preflight_bin"
+for required_command in \
+  python3 rg cpio file mktemp sort touch find cp chmod mv rm mkdir ln; do
+  required_path="$(command -v "$required_command")"
+  ln -s "$required_path" "${readlink_preflight_bin}/${required_command}"
+done
+set +e
+readlink_preflight_error="$(
+  bash -c '
+    set -euo pipefail
+    source "$1"
+    PATH="$2"
+    preflight_common
+  ' bash "$SETUP_SOURCE" "$readlink_preflight_bin" 2>&1
+)"
+readlink_preflight_status=$?
+set -e
+[ "$readlink_preflight_status" -ne 0 ] \
+  || fail_test "common preflight accepted a missing readlink"
+printf '%s\n' "$readlink_preflight_error" | rg -q 'readlink is required.*rootfs' \
+  || fail_test "missing readlink lacked a contextual preflight diagnostic"
 
 rtos_preflight_bin="${preflight_root}/rtos-bin"
 mkdir -p "$rtos_preflight_bin"

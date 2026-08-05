@@ -164,11 +164,27 @@ required_network = (
 for network_arg in required_network:
     require(qemu_args.count(network_arg) == 1, f"QEMU network topology must contain exactly one live {network_arg} ({qemu_path})")
 
-for source_path, document in tuple((vm_root / name, data) for name, data in documents.items()) + ((qemu_path, qemu),):
-    for value_path, live_value in walk_live(document):
+def reject_forbidden(source_path, value, root_path):
+    for value_path, live_value in walk_live(value, root_path):
         compact = re.sub(r"[^a-z0-9]+", "", live_value.lower())
         if "ivc" in compact or "sharedmem" in compact or "shmem" in compact or "vsock" in compact:
             raise ConfigError(f"topology must remain virtio-net only; forbidden live value at {source_path}:{value_path}: {live_value!r}")
+
+
+for filename, document in documents.items():
+    reject_forbidden(vm_root / filename, document["devices"], "devices")
+
+qemu_topology_options = {"-device", "-object", "-chardev", "-netdev"}
+for index, argument in enumerate(qemu_args):
+    if argument in qemu_topology_options and index + 1 < len(qemu_args):
+        reject_forbidden(qemu_path, qemu_args[index + 1], f"args[{index + 1}]")
+    for option in qemu_topology_options:
+        if argument.startswith(f"{option}="):
+            reject_forbidden(qemu_path, argument, f"args[{index}]")
+
+for field in ("device", "object", "chardev", "netdev"):
+    if field in qemu:
+        reject_forbidden(qemu_path, qemu[field], field)
 PY
 
 if [ "$TOPOLOGY_ONLY" = 1 ]; then

@@ -10,7 +10,9 @@ REPO_ROOT="$(cd "${AXVISOR_ROOT}/../.." && pwd)"
 IMAGE_ROOT="${AXVISOR_THREE_GUEST_IMAGE_ROOT:-/tmp/.axvisor-images}"
 GUEST_REGISTRY="${AXVISOR_THREE_GUEST_REGISTRY:-https://raw.githubusercontent.com/arceos-hypervisor/axvisor-guest/504cabb5e07e506e2692b010e01204d20587f030/registry/v0.0.26.toml}"
 LINUX_IMAGE_NAME="qemu_aarch64_linux"
-GENERATED_ROOT="${REPO_ROOT}/tmp/vmconfigs/three-guest-net"
+GENERATED_BASE="${REPO_ROOT}/tmp/vmconfigs/three-guest-net"
+GENERATED_ROOT="${GENERATED_BASE}/current"
+QEMU_CONFIG="${AXVISOR_ROOT}/configs/qemu/qemu-aarch64-three-guest-net.toml"
 ROOTFS_TARGET="${REPO_ROOT}/tmp/rootfs.img"
 RTOS_ENTRY_POINT="${AXVISOR_THREE_GUEST_RTOS_ENTRY_POINT:-}"
 RTOS_PCPU="${AXVISOR_THREE_GUEST_RTOS_PCPU:-2}"
@@ -53,6 +55,7 @@ mktemp	to isolate and atomically publish generated artifacts
 sort	to order deterministic Linux guest initramfs members
 touch	to normalize deterministic Linux guest initramfs metadata
 find	to enumerate Linux guest initramfs members and image artifacts
+readlink	to compare rootfs source and destination paths before publication
 cp	to stage selected guest artifacts
 chmod	to set guest initramfs executable modes
 mv	to atomically publish generated artifacts
@@ -204,7 +207,16 @@ prepare_rootfs() {
   [ -f "$source" ] || die "QEMU rootfs image does not exist: ${source}"
   mkdir -p "$(dirname "$ROOTFS_TARGET")"
   if [ "$(readlink -f "$source")" != "$(readlink -f "$ROOTFS_TARGET")" ]; then
-    cp "$source" "$ROOTFS_TARGET"
+    local rootfs_tmp
+    rootfs_tmp="$(mktemp "$(dirname "$ROOTFS_TARGET")/.${ROOTFS_TARGET##*/}.tmp.XXXXXX")"
+    if ! cp -- "$source" "$rootfs_tmp"; then
+      rm -f -- "$rootfs_tmp"
+      die "unable to copy QEMU rootfs image to destination staging: ${ROOTFS_TARGET}"
+    fi
+    if ! mv -f -- "$rootfs_tmp" "$ROOTFS_TARGET"; then
+      rm -f -- "$rootfs_tmp"
+      die "unable to atomically publish QEMU rootfs image: ${ROOTFS_TARGET}"
+    fi
   fi
   printf '%s\n' "$ROOTFS_TARGET"
 }
@@ -529,6 +541,12 @@ def main():
     if len(raw_artifacts) % 2:
         raise ManifestError("internal artifact manifest specification is incomplete")
 
+    published_root = os.environ.get("AXVISOR_THREE_GUEST_MANIFEST_PUBLISHED_ROOT")
+    published_config_labels = {
+        "linux-1-vm-config",
+        "linux-2-vm-config",
+        "zephyr-vm-config",
+    }
     records = []
     labels = set()
     for label, raw_path in zip(raw_artifacts[0::2], raw_artifacts[1::2]):
@@ -543,7 +561,10 @@ def main():
         canonical = path.resolve()
         if "\t" in str(canonical) or "\n" in str(canonical):
             raise ManifestError(f"artifact path contains TAB or newline: {label}: {canonical}")
-        records.append((label, canonical, sha256(canonical)))
+        recorded_path = canonical
+        if published_root and label in published_config_labels:
+            recorded_path = pathlib.Path(published_root).absolute() / path.name
+        records.append((label, recorded_path, sha256(canonical)))
 
     content = "version\t1\n" + "".join(
         f"{label}\t{path}\t{digest}\n" for label, path, digest in records
@@ -577,7 +598,101 @@ except (ManifestError, OSError) as exc:
 PY
 }
 
-main() {
+validate_staged_manifest() {
+  local manifest_path="$1"
+  local staged_root="$2"
+  python3 - "$manifest_path" "$staged_root" <<'PY'
+import hashlib
+import pathlib
+import sys
+
+
+class ManifestError(Exception):
+    pass
+
+
+def sha256(path):
+    digest = hashlib.sha256()
+    with path.open("rb") as artifact:
+        for chunk in iter(lambda: artifact.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+manifest_path = pathlib.Path(sys.argv[1])
+staged_root = pathlib.Path(sys.argv[2])
+config_labels = {
+    "linux-1-vm-config",
+    "linux-2-vm-config",
+    "zephyr-vm-config",
+}
+try:
+    lines = manifest_path.read_text().splitlines()
+    if not lines or lines[0] != "version\t1" or len(lines) != 10:
+        raise ManifestError("artifact manifest must contain version plus exactly nine records")
+    for line in lines[1:]:
+        label, raw_path, expected = line.split("\t")
+        path = staged_root / pathlib.Path(raw_path).name if label in config_labels else pathlib.Path(raw_path)
+        if not path.is_file():
+            raise ManifestError(f"manifest validation artifact does not exist: {label}: {path}")
+        actual = sha256(path)
+        if actual != expected:
+            raise ManifestError(f"manifest checksum mismatch: {label}: expected {expected}, got {actual}")
+except (OSError, ValueError, ManifestError) as exc:
+    print(f"[three-guest-net] ERROR: {exc}", file=sys.stderr)
+    raise SystemExit(1)
+PY
+}
+
+verify_generated_set() {
+  local vm_root="$1"
+  AXVISOR_THREE_GUEST_VERIFY_VM_ROOT="$vm_root" \
+  AXVISOR_THREE_GUEST_VERIFY_QEMU_CONFIG="$QEMU_CONFIG" \
+  AXVISOR_THREE_GUEST_VERIFY_EXPECTED_IDLE_POLICY="$HOST_VCPU_IDLE_POLICY" \
+  AXVISOR_THREE_GUEST_VERIFY_TOPOLOGY_ONLY=0 \
+    bash "${SCRIPT_DIR}/verify_three_guest_net.sh"
+}
+
+publish_generated_set() {
+  local staged_root="$1"
+  python3 - "$GENERATED_BASE" "$GENERATED_ROOT" "$staged_root" <<'PY'
+import os
+import pathlib
+import sys
+import tempfile
+
+
+base = pathlib.Path(sys.argv[1])
+current = pathlib.Path(sys.argv[2])
+staged = pathlib.Path(sys.argv[3])
+temporary_dir = None
+try:
+    if staged.parent.resolve() != base.resolve():
+        raise ValueError(f"staged set must be a direct child of {base}: {staged}")
+    if current.exists() and not current.is_symlink():
+        raise ValueError(f"published generated root must be a symlink: {current}")
+    temporary_dir = pathlib.Path(tempfile.mkdtemp(prefix=".publish.", dir=base))
+    temporary_link = temporary_dir / "current"
+    temporary_link.symlink_to(staged.name)
+    os.replace(temporary_link, current)
+    directory_fd = os.open(base, os.O_RDONLY)
+    try:
+        os.fsync(directory_fd)
+    finally:
+        os.close(directory_fd)
+except (OSError, ValueError) as exc:
+    print(f"[three-guest-net] ERROR: unable to atomically publish generated set: {exc}", file=sys.stderr)
+    raise SystemExit(1)
+finally:
+    if temporary_dir is not None:
+        try:
+            temporary_dir.rmdir()
+        except OSError:
+            pass
+PY
+}
+
+main() (
 preflight_common
 linux_kernel="$(prepare_linux_kernel)"
 prepare_rtos_kernel
@@ -589,23 +704,37 @@ mapfile -t prepared_initramfs < <(prepare_linux_initramfs)
 selected_busybox="${prepared_initramfs[0]}"
 linux_initramfs=("${prepared_initramfs[@]:1}")
 
+mkdir -p "$GENERATED_BASE"
+staged_root="$(mktemp -d "${GENERATED_BASE}/run.XXXXXX")"
+published=false
+cleanup_generated_set() {
+  if [ "$published" = false ]; then
+    if [ -L "$GENERATED_ROOT" ] \
+      && [ "$(readlink "$GENERATED_ROOT")" = "${staged_root##*/}" ]; then
+      return
+    fi
+    rm -rf -- "$staged_root"
+  fi
+}
+trap cleanup_generated_set EXIT INT TERM
+
 patch_vm_config \
   "${AXVISOR_ROOT}/configs/vms/qemu/aarch64/linux-net-1.toml" \
-  "${GENERATED_ROOT}/linux-net-1.toml" \
+  "${staged_root}/linux-net-1.toml" \
   "$linux_kernel" \
   "" \
   "${linux_initramfs[0]}" \
   "0x8c00_0000"
 patch_vm_config \
   "${AXVISOR_ROOT}/configs/vms/qemu/aarch64/linux-net-2.toml" \
-  "${GENERATED_ROOT}/linux-net-2.toml" \
+  "${staged_root}/linux-net-2.toml" \
   "$linux_kernel" \
   "" \
   "${linux_initramfs[1]}" \
   "0x9c00_0000"
 patch_vm_config \
   "${AXVISOR_ROOT}/configs/vms/qemu/aarch64/zephyr-net.toml" \
-  "${GENERATED_ROOT}/zephyr-net.toml" \
+  "${staged_root}/zephyr-net.toml" \
   "$rtos_kernel" \
   "${RTOS_ENTRY_POINT:-${AXVISOR_THREE_GUEST_RTOS_ENTRY_POINT:-}}" \
   "" \
@@ -615,23 +744,25 @@ patch_vm_config \
   "$HOST_VCPU_YIELD" \
   "$HOST_VCPU_IDLE_POLICY"
 
-AXVISOR_THREE_GUEST_VERIFY_VM_ROOT="$GENERATED_ROOT" \
-AXVISOR_THREE_GUEST_VERIFY_EXPECTED_IDLE_POLICY="$HOST_VCPU_IDLE_POLICY" \
-AXVISOR_THREE_GUEST_VERIFY_TOPOLOGY_ONLY=0 \
-  bash "${SCRIPT_DIR}/verify_three_guest_net.sh"
+verify_generated_set "$staged_root"
 
-manifest_path="${GENERATED_ROOT}/artifacts.tsv"
+staged_manifest="${staged_root}/artifacts.tsv"
+AXVISOR_THREE_GUEST_MANIFEST_PUBLISHED_ROOT="$GENERATED_ROOT" \
 write_artifact_manifest \
-  "$manifest_path" \
+  "$staged_manifest" \
   linux-kernel "$linux_kernel" \
   rtos-kernel "$rtos_kernel" \
   rootfs "$ROOTFS_TARGET" \
   busybox "$selected_busybox" \
   linux-1-initramfs "${linux_initramfs[0]}" \
   linux-2-initramfs "${linux_initramfs[1]}" \
-  linux-1-vm-config "${GENERATED_ROOT}/linux-net-1.toml" \
-  linux-2-vm-config "${GENERATED_ROOT}/linux-net-2.toml" \
-  zephyr-vm-config "${GENERATED_ROOT}/zephyr-net.toml"
+  linux-1-vm-config "${staged_root}/linux-net-1.toml" \
+  linux-2-vm-config "${staged_root}/linux-net-2.toml" \
+  zephyr-vm-config "${staged_root}/zephyr-net.toml"
+validate_staged_manifest "$staged_manifest" "$staged_root"
+publish_generated_set "$staged_root"
+published=true
+manifest_path="${GENERATED_ROOT}/artifacts.tsv"
 
 cat <<EOF
 
@@ -662,7 +793,7 @@ Guest network:
   Linux-2: 192.168.77.12/24, MAC 52:54:00:77:00:02
   Zephyr:  192.168.77.13/24, MAC 52:54:00:77:00:03
 EOF
-}
+)
 
 if [ "${BASH_SOURCE[0]}" = "$0" ]; then
   main "$@"
