@@ -14,9 +14,7 @@
 
 //! Public AArch64 WFI trap policy contract.
 
-#![cfg(target_arch = "aarch64")]
-
-use arm_vcpu::Aarch64VCpuSetupConfig;
+use arm_vcpu::{Aarch64VCpuSetupConfig, HcrEl2Twi, TrappedWfxDisposition, trapped_wfx_disposition};
 
 #[test]
 fn setup_config_exposes_an_opt_in_wfi_trap_policy() {
@@ -29,4 +27,18 @@ fn setup_config_exposes_an_opt_in_wfi_trap_policy() {
 
     assert!(!default_config.trap_wfi);
     assert!(trapping_config.trap_wfi);
+    assert_eq!(default_config.hcr_el2_twi(), HcrEl2Twi::Clear);
+    assert_eq!(trapping_config.hcr_el2_twi(), HcrEl2Twi::Set);
+}
+
+#[test]
+fn trapped_wfi_and_wfe_decode_to_distinct_typed_dispositions() {
+    assert_eq!(
+        trapped_wfx_disposition(0),
+        TrappedWfxDisposition::WaitForInterrupt
+    );
+    assert_eq!(
+        trapped_wfx_disposition(1),
+        TrappedWfxDisposition::UnsupportedWaitForEvent
+    );
 }

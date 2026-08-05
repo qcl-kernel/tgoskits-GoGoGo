@@ -17,8 +17,8 @@ use core::marker::PhantomData;
 use aarch64_cpu::registers::*;
 
 use crate::{
-    ArmGuestPhysAddr, ArmHostOps, ArmNestedPagingConfig, ArmSysRegAddr, ArmVcpuResult, ArmVmExit,
-    TrapFrame,
+    ArmGuestPhysAddr, ArmHostOps, ArmNestedPagingConfig, ArmSysRegAddr, ArmVcpuResult,
+    ArmVcpuSetupConfig, ArmVmExit, HcrEl2Twi, TrapFrame,
     context_frame::GuestSystemRegisters,
     exception::{TrapKind, handle_exception_sync},
     exception_utils::exception_class_value,
@@ -117,19 +117,6 @@ pub struct ArmVcpuCreateConfig {
     pub mpidr_el1: u64,
     /// The address of the device tree blob.
     pub dtb_addr: usize,
-}
-
-/// Configuration for setting up a new [`ArmVcpu`].
-#[derive(Clone, Debug, Default)]
-pub struct ArmVcpuSetupConfig {
-    /// Should the hypervisor passthrough interrupts to the guest?
-    pub passthrough_interrupt: bool,
-    /// Should the hypervisor passthrough timers to the guest?
-    pub passthrough_timer: bool,
-    /// Should guest WFI instructions trap to EL2?
-    ///
-    /// Defaults to `false`, preserving the guest's native WFI behavior.
-    pub trap_wfi: bool,
 }
 
 impl<H: ArmHostOps> ArmVcpu<H> {
@@ -289,7 +276,7 @@ fn hcr_el2_for_config(config: &ArmVcpuSetupConfig) -> u64 {
         // Passing physical interrupts through instead requires both controls to remain clear.
         hcr_el2 += HCR_EL2::IMO::EnableVirtualIRQ + HCR_EL2::FMO::EnableVirtualFIQ;
     }
-    if config.trap_wfi {
+    if config.hcr_el2_twi() == HcrEl2Twi::Set {
         hcr_el2 += HCR_EL2::TWI.val(1);
     }
 

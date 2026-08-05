@@ -17,7 +17,7 @@ use log::error;
 
 use crate::{
     ArmAccessWidth, ArmGuestPhysAddr, ArmSysRegAddr, ArmVcpuError, ArmVcpuResult, ArmVmExit,
-    TrapFrame,
+    TrapFrame, TrappedWfxDisposition,
     exception_utils::{
         exception_class, exception_class_value, exception_data_abort_access_is_write,
         exception_data_abort_access_reg, exception_data_abort_access_reg_width,
@@ -26,6 +26,7 @@ use crate::{
         exception_esr, exception_fault_addr, exception_iss, exception_next_instruction_step,
         exception_sysreg_addr, exception_sysreg_direction_write, exception_sysreg_gpr,
     },
+    trapped_wfx_disposition,
 };
 
 numeric_enum_macro::numeric_enum! {
@@ -148,14 +149,13 @@ fn handle_trapped_wfx(
     iss: usize,
     instruction_step: usize,
 ) -> ArmVcpuResult<ArmVmExit> {
-    const WFX_ISS_WFE: usize = 1 << 0;
-
-    if iss & WFX_ISS_WFE != 0 {
-        return Err(ArmVcpuError::Unsupported);
+    match trapped_wfx_disposition(iss) {
+        TrappedWfxDisposition::WaitForInterrupt => {
+            ctx.set_exception_pc(ctx.exception_pc() + instruction_step);
+            Ok(ArmVmExit::WaitForInterrupt)
+        }
+        TrappedWfxDisposition::UnsupportedWaitForEvent => Err(ArmVcpuError::Unsupported),
     }
-
-    ctx.set_exception_pc(ctx.exception_pc() + instruction_step);
-    Ok(ArmVmExit::WaitForInterrupt)
 }
 
 fn handle_data_abort(context_frame: &mut TrapFrame) -> ArmVcpuResult<ArmVmExit> {
