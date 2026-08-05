@@ -7,13 +7,26 @@ use crate::{
     AxVmResult,
     architecture::{BootImagePlatform, GuestBootPlatform, HostTimePlatform},
     ax_err_type,
+    timer::TimerCallbackRegistrar,
 };
+
+struct Aarch64HostTimerRegistrar;
+
+impl TimerCallbackRegistrar for Aarch64HostTimerRegistrar {
+    fn register<F>(self, callback: F)
+    where
+        F: Fn(ax_timer_list::TimeValue) + Send + Sync + 'static,
+    {
+        ax_std::os::arceos::modules::ax_task::register_timer_callback(callback);
+    }
+}
 
 impl HostTimePlatform for Aarch64Arch {
     fn register_timer_callback() {
-        ax_std::os::arceos::modules::ax_task::register_timer_callback(|_| {
-            crate::check_timer_events();
-        });
+        crate::timer::register_timer_wheel_callback(
+            Aarch64HostTimerRegistrar,
+            crate::check_timer_events,
+        );
     }
 }
 

@@ -159,6 +159,27 @@ pub(crate) fn check_events() {
     }
 }
 
+#[allow(
+    dead_code,
+    reason = "used by AArch64 production and portable host tests"
+)]
+pub(crate) trait TimerCallbackRegistrar {
+    fn register<F>(self, callback: F)
+    where
+        F: Fn(TimeValue) + Send + Sync + 'static;
+}
+
+#[allow(
+    dead_code,
+    reason = "used by AArch64 production and portable host tests"
+)]
+pub(crate) fn register_timer_wheel_callback(
+    registrar: impl TimerCallbackRegistrar,
+    drain_timer_wheel: fn(),
+) {
+    registrar.register(move |_| drain_timer_wheel());
+}
+
 #[cfg(not(test))]
 fn current_host_time() -> TimeValue {
     default_host().monotonic_time()
@@ -284,6 +305,19 @@ mod tests {
 
     static TEST_LOCK: Mutex<()> = Mutex::new(());
 
+    type RecordedTimerCallback = Box<dyn Fn(TimeValue) + Send + Sync + 'static>;
+
+    struct RecordingTimerCallbackRegistrar<'a>(&'a mut Option<RecordedTimerCallback>);
+
+    impl TimerCallbackRegistrar for RecordingTimerCallbackRegistrar<'_> {
+        fn register<F>(self, callback: F)
+        where
+            F: Fn(TimeValue) + Send + Sync + 'static,
+        {
+            *self.0 = Some(Box::new(callback));
+        }
+    }
+
     fn reset_global_timer_state() {
         with_timer_wheels(|timer_wheels| *timer_wheels = TimerWheels::new());
         lock_test_mutex(&TEST_REARMS).clear();
@@ -331,6 +365,33 @@ mod tests {
             with_timer_wheels(|timer_wheels| timer_wheels.cancel(token)),
             None
         );
+    }
+
+    #[test]
+    fn portable_registration_invokes_the_real_timer_wheel_drain() {
+        let _guard = lock_test_mutex(&TEST_LOCK);
+        reset_global_timer_state();
+        let mut registered = None;
+        let dispatch_count = alloc::sync::Arc::new(AtomicUsize::new(0));
+        let event_dispatch_count = dispatch_count.clone();
+
+        register_timer_wheel_callback(
+            RecordingTimerCallbackRegistrar(&mut registered),
+            crate::check_timer_events,
+        );
+        TEST_NOW_NS.store(5_000_000, Ordering::Release);
+        register_timer(
+            5_000_000,
+            Box::new(move |_| {
+                event_dispatch_count.fetch_add(1, Ordering::AcqRel);
+            }),
+        );
+
+        let callback = registered.expect("host timer callback must be registered");
+        callback(Duration::from_nanos(5_000_000));
+        callback(Duration::from_nanos(5_000_000));
+
+        assert_eq!(dispatch_count.load(Ordering::Acquire), 1);
     }
 
     #[test]
