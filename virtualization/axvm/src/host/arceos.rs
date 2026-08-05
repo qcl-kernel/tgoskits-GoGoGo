@@ -87,6 +87,7 @@ impl HostTime for ArceOsHost {
     }
 
     fn set_oneshot_timer(&self, deadline_ns: u64) {
+        crate::rt_trace::host_timer_program(deadline_ns);
         crate::arch::set_oneshot_timer(deadline_ns);
     }
 }
@@ -162,6 +163,10 @@ pub(crate) fn run_on_cpu_sync(
     // SAFETY: the caller guarantees that `arg` stays valid until the target CPU
     // has executed `f`; `ax_hal` provides the synchronous completion boundary.
     unsafe { modules::ax_hal::irq::run_on_cpu_sync(modules::ax_hal::irq::CpuId(cpu_id), f, arg) }
+}
+
+pub(crate) fn set_current_cpu_periodic_timer_enabled(enabled: bool) {
+    modules::ax_runtime::set_current_cpu_periodic_timer_enabled(enabled);
 }
 
 fn send_ipi_to_all_except_current(cpu_num: usize) {

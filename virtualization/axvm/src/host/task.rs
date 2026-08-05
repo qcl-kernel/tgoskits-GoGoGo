@@ -42,6 +42,10 @@ pub(crate) fn run_on_cpu_sync(
     arceos::run_on_cpu_sync(cpu_id, f, arg)
 }
 
+pub(crate) fn set_current_cpu_periodic_timer_enabled(enabled: bool) {
+    arceos::set_current_cpu_periodic_timer_enabled(enabled);
+}
+
 pub(crate) fn send_ipi(cpu_id: usize) {
     arceos::send_ipi(cpu_id);
 }

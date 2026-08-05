@@ -417,10 +417,7 @@ impl AxVMResources {
                     region.gpa,
                     region.host_paddr(),
                     region.size(),
-                    MappingFlags::READ
-                        | MappingFlags::WRITE
-                        | MappingFlags::EXECUTE
-                        | MappingFlags::USER,
+                    guest_memory_mapping_flags(self.config.interrupt_mode()),
                 )
                 .map_err(|error| {
                     AxVmError::from_addrspace("restore guest memory mapping", error)
@@ -431,6 +428,15 @@ impl AxVMResources {
         self.address_layout = None;
         Ok(())
     }
+}
+
+fn guest_memory_mapping_flags(interrupt_mode: VMInterruptMode) -> MappingFlags {
+    let mut flags =
+        MappingFlags::READ | MappingFlags::WRITE | MappingFlags::EXECUTE | MappingFlags::USER;
+    if interrupt_mode == VMInterruptMode::Passthrough {
+        flags |= MappingFlags::UNCACHED;
+    }
+    flags
 }
 
 #[allow(dead_code)]
@@ -1541,6 +1547,13 @@ mod tests {
     use axdevice_base::{IrqError, IrqLineId, IrqResult, IrqSink};
 
     use super::*;
+
+    #[test]
+    fn passthrough_guest_memory_is_mapped_uncached() {
+        let flags = guest_memory_mapping_flags(VMInterruptMode::Passthrough);
+
+        assert!(flags.contains(MappingFlags::UNCACHED));
+    }
 
     #[test]
     fn write_guest_bytes_to_chunks_writes_only_remaining_bytes() {

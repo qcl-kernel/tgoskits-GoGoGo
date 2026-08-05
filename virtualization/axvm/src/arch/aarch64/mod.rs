@@ -130,6 +130,7 @@ impl ArchOps for Aarch64Arch {
             ),
             ArmVmExit::ExternalInterrupt { vector } => {
                 debug!("VM[{}] run VCpu[{}] get irq {vector}", vm.id(), vcpu.id());
+                crate::rt_trace::exit_handler_return(vm.id(), vcpu.id(), vector as usize);
                 Ok(BoundVcpuExit::Defer(
                     Aarch64DeferredRunWork::ExternalInterrupt {
                         vector: vector as usize,
@@ -201,6 +202,7 @@ impl ArchOps for Aarch64Arch {
         match work {
             Aarch64DeferredRunWork::ExternalInterrupt { vector } => {
                 Self::after_external_interrupt(vm, vcpu, vector);
+                crate::rt_trace::deferred_finish(vm.id(), vcpu.id());
             }
         }
         Ok(VcpuRunAction {

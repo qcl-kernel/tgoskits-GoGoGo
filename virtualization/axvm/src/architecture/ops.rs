@@ -140,7 +140,9 @@ pub(crate) trait ArchOps {
 
                 drain_and_inject_dispatched_interrupts::<Self>(vm, vcpu_id, vcpu);
 
+                crate::rt_trace::guest_entry(vm_id, vcpu_id);
                 let exit = vcpu.run()?;
+                crate::rt_trace::guest_exit(vm_id, vcpu_id);
                 trace!("{exit:#x?}");
                 match Self::handle_vcpu_exit_bound(vm, vcpu, exit)? {
                     BoundVcpuExit::Continue => continue,

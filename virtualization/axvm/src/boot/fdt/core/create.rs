@@ -36,7 +36,7 @@ pub fn create_guest_fdt(
         .as_deref()
         .ok_or_else(|| ax_err_type!(InvalidInput, "phys_cpu_ids is missing"))?;
 
-    let guest_tree = FdtTree::clone_filtered(fdt, |node_id, path, node| {
+    let mut guest_tree = FdtTree::clone_filtered(fdt, |node_id, path, node| {
         should_keep_generated_node(
             fdt,
             node_id,
@@ -46,6 +46,21 @@ pub fn create_guest_fdt(
             phys_cpu_ids,
         )
     })?;
+    if !passthrough_device_names.is_empty() {
+        let root_id = guest_tree.inner().root_id();
+        if let Some(root) = guest_tree.inner_mut().node_mut(root_id) {
+            root.remove_property("dma-coherent");
+        }
+    }
+    for device_path in passthrough_device_names {
+        if let Some(node_id) = guest_tree.inner().get_by_path_id(device_path)
+            && let Some(node) = guest_tree.inner_mut().node_mut(node_id)
+        {
+            // The outer QEMU device reads guest RAM directly, so coherent DMA
+            // advertised by the host FDT is not valid across nested guests.
+            node.remove_property("dma-coherent");
+        }
+    }
     Ok(guest_tree.finish())
 }
 
@@ -62,6 +77,11 @@ fn should_keep_generated_node(
     }
 
     if node_path == "/cpus" || node_path.starts_with("/cpus/cpu-map") {
+        return true;
+    }
+
+    // Boot arguments and the console path are supplied through /chosen.
+    if matches!(node_path, "/chosen" | "/aliases") {
         return true;
     }
 
@@ -174,6 +194,18 @@ fn initrd_range_from_image_config(
     Some((start, start.saturating_add(size)))
 }
 
+fn configured_dtb_load_addr(
+    configured: Option<GuestPhysAddr>,
+    main_memory: &VMMemoryRegion,
+    fdt_size: usize,
+) -> Option<GuestPhysAddr> {
+    let configured = configured?;
+    let memory_end = main_memory.gpa.as_usize().checked_add(main_memory.size())?;
+    let fdt_end = configured.as_usize().checked_add(fdt_size)?;
+    (configured.as_usize() >= main_memory.gpa.as_usize() && fdt_end <= memory_end)
+        .then_some(configured)
+}
+
 pub fn update_fdt(
     fdt_src: NonNull<u8>,
     dtb_size: usize,
@@ -228,13 +260,11 @@ pub(crate) fn calculate_dtb_load_addr(vm: AxVMRef, fdt_size: usize) -> AxVmResul
         })?;
 
     let dtb_addr = vm.with_config(|config| {
-        let use_configured_dtb_addr =
-            config.image_config.dtb_load_gpa.is_some() && !main_memory.is_identical();
-
-        let dtb_addr = if let Some(configured) = config
-            .image_config
-            .dtb_load_gpa
-            .filter(|_| use_configured_dtb_addr)
+        // The configured address is also the AArch64 boot argument (x0); keep
+        // it when the complete DTB fits in guest memory so loading and handoff
+        // cannot diverge.
+        let dtb_addr = if let Some(configured) =
+            configured_dtb_load_addr(config.image_config.dtb_load_gpa, &main_memory, fdt_size)
         {
             configured
         } else {
@@ -254,6 +284,8 @@ pub(crate) fn calculate_dtb_load_addr(vm: AxVMRef, fdt_size: usize) -> AxVmResul
 
 #[cfg(test)]
 mod tests {
+    use core::alloc::Layout;
+
     use axvmconfig::AxVMCrateConfig;
     use fdt_edit::{Fdt, Node, Property};
     use fdt_raw::RegInfo;
@@ -261,11 +293,17 @@ mod tests {
     use super::{
         super::tree::sanitize_bootargs, cpu_node_id, initrd_range_from_image_config, need_cpu_node,
     };
-    use crate::{GuestPhysAddr, config::RamdiskInfo};
+    use crate::{GuestPhysAddr, VMMemoryRegion, config::RamdiskInfo};
 
     fn prop_u32(name: &str, value: u32) -> Property {
         let mut prop = Property::new(name, alloc::vec![]);
         prop.set_u32_ls(&[value]);
+        prop
+    }
+
+    fn prop_str(name: &str, value: &str) -> Property {
+        let mut prop = Property::new(name, alloc::vec![]);
+        prop.set_string(value);
         prop
     }
 
@@ -382,5 +420,268 @@ mod tests {
         assert!(reparsed.get_by_path_id("/cpus/cpu@100").is_some());
         assert!(reparsed.get_by_path_id("/cpus/cpu@0").is_none());
         assert!(reparsed.get_by_path_id("/cpus/cpu@101").is_none());
+    }
+
+    #[test]
+    fn generated_fdt_keeps_chosen_boot_metadata() {
+        let mut fdt = Fdt::new();
+        let root = fdt.root_id();
+        let cpus = fdt.add_node(root, Node::new("cpus"));
+        fdt.node_mut(cpus)
+            .unwrap()
+            .set_property(prop_u32("#address-cells", 1));
+        let cpu = fdt.add_node(cpus, Node::new("cpu@0"));
+        fdt.view_typed_mut(cpu)
+            .unwrap()
+            .set_regs(&[RegInfo::new(0, None)]);
+
+        let mut chosen = Node::new("chosen");
+        let mut bootargs = Property::new("bootargs", alloc::vec![]);
+        bootargs.set_string("console=ttyAMA0");
+        chosen.set_property(bootargs);
+        fdt.add_node(root, chosen);
+
+        let cfg = AxVMCrateConfig {
+            base: axvmconfig::VMBaseConfig {
+                phys_cpu_ids: Some(alloc::vec![0]),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let dtb = super::create_guest_fdt(&fdt, &["/pl011@9000000".into()], &cfg).unwrap();
+        let reparsed = Fdt::from_bytes(&dtb).unwrap();
+
+        let chosen = reparsed.get_by_path("/chosen").unwrap();
+        assert_eq!(
+            chosen.as_node().get_property("bootargs").unwrap().as_str(),
+            Some("console=ttyAMA0")
+        );
+    }
+
+    #[test]
+    fn generated_fdt_keeps_console_alias_for_zephyr_boot() {
+        let mut fdt = Fdt::new();
+        let root = fdt.root_id();
+        let cpus = fdt.add_node(root, Node::new("cpus"));
+        fdt.node_mut(cpus)
+            .unwrap()
+            .set_property(prop_u32("#address-cells", 1));
+        let cpu = fdt.add_node(cpus, Node::new("cpu@0"));
+        fdt.view_typed_mut(cpu)
+            .unwrap()
+            .set_regs(&[RegInfo::new(0, None)]);
+
+        let mut aliases = Node::new("aliases");
+        let mut serial0 = Property::new("serial0", alloc::vec![]);
+        serial0.set_string("/pl011@9000000");
+        aliases.set_property(serial0);
+        fdt.add_node(root, aliases);
+
+        let mut chosen = Node::new("chosen");
+        let mut stdout_path = Property::new("stdout-path", alloc::vec![]);
+        stdout_path.set_string("/pl011@9000000");
+        chosen.set_property(stdout_path);
+        fdt.add_node(root, chosen);
+
+        let cfg = AxVMCrateConfig {
+            base: axvmconfig::VMBaseConfig {
+                phys_cpu_ids: Some(alloc::vec![0]),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let dtb = super::create_guest_fdt(&fdt, &["/pl011@9000000".into()], &cfg).unwrap();
+        let reparsed = Fdt::from_bytes(&dtb).unwrap();
+
+        assert_eq!(
+            reparsed
+                .get_by_path("/aliases")
+                .unwrap()
+                .as_node()
+                .get_property("serial0")
+                .unwrap()
+                .as_str(),
+            Some("/pl011@9000000")
+        );
+    }
+
+    #[test]
+    fn generated_and_runtime_fdt_keep_zephyr_boot_nodes_and_memory() {
+        let mut host = Fdt::new();
+        let root = host.root_id();
+        host.node_mut(root)
+            .unwrap()
+            .set_property(prop_u32("#address-cells", 2));
+        host.node_mut(root)
+            .unwrap()
+            .set_property(prop_u32("#size-cells", 2));
+
+        let cpus = host.add_node(root, Node::new("cpus"));
+        host.node_mut(cpus)
+            .unwrap()
+            .set_property(prop_u32("#address-cells", 1));
+        let cpu = host.add_node(cpus, Node::new("cpu@0"));
+        host.view_typed_mut(cpu)
+            .unwrap()
+            .set_regs(&[RegInfo::new(0, None)]);
+
+        let gic = host.add_node(root, Node::new("intc@8000000"));
+        host.node_mut(gic)
+            .unwrap()
+            .set_property(prop_str("compatible", "arm,gic-v3"));
+        host.view_typed_mut(gic).unwrap().set_regs(&[
+            RegInfo::new(0x0800_0000, Some(0x1_0000)),
+            RegInfo::new(0x080a_0000, Some(0xf6_0000)),
+        ]);
+
+        let timer = host.add_node(root, Node::new("timer"));
+        host.node_mut(timer)
+            .unwrap()
+            .set_property(prop_str("compatible", "arm,armv8-timer"));
+
+        let psci = host.add_node(root, Node::new("psci"));
+        host.node_mut(psci)
+            .unwrap()
+            .set_property(prop_str("compatible", "arm,psci-0.2"));
+
+        let console = host.add_node(root, Node::new("pl011@9000000"));
+        host.node_mut(console)
+            .unwrap()
+            .set_property(prop_str("compatible", "arm,pl011"));
+        host.view_typed_mut(console)
+            .unwrap()
+            .set_regs(&[RegInfo::new(0x0900_0000, Some(0x1000))]);
+
+        let mut aliases = Node::new("aliases");
+        let mut serial0 = Property::new("serial0", alloc::vec![]);
+        serial0.set_string("/pl011@9000000");
+        aliases.set_property(serial0);
+        host.add_node(root, aliases);
+
+        let mut chosen = Node::new("chosen");
+        let mut stdout_path = Property::new("stdout-path", alloc::vec![]);
+        stdout_path.set_string("/pl011@9000000");
+        chosen.set_property(stdout_path);
+        host.add_node(root, chosen);
+
+        let host_memory = host.add_node(root, Node::new("memory@40000000"));
+        host.node_mut(host_memory)
+            .unwrap()
+            .set_property(prop_str("device_type", "memory"));
+        host.view_typed_mut(host_memory)
+            .unwrap()
+            .set_regs(&[RegInfo::new(0x4000_0000, Some(0x2_0000_0000))]);
+
+        let cfg = AxVMCrateConfig {
+            base: axvmconfig::VMBaseConfig {
+                phys_cpu_ids: Some(alloc::vec![0]),
+                ..Default::default()
+            },
+            kernel: axvmconfig::VMKernelConfig {
+                memory_regions: alloc::vec![axvmconfig::VmMemConfig {
+                    gpa: 0xa000_0000,
+                    size: 0x1000_0000,
+                    flags: 0x7,
+                    map_type: axvmconfig::VmMemMappingType::MapIdentical,
+                }],
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let passthrough = alloc::vec![
+            "/intc@8000000".into(),
+            "/timer".into(),
+            "/psci".into(),
+            "/pl011@9000000".into(),
+        ];
+        let generated = super::create_guest_fdt(&host, &passthrough, &cfg).unwrap();
+        let generated_fdt = Fdt::from_bytes(&generated).unwrap();
+        for path in [
+            "/chosen",
+            "/aliases",
+            "/pl011@9000000",
+            "/timer",
+            "/intc@8000000",
+            "/psci",
+        ] {
+            assert!(
+                generated_fdt.get_by_path_id(path).is_some(),
+                "generated FDT lost {path}"
+            );
+        }
+        assert!(generated_fdt.get_by_path_id("/memory@40000000").is_none());
+
+        let memory = VMMemoryRegion {
+            gpa: GuestPhysAddr::from(0xa000_0000),
+            hva: 0.into(),
+            layout: Layout::from_size_align(0x1000_0000, 0x2000_0000).unwrap(),
+            needs_dealloc: false,
+        };
+        let runtime =
+            super::patch_guest_fdt_for_runtime(&generated, &[memory], &cfg, None, true).unwrap();
+        let runtime_fdt = Fdt::from_bytes(&runtime).unwrap();
+        let runtime_memory = runtime_fdt.get_by_path("/memory@a0000000").unwrap();
+        assert_eq!(runtime_memory.regs()[0].address, 0xa000_0000);
+        assert_eq!(runtime_memory.regs()[0].size, Some(0x1000_0000));
+        assert_eq!(
+            runtime_fdt
+                .get_by_path("/chosen")
+                .unwrap()
+                .as_node()
+                .get_property("stdout-path")
+                .unwrap()
+                .as_str(),
+            Some("/pl011@9000000")
+        );
+    }
+
+    #[test]
+    fn identity_guest_keeps_configured_dtb_address_for_vcpu_boot_arg() {
+        let memory = VMMemoryRegion {
+            gpa: GuestPhysAddr::from(0xa000_0000),
+            hva: 0.into(),
+            layout: Layout::from_size_align(0x1000_0000, 0x2000_0000).unwrap(),
+            needs_dealloc: false,
+        };
+        let configured = GuestPhysAddr::from(0xaf00_0000);
+
+        assert_eq!(
+            super::configured_dtb_load_addr(Some(configured), &memory, 0x4000),
+            Some(configured)
+        );
+    }
+
+    #[test]
+    fn generated_fdt_removes_dma_coherent_from_passthrough_virtio_mmio() {
+        let mut fdt = Fdt::new();
+        let root = fdt.root_id();
+        fdt.node_mut(root)
+            .unwrap()
+            .set_property(Property::new("dma-coherent", alloc::vec![]));
+
+        let passthrough = fdt.add_node(root, Node::new("virtio_mmio@a000000"));
+        fdt.node_mut(passthrough)
+            .unwrap()
+            .set_property(Property::new("dma-coherent", alloc::vec![]));
+
+        let cfg = AxVMCrateConfig {
+            base: axvmconfig::VMBaseConfig {
+                phys_cpu_ids: Some(alloc::vec![0]),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let dtb = super::create_guest_fdt(&fdt, &["/virtio_mmio@a000000".into()], &cfg).unwrap();
+        let reparsed = Fdt::from_bytes(&dtb).unwrap();
+
+        let passthrough = reparsed.get_by_path("/virtio_mmio@a000000").unwrap();
+        assert!(passthrough.as_node().get_property("dma-coherent").is_none());
+        assert!(
+            reparsed
+                .node(reparsed.root_id())
+                .unwrap()
+                .get_property("dma-coherent")
+                .is_none()
+        );
     }
 }

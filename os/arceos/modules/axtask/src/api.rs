@@ -180,15 +180,15 @@ pub fn init_scheduler_secondary(stack_ptr: VirtAddr, stack_size: usize) {
 #[cfg(feature = "irq")]
 #[cfg_attr(doc, doc(cfg(feature = "irq")))]
 pub fn on_timer_tick() {
-    on_timer_irq(true);
+    on_timer_irq(true, true);
 }
 
 /// Handles a hardware timer interrupt.
 #[cfg(feature = "irq")]
 #[cfg_attr(doc, doc(cfg(feature = "irq")))]
-pub fn on_timer_irq(scheduler_tick: bool) {
+pub fn on_timer_irq(scheduler_tick: bool, run_callbacks: bool) {
     use ax_kernel_guard::NoOp;
-    crate::timers::check_events(scheduler_tick);
+    crate::timers::check_events(run_callbacks);
     if scheduler_tick {
         // Since irq and preemption are both disabled here,
         // we can get current run queue with the default `ax_kernel_guard::NoOp`.

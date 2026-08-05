@@ -59,6 +59,7 @@ stack-protector = ["ax-std/stack-protector"]
 backtrace = ["ax-std/backtrace", "dep:axbacktrace"]
 test-backtrace-panic = ["backtrace"]
 test-panic-no-backtrace = ["dep:axbacktrace"]
+rt-trace = ["axvm/rt-trace"]
 
 [dependencies]
 spin = { workspace = true }
@@ -75,8 +76,8 @@ ax-std = { workspace = true, default-features = false, features = [
   "ext-ld",
   "paging",
   "irq",
-  "multitask",
-  "task-ext",
+    "multitask",
+    "task-ext",
   "smp",
   "hv",
   "tls",

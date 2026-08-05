@@ -98,6 +98,7 @@ ax-errno = {workspace = true, optional = true}
 ax-fs-ng = {workspace = true, optional = true}
 axfs-ng-vfs = {workspace = true, optional = true}
 ax-hal = {workspace = true}
+ax-kernel-guard = {workspace = true}
 ax-input = {workspace = true, optional = true}
 ax-ipi = {workspace = true, optional = true}
 ax-kspin = {workspace = true, optional = true}

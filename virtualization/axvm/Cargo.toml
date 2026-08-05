@@ -18,6 +18,7 @@ host-test = [
     "ax-kernel-guard/host-test",
     "axdevice/host-test",
 ]
+rt-trace = []
 sstc = ["riscv_vcpu/sstc"]
 tls = ["ax-hal/tls", "ax-std/tls", "cpu-local/tls"]
 

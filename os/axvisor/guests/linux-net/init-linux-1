@@ -1,0 +1,49 @@
+#!/bin/sh
+
+/bin/busybox mkdir -p /proc /sys /dev /dev/pts
+/bin/busybox mount -t proc proc /proc 2>/dev/null || true
+/bin/busybox mount -t sysfs sysfs /sys 2>/dev/null || true
+/bin/busybox mount -t devtmpfs devtmpfs /dev 2>/dev/null || true
+/bin/busybox mount -t devpts devpts /dev/pts 2>/dev/null || true
+
+/bin/busybox ifconfig -a > /dev/console 2>&1
+/bin/busybox ip addr add 192.168.77.11/24 dev eth0
+/bin/busybox ip link set dev eth0 up
+echo "Linux network guest ready: 192.168.77.11/24" > /dev/console
+
+ping_ok=0
+for attempt in 1 2 3 4 5; do
+  if /bin/busybox ping -c 1 -W 2 192.168.77.13 > /dev/console 2>&1; then
+    ping_ok=1
+    echo "Linux-1 reached Zephyr at 192.168.77.13" > /dev/console
+    break
+  fi
+  /bin/busybox sleep 1
+done
+if [ "$ping_ok" -ne 1 ]; then
+  echo "Linux-1 could not reach Zephyr at 192.168.77.13" > /dev/console
+  /bin/busybox ifconfig eth0 > /dev/console 2>&1
+  /bin/busybox ip neigh > /dev/console 2>&1 || true
+  /bin/busybox cat /proc/interrupts > /dev/console 2>&1 || true
+  /bin/busybox cat /sys/class/net/eth0/statistics/tx_packets > /dev/console 2>&1 || true
+  /bin/busybox cat /sys/class/net/eth0/statistics/rx_packets > /dev/console 2>&1 || true
+fi
+
+/bin/busybox mkdir -p /www
+echo "linux-net-1" > /www/index.html
+/bin/busybox httpd -f -p 8080 -h /www &
+
+http_ok=0
+for attempt in 1 2 3 4 5; do
+  if /bin/busybox wget -q -O - http://192.168.77.12:8080/ > /dev/console 2>&1; then
+    http_ok=1
+    echo "Linux-1 reached Linux-2 over TCP:8080" > /dev/console
+    break
+  fi
+  /bin/busybox sleep 1
+done
+if [ "$http_ok" -ne 1 ]; then
+  echo "Linux-1 could not reach Linux-2 over TCP:8080" > /dev/console
+fi
+
+exec /bin/busybox sh

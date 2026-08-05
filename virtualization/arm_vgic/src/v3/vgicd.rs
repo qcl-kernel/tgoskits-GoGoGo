@@ -107,15 +107,22 @@ impl VGicD {
         unsafe {
             core::ptr::write_volatile(
                 gicd_irouter_vaddr.as_mut_ptr_of::<u64>(),
-                (target_cpu_affinity.0 as u64) << 32
-                    | 1 << 31 // set the routing mode bit
-                    | (target_cpu_affinity.1 as u64) << 16
-                    | (target_cpu_affinity.2 as u64) << 8
-                    | target_cpu_affinity.3 as u64,
+                target_route_value(target_cpu_affinity),
             );
         }
         Ok(())
     }
+}
+
+/// Encode a directed GICv3 SPI route for the target affinity.
+///
+/// Bit 31 selects Any-PE routing when set. GPPT vCPUs are pinned to one
+/// physical CPU, so a passthrough SPI must use the directed mode (bit 31=0).
+fn target_route_value(target_cpu_affinity: (u8, u8, u8, u8)) -> u64 {
+    (target_cpu_affinity.0 as u64) << 32
+        | (target_cpu_affinity.1 as u64) << 16
+        | (target_cpu_affinity.2 as u64) << 8
+        | target_cpu_affinity.3 as u64
 }
 
 impl VGicD {
@@ -406,3 +413,13 @@ impl VGicD {
 
 // Todo: move this lock to arceos or axvisor
 static GICD_LOCK: ax_kspin::SpinNoIrq<()> = ax_kspin::SpinNoIrq::new(());
+
+#[cfg(test)]
+mod tests {
+    use super::target_route_value;
+
+    #[test]
+    fn directed_route_keeps_the_requested_affinity() {
+        assert_eq!(target_route_value((0, 0, 0, 2)), 2);
+    }
+}

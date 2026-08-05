@@ -1,0 +1,8 @@
+features = [
+    "ax-driver/nvme",
+    "fs",
+    "rt-trace",
+]
+log = "Info"
+target = "aarch64-unknown-none-softfloat"
+vm_configs = []

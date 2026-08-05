@@ -37,6 +37,28 @@ static VMM: crate::HostWaitQueueHandle = crate::HostWaitQueueHandle::new();
 /// The number of running VMs. This is used to determine when to exit the VMM.
 static RUNNING_VM_COUNT: AtomicUsize = AtomicUsize::new(0);
 
+pub(crate) fn apply_current_vcpu_host_timer_policy(vm: &VMRef) {
+    let policy = vm.with_config(|config| config.host_timer_policy());
+    if policy == crate::config::HostTimerPolicy::Tickless {
+        crate::host::task::set_current_cpu_periodic_timer_enabled(false);
+        info!(
+            "VM[{}] host periodic timer disabled on current vCPU pCPU",
+            vm.id()
+        );
+    }
+}
+
+pub(crate) fn restore_current_vcpu_host_timer_policy(vm: &VMRef) {
+    let policy = vm.with_config(|config| config.host_timer_policy());
+    if policy == crate::config::HostTimerPolicy::Tickless {
+        crate::host::task::set_current_cpu_periodic_timer_enabled(true);
+        info!(
+            "VM[{}] host periodic timer restored on current vCPU pCPU",
+            vm.id()
+        );
+    }
+}
+
 /// Initialize runtime state for already registered VMs.
 pub fn init() {
     info!("Initializing VMM...");
