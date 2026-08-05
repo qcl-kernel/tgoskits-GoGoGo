@@ -26,6 +26,10 @@ die() {
   exit 1
 }
 
+warn() {
+  printf '[three-guest-net] WARNING: %s\n' "$*" >&2 || true
+}
+
 case "$HOST_TIMER_POLICY" in
   periodic|tickless) ;;
   *) die "AXVISOR_THREE_GUEST_HOST_TIMER_POLICY must be periodic or tickless" ;;
@@ -681,6 +685,7 @@ current = pathlib.Path(sys.argv[2])
 staged = pathlib.Path(sys.argv[3])
 failure_injection = sys.argv[4]
 temporary_dir = None
+temporary_link = None
 
 
 def inject_failure(step):
@@ -720,6 +725,11 @@ else:
         except OSError:
             pass
 finally:
+    if temporary_link is not None:
+        try:
+            temporary_link.unlink(missing_ok=True)
+        except OSError:
+            pass
     if temporary_dir is not None:
         try:
             temporary_dir.rmdir()
@@ -752,6 +762,148 @@ publish_rootfs_compatibility() {
   rm -rf -- "$temporary_dir"
 }
 
+prepare_rootfs_compatibility_backup() {
+  local destination_dir destination_name
+  destination_dir="$(dirname "$ROOTFS_TARGET")"
+  destination_name="${ROOTFS_TARGET##*/}"
+  mkdir -p "$destination_dir"
+
+  ROOTFS_COMPATIBILITY_BACKUP_DIR="$(
+    mktemp -d "${destination_dir}/.${destination_name}.backup.XXXXXX"
+  )"
+  ROOTFS_COMPATIBILITY_BACKUP_ENTRY="${ROOTFS_COMPATIBILITY_BACKUP_DIR}/previous"
+  ROOTFS_COMPATIBILITY_PRIOR_STATE=absent
+  ROOTFS_COMPATIBILITY_DESTINATION_DIR="$destination_dir"
+  ROOTFS_COMPATIBILITY_DESTINATION_NAME="$destination_name"
+
+  if [ -L "$ROOTFS_TARGET" ] || [ -f "$ROOTFS_TARGET" ]; then
+    if ! mv -T -- "$ROOTFS_TARGET" "$ROOTFS_COMPATIBILITY_BACKUP_ENTRY"; then
+      rmdir -- "$ROOTFS_COMPATIBILITY_BACKUP_DIR" 2>/dev/null || true
+      ROOTFS_COMPATIBILITY_BACKUP_DIR=""
+      die "unable to preserve prior rootfs compatibility entry: ${ROOTFS_TARGET}"
+    fi
+    ROOTFS_COMPATIBILITY_PRIOR_STATE=entry
+  elif [ -e "$ROOTFS_TARGET" ]; then
+    rmdir -- "$ROOTFS_COMPATIBILITY_BACKUP_DIR" 2>/dev/null || true
+    ROOTFS_COMPATIBILITY_BACKUP_DIR=""
+    die "rootfs compatibility path must be a regular file, symlink, or absent: ${ROOTFS_TARGET}"
+  fi
+}
+
+rootfs_compatibility_backup_is_safe() {
+  case "$ROOTFS_COMPATIBILITY_BACKUP_DIR" in
+    "${ROOTFS_COMPATIBILITY_DESTINATION_DIR}/.${ROOTFS_COMPATIBILITY_DESTINATION_NAME}.backup."*)
+      return 0
+      ;;
+    *)
+      warn "refusing unexpected rootfs compatibility backup path: ${ROOTFS_COMPATIBILITY_BACKUP_DIR}"
+      return 1
+      ;;
+  esac
+}
+
+clear_rootfs_compatibility_backup_state() {
+  ROOTFS_COMPATIBILITY_BACKUP_DIR=""
+  ROOTFS_COMPATIBILITY_BACKUP_ENTRY=""
+  ROOTFS_COMPATIBILITY_PRIOR_STATE=""
+  ROOTFS_COMPATIBILITY_DESTINATION_DIR=""
+  ROOTFS_COMPATIBILITY_DESTINATION_NAME=""
+}
+
+restore_rootfs_compatibility_backup() {
+  [ -n "$ROOTFS_COMPATIBILITY_BACKUP_DIR" ] || return 0
+  rootfs_compatibility_backup_is_safe || return 1
+
+  if [ "$ROOTFS_COMPATIBILITY_PRIOR_STATE" = entry ]; then
+    if [ ! -e "$ROOTFS_COMPATIBILITY_BACKUP_ENTRY" ] \
+      && [ ! -L "$ROOTFS_COMPATIBILITY_BACKUP_ENTRY" ]; then
+      warn "prior rootfs compatibility backup is missing: ${ROOTFS_COMPATIBILITY_BACKUP_ENTRY}"
+      return 1
+    fi
+    if ! mv -Tf -- "$ROOTFS_COMPATIBILITY_BACKUP_ENTRY" "$ROOTFS_TARGET"; then
+      warn "unable to restore prior rootfs compatibility entry: ${ROOTFS_TARGET}"
+      return 1
+    fi
+  elif [ "$ROOTFS_COMPATIBILITY_PRIOR_STATE" = absent ]; then
+    if [ -L "$ROOTFS_TARGET" ]; then
+      if [ "$(readlink "$ROOTFS_TARGET")" != "${GENERATED_ROOT}/rootfs.img" ]; then
+        warn "refusing to remove unexpected rootfs compatibility symlink: ${ROOTFS_TARGET}"
+        return 1
+      fi
+      if ! rm -f -- "$ROOTFS_TARGET"; then
+        warn "unable to restore absent rootfs compatibility state: ${ROOTFS_TARGET}"
+        return 1
+      fi
+    elif [ -e "$ROOTFS_TARGET" ]; then
+      warn "refusing to remove unexpected rootfs compatibility entry: ${ROOTFS_TARGET}"
+      return 1
+    fi
+  else
+    warn "unknown prior rootfs compatibility state: ${ROOTFS_COMPATIBILITY_PRIOR_STATE}"
+    return 1
+  fi
+
+  if ! rmdir -- "$ROOTFS_COMPATIBILITY_BACKUP_DIR"; then
+    warn "unable to remove restored rootfs compatibility backup directory: ${ROOTFS_COMPATIBILITY_BACKUP_DIR}"
+    return 1
+  fi
+  clear_rootfs_compatibility_backup_state
+}
+
+discard_rootfs_compatibility_backup() {
+  [ -n "$ROOTFS_COMPATIBILITY_BACKUP_DIR" ] || return 0
+  if ! rootfs_compatibility_backup_is_safe; then
+    return 0
+  fi
+
+  if [ -e "$ROOTFS_COMPATIBILITY_BACKUP_ENTRY" ] \
+    || [ -L "$ROOTFS_COMPATIBILITY_BACKUP_ENTRY" ]; then
+    if ! rm -f -- "$ROOTFS_COMPATIBILITY_BACKUP_ENTRY"; then
+      warn "unable to remove committed rootfs compatibility backup: ${ROOTFS_COMPATIBILITY_BACKUP_ENTRY}"
+      return 0
+    fi
+  fi
+  if ! rmdir -- "$ROOTFS_COMPATIBILITY_BACKUP_DIR"; then
+    warn "unable to remove committed rootfs compatibility backup directory: ${ROOTFS_COMPATIBILITY_BACKUP_DIR}"
+    return 0
+  fi
+  clear_rootfs_compatibility_backup_state
+  return 0
+}
+
+report_setup_summary() {
+  local manifest_path="$1"
+  cat <<EOF
+
+[three-guest-net] prepared successfully
+  Linux kernel: ${GENERATED_ROOT}/linux-kernel
+  RTOS kernel:  ${GENERATED_ROOT}/rtos-kernel
+  RTOS entry:   ${RTOS_ENTRY_POINT:-${AXVISOR_THREE_GUEST_RTOS_ENTRY_POINT:-template}}
+  RTOS pCPU:    ${RTOS_PCPU}
+  Host timer:  ${HOST_TIMER_POLICY}
+  vCPU yield:  ${HOST_VCPU_YIELD}
+  vCPU idle:   ${HOST_VCPU_IDLE_POLICY}
+  Rootfs:       ${ROOTFS_TARGET}
+  VM configs:   ${GENERATED_ROOT}
+  Manifest:     ${manifest_path}
+
+Run:
+  cd ${REPO_ROOT}
+  cargo xtask axvisor qemu \\
+    --config os/axvisor/configs/board/qemu-aarch64.toml \\
+    --qemu-config os/axvisor/configs/qemu/qemu-aarch64-three-guest-net.toml \\
+    --rootfs ${ROOTFS_TARGET} \\
+    --vmconfigs ${GENERATED_ROOT}/linux-net-1.toml \\
+    --vmconfigs ${GENERATED_ROOT}/linux-net-2.toml \\
+    --vmconfigs ${GENERATED_ROOT}/zephyr-net.toml
+
+Guest network:
+  Linux-1: 192.168.77.11/24, MAC 52:54:00:77:00:01
+  Linux-2: 192.168.77.12/24, MAC 52:54:00:77:00:02
+  Zephyr:  192.168.77.13/24, MAC 52:54:00:77:00:03
+EOF
+}
+
 main() (
 preflight_common
 selected_linux_kernel="$(prepare_linux_kernel)"
@@ -768,13 +920,22 @@ mkdir -p "$GENERATED_BASE"
 staged_root="$(mktemp -d "${GENERATED_BASE}/run.XXXXXX")"
 staged_root="$(readlink -f "$staged_root")"
 published=false
+ROOTFS_COMPATIBILITY_BACKUP_DIR=""
+ROOTFS_COMPATIBILITY_BACKUP_ENTRY=""
+ROOTFS_COMPATIBILITY_PRIOR_STATE=""
+ROOTFS_COMPATIBILITY_DESTINATION_DIR=""
+ROOTFS_COMPATIBILITY_DESTINATION_NAME=""
 cleanup_generated_set() {
   if [ "$published" = false ]; then
     if [ -L "$GENERATED_ROOT" ] \
       && [ "$(readlink "$GENERATED_ROOT")" = "${staged_root##*/}" ]; then
+      discard_rootfs_compatibility_backup
       return
     fi
+    restore_rootfs_compatibility_backup || true
     rm -rf -- "$staged_root"
+  else
+    discard_rootfs_compatibility_backup
   fi
 }
 trap cleanup_generated_set EXIT INT TERM
@@ -835,40 +996,16 @@ write_artifact_manifest \
   linux-2-vm-config "${staged_root}/linux-net-2.toml" \
   zephyr-vm-config "${staged_root}/zephyr-net.toml"
 validate_staged_manifest "$staged_manifest" "$staged_root"
+prepare_rootfs_compatibility_backup
 publish_rootfs_compatibility "$staged_root"
 publish_generated_set "$staged_root"
 published=true
+discard_rootfs_compatibility_backup
 manifest_path="${GENERATED_ROOT}/artifacts.tsv"
-
-cat <<EOF
-
-[three-guest-net] prepared successfully
-  Linux kernel: ${GENERATED_ROOT}/linux-kernel
-  RTOS kernel:  ${GENERATED_ROOT}/rtos-kernel
-  RTOS entry:   ${RTOS_ENTRY_POINT:-${AXVISOR_THREE_GUEST_RTOS_ENTRY_POINT:-template}}
-  RTOS pCPU:    ${RTOS_PCPU}
-  Host timer:  ${HOST_TIMER_POLICY}
-  vCPU yield:  ${HOST_VCPU_YIELD}
-  vCPU idle:   ${HOST_VCPU_IDLE_POLICY}
-  Rootfs:       ${ROOTFS_TARGET}
-  VM configs:   ${GENERATED_ROOT}
-  Manifest:     ${manifest_path}
-
-Run:
-  cd ${REPO_ROOT}
-  cargo xtask axvisor qemu \\
-    --config os/axvisor/configs/board/qemu-aarch64.toml \\
-    --qemu-config os/axvisor/configs/qemu/qemu-aarch64-three-guest-net.toml \\
-    --rootfs ${ROOTFS_TARGET} \\
-    --vmconfigs ${GENERATED_ROOT}/linux-net-1.toml \\
-    --vmconfigs ${GENERATED_ROOT}/linux-net-2.toml \\
-    --vmconfigs ${GENERATED_ROOT}/zephyr-net.toml
-
-Guest network:
-  Linux-1: 192.168.77.11/24, MAC 52:54:00:77:00:01
-  Linux-2: 192.168.77.12/24, MAC 52:54:00:77:00:02
-  Zephyr:  192.168.77.13/24, MAC 52:54:00:77:00:03
-EOF
+if ! report_setup_summary "$manifest_path"; then
+  warn "setup committed successfully, but summary output failed"
+fi
+return 0
 )
 
 if [ "${BASH_SOURCE[0]}" = "$0" ]; then

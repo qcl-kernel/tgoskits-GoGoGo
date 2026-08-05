@@ -820,8 +820,9 @@ printf '%s\n' \
   '#!/usr/bin/env bash' \
   'set -euo pipefail' \
   'destination="${!#}"' \
+  'source_path="${@: -2:1}"' \
   'if [ "${AXVISOR_TEST_PUBLICATION_FAILURE:-}" = rootfs-replace ] && [ "$destination" = "$AXVISOR_TEST_ROOTFS_TARGET" ]; then' \
-  '  exit 1' \
+  '  case "$source_path" in */.rootfs-target.img.link.*/rootfs-target.img) exit 1 ;; esac' \
   'fi' \
   'exec "$AXVISOR_TEST_REAL_MV" "$@"' \
   >"${complete_publication_bin}/mv"
@@ -944,6 +945,9 @@ run_complete_publication_fixture() {
             publish_generated_set_injected "$1" "$publication_failure"
           }
           ;;
+        summary-output)
+          report_setup_summary() { return 1; }
+          ;;
       esac
       main
     ' bash "$SETUP_SOURCE" "$fixture_root" "$topology_qemu_config" "$failure_step"
@@ -983,6 +987,76 @@ published_runs_snapshot() {
   find "$1" -mindepth 1 -maxdepth 1 -type d -name 'run.*' -printf '%f\n' \
     | LC_ALL=C sort
 }
+
+assert_no_publication_temporaries() {
+  local fixture_root="$1"
+  if find "$fixture_root" -mindepth 1 -maxdepth 1 -type d \
+    \( -name '.rootfs-target.img.link.*' -o -name '.rootfs-target.img.backup.*' \) \
+    | rg -q .; then
+    fail_test "publication failure left rootfs compatibility staging under ${fixture_root}"
+  fi
+  if find "${fixture_root}/published" -mindepth 1 -maxdepth 1 -type d -name '.publish.*' \
+    | rg -q .; then
+    fail_test "publication failure left current-link staging under ${fixture_root}/published"
+  fi
+}
+
+first_publication_root="${complete_publication_root}/first-publication"
+for failure_step in current-link current-replace; do
+  first_failure_root="${first_publication_root}/${failure_step}"
+  mkdir -p "${first_failure_root}/images"
+  printf '%s\n' 'first Linux kernel' >"${first_failure_root}/selected-linux-kernel"
+  printf '%s\n' 'first RTOS kernel' >"${first_failure_root}/selected-rtos-kernel"
+  printf '%s\n' 'first selected rootfs' >"${first_failure_root}/selected-rootfs.img"
+  printf '%s\n' 'first BusyBox' >"${first_failure_root}/selected-busybox"
+  chmod +x "${first_failure_root}/selected-busybox"
+  printf '%s\n' 'legacy regular compatibility bytes' >"${first_failure_root}/rootfs-target.img"
+  chmod 0640 "${first_failure_root}/rootfs-target.img"
+  legacy_rootfs_hash="$(sha256sum -- "${first_failure_root}/rootfs-target.img")"
+  legacy_rootfs_mode="$(stat -c '%a' "${first_failure_root}/rootfs-target.img")"
+
+  set +e
+  first_failure_error="$(
+    run_complete_publication_fixture "$first_failure_root" "$failure_step" 2>&1
+  )"
+  first_failure_status=$?
+  set -e
+  [ "$first_failure_status" -ne 0 ] \
+    || fail_test "first-publication ${failure_step} injection was accepted"
+  [ ! -e "${first_failure_root}/published/current" ] \
+    && [ ! -L "${first_failure_root}/published/current" ] \
+    || fail_test "first-publication ${failure_step} failure created current"
+  [ -f "${first_failure_root}/rootfs-target.img" ] \
+    && [ ! -L "${first_failure_root}/rootfs-target.img" ] \
+    || fail_test "first-publication ${failure_step} failure did not restore the legacy regular rootfs"
+  [ "$(sha256sum -- "${first_failure_root}/rootfs-target.img")" = "$legacy_rootfs_hash" ] \
+    || fail_test "first-publication ${failure_step} failure changed legacy rootfs bytes"
+  [ "$(stat -c '%a' "${first_failure_root}/rootfs-target.img")" = "$legacy_rootfs_mode" ] \
+    || fail_test "first-publication ${failure_step} failure changed legacy rootfs mode"
+  [ -z "$(published_runs_snapshot "${first_failure_root}/published")" ] \
+    || fail_test "first-publication ${failure_step} failure left an unpublished run"
+  assert_no_publication_temporaries "$first_failure_root"
+done
+
+first_absent_root="${first_publication_root}/absent-current-link"
+mkdir -p "${first_absent_root}/images"
+printf '%s\n' 'absent Linux kernel' >"${first_absent_root}/selected-linux-kernel"
+printf '%s\n' 'absent RTOS kernel' >"${first_absent_root}/selected-rtos-kernel"
+printf '%s\n' 'absent selected rootfs' >"${first_absent_root}/selected-rootfs.img"
+printf '%s\n' 'absent BusyBox' >"${first_absent_root}/selected-busybox"
+chmod +x "${first_absent_root}/selected-busybox"
+set +e
+run_complete_publication_fixture "$first_absent_root" current-link >/dev/null 2>&1
+first_absent_status=$?
+set -e
+[ "$first_absent_status" -ne 0 ] || fail_test "first-publication absent-state failure was accepted"
+[ ! -e "${first_absent_root}/rootfs-target.img" ] && [ ! -L "${first_absent_root}/rootfs-target.img" ] \
+  || fail_test "first-publication failure did not restore absent compatibility state"
+[ ! -e "${first_absent_root}/published/current" ] && [ ! -L "${first_absent_root}/published/current" ] \
+  || fail_test "first-publication absent-state failure created current"
+[ -z "$(published_runs_snapshot "${first_absent_root}/published")" ] \
+  || fail_test "first-publication absent-state failure left an unpublished run"
+assert_no_publication_temporaries "$first_absent_root"
 
 commit_point_root="${complete_publication_root}/commit-point"
 mkdir -p "${commit_point_root}/images"
@@ -1048,6 +1122,30 @@ cmp -s -- "${commit_point_root}/rootfs-target.img" "${commit_point_root}/selecte
 expected_commit_runs="$(printf '%s\n%s\n' "$commit_a_target" "$commit_b_target" | LC_ALL=C sort)"
 [ "$(published_runs_snapshot "${commit_point_root}/published")" = "$expected_commit_runs" ] \
   || fail_test "post-commit fsync warning left unexpected staged runs"
+
+commit_b_hashes="$(validated_manifest_snapshot "${commit_point_root}/published/current")"
+set +e
+summary_failure_error="$(
+  run_complete_publication_fixture "$commit_point_root" summary-output 2>&1
+)"
+summary_failure_status=$?
+set -e
+[ "$summary_failure_status" -eq 0 ] \
+  || fail_test "summary output failure returned nonzero after committing current"
+printf '%s\n' "$summary_failure_error" | rg -q 'WARNING:.*summary' \
+  || fail_test "summary output failure lacked a post-commit warning"
+summary_target="$(readlink "${commit_point_root}/published/current")"
+[ "$summary_target" != "$commit_b_target" ] \
+  || fail_test "summary output failure did not commit a new current run"
+validated_manifest_snapshot "${commit_point_root}/published/current" >/dev/null \
+  || fail_test "summary output failure left an invalid current manifest"
+[ "$(validated_manifest_snapshot "${commit_point_root}/published/${commit_b_target}")" = "$commit_b_hashes" ] \
+  || fail_test "summary output failure invalidated the prior run"
+[ "$(readlink "${commit_point_root}/rootfs-target.img")" = "$commit_a_compat_target" ] \
+  || fail_test "summary output failure changed the stable compatibility target"
+cmp -s -- "${commit_point_root}/rootfs-target.img" "${commit_point_root}/selected-rootfs.img" \
+  || fail_test "summary output failure left invalid compatibility content"
+assert_no_publication_temporaries "$commit_point_root"
 
 switch_root="${complete_publication_root}/halt-busy-halt"
 mkdir -p "${switch_root}/images"
