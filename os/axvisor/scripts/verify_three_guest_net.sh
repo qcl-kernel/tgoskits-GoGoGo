@@ -167,7 +167,7 @@ for network_arg in required_network:
 for source_path, document in tuple((vm_root / name, data) for name, data in documents.items()) + ((qemu_path, qemu),):
     for value_path, live_value in walk_live(document):
         compact = re.sub(r"[^a-z0-9]+", "", live_value.lower())
-        if "ivc" in compact or "sharedmemory" in compact or "shmem" in compact or "vsock" in compact:
+        if "ivc" in compact or "sharedmem" in compact or "shmem" in compact or "vsock" in compact:
             raise ConfigError(f"topology must remain virtio-net only; forbidden live value at {source_path}:{value_path}: {live_value!r}")
 PY
 

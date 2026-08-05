@@ -561,6 +561,8 @@ printf '%s\n' "$comments_only_error" | rg -q 'VM 1|QEMU network topology' \
 for forbidden_live_value in \
   'virtio,vsock' \
   'vhost-user-vsock-pci' \
+  'shared_mem_backend' \
+  'shared-mem-backend' \
   'shared-memory-backend' \
   'shmem-device' \
   'ivc-channel'; do
@@ -588,6 +590,66 @@ PY
   printf '%s\n' "$forbidden_error" | rg -qi 'virtio-net only|forbidden' \
     || fail_test "forbidden topology lacked a contextual diagnostic: ${forbidden_live_value}"
 done
+
+full_verify_root="${functional_root}/setup-full-verify"
+full_verify_bin="${full_verify_root}/bin"
+full_verify_sentinel="${full_verify_root}/source-validation-requested"
+real_rg="$(command -v rg)"
+mkdir -p "$full_verify_bin" "${full_verify_root}/images"
+printf '%s\n' \
+  '#!/usr/bin/env bash' \
+  'set -euo pipefail' \
+  'for argument in "$@"; do' \
+  '  case "$argument" in' \
+  '    */guests/zephyr-net/prj.conf)' \
+  '      : >"$FULL_VERIFY_SENTINEL"' \
+  '      exit 1' \
+  '      ;;' \
+  '  esac' \
+  'done' \
+  'exec "$REAL_RG" "$@"' \
+  >"${full_verify_bin}/rg"
+printf '%s\n' \
+  '#!/bin/sh' \
+  'for target do :; done' \
+  'printf "%s: ELF fixture, statically linked\\n" "$target"' \
+  >"${full_verify_bin}/file"
+chmod +x "${full_verify_bin}/rg" "${full_verify_bin}/file"
+printf '%s\n' 'local Linux kernel' >"${full_verify_root}/linux-kernel"
+printf '%s\n' 'local RTOS kernel' >"${full_verify_root}/rtos-kernel"
+printf '%s\n' 'local rootfs' >"${full_verify_root}/rootfs.img"
+printf '%s\n' 'local static BusyBox' >"${full_verify_root}/busybox"
+chmod +x "${full_verify_root}/busybox"
+
+set +e
+full_verify_error="$(
+  PATH="${full_verify_bin}:${PATH}" \
+  REAL_RG="$real_rg" \
+  FULL_VERIFY_SENTINEL="$full_verify_sentinel" \
+  AXVISOR_THREE_GUEST_VERIFY_TOPOLOGY_ONLY=1 \
+  AXVISOR_THREE_GUEST_IMAGE_ROOT="${full_verify_root}/images" \
+  AXVISOR_THREE_GUEST_LINUX_IMAGE="${full_verify_root}/linux-kernel" \
+  AXVISOR_THREE_GUEST_RTOS_IMAGE="${full_verify_root}/rtos-kernel" \
+  AXVISOR_THREE_GUEST_RTOS_ENTRY_POINT=0xa0001114 \
+  AXVISOR_THREE_GUEST_BUSYBOX="${full_verify_root}/busybox" \
+  AXVISOR_THREE_GUEST_ROOTFS="${full_verify_root}/rootfs.img" \
+    bash -c '
+      set -euo pipefail
+      source "$1"
+      IMAGE_ROOT="$2/images"
+      GENERATED_ROOT="$2/generated"
+      ROOTFS_TARGET="$2/rootfs-target.img"
+      main
+    ' bash "$SETUP_SOURCE" "$full_verify_root" 2>&1
+)"
+full_verify_status=$?
+set -e
+[ "$full_verify_status" -ne 0 ] \
+  || fail_test "setup inherited topology-only mode and skipped full verification"
+[ -f "$full_verify_sentinel" ] \
+  || fail_test "setup did not request mandatory source verification"
+printf '%s\n' "$full_verify_error" | rg -q 'Zephyr must configure networking from main' \
+  || fail_test "full setup verification failure lacked the expected source diagnostic"
 
 preflight_root="${functional_root}/preflight-fixture"
 preflight_bin="${preflight_root}/bin"
