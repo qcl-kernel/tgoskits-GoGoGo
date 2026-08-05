@@ -44,6 +44,24 @@ where
     }
 }
 
+#[test]
+#[cfg(feature = "irq")]
+fn non_periodic_timer_irq_runs_registered_callbacks() {
+    run_in_test_scheduler(|| {
+        let callback_count = Arc::new(AtomicUsize::new(0));
+        let callback_count_for_irq = callback_count.clone();
+        let busy_ticks_before = ax_task::cpu_busy_ticks(0);
+        ax_task::register_timer_callback(move |_| {
+            callback_count_for_irq.fetch_add(1, Ordering::Relaxed);
+        });
+
+        ax_task::on_timer_irq(false, true);
+
+        assert_eq!(callback_count.load(Ordering::Relaxed), 1);
+        assert_eq!(ax_task::cpu_busy_ticks(0), busy_ticks_before);
+    });
+}
+
 struct CountingPollable {
     polls: AtomicUsize,
     registers: AtomicUsize,

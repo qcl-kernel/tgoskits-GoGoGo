@@ -286,6 +286,20 @@ fn vcpu_task_cpu_mask(vm_id: usize, vcpu_id: usize, requested_mask: usize) -> us
     fallback_mask
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum PostExitHostTaskAction {
+    Continue,
+    Yield,
+}
+
+const fn post_exit_host_task_action(host_vcpu_yield: bool) -> PostExitHostTaskAction {
+    if host_vcpu_yield {
+        PostExitHostTaskAction::Yield
+    } else {
+        PostExitHostTaskAction::Continue
+    }
+}
+
 /// The main routine for VCpu task.
 /// This function is the entry point for the VCpu tasks, which are spawned for each VCpu of a VM.
 ///
@@ -376,11 +390,30 @@ fn vcpu_run() {
             break;
         }
 
-        let should_yield = vm.with_config(|config| config.host_vcpu_yield());
-        if should_yield {
-            crate::host::task::yield_now();
+        let host_task_action =
+            vm.with_config(|config| post_exit_host_task_action(config.host_vcpu_yield()));
+        match host_task_action {
+            PostExitHostTaskAction::Continue => {}
+            PostExitHostTaskAction::Yield => crate::host::task::yield_now(),
         }
     }
 
     info!("VM[{}] VCpu[{}] exiting...", vm_id, vcpu_id);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn post_exit_host_task_action_yields_only_when_enabled() {
+        assert_eq!(
+            post_exit_host_task_action(false),
+            PostExitHostTaskAction::Continue
+        );
+        assert_eq!(
+            post_exit_host_task_action(true),
+            PostExitHostTaskAction::Yield
+        );
+    }
 }

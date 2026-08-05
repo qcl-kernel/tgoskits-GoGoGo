@@ -467,6 +467,7 @@ static NEXT_PERIODIC_DEADLINE_NANOS: u64 = 0;
 #[ax_percpu::def_percpu]
 static PERIODIC_TIMER_DISABLE_DEPTH: usize = 0;
 
+#[cfg(any(feature = "irq", test))]
 fn next_periodic_disable_depth(depth: usize, enable_periodic: bool) -> usize {
     if enable_periodic {
         depth.saturating_sub(1)
@@ -475,6 +476,7 @@ fn next_periodic_disable_depth(depth: usize, enable_periodic: bool) -> usize {
     }
 }
 
+#[cfg(any(feature = "irq", test))]
 fn next_timer_deadline_for_policy(
     periodic_enabled: bool,
     periodic_deadline: u64,
@@ -587,6 +589,23 @@ fn program_next_timer() {
     ax_task::note_programmed_timer_deadline_nanos(deadline);
 }
 
+#[cfg(any(feature = "multitask", test))]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct TaskTimerIrqDispatch {
+    scheduler_tick: bool,
+}
+
+#[cfg(any(feature = "multitask", test))]
+impl TaskTimerIrqDispatch {
+    const fn new(scheduler_tick: bool) -> Self {
+        Self { scheduler_tick }
+    }
+
+    fn deliver(self, on_timer_irq: impl FnOnce(bool, bool)) {
+        on_timer_irq(self.scheduler_tick, true);
+    }
+}
+
 #[cfg(feature = "irq")]
 fn timer_irq_handler(ctx: ax_hal::irq::IrqContext) -> ax_hal::irq::IrqReturn {
     let _ = ctx;
@@ -595,7 +614,7 @@ fn timer_irq_handler(ctx: ax_hal::irq::IrqContext) -> ax_hal::irq::IrqReturn {
     #[cfg(not(feature = "multitask"))]
     let _ = advance_periodic_timer(ax_hal::time::monotonic_time_nanos());
     #[cfg(feature = "multitask")]
-    ax_task::on_timer_irq(scheduler_tick, true);
+    TaskTimerIrqDispatch::new(scheduler_tick).deliver(ax_task::on_timer_irq);
     program_next_timer();
     ax_hal::irq::IrqReturn::Handled
 }
@@ -621,6 +640,19 @@ fn init_tls() {
 
 #[cfg(test)]
 mod tests {
+    use core::cell::Cell;
+
+    #[test]
+    fn non_periodic_timer_irq_dispatches_callbacks_without_scheduler_tick() {
+        let observed = Cell::new(None);
+
+        super::TaskTimerIrqDispatch::new(false).deliver(|scheduler_tick, run_callbacks| {
+            observed.set(Some((scheduler_tick, run_callbacks)));
+        });
+
+        assert_eq!(observed.get(), Some((false, true)));
+    }
+
     #[test]
     fn periodic_timer_disable_depth_is_nested_and_saturating() {
         assert_eq!(super::next_periodic_disable_depth(0, false), 1);

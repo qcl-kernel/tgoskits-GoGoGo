@@ -379,54 +379,6 @@ fn eager_vm_lifecycle_has_no_uninit_state() {
     assert!(vm.contains("machine: Mutex::new(Machine::Ready(resources))"));
 }
 
-#[test]
-fn realtime_trace_covers_guest_and_host_timer_boundaries() {
-    let trace = include_str!("../src/rt_trace.rs");
-    let ops = include_str!("../src/architecture/ops.rs");
-    let aarch64 = include_str!("../src/arch/aarch64/mod.rs");
-    let host = include_str!("../src/host/arceos.rs");
-    let lib = include_str!("../src/lib.rs");
-
-    for event in [
-        "GuestEntry",
-        "GuestExit",
-        "ExitHandlerReturn",
-        "DeferredFinish",
-        "HostTimerProgram",
-    ] {
-        assert!(trace.contains(event), "RT trace must define {event}");
-    }
-    assert!(ops.contains("rt_trace::guest_entry"));
-    assert!(ops.contains("rt_trace::guest_exit"));
-    assert!(aarch64.contains("rt_trace::exit_handler_return"));
-    assert!(aarch64.contains("rt_trace::deferred_finish"));
-    assert!(host.contains("rt_trace::host_timer_program"));
-    assert!(lib.contains("feature = \"rt-trace\""));
-    assert!(trace.contains("counter_unit={}"));
-    assert!(trace.contains("entry_to_exit_ticks={}"));
-    assert!(!trace.contains("entry_to_exit_cycles={}"));
-}
-
-#[test]
-fn vcpu_slice_yield_is_optional_and_after_exit_processing() {
-    let vcpus = include_str!("../src/runtime/vcpus.rs");
-    let config = include_str!("../src/config.rs");
-
-    assert!(config.contains("host_vcpu_yield"));
-    assert!(vcpus.contains("host_vcpu_yield()"));
-    assert!(vcpus.contains("crate::host::task::yield_now()"));
-    assert!(vcpus.contains("let should_yield"));
-}
-
-#[test]
-fn non_periodic_host_timer_irqs_still_run_axvm_timer_callbacks() {
-    let runtime = include_str!("../../../os/arceos/modules/axruntime/src/lib.rs");
-    let task_api = include_str!("../../../os/arceos/modules/axtask/src/api.rs");
-
-    assert!(runtime.contains("ax_task::on_timer_irq(scheduler_tick, true)"));
-    assert!(task_api.contains("crate::timers::check_events(run_callbacks)"));
-}
-
 fn find_target_arch_cfg_outside_arch(
     source_root: &std::path::Path,
     directory: &std::path::Path,

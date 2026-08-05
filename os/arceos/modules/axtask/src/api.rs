@@ -174,6 +174,36 @@ pub fn init_scheduler_secondary(stack_ptr: VirtAddr, stack_size: usize) {
     crate::run_queue::init_secondary(stack_ptr, stack_size);
 }
 
+#[cfg(feature = "irq")]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum TimerIrqKind {
+    Periodic,
+    OneShot,
+}
+
+#[cfg(feature = "irq")]
+impl TimerIrqKind {
+    const fn from_scheduler_tick(scheduler_tick: bool) -> Self {
+        if scheduler_tick {
+            Self::Periodic
+        } else {
+            Self::OneShot
+        }
+    }
+}
+
+#[cfg(feature = "irq")]
+fn dispatch_timer_irq(
+    kind: TimerIrqKind,
+    dispatch_timer_events: impl FnOnce(),
+    scheduler_tick: impl FnOnce(),
+) {
+    dispatch_timer_events();
+    if kind == TimerIrqKind::Periodic {
+        scheduler_tick();
+    }
+}
+
 /// Handles periodic timer ticks for the task manager.
 ///
 /// For example, advance scheduler states, checks timed events, etc.
@@ -188,12 +218,15 @@ pub fn on_timer_tick() {
 #[cfg_attr(doc, doc(cfg(feature = "irq")))]
 pub fn on_timer_irq(scheduler_tick: bool, run_callbacks: bool) {
     use ax_kernel_guard::NoOp;
-    crate::timers::check_events(run_callbacks);
-    if scheduler_tick {
-        // Since irq and preemption are both disabled here,
-        // we can get current run queue with the default `ax_kernel_guard::NoOp`.
-        current_run_queue::<NoOp>().scheduler_timer_tick();
-    }
+    dispatch_timer_irq(
+        TimerIrqKind::from_scheduler_tick(scheduler_tick),
+        || crate::timers::check_events(run_callbacks),
+        || {
+            // Since irq and preemption are both disabled here,
+            // we can get current run queue with the default `ax_kernel_guard::NoOp`.
+            current_run_queue::<NoOp>().scheduler_timer_tick();
+        },
+    );
 }
 
 #[cfg(feature = "irq")]
@@ -753,6 +786,22 @@ pub(crate) fn axtask_api_task_registry_functions_exist_hold_for_test() -> bool {
 #[cfg(test)]
 mod tests {
     use core::cell::Cell;
+
+    #[test]
+    #[cfg(feature = "irq")]
+    fn one_shot_timer_irq_runs_callbacks_without_scheduler_tick() {
+        let callbacks = Cell::new(0);
+        let scheduler_ticks = Cell::new(0);
+
+        super::dispatch_timer_irq(
+            super::TimerIrqKind::OneShot,
+            || callbacks.set(callbacks.get() + 1),
+            || scheduler_ticks.set(scheduler_ticks.get() + 1),
+        );
+
+        assert_eq!(callbacks.get(), 1);
+        assert_eq!(scheduler_ticks.get(), 0);
+    }
 
     #[test]
     fn task_initialization_precedes_scheduling() {

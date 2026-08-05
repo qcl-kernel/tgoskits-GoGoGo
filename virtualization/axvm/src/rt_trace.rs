@@ -145,21 +145,64 @@ pub(crate) fn host_timer_program(deadline_ns: u64) {
     HOST_TIMER_PROGRAM_COUNT.fetch_add(1, Ordering::Relaxed);
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct TraceReportState {
+    guest_exits: usize,
+    external_exits: usize,
+    host_timer_programs: usize,
+    entry_to_exit_ticks: u64,
+    exit_to_handler_ticks: u64,
+    handler_to_finish_ticks: u64,
+    records_written: usize,
+}
+
+fn report_state() -> TraceReportState {
+    TraceReportState {
+        guest_exits: GUEST_EXIT_COUNT.load(Ordering::Relaxed),
+        external_exits: EXTERNAL_EXIT_COUNT.load(Ordering::Relaxed),
+        host_timer_programs: HOST_TIMER_PROGRAM_COUNT.load(Ordering::Relaxed),
+        entry_to_exit_ticks: MAX_ENTRY_TO_EXIT.load(Ordering::Relaxed),
+        exit_to_handler_ticks: MAX_EXIT_TO_HANDLER.load(Ordering::Relaxed),
+        handler_to_finish_ticks: MAX_HANDLER_TO_FINISH.load(Ordering::Relaxed),
+        records_written: WRITE_INDEX.load(Ordering::Relaxed),
+    }
+}
+
 fn maybe_report(guest_exits: usize) {
     if guest_exits < REPORT_AFTER_GUEST_EXITS || REPORT_EMITTED.swap(1, Ordering::AcqRel) != 0 {
         return;
     }
+    let report = report_state();
     info!(
         "RTTRACE summary counter_unit={} guest_exits={} external_exits={} host_timer_programs={} \
          entry_to_exit_ticks={} exit_to_handler_ticks={} handler_to_finish_ticks={} \
          ring_records={}",
         COUNTER_UNIT,
-        guest_exits,
-        EXTERNAL_EXIT_COUNT.load(Ordering::Relaxed),
-        HOST_TIMER_PROGRAM_COUNT.load(Ordering::Relaxed),
-        MAX_ENTRY_TO_EXIT.load(Ordering::Relaxed),
-        MAX_EXIT_TO_HANDLER.load(Ordering::Relaxed),
-        MAX_HANDLER_TO_FINISH.load(Ordering::Relaxed),
-        WRITE_INDEX.load(Ordering::Relaxed).min(CAPACITY),
+        report.guest_exits,
+        report.external_exits,
+        report.host_timer_programs,
+        report.entry_to_exit_ticks,
+        report.exit_to_handler_ticks,
+        report.handler_to_finish_ticks,
+        report.records_written.min(CAPACITY),
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn runtime_hooks_update_trace_report_state() {
+        let before = report_state();
+
+        guest_entry(usize::MAX, usize::MAX);
+        guest_exit(usize::MAX, usize::MAX);
+        host_timer_program(123_456);
+
+        let after = report_state();
+        assert_eq!(after.guest_exits, before.guest_exits + 1);
+        assert_eq!(after.host_timer_programs, before.host_timer_programs + 1);
+        assert_eq!(after.records_written, before.records_written + 3);
+    }
 }
