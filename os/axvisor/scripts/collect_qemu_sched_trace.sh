@@ -39,6 +39,47 @@ sha256() {
   printf '%s' "${output%% *}"
 }
 
+proc_stat_starttime() {
+  local stat_path="$1"
+  local starttime
+
+  [ -r "$stat_path" ] || return 1
+  starttime="$(awk '
+    {
+      closep=0
+      for (position=length($0)-1; position > 0; position--) {
+        if (substr($0, position, 2) == ") ") {
+          closep=position
+          break
+        }
+      }
+      if (closep == 0) exit 1
+      rest=substr($0, closep+2)
+      field_count=split(rest, fields, " ")
+      if (field_count < 20 || fields[20] !~ /^[0-9]+$/) exit 1
+      print fields[20]
+    }
+  ' "$stat_path")" || return 1
+  [[ "$starttime" =~ ^[0-9]+$ ]] || return 1
+  printf '%s' "$starttime"
+}
+
+verify_sampled_task_identities() {
+  local index
+  local tid
+  local observed_starttime
+
+  for index in "${!sampled_tids[@]}"; do
+    tid="${sampled_tids[$index]}"
+    [ -d "/proc/${QEMU_PID}/task/${tid}" ] \
+      || die "sampled QEMU thread exited before evidence was finalized: tid=${tid}"
+    observed_starttime="$(proc_stat_starttime "/proc/${QEMU_PID}/task/${tid}/stat")" \
+      || die "cannot read sampled QEMU thread identity: tid=${tid}"
+    [ "$observed_starttime" = "${sampled_task_starttimes[$index]}" ] \
+      || die "sampled QEMU thread identity changed: tid=${tid}"
+  done
+}
+
 [[ "$QEMU_PID" =~ ^[0-9]+$ ]] || die "QEMU PID must be numeric"
 [[ "$DURATION_SECONDS" =~ ^[1-9][0-9]*$ ]] || die "duration must be a positive integer"
 [[ "$SAMPLE_INTERVAL_US" =~ ^[1-9][0-9]*$ ]] || die "sample interval must be positive"
@@ -60,7 +101,8 @@ mapfile -d '' -t qemu_argv <"/proc/${QEMU_PID}/cmdline"
 [[ "${qemu_argv[0]}" == *qemu-system-aarch64* ]] \
   || die "PID is not qemu-system-aarch64: ${qemu_argv[0]}"
 qemu_exe="$(realpath -- "/proc/${QEMU_PID}/exe")"
-qemu_starttime="$(awk 'BEGIN { p="" } { closep=index($0, ") "); rest=substr($0, closep+2); split(rest,a," "); print a[20] }' "/proc/${QEMU_PID}/stat")"
+qemu_starttime="$(proc_stat_starttime "/proc/${QEMU_PID}/stat")" \
+  || die "cannot read QEMU process identity"
 
 actual_smp=""
 for index in "${!qemu_argv[@]}"; do
@@ -98,6 +140,8 @@ done <"$MANIFEST_FILE"
 [ "$(sha256 "$KERNEL_SNAPSHOT")" = "$manifest_raw_hash" ] \
   || die "running kernel snapshot does not match manifest raw hash"
 
+cc -std=c11 -O2 -Wall -Wextra -Werror -o "$PROBE_BIN" "$PROBE_SOURCE"
+
 {
   printf '%s\n' '{"execute":"qmp_capabilities"}'
   printf '%s\n' '{"execute":"query-cpus-fast"}'
@@ -123,15 +167,21 @@ awk -F '\t' -v expected="$EXPECTED_SMP" '
   || die "sampled thread map does not contain the main loop and ${EXPECTED_SMP} vCPUs"
 
 sampled_tids=()
+sampled_task_starttimes=()
 while IFS=$'\t' read -r role cpu_index tid qemu_name; do
   [ "$role" != "role" ] || continue
   sampled_tids+=("$tid")
+  task_starttime="$(proc_stat_starttime "/proc/${QEMU_PID}/task/${tid}/stat")" \
+    || die "cannot capture sampled QEMU thread identity: tid=${tid}"
+  sampled_task_starttimes+=("$task_starttime")
 done <"$SAMPLED_THREAD_MAP"
 
-cc -std=c11 -O2 -Wall -Wextra -Werror -o "$PROBE_BIN" "$PROBE_SOURCE"
 duration_ms=$((DURATION_SECONDS * 1000))
 collection_start_ns="$(date +%s%N)"
-"$PROBE_BIN" schedstat "$RAW_SAMPLES" "$duration_ms" "$SAMPLE_INTERVAL_US" "${sampled_tids[@]}"
+verify_sampled_task_identities
+AXVISOR_PROC_ROOT="/proc/${QEMU_PID}/task" \
+  "$PROBE_BIN" schedstat "$RAW_SAMPLES" "$duration_ms" "$SAMPLE_INTERVAL_US" "${sampled_tids[@]}"
+verify_sampled_task_identities
 collection_end_ns="$(date +%s%N)"
 "$THREAD_MAP_HELPER" annotate "$SAMPLED_THREAD_MAP" "$RAW_SAMPLES" "$SAMPLES"
 
@@ -180,7 +230,7 @@ fi
 [ "$(sha256 "$KERNEL_SNAPSHOT")" = "$manifest_raw_hash" ] \
   || die "running kernel snapshot changed during collection"
 [ -d "/proc/${QEMU_PID}" ] || die "QEMU exited during collection"
-[ "$(awk 'BEGIN { p="" } { closep=index($0, ") "); rest=substr($0, closep+2); split(rest,a," "); print a[20] }' "/proc/${QEMU_PID}/stat")" = "$qemu_starttime" ] \
+[ "$(proc_stat_starttime "/proc/${QEMU_PID}/stat")" = "$qemu_starttime" ] \
   || die "QEMU PID was reused during collection"
 
 {

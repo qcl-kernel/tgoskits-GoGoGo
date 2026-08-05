@@ -15,6 +15,7 @@ INPUT_TWO="$3"
 OUTPUT="$4"
 OUTPUT_DIR="$(dirname -- "$OUTPUT")"
 [ -d "$OUTPUT_DIR" ] || die "output directory does not exist: ${OUTPUT_DIR}"
+[ ! -d "$OUTPUT" ] || die "output path must not be a directory: ${OUTPUT}"
 
 TEMP_OUTPUT="$(mktemp "${OUTPUT_DIR}/.$(basename -- "$OUTPUT").tmp.XXXXXX")"
 cleanup() {
@@ -22,7 +23,9 @@ cleanup() {
     rm -f -- "$TEMP_OUTPUT"
   fi
 }
-trap cleanup EXIT INT TERM
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 build_map() {
   local qemu_pid="$INPUT_ONE"
@@ -53,6 +56,8 @@ build_map() {
 
       cpu_index = sprintf("%.0f", $1 + 0)
       tid = sprintf("%.0f", $2 + 0)
+      if (seen_cpu_index[cpu_index]++)
+        fail("duplicate vCPU CPU index: " cpu_index)
       if (seen_tid[tid]++)
         fail("duplicate sampled TID: " tid)
 
@@ -92,8 +97,21 @@ annotate_samples() {
       }
       if (NF != 4)
         fail("sampled thread map row must contain four fields at line " FNR)
+      if ($1 == "" || $2 == "" || $3 == "" || $4 == "")
+        fail("sampled thread map fields must be non-empty at line " FNR)
       if ($3 !~ /^[0-9]+$/)
         fail("sampled thread map TID must be numeric at line " FNR)
+
+      if (FNR == 2) {
+        if ($1 != "main-loop" || $2 != "NA")
+          fail("first sampled thread must be main-loop with CPU index NA")
+      } else {
+        if ($1 != "vcpu" || $2 !~ /^[0-9]+$/)
+          fail("sampled threads after main-loop must be vCPUs with numeric CPU indexes at line " FNR)
+        normalized_cpu_index = sprintf("%.0f", $2 + 0)
+        if (seen_cpu_index[normalized_cpu_index]++)
+          fail("duplicate sampled-map vCPU CPU index: " normalized_cpu_index)
+      }
 
       tid = sprintf("%.0f", $3 + 0)
       if (seen_tid[tid]++)
@@ -131,5 +149,5 @@ case "$COMMAND" in
   *) die "unknown subcommand: ${COMMAND}" ;;
 esac
 
-mv -- "$TEMP_OUTPUT" "$OUTPUT"
+mv -fT -- "$TEMP_OUTPUT" "$OUTPUT"
 TEMP_OUTPUT=""
