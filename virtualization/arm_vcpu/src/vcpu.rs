@@ -126,6 +126,10 @@ pub struct ArmVcpuSetupConfig {
     pub passthrough_interrupt: bool,
     /// Should the hypervisor passthrough timers to the guest?
     pub passthrough_timer: bool,
+    /// Should guest WFI instructions trap to EL2?
+    ///
+    /// Defaults to `false`, preserving the guest's native WFI behavior.
+    pub trap_wfi: bool,
 }
 
 impl<H: ArmHostOps> ArmVcpu<H> {
@@ -254,19 +258,7 @@ impl<H: ArmHostOps> ArmVcpu<H> {
             self.guest_system_regs.vtcr_el2 = vtcr_for_config(levels, gpa_bits, pa_bits);
         }
 
-        let mut hcr_el2 =
-            HCR_EL2::VM::Enable + HCR_EL2::TSC::EnableTrapEl1SmcToEl2 + HCR_EL2::RW::EL1IsAarch64;
-
-        if !config.passthrough_interrupt {
-            // Set HCR_EL2.IMO will trap IRQs to EL2 while enabling virtual IRQs.
-            //
-            // We must choose one of the two:
-            // - Enable virtual IRQs and trap physical IRQs to EL2.
-            // - Disable virtual IRQs and pass through physical IRQs to EL1.
-            hcr_el2 += HCR_EL2::IMO::EnableVirtualIRQ + HCR_EL2::FMO::EnableVirtualFIQ;
-        }
-
-        self.guest_system_regs.hcr_el2 = hcr_el2.into();
+        self.guest_system_regs.hcr_el2 = hcr_el2_for_config(&config);
 
         // Set VMPIDR_EL2, which provides the value of the Virtualization Multiprocessor ID.
         // This is the value returned by Non-secure EL1 reads of MPIDR.
@@ -286,6 +278,22 @@ impl<H: ArmHostOps> ArmVcpu<H> {
     fn get_gpr(&self, idx: usize) {
         self.ctx.gpr(idx);
     }
+}
+
+fn hcr_el2_for_config(config: &ArmVcpuSetupConfig) -> u64 {
+    let mut hcr_el2 =
+        HCR_EL2::VM::Enable + HCR_EL2::TSC::EnableTrapEl1SmcToEl2 + HCR_EL2::RW::EL1IsAarch64;
+
+    if !config.passthrough_interrupt {
+        // HCR_EL2.IMO traps physical IRQs to EL2 while enabling virtual IRQs.
+        // Passing physical interrupts through instead requires both controls to remain clear.
+        hcr_el2 += HCR_EL2::IMO::EnableVirtualIRQ + HCR_EL2::FMO::EnableVirtualFIQ;
+    }
+    if config.trap_wfi {
+        hcr_el2 += HCR_EL2::TWI.val(1);
+    }
+
+    hcr_el2.value
 }
 
 /// Private functions related to vcpu runtime control flow.
@@ -532,4 +540,43 @@ fn vtcr_for_config(levels: usize, gpa_bits: usize, pa_bits: usize) -> u64 {
         + VTCR_EL2::IRGN0::NormalWBRAWA;
 
     val.value
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn hcr_el2_composition_applies_wfi_and_interrupt_policies_independently() {
+        let base =
+            (HCR_EL2::VM::Enable + HCR_EL2::TSC::EnableTrapEl1SmcToEl2 + HCR_EL2::RW::EL1IsAarch64)
+                .value;
+        let virtual_interrupts =
+            (HCR_EL2::IMO::EnableVirtualIRQ + HCR_EL2::FMO::EnableVirtualFIQ).value;
+        let twi = HCR_EL2::TWI.val(1).value;
+        assert_eq!(twi, 1 << 13);
+
+        let default_hcr = hcr_el2_for_config(&ArmVcpuSetupConfig::default());
+        assert_eq!(default_hcr, base | virtual_interrupts);
+        assert_eq!(default_hcr & twi, 0);
+
+        let trapping_hcr = hcr_el2_for_config(&ArmVcpuSetupConfig {
+            trap_wfi: true,
+            ..Default::default()
+        });
+        assert_eq!(trapping_hcr, default_hcr | twi);
+
+        let passthrough_hcr = hcr_el2_for_config(&ArmVcpuSetupConfig {
+            passthrough_interrupt: true,
+            ..Default::default()
+        });
+        assert_eq!(passthrough_hcr, base);
+
+        let passthrough_trapping_hcr = hcr_el2_for_config(&ArmVcpuSetupConfig {
+            passthrough_interrupt: true,
+            trap_wfi: true,
+            ..Default::default()
+        });
+        assert_eq!(passthrough_trapping_hcr, base | twi);
+    }
 }

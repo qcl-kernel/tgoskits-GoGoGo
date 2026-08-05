@@ -48,6 +48,7 @@ fn test_vcpu_setup_config_default() {
 
     assert_eq!(config.passthrough_interrupt, false);
     assert_eq!(config.passthrough_timer, false);
+    assert_eq!(config.trap_wfi, false);
 }
 
 /// Test setting Aarch64VCpuSetupConfig fields
@@ -56,8 +57,10 @@ fn test_vcpu_setup_config_fields() {
     let config = Aarch64VCpuSetupConfig {
         passthrough_interrupt: true,
         passthrough_timer: true,
+        trap_wfi: true,
     };
 
     assert_eq!(config.passthrough_interrupt, true);
     assert_eq!(config.passthrough_timer, true);
+    assert_eq!(config.trap_wfi, true);
 }

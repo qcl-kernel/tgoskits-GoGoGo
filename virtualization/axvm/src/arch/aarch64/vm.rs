@@ -16,7 +16,7 @@ use axvm_types::{
 use super::{Aarch64Arch, npt};
 use crate::{
     AxVmError, AxVmResult, ax_err,
-    config::AxVMConfig,
+    config::{AxVMConfig, HostVcpuIdlePolicy},
     vm::{
         AxVM, AxVMResources,
         prepare::{
@@ -89,7 +89,7 @@ fn init_vm_with(
             &extra_devices,
             vm.device_access_ports(),
         )?;
-        assign_arch_device_state(vm, resources.config(), devices.devices())?;
+        assign_arch_device_state(resources.config(), devices.devices())?;
         validate_guest_dtb(resources)?;
 
         let owned_regions = guest_owned_regions(resources);
@@ -108,16 +108,13 @@ fn build_vcpu_setup_config(
     Ok(ArmVcpuSetupConfig {
         passthrough_interrupt: passthrough,
         passthrough_timer: passthrough,
+        trap_wfi: config.host_vcpu_idle_policy() == HostVcpuIdlePolicy::Busy,
     })
 }
 
-fn assign_arch_device_state(
-    vm: &AxVM,
-    config: &AxVMConfig,
-    devices: &axdevice::DeviceRuntime,
-) -> AxVmResult {
+fn assign_arch_device_state(config: &AxVMConfig, devices: &axdevice::DeviceRuntime) -> AxVmResult {
     if config.interrupt_mode() == VMInterruptMode::Passthrough {
-        assign_passthrough_spis(vm, config, devices)?;
+        assign_passthrough_spis(config, devices)?;
     }
     Ok(())
 }
@@ -136,15 +133,16 @@ fn arch_extra_device_configs(config: &AxVMConfig) -> alloc::vec::Vec<EmulatedDev
     }]
 }
 
-fn assign_passthrough_spis(
-    vm: &AxVM,
-    config: &AxVMConfig,
-    devices: &axdevice::DeviceRuntime,
-) -> AxVmResult {
+fn assign_passthrough_spis(config: &AxVMConfig, devices: &axdevice::DeviceRuntime) -> AxVmResult {
     if config.pass_through_spis().is_empty() {
         return Ok(());
     }
-    let cpu_id = vm.id() - 1; // FIXME: get the real CPU id.
+    let cpu_id = config
+        .phys_cpu_ls
+        .get_vcpu_affinities_pcpu_ids()
+        .first()
+        .map(|(_, _, phys_cpu_id)| *phys_cpu_id)
+        .ok_or_else(|| AxVmError::interrupt("assign passthrough SPI", "missing vCPU placement"))?;
     let Ok(gicd) = devices.services().require::<Aarch64GicDistributorKey>() else {
         // A passthrough-only guest intentionally has no emulated GICD service:
         // its interrupt controller is described by the forwarded host FDT.
@@ -363,4 +361,29 @@ fn nested_paging_config(
     Ok(NestedPagingConfig::new(
         root_paddr, levels, gpa_bits, pa_bits,
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::AxVMConfigParams;
+
+    #[test]
+    fn vcpu_setup_maps_busy_idle_policy_to_wfi_trapping() {
+        let halt_config = config_with_idle_policy(HostVcpuIdlePolicy::Halt);
+        let busy_config = config_with_idle_policy(HostVcpuIdlePolicy::Busy);
+
+        let halt_setup = build_vcpu_setup_config(&halt_config, &[]).unwrap();
+        let busy_setup = build_vcpu_setup_config(&busy_config, &[]).unwrap();
+
+        assert!(!halt_setup.trap_wfi);
+        assert!(busy_setup.trap_wfi);
+    }
+
+    fn config_with_idle_policy(host_vcpu_idle_policy: HostVcpuIdlePolicy) -> AxVMConfig {
+        AxVMConfig::new(AxVMConfigParams {
+            host_vcpu_idle_policy,
+            ..Default::default()
+        })
+    }
 }
