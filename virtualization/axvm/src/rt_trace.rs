@@ -8,10 +8,37 @@ use crate::host::HostTime;
 const CAPACITY: usize = 4096;
 const REPORT_AFTER_GUEST_EXITS: usize = 10000;
 const STREAMS: usize = 32;
-#[cfg(target_arch = "aarch64")]
-const COUNTER_UNIT: &str = "cycles";
-#[cfg(not(target_arch = "aarch64"))]
-const COUNTER_UNIT: &str = "ns";
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct CounterMetadata {
+    unit: &'static str,
+    frequency_hz: u64,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum CounterSource {
+    #[cfg(any(target_arch = "aarch64", test))]
+    Architectural { frequency_hz: u64 },
+    #[cfg(any(not(target_arch = "aarch64"), test))]
+    MonotonicNanoseconds,
+}
+
+impl CounterSource {
+    const fn metadata(self) -> CounterMetadata {
+        match self {
+            #[cfg(any(target_arch = "aarch64", test))]
+            Self::Architectural { frequency_hz } => CounterMetadata {
+                unit: "counter_ticks",
+                frequency_hz,
+            },
+            #[cfg(any(not(target_arch = "aarch64"), test))]
+            Self::MonotonicNanoseconds => CounterMetadata {
+                unit: "ns",
+                frequency_hz: 1_000_000_000,
+            },
+        }
+    }
+}
 
 #[repr(u8)]
 #[derive(Clone, Copy)]
@@ -71,6 +98,21 @@ fn counter() -> u64 {
     #[cfg(not(target_arch = "aarch64"))]
     {
         crate::host::default_host().monotonic_time().as_nanos() as u64
+    }
+}
+
+#[inline]
+fn counter_source() -> CounterSource {
+    #[cfg(target_arch = "aarch64")]
+    {
+        let frequency_hz: u64;
+        unsafe { core::arch::asm!("mrs {0}, CNTFRQ_EL0", out(reg) frequency_hz) };
+        return CounterSource::Architectural { frequency_hz };
+    }
+
+    #[cfg(not(target_arch = "aarch64"))]
+    {
+        CounterSource::MonotonicNanoseconds
     }
 }
 
@@ -173,11 +215,13 @@ fn maybe_report(guest_exits: usize) {
         return;
     }
     let report = report_state();
+    let counter = counter_source().metadata();
     info!(
-        "RTTRACE summary counter_unit={} guest_exits={} external_exits={} host_timer_programs={} \
-         entry_to_exit_ticks={} exit_to_handler_ticks={} handler_to_finish_ticks={} \
-         ring_records={}",
-        COUNTER_UNIT,
+        "RTTRACE summary counter_unit={} counter_frequency_hz={} guest_exits={} external_exits={} \
+         host_timer_programs={} entry_to_exit_ticks={} exit_to_handler_ticks={} \
+         handler_to_finish_ticks={} ring_records={}",
+        counter.unit,
+        counter.frequency_hz,
         report.guest_exits,
         report.external_exits,
         report.host_timer_programs,
@@ -191,6 +235,17 @@ fn maybe_report(guest_exits: usize) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn architectural_counter_reports_ticks_and_frequency() {
+        let metadata = CounterSource::Architectural {
+            frequency_hz: 62_500_000,
+        }
+        .metadata();
+
+        assert_eq!(metadata.unit, "counter_ticks");
+        assert_eq!(metadata.frequency_hz, 62_500_000);
+    }
 
     #[test]
     fn runtime_hooks_update_trace_report_state() {
