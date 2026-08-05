@@ -89,7 +89,7 @@ fn init_vm_with(
             &extra_devices,
             vm.device_access_ports(),
         )?;
-        assign_arch_device_state(resources.config(), devices.devices())?;
+        assign_arch_device_state(vm, resources.config(), devices.devices())?;
         validate_guest_dtb(resources)?;
 
         let owned_regions = guest_owned_regions(resources);
@@ -112,9 +112,13 @@ fn build_vcpu_setup_config(
     })
 }
 
-fn assign_arch_device_state(config: &AxVMConfig, devices: &axdevice::DeviceRuntime) -> AxVmResult {
+fn assign_arch_device_state(
+    vm: &AxVM,
+    config: &AxVMConfig,
+    devices: &axdevice::DeviceRuntime,
+) -> AxVmResult {
     if config.interrupt_mode() == VMInterruptMode::Passthrough {
-        assign_passthrough_spis(config, devices)?;
+        assign_passthrough_spis(vm, config, devices)?;
     }
     Ok(())
 }
@@ -133,16 +137,15 @@ fn arch_extra_device_configs(config: &AxVMConfig) -> alloc::vec::Vec<EmulatedDev
     }]
 }
 
-fn assign_passthrough_spis(config: &AxVMConfig, devices: &axdevice::DeviceRuntime) -> AxVmResult {
+fn assign_passthrough_spis(
+    vm: &AxVM,
+    config: &AxVMConfig,
+    devices: &axdevice::DeviceRuntime,
+) -> AxVmResult {
     if config.pass_through_spis().is_empty() {
         return Ok(());
     }
-    let cpu_id = config
-        .phys_cpu_ls
-        .get_vcpu_affinities_pcpu_ids()
-        .first()
-        .map(|(_, _, phys_cpu_id)| *phys_cpu_id)
-        .ok_or_else(|| AxVmError::interrupt("assign passthrough SPI", "missing vCPU placement"))?;
+    let cpu_id = vm.id() - 1; // FIXME: get the real CPU id.
     let Ok(gicd) = devices.services().require::<Aarch64GicDistributorKey>() else {
         // A passthrough-only guest intentionally has no emulated GICD service:
         // its interrupt controller is described by the forwarded host FDT.
