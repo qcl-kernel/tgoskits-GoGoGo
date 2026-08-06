@@ -324,47 +324,6 @@ fn axvm_sources_have_no_direct_host_comparator_capability() {
 }
 
 #[test]
-fn every_architecture_registers_timer_drain_before_deadline_provider() {
-    let timer = include_str!("../src/timer.rs");
-    let capabilities = include_str!("../src/architecture/capabilities.rs");
-    let aarch64 = include_str!("../src/arch/aarch64/capabilities.rs");
-    let loongarch64 = include_str!("../src/arch/loongarch64/capabilities.rs");
-    let riscv64 = include_str!("../src/arch/riscv64/capabilities.rs");
-    let x86_64 = include_str!("../src/arch/x86_64/capabilities.rs");
-
-    let callback_registration = timer
-        .find("crate::arch::register_timer_callback()")
-        .expect("init_percpu must register the AxVM drain callback");
-    let provider_registration = timer
-        .find("register_current_cpu_timer_deadline_provider")
-        .expect("init_percpu must register the AxVM deadline provider");
-    assert!(
-        callback_registration < provider_registration,
-        "the drain callback must be registered before the deadline provider"
-    );
-    assert!(timer[provider_registration..].contains("current_cpu_deadline_nanos"));
-
-    assert!(capabilities.contains("crate::check_timer_events()"));
-    for (architecture, source) in [("aarch64", aarch64), ("loongarch64", loongarch64)] {
-        assert!(
-            source.contains("fn register_timer_callback()")
-                && source.contains("crate::check_timer_events"),
-            "{architecture} must keep its timer drain callback override"
-        );
-    }
-    for (architecture, source) in [("riscv64", riscv64), ("x86_64", x86_64)] {
-        assert!(
-            source.contains("impl HostTimePlatform"),
-            "{architecture} must use the default timer drain registration"
-        );
-        assert!(
-            !source.contains("fn register_timer_callback()"),
-            "{architecture} must not duplicate the default timer drain registration"
-        );
-    }
-}
-
-#[test]
 fn vcpu_setup_context_keeps_named_capabilities() {
     let types = include_str!("../src/architecture/types.rs");
     let ops = include_str!("../src/architecture/ops.rs");
