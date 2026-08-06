@@ -340,14 +340,16 @@ shared-memory、IVC、vsock、virtio socket、vhost-vsock 均未出现，三个 
 都是有效 Ethernet PCAP。所有 guest 通信从 smoke 到两轮筛选始终只走 virtio-net。
 
 iteration 147 启动了 45 秒同步筛选并完成两条 Linux-to-Zephyr、Linux 间
-TCP/8080 和 `9999/9999` RTBENCH，但同步 collector 在 finalization 前被外部
-controller interrupt。`/tmp/axvisor-timer-broker-iteration-147-trace` 只有原始
+TCP/8080 和 `9999/9999` RTBENCH。保留的执行上下文将该轮记为在同步 collector
+finalization 前中断，但没有保留可独立验证 controller signal 或 exit status 的
+machine-readable artifact。`/tmp/axvisor-timer-broker-iteration-147-trace` 只有原始
 schedstat、console、QMP/map 和 probe，没有 metadata、annotated samples、summary
-或 trace report。因此本轮是 interrupted/invalid screening，不能视为完整同步
-性能结论。CSV 仍按“失败/回退轮不得省略”的规则记录 console 中的事实字段：
+或 trace report。因此可复现处置只基于这些 finalization artifacts 缺失：本轮按
+invalid screening 处置，不能视为完整同步性能结论。CSV 仍按“失败/回退轮不得省略”
+的规则记录 console 中的事实字段：
 p99.9 `0 us`、p99.99 `240240 ns`、maximum `1236 us`、miss `2/1/1`、callback
 max `28960 ns`、tick gap `0/0`；`network_validation=pass` 只表示三条网络 marker
-通过，`candidate_decision=failed_incomplete_synchronized_trace_controller_interrupt`。
+通过，`candidate_decision=failed_incomplete_synchronized_trace_missing_finalization_artifacts`。
 
 iteration 148 复用完全相同的已验证 artifact，并以独立 inode 的专用
 `/tmp/axvisor-timer-broker-iteration-148-rootfs.img` 开始于冻结的 `12cfc...` bytes；
@@ -376,6 +378,9 @@ exits 为 `10000/0`，AxVM deadline publications 为 `18121`，ring 为 `4096`�
 改善 `297232 ns`（`49.934145%`）；maximum 从 `1185` 降至 `357 us`，改善
 `828 us`（`69.873418%`）；miss 从 `8/2/1` 变为 `7/0/0`；但 callback max 从
 `35936` 增至 `43456 ns`，回退 `7520 ns`（`20.926091%`），tick gap 仍为 `0/0`。
+上述结果只是跨不同冻结 build identity 的描述性筛选算术：iteration 146 与 148 的
+ELF/raw 及三份 VM TOML 均不同，不能作为 timer broker/remediation closure 的
+单变量因果归因。
 因此 iteration 148 的 `network_validation=pass`，`candidate_decision` 为
 `screen_pass_single_tcg_repetition_tail_improved_callback_max_regressed_not_physical_acceptance`。
 timer broker、host RAM reservation 和 current-config consumption 修复按 correctness
@@ -383,9 +388,9 @@ timer broker、host RAM reservation 和 current-config consumption 修复按 cor
 或 physical acceptance。
 
 原计划只追加一个 completed row，但 iteration 147 已实际启动并产生 guest output，
-批准规则要求失败/回退运行不得省略，所以报告按证据诚实性先记录 147 的中断无效轮，
-再记录 148 的完整有效轮。CSV 因此恰好追加两行，而不是把 147 的事实输出伪装成
-valid synchronized metrics 或静默丢弃。
+批准规则要求失败/回退运行不得省略，所以报告按证据诚实性先将 147 记为缺少
+finalization artifacts 的无效轮，再记录 148 的完整有效轮。CSV 因此恰好追加两行，
+而不是把 147 的事实输出伪装成 valid synchronized metrics 或静默丢弃。
 
 作为下一轮单变量对照，显式 `tcg,thread=multi` 的第 4 轮完成两条 ICMP、TCP/8080
 和 `9999/9999` callback，最大延迟为 `633 us`，`>100 us/>500 us/>1 ms` miss 为
@@ -789,7 +794,7 @@ passthrough virtio SPI 的真实中断路径可用；原来的 1 ms MMIO 轮询�
 | 143 | 同步采集器预检失败（未进入 benchmark） | NA | NA | NA | NA | NA | NA | NA |
 | 144--145 | SMP3 同步 schedstat/state/wchan 归因 | 9999/9999 | 0/0 us | 0/0 us | 1459/1362 us | 3/8 | 2/6 | 1/3 |
 | 146 | busy-WFI + main-loop 同步筛选（拒绝） | 9999/9999 | 0 us | 0 us | 1185 us | 8 | 2 | 1 |
-| 147 | timer-broker 同步筛选（collector 中断，无效） | 9999/9999 | 0 us | 0 us | 1236 us | 2 | 1 | 1 |
+| 147 | timer-broker 同步筛选（finalization 产物缺失，无效） | 9999/9999 | 0 us | 0 us | 1236 us | 2 | 1 | 1 |
 | 148 | timer-broker 同步筛选（单次 TCG screen pass） | 9999/9999 | 0 us | 0 us | 357 us | 7 | 0 | 0 |
 其中第 87 轮虽完成 RTOS callback，但 Linux 因动态 BusyBox 无 loader 未完成网络启动，
 不计入正式性能比较；第 88--90 轮才是完整 pCPU 3 候选数据。
@@ -851,6 +856,9 @@ Linux-1 到 Linux-2 的 TCP/8080 通信。第 30 轮三个 guest 同时向控制
 迭代趋势图见
 [`rtos-realtime-iterations.png`](./rtos-realtime-iterations.png)，可由
 `plot_rtos_realtime_iterations.py` 从 CSV 重新生成。
+图中仍保留 invalid/rejected 运行的数值型 guest output；折线连接数据点不表示候选
+有效、采纳或验收通过。运行有效性和候选处置必须结合 CSV 的 `candidate_decision`
+与本报告对应叙述判断。
 
 ## 结果解释和限制
 
@@ -975,7 +983,7 @@ affinity 候选、迭代 124 的 QEMU RAM 2 GiB 筛选、迭代 125--127 的 `SC
   候选、6 条 cooperative exit budget64 候选、3 条 QMP 精确 vCPU affinity 候选、
   1 条 QEMU RAM 2 GiB 筛选、3 条 `SCHED_IDLE` 候选、12 条 SMP3 控制/诊断/组合候选、
   3 条新鲜产物 SMP3 确认轮、3 条同步采集/归因记录、1 条 busy-WFI 筛选、1 条
-  collector 中断的无效筛选和 1 条完整 timer-broker remediation 筛选）。其中 iteration
+  缺少 finalization 产物的无效筛选和 1 条完整 timer-broker remediation 筛选）。其中 iteration
   83--86、91--111 的分类计数为
   `1 + 3 + 1 + 3 + 3 + 4 + 3 + 3 + 4 = 25` 条；全部分类合计 149 条。
 - [x] 评估 callback 低扰动统计路径；callback 最大执行时间降至约 `16--25 us`，
@@ -1041,7 +1049,7 @@ affinity 候选、迭代 124 的 QEMU RAM 2 GiB 筛选、迭代 125--127 的 `SC
   漂移，iteration 146 明确拒绝该候选；后续 correctness remediation 使用重新冻结
   且 identity 完整的 artifact 独立筛选。
 - [x] 完成 timer broker、host RAM reservation 和 current-config consumption 的
-  correctness 验证及 safety smoke；iteration 147 因 collector 中断记为无效失败轮，
+  correctness 验证及 safety smoke；iteration 147 因缺少 finalization 产物记为无效失败轮，
   iteration 148 完成单次 TCG screen pass，但不提升为稳定性能或物理验收结论。
 - [ ] 在 KVM/真实硬件上重复实验，建立可用于实时性承诺的测量基线；当前 QEMU
   AArch64 只支持 TCG，x86_64 主机的 `/dev/kvm` 不能提供 AArch64 KVM。
