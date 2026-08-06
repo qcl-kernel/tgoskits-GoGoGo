@@ -126,6 +126,34 @@ for phrase in \
     require_text "$phrase" "$DOC"
 done
 
+qemu_comparison_section="$(awk '
+    $0 == "## QEMU 对照命令（不是实体板命令）" { in_section = 1 }
+    in_section && /^## / && $0 != "## QEMU 对照命令（不是实体板命令）" { exit }
+    in_section { print }
+' "$DOC")"
+
+for required_qemu_argument in \
+    '--config os/axvisor/configs/board/qemu-aarch64-three-guest-net.toml' \
+    '--vmconfigs tmp/vmconfigs/three-guest-net/current/linux-net-1.toml' \
+    '--vmconfigs tmp/vmconfigs/three-guest-net/current/linux-net-2.toml' \
+    '--vmconfigs tmp/vmconfigs/three-guest-net/current/zephyr-net.toml'; do
+    if ! rg -qF -- "$required_qemu_argument" <<<"$qemu_comparison_section"; then
+        printf 'FAIL missing QEMU comparison argument: %s\n' "$required_qemu_argument" >&2
+        exit 1
+    fi
+done
+
+for stale_qemu_argument in \
+    '--config os/axvisor/configs/board/qemu-aarch64.toml' \
+    '--vmconfigs tmp/vmconfigs/three-guest-net/linux-net-1.toml' \
+    '--vmconfigs tmp/vmconfigs/three-guest-net/linux-net-2.toml' \
+    '--vmconfigs tmp/vmconfigs/three-guest-net/zephyr-net.toml'; do
+    if rg -qF -- "$stale_qemu_argument" <<<"$qemu_comparison_section"; then
+        printf 'FAIL stale QEMU comparison argument: %s\n' "$stale_qemu_argument" >&2
+        exit 1
+    fi
+done
+
 maximum_allowance='Axvisor maximum <= bare-metal maximum + max(2 x bare-metal maximum, 50 us)'
 require_text "$maximum_allowance" "$DOC"
 require_text "$maximum_allowance" "$REPORT"

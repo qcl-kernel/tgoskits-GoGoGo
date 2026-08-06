@@ -41,14 +41,15 @@ the validation script before an Axvisor run is attempted.
 
 The two Linux VM configs may use the same AArch64 Linux image because Axvisor
 loads each copy into a different RAM range. The RTOS input is a Zephyr image
-with `virtio-net` and an IP/TCP sample enabled. The repository's existing
-FreeRTOS image is a benchmark without a TCP/IP application and is therefore
-not used as proof of network communication.
+with `virtio-net`, IPv4, ARP, and ICMP echo handling enabled. The checked-in
+guest does not provide a TCP service. The repository's existing FreeRTOS image
+is a benchmark without a network application and is therefore not used as
+proof of network communication.
 
-The setup script accepts an explicit RTOS image path and also supports the
-registry resource `qemu_aarch64_zephyr` when available. It must fail with an
-actionable message if the image is absent instead of silently falling back to
-the benchmark image.
+The setup script accepts an explicit RTOS image path. Without one, it builds
+the checked-in `guests/zephyr-net` application and requires a configured
+`ZEPHYR_BASE` and AArch64 toolchain; it does not fall back to a registry RTOS
+image or the benchmark image.
 
 ## Files
 
@@ -63,8 +64,8 @@ the benchmark image.
 - `scripts/setup_qemu_three_guest_net.sh`: prepares Linux/RTOS images,
   generates memory-mode VM configs, and prints the Axvisor command.
 - `scripts/verify_three_guest_net.sh`: validates TOML invariants and QEMU FDT
-  topology; when supplied with guest logs, it also checks the expected IP
-  addresses and ping/TCP evidence.
+  topology and optionally validates one QEMU host DTB. It does not accept guest
+  logs.
 - `docs/docs/build/axvisor/three-guest-network.md`: user-facing setup, guest
   network commands, and limitations.
 
@@ -78,13 +79,14 @@ the benchmark image.
    three `virtio_mmio` nodes have distinct MMIO ranges and IRQs.
 3. Build Axvisor with all three VM configs and confirm the generated guest FDT
    for each VM contains only its assigned NIC.
-4. Boot the three guests. Configure the static addresses above and verify
-   Linux-1 can ping Linux-2 and Zephyr, Linux-2 can ping Zephyr, and at least
-   one TCP request/reply crosses between Linux and Zephyr.
+4. Boot the three guests and observe the checked-in runtime probes: Linux-1 and
+   Linux-2 each reach Zephyr over ICMP, and Linux-1 reaches Linux-2 over
+   TCP port 8080.
 
 The first three checks are repository-local and runnable without a working
-RTOS image. The final check is reported as unavailable, rather than passing,
-when the required Zephyr network image is not supplied.
+RTOS image. The final check requires a built or explicitly supplied Zephyr
+image and must be judged from the guest console output; the static verifier
+does not consume those logs.
 
 ## Non-Goals
 

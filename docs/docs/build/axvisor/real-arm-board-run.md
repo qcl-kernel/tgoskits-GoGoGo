@@ -204,12 +204,12 @@ bare-metal-level 证据。
 
 ```bash
 cargo xtask axvisor qemu \
-  --config os/axvisor/configs/board/qemu-aarch64.toml \
+  --config os/axvisor/configs/board/qemu-aarch64-three-guest-net.toml \
   --qemu-config os/axvisor/configs/qemu/qemu-aarch64-three-guest-net.toml \
   --rootfs tmp/rootfs.img \
-  --vmconfigs tmp/vmconfigs/three-guest-net/linux-net-1.toml \
-  --vmconfigs tmp/vmconfigs/three-guest-net/linux-net-2.toml \
-  --vmconfigs tmp/vmconfigs/three-guest-net/zephyr-net.toml
+  --vmconfigs tmp/vmconfigs/three-guest-net/current/linux-net-1.toml \
+  --vmconfigs tmp/vmconfigs/three-guest-net/current/linux-net-2.toml \
+  --vmconfigs tmp/vmconfigs/three-guest-net/current/zephyr-net.toml
 ```
 
 该命令依赖文档 [三客户机网络实验](./three-guest-network)，并且 QEMU TOML 明确
