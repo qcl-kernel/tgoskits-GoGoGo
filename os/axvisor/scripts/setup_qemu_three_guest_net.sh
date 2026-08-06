@@ -13,6 +13,7 @@ LINUX_IMAGE_NAME="qemu_aarch64_linux"
 GENERATED_BASE="${REPO_ROOT}/tmp/vmconfigs/three-guest-net"
 GENERATED_ROOT="${GENERATED_BASE}/current"
 QEMU_CONFIG="${AXVISOR_ROOT}/configs/qemu/qemu-aarch64-three-guest-net.toml"
+BOARD_CONFIG="${AXVISOR_ROOT}/configs/board/qemu-aarch64-three-guest-net.toml"
 ROOTFS_TARGET="${REPO_ROOT}/tmp/rootfs.img"
 RTOS_ENTRY_POINT="${AXVISOR_THREE_GUEST_RTOS_ENTRY_POINT:-}"
 RTOS_PCPU="${AXVISOR_THREE_GUEST_RTOS_PCPU:-2}"
@@ -664,6 +665,7 @@ verify_generated_set() {
   local vm_root="$1"
   AXVISOR_THREE_GUEST_VERIFY_VM_ROOT="$vm_root" \
   AXVISOR_THREE_GUEST_VERIFY_QEMU_CONFIG="$QEMU_CONFIG" \
+  AXVISOR_THREE_GUEST_VERIFY_BOARD_CONFIG="$BOARD_CONFIG" \
   AXVISOR_THREE_GUEST_VERIFY_EXPECTED_IDLE_POLICY="$HOST_VCPU_IDLE_POLICY" \
   AXVISOR_THREE_GUEST_VERIFY_TOPOLOGY_ONLY=0 \
     bash "${SCRIPT_DIR}/verify_three_guest_net.sh"
@@ -883,6 +885,7 @@ report_setup_summary() {
   Host timer:  ${HOST_TIMER_POLICY}
   vCPU yield:  ${HOST_VCPU_YIELD}
   vCPU idle:   ${HOST_VCPU_IDLE_POLICY}
+  Board config: ${BOARD_CONFIG}
   Rootfs:       ${ROOTFS_TARGET}
   VM configs:   ${GENERATED_ROOT}
   Manifest:     ${manifest_path}
@@ -890,7 +893,7 @@ report_setup_summary() {
 Run:
   cd ${REPO_ROOT}
   cargo xtask axvisor qemu \\
-    --config os/axvisor/configs/board/qemu-aarch64.toml \\
+    --config os/axvisor/configs/board/qemu-aarch64-three-guest-net.toml \\
     --qemu-config os/axvisor/configs/qemu/qemu-aarch64-three-guest-net.toml \\
     --rootfs ${ROOTFS_TARGET} \\
     --vmconfigs ${GENERATED_ROOT}/linux-net-1.toml \\

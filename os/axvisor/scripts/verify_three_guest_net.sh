@@ -5,6 +5,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 AXVISOR_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 VM_ROOT="${AXVISOR_THREE_GUEST_VERIFY_VM_ROOT:-${AXVISOR_ROOT}/configs/vms/qemu/aarch64}"
 QEMU_CONFIG="${AXVISOR_THREE_GUEST_VERIFY_QEMU_CONFIG:-${AXVISOR_ROOT}/configs/qemu/qemu-aarch64-three-guest-net.toml}"
+BOARD_CONFIG="${AXVISOR_THREE_GUEST_VERIFY_BOARD_CONFIG:-${AXVISOR_ROOT}/configs/board/qemu-aarch64-three-guest-net.toml}"
 EXPECTED_IDLE_POLICY="${AXVISOR_THREE_GUEST_VERIFY_EXPECTED_IDLE_POLICY:-halt}"
 TOPOLOGY_ONLY="${AXVISOR_THREE_GUEST_VERIFY_TOPOLOGY_ONLY:-0}"
 
@@ -34,7 +35,7 @@ command -v python3 >/dev/null 2>&1 \
 python3 -c 'import tomllib' >/dev/null 2>&1 \
   || fail "python3 tomllib is required for structured topology validation"
 
-python3 - "$VM_ROOT" "$QEMU_CONFIG" "$EXPECTED_IDLE_POLICY" <<'PY'
+python3 - "$BOARD_CONFIG" "$VM_ROOT" "$QEMU_CONFIG" "$EXPECTED_IDLE_POLICY" <<'PY'
 import pathlib
 import re
 import sys
@@ -100,15 +101,40 @@ def require(condition, message):
         raise ConfigError(message)
 
 
-vm_root = pathlib.Path(sys.argv[1])
-qemu_path = pathlib.Path(sys.argv[2])
-expected_idle_policy = sys.argv[3]
+reservation_feature = "qemu-aarch64-three-guest-net"
+board_path = pathlib.Path(sys.argv[1])
+vm_root = pathlib.Path(sys.argv[2])
+qemu_path = pathlib.Path(sys.argv[3])
+expected_idle_policy = sys.argv[4]
 specifications = (
     ("linux-net-1.toml", 1, 0x80000000, "/virtio_mmio@a000000", 0),
     ("linux-net-2.toml", 2, 0x90000000, "/virtio_mmio@a000200", 1),
     ("zephyr-net.toml", 3, 0xA0000000, "/virtio_mmio@a000400", 2),
 )
 documents = {}
+
+board = load(board_path)
+board_features = board.get("features")
+require(
+    isinstance(board_features, list)
+    and all(isinstance(feature, str) for feature in board_features),
+    f"board features must be an array of strings ({board_path})",
+)
+qualified_reservation_features = [
+    feature
+    for feature in board_features
+    if feature != reservation_feature
+    and feature.rsplit("/", 1)[-1] == reservation_feature
+]
+require(
+    not qualified_reservation_features,
+    f"board must not use dependency-qualified {reservation_feature} features: "
+    f"{qualified_reservation_features} ({board_path})",
+)
+require(
+    board_features.count(reservation_feature) == 1,
+    f"board must contain the bare {reservation_feature} feature exactly once ({board_path})",
+)
 
 for filename, vm_id, ram_start, nic, pcpu in specifications:
     path = vm_root / filename

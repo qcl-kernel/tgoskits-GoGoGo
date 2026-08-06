@@ -7,6 +7,7 @@ CMAKE_SOURCE="${SCRIPT_DIR}/../guests/zephyr-net/CMakeLists.txt"
 SETUP_SOURCE="${SCRIPT_DIR}/setup_qemu_three_guest_net.sh"
 AXVISOR_CONFIG_SOURCE="${SCRIPT_DIR}/../src/config.rs"
 ZEPHYR_VM_CONFIG="${SCRIPT_DIR}/../configs/vms/qemu/aarch64/zephyr-net.toml"
+GENERIC_BOARD_CONFIG="${SCRIPT_DIR}/../configs/board/qemu-aarch64.toml"
 
 require_source() {
   local pattern="$1"
@@ -571,21 +572,78 @@ rg -q --fixed-strings 'immutable run A rootfs' "${rootfs_atomic_root}/target.img
 topology_fixture_root="${functional_root}/topology-fixture"
 topology_vm_root="${topology_fixture_root}/vms"
 topology_qemu_config="${topology_fixture_root}/qemu.toml"
+topology_board_config="${topology_fixture_root}/board.toml"
 mkdir -p "$topology_vm_root"
 cp "${SCRIPT_DIR}/../configs/vms/qemu/aarch64/linux-net-1.toml" "$topology_vm_root/"
 cp "${SCRIPT_DIR}/../configs/vms/qemu/aarch64/linux-net-2.toml" "$topology_vm_root/"
 cp "${SCRIPT_DIR}/../configs/vms/qemu/aarch64/zephyr-net.toml" "$topology_vm_root/"
 cp "${SCRIPT_DIR}/../configs/qemu/qemu-aarch64-three-guest-net.toml" "$topology_qemu_config"
+printf '%s\n' \
+  'features = ["ax-driver/nvme", "fs", "qemu-aarch64-three-guest-net"]' \
+  'log = "Info"' \
+  'target = "aarch64-unknown-none-softfloat"' \
+  'vm_configs = []' \
+  >"$topology_board_config"
 
 run_topology_fixture() {
   local vm_root="$1"
   local qemu_config="$2"
+  local board_config="${3:-$topology_board_config}"
   AXVISOR_THREE_GUEST_VERIFY_VM_ROOT="$vm_root" \
   AXVISOR_THREE_GUEST_VERIFY_QEMU_CONFIG="$qemu_config" \
+  AXVISOR_THREE_GUEST_VERIFY_BOARD_CONFIG="$board_config" \
   AXVISOR_THREE_GUEST_VERIFY_EXPECTED_IDLE_POLICY=halt \
   AXVISOR_THREE_GUEST_VERIFY_TOPOLOGY_ONLY=1 \
     bash "${SCRIPT_DIR}/verify_three_guest_net.sh"
 }
+
+python3 - "$GENERIC_BOARD_CONFIG" <<'PY' \
+  || fail_test "generic QEMU board unexpectedly reserves three-guest host RAM"
+import pathlib
+import sys
+import tomllib
+
+board = tomllib.loads(pathlib.Path(sys.argv[1]).read_text())
+features = board.get("features")
+assert isinstance(features, list) and all(isinstance(feature, str) for feature in features)
+assert "qemu-aarch64-three-guest-net" not in features
+PY
+
+for invalid_board_case in missing dependency-qualified duplicate; do
+  invalid_board_root="${functional_root}/topology-board-${invalid_board_case}"
+  cp -a "$topology_fixture_root" "$invalid_board_root"
+  python3 - "${invalid_board_root}/board.toml" "$invalid_board_case" <<'PY'
+import pathlib
+import sys
+
+path = pathlib.Path(sys.argv[1])
+case = sys.argv[2]
+text = path.read_text()
+feature = '"qemu-aarch64-three-guest-net"'
+if case == "missing":
+    replacement = ""
+elif case == "dependency-qualified":
+    replacement = '"axplat-dyn/qemu-aarch64-three-guest-net"'
+elif case == "duplicate":
+    replacement = f"{feature}, {feature}"
+else:
+    raise AssertionError(f"unexpected invalid board fixture case: {case}")
+path.write_text(text.replace(feature, replacement, 1))
+PY
+  set +e
+  invalid_board_error="$(
+    run_topology_fixture \
+      "${invalid_board_root}/vms" \
+      "${invalid_board_root}/qemu.toml" \
+      "${invalid_board_root}/board.toml" 2>&1
+  )"
+  invalid_board_status=$?
+  set -e
+  [ "$invalid_board_status" -ne 0 ] \
+    || fail_test "${invalid_board_case} three-guest board reservation feature was accepted"
+  printf '%s\n' "$invalid_board_error" | rg -q 'qemu-aarch64-three-guest-net' \
+    || fail_test "${invalid_board_case} board reservation failure lacked a contextual diagnostic"
+done
 
 for topology_input in "$topology_vm_root"/*.toml "$topology_qemu_config"; do
   printf '%s\n' \
@@ -1175,6 +1233,9 @@ printf '%s\n' "$halt_a_output" | rg -q --fixed-strings "Linux kernel: ${switch_r
   || fail_test "setup summary did not expose the current immutable Linux kernel path"
 printf '%s\n' "$halt_a_output" | rg -q --fixed-strings "RTOS kernel:  ${switch_root}/published/current/rtos-kernel" \
   || fail_test "setup summary did not expose the current immutable RTOS kernel path"
+printf '%s\n' "$halt_a_output" \
+  | rg -q --fixed-strings -- '--config os/axvisor/configs/board/qemu-aarch64-three-guest-net.toml' \
+  || fail_test "setup command did not select the dedicated three-guest board"
 
 run_complete_publication_fixture "$switch_root" "" busy >/dev/null \
   || fail_test "busy immutable publication failed"
