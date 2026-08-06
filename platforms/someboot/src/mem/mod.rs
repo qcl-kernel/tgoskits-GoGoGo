@@ -301,12 +301,14 @@ fn apply_early_reserved_ranges(map: &mut MemoryMap, ranges: &[Range<usize>]) {
         }
     }
 
+    let mut updated = map.clone();
     for range in ranges {
         let desc = MemoryDescriptor::new_with_range(range.clone(), MemoryType::Reserved);
-        map.merge_add(desc).unwrap_or_else(|err| {
+        updated.merge_add(desc).unwrap_or_else(|err| {
             panic!("failed to add early reserved range {range:#x?}: {err:?}")
         });
     }
+    *map = updated;
 }
 
 /// Get the physical range of the kernel image
@@ -371,6 +373,10 @@ pub fn kernel_space() -> Range<usize> {
 
 #[cfg(test)]
 mod tests {
+    extern crate std;
+
+    use std::panic::{AssertUnwindSafe, catch_unwind};
+
     use super::*;
 
     fn memory_map_with(range: Range<usize>, memory_type: MemoryType) -> MemoryMap {
@@ -548,6 +554,49 @@ mod tests {
         .unwrap();
 
         apply_early_reserved_ranges(&mut map, &[0x8000_0000..0xb000_0000]);
+    }
+
+    #[test]
+    fn early_reservation_capacity_failure_leaves_map_unchanged() {
+        let mut map = memory_map_with(0x4000_0000..0x2_4000_0000, MemoryType::Free);
+        for index in 0..MEMORY_MAP_CAPACITY - 1 {
+            let start = index * 0x2000;
+            map.push(MemoryDescriptor::new_with_range(
+                start..start + 0x1000,
+                MemoryType::Reserved,
+            ))
+            .unwrap();
+        }
+        assert_eq!(map.len(), MEMORY_MAP_CAPACITY);
+        let original = map.clone();
+
+        let result = catch_unwind(AssertUnwindSafe(|| {
+            apply_early_reserved_ranges(&mut map, &[0x8000_0000..0xb000_0000]);
+        }));
+
+        assert!(result.is_err());
+        assert_eq!(map, original);
+    }
+
+    #[test]
+    fn early_reservation_applies_two_disjoint_ranges() {
+        let mut map = memory_map_with(0x4000_0000..0x1_4000_0000, MemoryType::Free);
+
+        apply_early_reserved_ranges(
+            &mut map,
+            &[0x8000_0000..0x9000_0000, 0xa000_0000..0xb000_0000],
+        );
+
+        assert_memory_types(
+            &mut map,
+            &[
+                (0x4000_0000..0x8000_0000, MemoryType::Free),
+                (0x8000_0000..0x9000_0000, MemoryType::Reserved),
+                (0x9000_0000..0xa000_0000, MemoryType::Free),
+                (0xa000_0000..0xb000_0000, MemoryType::Reserved),
+                (0xb000_0000..0x1_4000_0000, MemoryType::Free),
+            ],
+        );
     }
 
     #[test]

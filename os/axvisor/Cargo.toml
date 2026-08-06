@@ -60,6 +60,7 @@ backtrace = ["ax-std/backtrace", "dep:axbacktrace"]
 test-backtrace-panic = ["backtrace"]
 test-panic-no-backtrace = ["dep:axbacktrace"]
 rt-trace = ["axvm/rt-trace"]
+qemu-aarch64-three-guest-net = ["axplat-dyn/qemu-aarch64-three-guest-net"]
 
 [dependencies]
 spin = { workspace = true }
