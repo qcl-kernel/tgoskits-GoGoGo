@@ -29,6 +29,9 @@ static mut KIMAGE_END: PhysAddr = PhysAddr::new(0);
 
 const MEMORY_MAP_CAPACITY: usize = 512;
 
+#[cfg(all(target_arch = "aarch64", feature = "qemu-aarch64-three-guest-net"))]
+const QEMU_AARCH64_THREE_GUEST_RAM: Range<usize> = 0x8000_0000..0xb000_0000;
+
 pub type MemoryMap = heapless::Vec<MemoryDescriptor, MEMORY_MAP_CAPACITY>;
 
 pub(crate) fn setup_entry(
@@ -209,6 +212,13 @@ pub(crate) fn early_init() {
 }
 
 fn reserve_arch_early_ranges() {
+    #[cfg(all(target_arch = "aarch64", feature = "qemu-aarch64-three-guest-net"))]
+    unsafe {
+        MEMORY_MAP.update(|map| {
+            apply_early_reserved_ranges(map, &[QEMU_AARCH64_THREE_GUEST_RAM]);
+        });
+    }
+
     #[cfg(target_arch = "x86_64")]
     {
         // AP trampoline lives in low memory and must stay reserved.
@@ -224,6 +234,79 @@ fn reserve_arch_early_ranges() {
             }
             Err(err) => panic!("failed to reserve x86 AP trampoline: {err:?}"),
         }
+    }
+}
+
+#[cfg(any(
+    test,
+    all(target_arch = "aarch64", feature = "qemu-aarch64-three-guest-net")
+))]
+fn apply_early_reserved_ranges(map: &mut MemoryMap, ranges: &[Range<usize>]) {
+    const ALIGNMENT: usize = 4 * KB;
+
+    for (index, range) in ranges.iter().enumerate() {
+        let size = range.end.checked_sub(range.start).unwrap_or_else(|| {
+            panic!("invalid early reserved range {range:#x?}: expected non-empty ordered range")
+        });
+        assert!(
+            size != 0,
+            "invalid early reserved range {range:#x?}: expected non-empty ordered range"
+        );
+        assert!(
+            range.start.is_multiple_of(ALIGNMENT) && range.end.is_multiple_of(ALIGNMENT),
+            "invalid early reserved range {range:#x?}: start and end must be 4 KiB aligned"
+        );
+
+        for previous in &ranges[..index] {
+            assert!(
+                range.start >= previous.end || range.end <= previous.start,
+                "invalid early reserved range {range:#x?}: requested ranges overlap {previous:#x?}"
+            );
+        }
+
+        let mut contained_in_free = false;
+        let mut non_free_overlap = None;
+        for desc in map.iter() {
+            let desc_end = desc
+                .physical_start
+                .checked_add(desc.size_in_bytes)
+                .unwrap_or_else(|| {
+                    panic!(
+                        "cannot validate early reserved range {range:#x?}: memory descriptor \
+                         overflows: {desc:?}"
+                    )
+                });
+            if desc.memory_type == MemoryType::Free
+                && desc.physical_start <= range.start
+                && range.end <= desc_end
+            {
+                contained_in_free = true;
+                break;
+            }
+            if desc.memory_type != MemoryType::Free
+                && range.start < desc_end
+                && range.end > desc.physical_start
+            {
+                non_free_overlap = Some((desc.memory_type, desc.physical_start..desc_end));
+            }
+        }
+
+        if !contained_in_free {
+            if let Some((memory_type, existing)) = non_free_overlap {
+                panic!(
+                    "invalid early reserved range {range:#x?}: overlaps {memory_type:?} \
+                     descriptor {existing:#x?}"
+                );
+            }
+            panic!("invalid early reserved range {range:#x?}: outside FREE RAM");
+        }
+    }
+
+    for range in ranges {
+        let desc = MemoryDescriptor::new_with_range(range.clone(), MemoryType::Reserved);
+        map.merge_add(desc).unwrap_or_else(|err| {
+            panic!("failed to add early reserved range {range:#x?}: {err:?}")
+        });
     }
 }
 
@@ -291,6 +374,27 @@ pub fn kernel_space() -> Range<usize> {
 mod tests {
     use super::*;
 
+    fn memory_map_with(range: Range<usize>, memory_type: MemoryType) -> MemoryMap {
+        let mut map = MemoryMap::new();
+        map.merge_add(MemoryDescriptor::new_with_range(range, memory_type))
+            .unwrap();
+        map
+    }
+
+    fn assert_memory_types(map: &mut MemoryMap, expected: &[(Range<usize>, MemoryType)]) {
+        map.sort_by_key(|desc| desc.physical_start);
+        let actual: heapless::Vec<_, MEMORY_MAP_CAPACITY> = map
+            .iter()
+            .map(|desc| {
+                (
+                    desc.physical_start..desc.physical_start + desc.size_in_bytes,
+                    desc.memory_type,
+                )
+            })
+            .collect();
+        assert_eq!(actual.as_slice(), expected);
+    }
+
     #[test]
     fn cache_line_range_covers_unaligned_buffer() {
         assert_eq!(cache_line_range(0x1003, 1, 64), Some((0x1000, 0x1004)));
@@ -303,6 +407,103 @@ mod tests {
         assert_eq!(cache_line_range(0x1000, 1, 0), None);
         assert_eq!(cache_line_range(0x1000, 1, 63), None);
         assert_eq!(cache_line_range(usize::MAX, 2, 64), None);
+    }
+
+    #[test]
+    fn qemu_aarch64_three_guest_reservation_splits_free_ram() {
+        let mut map = memory_map_with(0x4000_0000..0x2_4000_0000, MemoryType::Free);
+
+        apply_early_reserved_ranges(&mut map, &[0x8000_0000..0xb000_0000]);
+
+        assert_memory_types(
+            &mut map,
+            &[
+                (0x4000_0000..0x8000_0000, MemoryType::Free),
+                (0x8000_0000..0xb000_0000, MemoryType::Reserved),
+                (0xb000_0000..0x2_4000_0000, MemoryType::Free),
+            ],
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "outside FREE RAM")]
+    fn qemu_aarch64_three_guest_reservation_rejects_too_small_ram() {
+        let mut map = memory_map_with(0x4000_0000..0x9000_0000, MemoryType::Free);
+        apply_early_reserved_ranges(&mut map, &[0x8000_0000..0xb000_0000]);
+    }
+
+    #[test]
+    #[should_panic(expected = "4 KiB aligned")]
+    fn qemu_aarch64_three_guest_reservation_rejects_misaligned_start() {
+        let mut map = memory_map_with(0x4000_0000..0x2_4000_0000, MemoryType::Free);
+        apply_early_reserved_ranges(&mut map, &[0x8000_0001..0xb000_0000]);
+    }
+
+    #[test]
+    #[should_panic(expected = "4 KiB aligned")]
+    fn qemu_aarch64_three_guest_reservation_rejects_misaligned_end() {
+        let mut map = memory_map_with(0x4000_0000..0x2_4000_0000, MemoryType::Free);
+        apply_early_reserved_ranges(&mut map, &[0x8000_0000..0xafff_ffff]);
+    }
+
+    #[test]
+    #[should_panic(expected = "non-empty ordered range")]
+    fn qemu_aarch64_three_guest_reservation_rejects_empty_range() {
+        let mut map = memory_map_with(0x4000_0000..0x2_4000_0000, MemoryType::Free);
+        apply_early_reserved_ranges(&mut map, &[0x8000_0000..0x8000_0000]);
+    }
+
+    #[test]
+    #[should_panic(expected = "non-empty ordered range")]
+    fn qemu_aarch64_three_guest_reservation_rejects_reversed_range() {
+        let mut map = memory_map_with(0x4000_0000..0x2_4000_0000, MemoryType::Free);
+        apply_early_reserved_ranges(&mut map, &[0xb000_0000..0x8000_0000]);
+    }
+
+    #[test]
+    #[should_panic(expected = "overlaps KImage")]
+    fn qemu_aarch64_three_guest_reservation_rejects_kimage_overlap() {
+        let mut map = memory_map_with(0x4000_0000..0x2_4000_0000, MemoryType::Free);
+        map.merge_add(MemoryDescriptor::new_with_range(
+            0x9000_0000..0x9100_0000,
+            MemoryType::KImage,
+        ))
+        .unwrap();
+        apply_early_reserved_ranges(&mut map, &[0x8000_0000..0xb000_0000]);
+    }
+
+    #[test]
+    #[should_panic(expected = "overlaps Reserved")]
+    fn qemu_aarch64_three_guest_reservation_rejects_firmware_reservation_overlap() {
+        let mut map = memory_map_with(0x4000_0000..0x2_4000_0000, MemoryType::Free);
+        map.merge_add(MemoryDescriptor::new_with_range(
+            0x9000_0000..0x9100_0000,
+            MemoryType::Reserved,
+        ))
+        .unwrap();
+        apply_early_reserved_ranges(&mut map, &[0x8000_0000..0xb000_0000]);
+    }
+
+    #[test]
+    #[should_panic(expected = "overlaps Mmio")]
+    fn qemu_aarch64_three_guest_reservation_rejects_other_non_free_overlap() {
+        let mut map = memory_map_with(0x4000_0000..0x2_4000_0000, MemoryType::Free);
+        map.merge_add(MemoryDescriptor::new_with_range(
+            0x9000_0000..0x9100_0000,
+            MemoryType::Mmio,
+        ))
+        .unwrap();
+        apply_early_reserved_ranges(&mut map, &[0x8000_0000..0xb000_0000]);
+    }
+
+    #[test]
+    #[should_panic(expected = "requested ranges overlap")]
+    fn qemu_aarch64_three_guest_reservation_rejects_requested_range_overlap() {
+        let mut map = memory_map_with(0x4000_0000..0x2_4000_0000, MemoryType::Free);
+        apply_early_reserved_ranges(
+            &mut map,
+            &[0x8000_0000..0xa000_0000, 0x9000_0000..0xb000_0000],
+        );
     }
 }
 
