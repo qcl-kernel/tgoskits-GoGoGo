@@ -281,7 +281,6 @@ fn apply_early_reserved_ranges(map: &mut MemoryMap, ranges: &[Range<usize>]) {
                 && range.end <= desc_end
             {
                 contained_in_free = true;
-                break;
             }
             if desc.memory_type != MemoryType::Free
                 && range.start < desc_end
@@ -291,13 +290,13 @@ fn apply_early_reserved_ranges(map: &mut MemoryMap, ranges: &[Range<usize>]) {
             }
         }
 
+        if let Some((memory_type, existing)) = non_free_overlap {
+            panic!(
+                "invalid early reserved range {range:#x?}: overlaps {memory_type:?} descriptor \
+                 {existing:#x?}"
+            );
+        }
         if !contained_in_free {
-            if let Some((memory_type, existing)) = non_free_overlap {
-                panic!(
-                    "invalid early reserved range {range:#x?}: overlaps {memory_type:?} \
-                     descriptor {existing:#x?}"
-                );
-            }
             panic!("invalid early reserved range {range:#x?}: outside FREE RAM");
         }
     }
@@ -493,6 +492,61 @@ mod tests {
             MemoryType::Mmio,
         ))
         .unwrap();
+        apply_early_reserved_ranges(&mut map, &[0x8000_0000..0xb000_0000]);
+    }
+
+    #[test]
+    #[should_panic(expected = "overlaps Reserved")]
+    fn early_reservation_scans_later_reserved_descriptor_after_containing_free() {
+        let mut map = MemoryMap::new();
+        map.push(MemoryDescriptor::new_with_range(
+            0x4000_0000..0x2_4000_0000,
+            MemoryType::Free,
+        ))
+        .unwrap();
+        map.push(MemoryDescriptor::new_with_range(
+            0x9000_0000..0x9100_0000,
+            MemoryType::Reserved,
+        ))
+        .unwrap();
+
+        apply_early_reserved_ranges(&mut map, &[0x8000_0000..0xb000_0000]);
+    }
+
+    #[test]
+    #[should_panic(expected = "overlaps KImage")]
+    fn early_reservation_scans_later_kimage_descriptor_after_containing_free() {
+        let mut map = MemoryMap::new();
+        map.push(MemoryDescriptor::new_with_range(
+            0x4000_0000..0x2_4000_0000,
+            MemoryType::Free,
+        ))
+        .unwrap();
+        map.push(MemoryDescriptor::new_with_range(
+            0x9000_0000..0x9100_0000,
+            MemoryType::KImage,
+        ))
+        .unwrap();
+
+        apply_early_reserved_ranges(&mut map, &[0x8000_0000..0xb000_0000]);
+    }
+
+    #[test]
+    #[should_panic(expected = "memory descriptor overflows")]
+    fn early_reservation_scans_later_overflowing_descriptor_after_containing_free() {
+        let mut map = MemoryMap::new();
+        map.push(MemoryDescriptor::new_with_range(
+            0x4000_0000..0x2_4000_0000,
+            MemoryType::Free,
+        ))
+        .unwrap();
+        map.push(MemoryDescriptor {
+            physical_start: usize::MAX - 0xfff,
+            size_in_bytes: 0x2000,
+            memory_type: MemoryType::Reserved,
+        })
+        .unwrap();
+
         apply_early_reserved_ranges(&mut map, &[0x8000_0000..0xb000_0000]);
     }
 
