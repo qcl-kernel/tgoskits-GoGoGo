@@ -2,9 +2,9 @@
 
 ## 结论
 
-截至 `2026-08-05`，same-board bare-metal acceptance 的目标是
+截至 `2026-08-07`，same-board bare-metal acceptance 的目标是
 `board=orangepi-5-plus`，当前状态为外部硬件/资产 `BLOCKED`，不是实时性优化
-完成。当前没有真实板测量，CSV/PNG 保持不变；下述 QEMU 结果不能解除该阻塞。
+完成。当前没有真实板测量；CSV/PNG 新增的 QEMU TCG 筛选结果不能解除该阻塞。
 
 本轮迭代确认并修复了 RTOS 定时器完全不工作的配置问题：Axvisor 将
 Zephyr guest 放在 EL1 Non-secure，但 Zephyr 未按 Non-secure GIC 模型配置
@@ -290,6 +290,103 @@ map、sampled-thread map、raw/annotated samples、summary 和 metadata 分别�
 `/tmp/axvisor-busy-wfi-iteration-146.log` 及
 `/tmp/axvisor-busy-wfi-iteration-146-trace`；本轮没有覆盖或复用旧证据路径。
 
+### 迭代 147--148：timer-broker remediation 筛选
+
+本轮在 clean archive
+`/tmp/axvisor-timer-broker-iteration-147-archive.y9NvYf` 上完成 correctness remediation
+验证。归档源 SHA 为 `cc1c3a3ad176090261a7c18cb3218868d7bbb82e`，source tree 为
+`de3393c9b491d5f8d77a23236c1267cd3c03e8d2`；生成目录的 `current` 是相对链接
+`run.kw8nkU`，且同级只有这一个 `run.*` 目录。host matrix 全部通过：
+`cargo fmt --check`；axvmconfig `25`、arm_vcpu `6`、axvm host-test `197`、
+ax-runtime host-test `7`、ax-task `26`，Rust 合计 `261 passed, 0 failed`；precision
+source contract、affinity executable artifact contract、validator shell syntax 均通过；
+plot tests `11`、report tests `10`。
+
+冻结输入为 Linux
+`d8127a4ce952ae9bfa539d3535260b8d67973b766e51a3de0b97b526bfd6722c`、Zephyr
+`31fc218ab1c2b4d8e4395eee19bf387a76a28800f664c3189a2236342b18dfe2`
+（entry `0xa0001114`）、BusyBox
+`52862c3b1a80652dd255f90a06960b1e03c5d58805f473c78bc8855c5eabb060` 和 rootfs
+source `12cfc9f42549199d57ca67b6fc49fc701ff041efd6cdbcb390094edda8ef6f20`
+（`33554432` bytes）。QEMU `11.0.2` executable 为 `118351784` bytes，SHA-256
+`84630fc116fb9c7cc665e329b7f7c071469a0dc356ed541630d37a91baa36956`；宿主为
+x86_64 Linux `6.17.0-40-generic`，32 个 CPU governor 均为 `powersave`。
+
+board 为 `qemu-aarch64-three-guest-net-rt-trace.toml`，大小 `170` bytes，SHA-256
+`7ced0368c8b8a98e99f46de0385415d83c126087fd064d793cc71f16ab043540`；features
+严格为 `ax-driver/nvme, fs, rt-trace, qemu-aarch64-three-guest-net`，没有
+`preempt`。release ELF/raw 分别为 `58356560`/`56725552` bytes，SHA-256 为
+`915a53c1ae62f927926f70060b4548b0c65c8fbd2e00b4be8f8ed0b5fc2ab5d0`/
+`467d745f0093a2741804810da1c6acb0fc0128b9a1e3503f245840e8c87a817a`。
+build manifest 为 `925` bytes、SHA-256
+`e8a4e0cb5b15eba2aee5fe6d8d4b6463977c742740120b7c6705fa09e1130fb7`；setup
+manifest 为 `1728` bytes、SHA-256
+`96852c75745d55531c9844db60f0619279f5fab5ba2aa8b7c5b6ee4eeb8d7160`。
+Linux-1/Linux-2/Zephyr TOML 分别为 `934/934/796` bytes，SHA-256 为
+`5f5c533aab3d2ace955a8c09883a7bf70c379e117e07c2b70b66e3356c6cd45b`、
+`43f7eb26b724bff4c364c3c720fb819e9747508e5ebcee67d6db296fcfc84270`、
+`3ba6e33198cafa139948350f4464ae2fc911fa4b0439803ac4587c27f8e33e64`。
+两轮 runner sidecar 都与 build manifest byte-identical；启动策略严格为两个
+`Periodic,false,Halt` 和一个 `Tickless,true,Busy`。
+
+正式筛选前的 45 秒 safety smoke 保留在
+`/tmp/axvisor-timer-broker-iteration-147-smoke.log`。它确认 host RAM reservation
+恰有一个精确的 `[0x80000000,0xb0000000)` 区间，buddy 初始化区间为
+`[0xb0000000,0x240000000)`，追加区间为 `[0x40000000,0x40200000)` 和
+`[0x43bd5000,0x80000000)`，所有 allocator 区间在数学上互不相交。三条网络 marker
+及 `9999/9999` callback 全部通过，tick gap `0/0`，maximum `606 us`，miss
+`2/1/0`，callback max `31808 ns`。QEMU hub 77 上恰有三个 virtio-net NIC；
+shared-memory、IVC、vsock、virtio socket、vhost-vsock 均未出现，三个 sidecar
+都是有效 Ethernet PCAP。所有 guest 通信从 smoke 到两轮筛选始终只走 virtio-net。
+
+iteration 147 启动了 45 秒同步筛选并完成两条 Linux-to-Zephyr、Linux 间
+TCP/8080 和 `9999/9999` RTBENCH，但同步 collector 在 finalization 前被外部
+controller interrupt。`/tmp/axvisor-timer-broker-iteration-147-trace` 只有原始
+schedstat、console、QMP/map 和 probe，没有 metadata、annotated samples、summary
+或 trace report。因此本轮是 interrupted/invalid screening，不能视为完整同步
+性能结论。CSV 仍按“失败/回退轮不得省略”的规则记录 console 中的事实字段：
+p99.9 `0 us`、p99.99 `240240 ns`、maximum `1236 us`、miss `2/1/1`、callback
+max `28960 ns`、tick gap `0/0`；`network_validation=pass` 只表示三条网络 marker
+通过，`candidate_decision=failed_incomplete_synchronized_trace_controller_interrupt`。
+
+iteration 148 复用完全相同的已验证 artifact，并以独立 inode 的专用
+`/tmp/axvisor-timer-broker-iteration-148-rootfs.img` 开始于冻结的 `12cfc...` bytes；
+运行后该副本变为
+`44ad9ec8276bac5b200313ad1698be9efed9a8bd6b915611ee0a077056c732f8`，冻结 source
+保持不变。完整 45 秒 collector 使用 `CLOCK_MONOTONIC_RAW` 和 `500 us` 目标周期，
+wall duration 为 `45009008678 ns`，产出 `360004` 行且无负/倒退 delta。main-loop
+及三个 vCPU 各有 `90001` samples；main-loop、vCPU0、vCPU1、RTOS vCPU2 的最大
+run delay 分别为 `1776768/15230/984965/39790 ns`。RTOS vCPU2 状态为
+`R=88613`、`S=1388`，其中 `futex_do_wait=1377`；QMP/affinity 只映射出三个唯一、
+unbound、`SCHED_OTHER` 的 vCPU TID。network、policy、reservation、allocator gate
+全部通过。可选 QEMU log trace backend 为 `unavailable/no_trace_file`，但 schedstat、
+QMP、metadata 均完整，不影响本轮同步筛选有效性。
+
+guest RTBENCH 为 p99.9 `0 us`、p99.99 `298016 ns`、maximum `357 us`、miss
+`7/0/0`、callback max `43456 ns`、tick gap `0/0`。IRQ 记录为 entries/callbacks
+`10000/10000`、overflow `9744`、entry-to-callback max `177520 ns`、entry 时
+overdue max `606640 ns`；overdue sample/compare/entry 为
+`531/34943750/34981665`，trace start/report 为 `1687231/626841344`，last
+CTL/CVAL 为 `0x05/626693750`。RTTRACE frequency 为 `62500000`，guest/external
+exits 为 `10000/0`，AxVM deadline publications 为 `18121`，ring 为 `4096`；
+`entry_to_exit_ticks=18446744073664825956 = 2^64 - 44725660` 是无符号下溢/回绕，
+不是可信 latency，`exit_to_handler_ticks` 和 `handler_to_finish_ticks` 均为 `0`。
+
+与 iteration 146 相比：p99.9 保持 `0 us`；p99.99 从 `595248` 降至 `298016 ns`，
+改善 `297232 ns`（`49.934145%`）；maximum 从 `1185` 降至 `357 us`，改善
+`828 us`（`69.873418%`）；miss 从 `8/2/1` 变为 `7/0/0`；但 callback max 从
+`35936` 增至 `43456 ns`，回退 `7520 ns`（`20.926091%`），tick gap 仍为 `0/0`。
+因此 iteration 148 的 `network_validation=pass`，`candidate_decision` 为
+`screen_pass_single_tcg_repetition_tail_improved_callback_max_regressed_not_physical_acceptance`。
+timer broker、host RAM reservation 和 current-config consumption 修复按 correctness
+证据继续接受；单次 QEMU TCG screening 不证明稳定性能收益、优秀实时性、裸机等价
+或 physical acceptance。
+
+原计划只追加一个 completed row，但 iteration 147 已实际启动并产生 guest output，
+批准规则要求失败/回退运行不得省略，所以报告按证据诚实性先记录 147 的中断无效轮，
+再记录 148 的完整有效轮。CSV 因此恰好追加两行，而不是把 147 的事实输出伪装成
+valid synchronized metrics 或静默丢弃。
+
 作为下一轮单变量对照，显式 `tcg,thread=multi` 的第 4 轮完成两条 ICMP、TCP/8080
 和 `9999/9999` callback，最大延迟为 `633 us`，`>100 us/>500 us/>1 ms` miss 为
 `1/1/0`。它没有稳定优于正式 no-poll 基线的 `515/307/84 us`，因此候选拒绝，正式
@@ -454,7 +551,7 @@ console 的 smoke 得到 `2729 us`，因没有原始日志不写入 CSV；正式
 
 ## Same-board bare-metal acceptance 状态
 
-记录日期为 `2026-08-05`，目标为 `board=orangepi-5-plus`。在当前没有设置任何
+记录日期为 `2026-08-07`，目标为 `board=orangepi-5-plus`。在当前没有设置任何
 `AXVISOR_RT_*` 变量的环境中执行：
 
 ```bash
@@ -486,27 +583,33 @@ FAIL missing realtime input: AXVISOR_RT_TRAFFIC_PEER
 全部 16 个外部 input 都缺失。当前 checked-in Orange Pi 5 Plus 资产不能运行要求的
 两个 Linux 加 Zephyr 网络负载：现有板级链路只覆盖单 Linux，RTOS 配置没有可用于
 三 guest workload 的独立网络设备/IRQ、唯一 VM id 和不重叠 pCPU 组合。preflight
-不发现、不回退到 QEMU artifact，也不使用虚拟板替代实体板。iteration 146 是
-x86_64 host 上的 AArch64 QEMU TCG 筛选，不是 same-board/bare-metal-level 结果。
+不发现、不回退到 QEMU artifact，也不使用虚拟板替代实体板。iterations 147--148
+仍是 x86_64 host 上的 AArch64 QEMU TCG 筛选，不是 same-board/bare-metal-level
+结果。
 
 批准阈值保持不变：每次 Axvisor run 必须通过 full callback/network 且有
 `0` 个 `>1 ms` miss；p99.9、p99.99 相对 bare metal 的差值必须分别在
 `max(25%, 10 us)` 以内；maximum 必须满足
 `Axvisor maximum <= bare-metal maximum + max(2 x bare-metal maximum, 50 us)`。Axvisor 与 bare-metal 的三次配对重复必须
 保持相同 RTOS binary options、tick、counter、governor 和 traffic。资产 gate 通过
-后仍必须完成这些测量和比较才能批准。
+后仍必须完成这些测量和比较才能批准。也就是说，physical acceptance 仍须先提供
+全部 16 个 `AXVISOR_RT_*` input，再在同一实体板完成三次 Axvisor/bare-metal
+配对重复；单轮 TCG screen 不能替代其中任何一项。
 
-本次没有连接或控制实体板，也没有真实测量，因此不修改 CSV/PNG。当前 same-board
-结论保持外部硬件/资产 `BLOCKED`，不声明目标完成。
+本次没有连接或控制实体板，也没有真实测量；CSV/PNG 只追加 QEMU TCG remediation
+筛选证据。当前 same-board 结论保持外部硬件/资产 `BLOCKED`，不声明目标完成。
 
 ## 环境
 
-- 报告更新日期：2026-08-05（本次仅运行 preflight，无物理测量）
+- 报告更新日期：2026-08-07（新增 TCG remediation 筛选；仍无物理测量）
 - Axvisor：QEMU AArch64，Cortex-A72，GICv3；正式配置 4 vCPU，SMP3 确认组合 3 vCPU
 - 模式：timer/GIC passthrough，Zephyr vCPU 固定到物理 CPU 2
 - 加速器：AArch64 guest 在 x86_64 宿主上使用 QEMU TCG；没有 KVM 加速
 - QEMU：`/home/yfblock/.local/qemu-arm/bin/qemu-system-aarch64`，版本 `11.0.2`；
   `-accel help` 仅列出 `tcg`，`-accel kvm` 实测报 invalid accelerator
+- iteration 147--148 QEMU：`/home/yfblock/Env/qemu-11.0.2/build/qemu-system-aarch64`，
+  版本 `11.0.2`，SHA-256 为
+  `84630fc116fb9c7cc665e329b7f7c071469a0dc356ed541630d37a91baa36956`
 - 宿主：AMD Ryzen 9 9950X，32 logical CPUs；当前 governor 为 `powersave`；
   绑核对照分别使用 `taskset -c 4-7` 和 `taskset -c 4-11`
 - Guest：Linux-1、Linux-2、Zephyr
@@ -686,6 +789,8 @@ passthrough virtio SPI 的真实中断路径可用；原来的 1 ms MMIO 轮询�
 | 143 | 同步采集器预检失败（未进入 benchmark） | NA | NA | NA | NA | NA | NA | NA |
 | 144--145 | SMP3 同步 schedstat/state/wchan 归因 | 9999/9999 | 0/0 us | 0/0 us | 1459/1362 us | 3/8 | 2/6 | 1/3 |
 | 146 | busy-WFI + main-loop 同步筛选（拒绝） | 9999/9999 | 0 us | 0 us | 1185 us | 8 | 2 | 1 |
+| 147 | timer-broker 同步筛选（collector 中断，无效） | 9999/9999 | 0 us | 0 us | 1236 us | 2 | 1 | 1 |
+| 148 | timer-broker 同步筛选（单次 TCG screen pass） | 9999/9999 | 0 us | 0 us | 357 us | 7 | 0 | 0 |
 其中第 87 轮虽完成 RTOS callback，但 Linux 因动态 BusyBox 无 loader 未完成网络启动，
 不计入正式性能比较；第 88--90 轮才是完整 pCPU 3 候选数据。
 
@@ -855,7 +960,7 @@ affinity 候选、迭代 124 的 QEMU RAM 2 GiB 筛选、迭代 125--127 的 `SC
 - [x] 评估 guest-entry EL2 上下文缓存；三轮最大值 251/664/1697 us，拒绝并移除候选。
 - [x] 三 guest 网络连通性验证通过。
 - [x] 单 guest idle/低优先级负载测试完成。
-- [x] 三 guest 网络实时性测试和优化迭代持续记录；CSV 已记录 iteration `0--146`，共 147 条数据行
+- [x] 三 guest 网络实时性测试和优化迭代持续记录；CSV 已记录 iteration `0--148`，共 149 条数据行
   （含 0 基线、44 轮既有实验、6 条裸机 QEMU 对照、3 条分层对照、3 条低扰动
   测量候选、3 条 `ic iallu` 候选、3 条内联 external IRQ 候选、6 条单 RTOS 分层对照
   、1 条最终 FDT 功能 smoke、3 条 `sched-rr` 候选和 3 条 AArch64 IRQ fetch
@@ -869,9 +974,10 @@ affinity 候选、迭代 124 的 QEMU RAM 2 GiB 筛选、迭代 125--127 的 `SC
   4 条默认 QEMU `host_vcpu_yield` 候选（108--111）、3 条 FIFO + host `preempt`
   候选、6 条 cooperative exit budget64 候选、3 条 QMP 精确 vCPU affinity 候选、
   1 条 QEMU RAM 2 GiB 筛选、3 条 `SCHED_IDLE` 候选、12 条 SMP3 控制/诊断/组合候选、
-  3 条新鲜产物 SMP3 确认轮、3 条同步采集/归因记录和 1 条 busy-WFI 筛选）。其中 iteration
+  3 条新鲜产物 SMP3 确认轮、3 条同步采集/归因记录、1 条 busy-WFI 筛选、1 条
+  collector 中断的无效筛选和 1 条完整 timer-broker remediation 筛选）。其中 iteration
   83--86、91--111 的分类计数为
-  `1 + 3 + 1 + 3 + 3 + 4 + 3 + 3 + 4 = 25` 条；全部分类合计 147 条。
+  `1 + 3 + 1 + 3 + 3 + 4 + 3 + 3 + 4 = 25` 条；全部分类合计 149 条。
 - [x] 评估 callback 低扰动统计路径；callback 最大执行时间降至约 `16--25 us`，
   但三轮 latency 未稳定改善，保留为测量质量改进而非实时性收益。
 - [x] 评估移除 guest-entry `ic iallu`；三轮最大延迟 `8383/77/104 us`，拒绝并
@@ -932,7 +1038,11 @@ affinity 候选、迭代 124 的 QEMU RAM 2 GiB 筛选、迭代 125--127 的 `SC
   `2010ab4788aae2d344c1b2d08a23869ceb869127f4953a8649ff47e752156573`。
 - [x] 筛选 RTOS busy-WFI；功能和因果门禁通过，`S/futex_do_wait` 降至
   `1.507761%`，但 p99.99/miss 未相对同步对照同时改善，且存在 QEMU/TOML hash
-  漂移，iteration 146 明确拒绝并停止后续筛选轮次。
+  漂移，iteration 146 明确拒绝该候选；后续 correctness remediation 使用重新冻结
+  且 identity 完整的 artifact 独立筛选。
+- [x] 完成 timer broker、host RAM reservation 和 current-config consumption 的
+  correctness 验证及 safety smoke；iteration 147 因 collector 中断记为无效失败轮，
+  iteration 148 完成单次 TCG screen pass，但不提升为稳定性能或物理验收结论。
 - [ ] 在 KVM/真实硬件上重复实验，建立可用于实时性承诺的测量基线；当前 QEMU
   AArch64 只支持 TCG，x86_64 主机的 `/dev/kvm` 不能提供 AArch64 KVM。
 
@@ -961,7 +1071,14 @@ affinity 候选、迭代 124 的 QEMU RAM 2 GiB 筛选、迭代 125--127 的 `SC
 - AArch64 release Axvisor 使用 `qemu-aarch64.toml`、SMP3 和三份确认轮 TOML 重新构建
   成功；未启用 `preempt`，Linux VM 为 periodic/false，RTOS VM 为 tickless/true，
   启动日志逐项确认。
-- RTOS 精度、绘图、三 guest 静态验证和 CSV schema 检查：通过；CSV 共 147 条数据行，
+- timer-broker remediation host matrix：`cargo fmt --check` 通过；axvmconfig 25、
+  arm_vcpu 6、axvm host-test 197、ax-runtime host-test 7、ax-task 26，Rust 合计
+  `261 passed, 0 failed`；precision source、affinity executable artifact、validator
+  syntax contract 通过；plot tests 11、report tests 10。
+- clean archive、board、ELF/raw、setup/build manifest、三份 VM TOML 和 runner
+  sidecar identity 已核对；iteration 148 的 QMP、metadata、schedstat summary 和
+  annotated samples 完整，iteration 147 缺少 finalization 产物并按 invalid 记录。
+- RTOS 精度、绘图、三 guest 静态验证和 CSV schema 检查：通过；CSV 共 149 条数据行，
   37 列；从迭代 140 起，`network_validation` 只记录网络结果，新列
   `candidate_decision` 独立记录候选处置；历史行保留原有混合状态值并将新列留空。
   延迟扩展列包括 `p99_99_ns`、`callback_duration_max_ns`、`tick_gap_min/max`。
