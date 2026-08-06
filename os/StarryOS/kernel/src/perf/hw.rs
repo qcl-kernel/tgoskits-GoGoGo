@@ -167,12 +167,12 @@ enum Counter {
     Programmable(usize),
 }
 
-/// The counter allocator is per-CPU (`super::percpu::ALLOC`): `PMEVCNTRn_EL0` is
-/// banked per-PE, so each core owns its own pool. Reservation/release go through
-/// [`super::percpu::alloc_programmable_counter`] /
-/// [`super::percpu::free_programmable_counter`] (and the cycle-counter pair),
-/// which the per-task path drives per scheduling slice and the system-wide path
-/// at open/close on the owning core.
+// The counter allocator is per-CPU (`super::percpu::ALLOC`): `PMEVCNTRn_EL0` is
+// banked per-PE, so each core owns its own pool. Reservation/release go through
+// `super::percpu::alloc_programmable_counter` /
+// `super::percpu::free_programmable_counter` (and the cycle-counter pair),
+// which the per-task path drives per scheduling slice and the system-wide path
+// at open/close on the owning core.
 
 /// The backing pages of a sampling event's mmap ring buffer, after the first
 /// `mmap(perf_fd)`.

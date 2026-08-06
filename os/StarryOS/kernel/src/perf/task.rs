@@ -585,9 +585,10 @@ pub fn attach(thr: &Thread, ptc: Arc<PerTaskCounter>) {
 /// into the task's ring only while the task runs. (If the ring is not mapped yet,
 /// the slice is skipped — `perf` always mmaps before enable, so this is a rare race.)
 ///
-/// Runs with IRQs disabled inside `switch_to`: [`SpinNoIrq`](ax_sync::spin::SpinNoIrq)
-/// + atomics + sysreg writes only, no allocation. `sampling::register` nests a
-///   further local-IRQ-off section, which is fine.
+/// Runs with IRQs disabled inside `switch_to`
+/// ([`SpinNoIrq`](ax_sync::spin::SpinNoIrq) + atomics + sysreg writes only, no
+/// allocation). `sampling::register` nests a further local-IRQ-off section,
+/// which is fine.
 /// Arm `ptc` onto programmable counter `n` on the current core: configure
 /// (counting) or configure + preload + register a [`SampleSlot`] (sampling),
 /// enable, and mark it running from `now`. IRQ-off, alloc-free. Shared by
@@ -831,10 +832,21 @@ pub fn perf_rotate_current() {
     let now = now_ns();
     // Advance the per-CPU cursor; the holding window is the `free` eligible events
     // at ranks `[cursor, cursor + free)` (mod `n_eligible`).
-    let cursor = ROTATE_CURSOR.with_current(|c| {
-        *c = c.wrapping_add(1);
-        *c
-    }) % n_eligible;
+    // Advance the per-CPU rotation cursor (primitive: read-modify-write under a
+    // pin). The tick already runs on the local CPU; the guard keeps it pinned.
+    let cursor = {
+        let _guard = ax_kernel_guard::NoPreemptIrqSave::new();
+        // SAFETY: `_guard` disables preemption + local IRQs, so this CPU cannot
+        // migrate across the cursor read-modify-write.
+        unsafe {
+            ax_percpu::with_cpu_pin(|pin| {
+                let c = ROTATE_CURSOR.read_current(pin).wrapping_add(1);
+                ROTATE_CURSOR.write_current(pin, c);
+                c
+            })
+        }
+        .unwrap_or_else(|error| panic!("perf rotation cursor CPU-local state is invalid: {error}"))
+    } % n_eligible;
 
     // Pass 1 — evict counters that hold a slot but fell out of the window. This
     // frees slots first, so the admits in pass 2 can allocate them.
