@@ -8,6 +8,8 @@ SETUP_SOURCE="${SCRIPT_DIR}/setup_qemu_three_guest_net.sh"
 AXVISOR_CONFIG_SOURCE="${SCRIPT_DIR}/../src/config.rs"
 ZEPHYR_VM_CONFIG="${SCRIPT_DIR}/../configs/vms/qemu/aarch64/zephyr-net.toml"
 GENERIC_BOARD_CONFIG="${SCRIPT_DIR}/../configs/board/qemu-aarch64.toml"
+THREE_GUEST_BOARD_CONFIG="${SCRIPT_DIR}/../configs/board/qemu-aarch64-three-guest-net.toml"
+THREE_GUEST_RT_TRACE_BOARD_CONFIG="${SCRIPT_DIR}/../configs/board/qemu-aarch64-three-guest-net-rt-trace.toml"
 
 require_source() {
   local pattern="$1"
@@ -597,16 +599,110 @@ run_topology_fixture() {
     bash "${SCRIPT_DIR}/verify_three_guest_net.sh"
 }
 
-python3 - "$GENERIC_BOARD_CONFIG" <<'PY' \
-  || fail_test "generic QEMU board unexpectedly reserves three-guest host RAM"
+python3 - \
+  "$THREE_GUEST_RT_TRACE_BOARD_CONFIG" \
+  "$THREE_GUEST_BOARD_CONFIG" \
+  "$GENERIC_BOARD_CONFIG" <<'PY' \
+  || fail_test "checked-in QEMU board feature contracts"
+import collections
 import pathlib
 import sys
 import tomllib
 
-board = tomllib.loads(pathlib.Path(sys.argv[1]).read_text())
-features = board.get("features")
-assert isinstance(features, list) and all(isinstance(feature, str) for feature in features)
-assert "qemu-aarch64-three-guest-net" not in features
+combined_path = pathlib.Path(sys.argv[1])
+combined_exists = combined_path.is_file()
+assert combined_exists, (
+    f"{combined_path}: expected file presence=True, actual={combined_exists}"
+)
+combined = tomllib.loads(combined_path.read_text())
+combined_features = combined.get("features")
+assert isinstance(combined_features, list), (
+    f"{combined_path}: expected features type=list, "
+    f"actual type={type(combined_features).__name__}, value={combined_features!r}"
+)
+non_string_features = [
+    feature for feature in combined_features if not isinstance(feature, str)
+]
+assert not non_string_features, (
+    f"{combined_path}: expected every feature type=str, "
+    f"actual non-string elements={non_string_features!r}, features={combined_features!r}"
+)
+reservation_feature = "qemu-aarch64-three-guest-net"
+qualified_reservation_features = [
+    feature
+    for feature in combined_features
+    if feature.endswith(f"/{reservation_feature}")
+]
+assert not qualified_reservation_features, (
+    f"{combined_path}: expected dependency-qualified reservation features=[], "
+    f"actual={qualified_reservation_features!r}"
+)
+expected_features = collections.Counter({
+    "ax-driver/nvme": 1,
+    "fs": 1,
+    "rt-trace": 1,
+    reservation_feature: 1,
+})
+actual_features = collections.Counter(combined_features)
+assert actual_features == expected_features, (
+    f"{combined_path}: expected feature multiset={dict(expected_features)!r}, "
+    f"actual={dict(actual_features)!r}"
+)
+actual_log = combined.get("log")
+assert actual_log == "Info", (
+    f"{combined_path}: expected log='Info', actual={actual_log!r}"
+)
+actual_target = combined.get("target")
+assert actual_target == "aarch64-unknown-none-softfloat", (
+    f"{combined_path}: expected target='aarch64-unknown-none-softfloat', "
+    f"actual={actual_target!r}"
+)
+actual_vm_configs = combined.get("vm_configs")
+assert actual_vm_configs == [], (
+    f"{combined_path}: expected vm_configs=[], actual={actual_vm_configs!r}"
+)
+
+three_guest_path = pathlib.Path(sys.argv[2])
+three_guest = tomllib.loads(three_guest_path.read_text())
+three_guest_features = three_guest.get("features")
+assert isinstance(three_guest_features, list), (
+    f"{three_guest_path}: expected features type=list, "
+    f"actual type={type(three_guest_features).__name__}, value={three_guest_features!r}"
+)
+three_guest_non_string_features = [
+    feature for feature in three_guest_features if not isinstance(feature, str)
+]
+assert not three_guest_non_string_features, (
+    f"{three_guest_path}: expected every feature type=str, "
+    f"actual non-string elements={three_guest_non_string_features!r}, "
+    f"features={three_guest_features!r}"
+)
+rt_trace_count = three_guest_features.count("rt-trace")
+assert rt_trace_count == 0, (
+    f"{three_guest_path}: expected rt-trace feature count=0, "
+    f"actual={rt_trace_count}, features={three_guest_features!r}"
+)
+
+generic_path = pathlib.Path(sys.argv[3])
+generic = tomllib.loads(generic_path.read_text())
+generic_features = generic.get("features")
+assert isinstance(generic_features, list), (
+    f"{generic_path}: expected features type=list, "
+    f"actual type={type(generic_features).__name__}, value={generic_features!r}"
+)
+generic_non_string_features = [
+    feature for feature in generic_features if not isinstance(feature, str)
+]
+assert not generic_non_string_features, (
+    f"{generic_path}: expected every feature type=str, "
+    f"actual non-string elements={generic_non_string_features!r}, "
+    f"features={generic_features!r}"
+)
+generic_reservation_count = generic_features.count(reservation_feature)
+assert generic_reservation_count == 0, (
+    f"{generic_path}: expected {reservation_feature!r} feature count=0, "
+    f"actual={generic_reservation_count}, features={generic_features!r}"
+)
 PY
 
 for invalid_board_case in missing dependency-qualified duplicate; do
