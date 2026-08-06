@@ -288,11 +288,78 @@ fn axvisor_vm_creation_uses_unified_guest_boot_facade() {
 fn host_time_trait_only_exposes_common_clock_capabilities() {
     let host_traits = include_str!("../src/host/traits.rs");
 
-    for architecture_specific_detail in ["CancelToken", "fn register_timer"] {
+    for architecture_specific_detail in ["CancelToken", "fn register_timer", "fn set_oneshot_timer"]
+    {
         assert!(
             !host_traits.contains(architecture_specific_detail),
             "HostTime must not expose architecture-specific timer details: \
              {architecture_specific_detail}"
+        );
+    }
+}
+
+#[test]
+fn axvm_sources_have_no_direct_host_comparator_capability() {
+    let source_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+    let mut violations = Vec::new();
+
+    find_source_files(&source_root, &mut |path, source| {
+        for (line_index, line) in source.lines().enumerate() {
+            if line.contains("set_oneshot_timer") {
+                violations.push(format!(
+                    "{}:{}",
+                    source_relative_path(&source_root, path),
+                    line_index + 1
+                ));
+            }
+        }
+    });
+
+    assert!(
+        violations.is_empty(),
+        "AxVM must publish deadlines through ax_task instead of programming the host comparator: \
+         {}",
+        violations.join(", ")
+    );
+}
+
+#[test]
+fn every_architecture_registers_timer_drain_before_deadline_provider() {
+    let timer = include_str!("../src/timer.rs");
+    let capabilities = include_str!("../src/architecture/capabilities.rs");
+    let aarch64 = include_str!("../src/arch/aarch64/capabilities.rs");
+    let loongarch64 = include_str!("../src/arch/loongarch64/capabilities.rs");
+    let riscv64 = include_str!("../src/arch/riscv64/capabilities.rs");
+    let x86_64 = include_str!("../src/arch/x86_64/capabilities.rs");
+
+    let callback_registration = timer
+        .find("crate::arch::register_timer_callback()")
+        .expect("init_percpu must register the AxVM drain callback");
+    let provider_registration = timer
+        .find("register_current_cpu_timer_deadline_provider")
+        .expect("init_percpu must register the AxVM deadline provider");
+    assert!(
+        callback_registration < provider_registration,
+        "the drain callback must be registered before the deadline provider"
+    );
+    assert!(timer[provider_registration..].contains("current_cpu_deadline_nanos"));
+
+    assert!(capabilities.contains("crate::check_timer_events()"));
+    for (architecture, source) in [("aarch64", aarch64), ("loongarch64", loongarch64)] {
+        assert!(
+            source.contains("fn register_timer_callback()")
+                && source.contains("crate::check_timer_events"),
+            "{architecture} must keep its timer drain callback override"
+        );
+    }
+    for (architecture, source) in [("riscv64", riscv64), ("x86_64", x86_64)] {
+        assert!(
+            source.contains("impl HostTimePlatform"),
+            "{architecture} must use the default timer drain registration"
+        );
+        assert!(
+            !source.contains("fn register_timer_callback()"),
+            "{architecture} must not duplicate the default timer drain registration"
         );
     }
 }

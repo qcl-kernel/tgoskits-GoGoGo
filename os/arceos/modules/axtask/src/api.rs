@@ -235,12 +235,6 @@ pub fn on_timer_irq(scheduler_tick: bool, run_callbacks: bool) {
     );
 }
 
-#[cfg(feature = "irq")]
-#[doc(hidden)]
-pub fn next_timer_deadline_nanos() -> Option<u64> {
-    crate::timers::next_deadline_nanos()
-}
-
 /// Scheduler ticks CPU `cpu` has spent running a non-idle task since boot.
 ///
 /// This is the load metric for an ondemand cpufreq governor: a monotonic per-CPU
@@ -252,12 +246,6 @@ pub fn cpu_busy_ticks(cpu: usize) -> u64 {
     crate::run_queue::BUSY_TICKS
         .get(cpu)
         .map_or(0, |t| t.load(core::sync::atomic::Ordering::Relaxed))
-}
-
-#[cfg(feature = "irq")]
-#[doc(hidden)]
-pub fn note_programmed_timer_deadline_nanos(deadline_nanos: u64) {
-    crate::timers::note_programmed_deadline_nanos(deadline_nanos);
 }
 
 /// Adds the given task to the run queue, returns the task reference.

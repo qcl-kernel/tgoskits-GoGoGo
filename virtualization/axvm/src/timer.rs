@@ -23,7 +23,6 @@ use ax_timer_list::{TimeValue, TimerEvent, TimerList};
 use crate::host::{HostTime, default_host, task};
 
 static TOKEN: AtomicUsize = AtomicUsize::new(0);
-const HOST_TIMER_PARK_DELAY: Duration = Duration::from_secs(1);
 
 struct VmTimerEvent {
     token: usize,
@@ -116,7 +115,7 @@ pub(crate) fn register_timer(
     callback: Box<dyn FnOnce(Duration) + Send + 'static>,
 ) -> usize {
     let token = TOKEN.fetch_add(1, Ordering::Relaxed);
-    let next_deadline = with_current_timer_wheels(|cpu_id, timer_wheels| {
+    with_current_timer_wheels(|cpu_id, timer_wheels| {
         timer_wheels.register(
             cpu_id,
             token,
@@ -124,7 +123,7 @@ pub(crate) fn register_timer(
             VmTimerEvent::new(token, callback),
         )
     });
-    rearm_host_timer(next_deadline);
+    request_current_cpu_broker_recompute();
     token
 }
 
@@ -132,31 +131,36 @@ pub(crate) fn cancel_timer(token: usize) {
     let _guard = NoPreempt::new();
     let current_cpu = current_cpu_id();
     let canceled = with_timer_wheels(|timer_wheels| timer_wheels.cancel(token));
-    if let Some((owner_cpu, next_deadline)) = canceled {
-        rearm_owner_host_timer(owner_cpu, current_cpu, next_deadline);
+    if let Some((owner_cpu, _)) = canceled {
+        request_owner_cpu_broker_recompute(owner_cpu, current_cpu);
     }
 }
 
 pub(crate) fn check_events() {
     loop {
         let now = current_host_time();
-        let (expired, next_deadline) = with_current_timer_wheels(|cpu_id, timer_wheels| {
-            let expired = timer_wheels.expire_one(cpu_id, now);
-            let next_deadline = if expired.is_none() {
-                timer_wheels.next_deadline(cpu_id)
-            } else {
-                None
-            };
-            (expired, next_deadline)
-        });
+        let expired =
+            with_current_timer_wheels(|cpu_id, timer_wheels| timer_wheels.expire_one(cpu_id, now));
         if let Some((deadline, event)) = expired {
+            request_current_cpu_broker_recompute();
             trace!("handle VM timer event scheduled at {deadline:#?}");
             event.callback(now);
         } else {
-            rearm_host_timer(next_deadline);
             break;
         }
     }
+}
+
+pub(crate) fn current_cpu_deadline_nanos() -> Option<u64> {
+    let deadline_nanos = with_current_timer_wheels(|cpu_id, timer_wheels| {
+        timer_wheels.next_deadline(cpu_id).map(deadline_to_nanos)
+    });
+    crate::rt_trace::axvm_deadline_publish(deadline_nanos);
+    deadline_nanos
+}
+
+fn deadline_to_nanos(deadline: TimeValue) -> u64 {
+    deadline.as_nanos().min(u64::MAX as u128) as u64
 }
 
 #[allow(
@@ -190,50 +194,40 @@ fn current_host_time() -> TimeValue {
     TimeValue::from_nanos(TEST_NOW_NS.load(Ordering::Acquire))
 }
 
-fn rearm_owner_host_timer(owner_cpu: usize, current_cpu: usize, next_deadline: Option<TimeValue>) {
+fn request_owner_cpu_broker_recompute(owner_cpu: usize, current_cpu: usize) {
     if owner_cpu == current_cpu {
-        rearm_host_timer(next_deadline);
+        request_current_cpu_broker_recompute();
     } else {
-        rearm_remote_owner_host_timer(owner_cpu);
+        request_remote_owner_cpu_broker_recompute(owner_cpu);
     }
 }
 
-fn rearm_current_host_timer_from_wheel() {
-    let next_deadline =
-        with_current_timer_wheels(|cpu_id, timer_wheels| timer_wheels.next_deadline(cpu_id));
-    rearm_host_timer(next_deadline);
+#[cfg(not(test))]
+fn request_current_cpu_broker_recompute() {
+    ax_std::os::arceos::modules::ax_task::reprogram_current_cpu_timer();
 }
 
 #[cfg(not(test))]
-unsafe fn rearm_current_host_timer_from_wheel_thunk(_arg: *mut ()) {
-    rearm_current_host_timer_from_wheel();
+unsafe fn request_current_cpu_broker_recompute_thunk(_arg: *mut ()) {
+    request_current_cpu_broker_recompute();
 }
 
 #[cfg(not(test))]
-fn rearm_remote_owner_host_timer(owner_cpu: usize) {
+fn request_remote_owner_cpu_broker_recompute(owner_cpu: usize) {
     let result = task::run_on_cpu_sync(
         owner_cpu,
-        rearm_current_host_timer_from_wheel_thunk,
+        request_current_cpu_broker_recompute_thunk,
         core::ptr::null_mut(),
     );
     if let Err(error) = result {
-        warn!("failed to rearm AxVM timer on owner CPU {owner_cpu}: {error:?}; sending IPI");
+        // The previously programmed, possibly early deadline remains armed, so
+        // cancellation cannot make the owner miss a later surviving deadline.
+        warn!(
+            "failed to reconcile AxVM timer on owner CPU {owner_cpu}: {error:?}; retaining the \
+             early host deadline and sending IPI"
+        );
         task::send_ipi(owner_cpu);
     }
-}
-
-#[cfg(not(test))]
-fn rearm_host_timer(next_deadline: Option<TimeValue>) {
-    let deadline = next_deadline.unwrap_or_else(|| {
-        // The host timer API has no cancel hook. Park the comparator in the
-        // future so an empty wheel overwrites any stale canceled deadline.
-        parked_host_timer_deadline(default_host().monotonic_time())
-    });
-    default_host().set_oneshot_timer(deadline.as_nanos() as u64);
-}
-
-fn parked_host_timer_deadline(now: TimeValue) -> TimeValue {
-    now.saturating_add(HOST_TIMER_PARK_DELAY)
 }
 
 pub(crate) fn init_percpu() {
@@ -242,6 +236,9 @@ pub(crate) fn init_percpu() {
         timer_wheels.ensure_cpu(cpu_id);
     });
     crate::arch::register_timer_callback();
+    ax_std::os::arceos::modules::ax_task::register_current_cpu_timer_deadline_provider(
+        current_cpu_deadline_nanos,
+    );
 }
 
 fn with_timer_wheels<R>(operation: impl FnOnce(&mut TimerWheels) -> R) -> R {
@@ -265,9 +262,12 @@ fn current_cpu_id() -> usize {
 #[cfg(test)]
 static TEST_CURRENT_CPU: AtomicUsize = AtomicUsize::new(0);
 #[cfg(test)]
-static TEST_REARMS: Mutex<Vec<(usize, Option<TimeValue>)>> = Mutex::new(Vec::new());
+static TEST_BROKER_RECOMPUTES: Mutex<Vec<usize>> = Mutex::new(Vec::new());
 #[cfg(test)]
-static TEST_REMOTE_REARMS: Mutex<Vec<usize>> = Mutex::new(Vec::new());
+static TEST_DIRECT_HOST_TIMER_WRITES: Mutex<Vec<(usize, Option<TimeValue>)>> =
+    Mutex::new(Vec::new());
+#[cfg(test)]
+static TEST_REMOTE_RECOMPUTES: Mutex<Vec<usize>> = Mutex::new(Vec::new());
 #[cfg(test)]
 static TEST_NOW_NS: AtomicU64 = AtomicU64::new(0);
 
@@ -282,20 +282,15 @@ fn lock_test_mutex<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
 }
 
 #[cfg(test)]
-fn rearm_host_timer(next_deadline: Option<TimeValue>) {
-    let deadline = next_deadline.or_else(|| {
-        Some(parked_host_timer_deadline(TimeValue::from_nanos(
-            TEST_NOW_NS.load(Ordering::Acquire),
-        )))
-    });
-    lock_test_mutex(&TEST_REARMS).push((current_cpu_id(), deadline));
+fn request_current_cpu_broker_recompute() {
+    lock_test_mutex(&TEST_BROKER_RECOMPUTES).push(current_cpu_id());
 }
 
 #[cfg(test)]
-fn rearm_remote_owner_host_timer(owner_cpu: usize) {
-    lock_test_mutex(&TEST_REMOTE_REARMS).push(owner_cpu);
+fn request_remote_owner_cpu_broker_recompute(owner_cpu: usize) {
+    lock_test_mutex(&TEST_REMOTE_RECOMPUTES).push(owner_cpu);
     let previous_cpu = TEST_CURRENT_CPU.swap(owner_cpu, Ordering::AcqRel);
-    rearm_current_host_timer_from_wheel();
+    request_current_cpu_broker_recompute();
     TEST_CURRENT_CPU.store(previous_cpu, Ordering::Release);
 }
 
@@ -320,8 +315,9 @@ mod tests {
 
     fn reset_global_timer_state() {
         with_timer_wheels(|timer_wheels| *timer_wheels = TimerWheels::new());
-        lock_test_mutex(&TEST_REARMS).clear();
-        lock_test_mutex(&TEST_REMOTE_REARMS).clear();
+        lock_test_mutex(&TEST_BROKER_RECOMPUTES).clear();
+        lock_test_mutex(&TEST_DIRECT_HOST_TIMER_WRITES).clear();
+        lock_test_mutex(&TEST_REMOTE_RECOMPUTES).clear();
         TEST_CURRENT_CPU.store(0, Ordering::Release);
         TEST_NOW_NS.store(0, Ordering::Release);
     }
@@ -353,18 +349,48 @@ mod tests {
 
         check_events();
         assert_eq!(TEST_CALLBACK_NOW_NS.load(Ordering::Acquire), 0);
-        assert_eq!(
-            lock_test_mutex(&TEST_REARMS).last().copied(),
-            Some((0, Some(Duration::from_nanos(10_000_000))))
-        );
 
+        lock_test_mutex(&TEST_BROKER_RECOMPUTES).clear();
+        lock_test_mutex(&TEST_DIRECT_HOST_TIMER_WRITES).clear();
         TEST_NOW_NS.store(10_000_000, Ordering::Release);
         check_events();
         assert_eq!(TEST_CALLBACK_NOW_NS.load(Ordering::Acquire), 10_000_000);
+        assert_eq!(lock_test_mutex(&TEST_BROKER_RECOMPUTES).as_slice(), &[0]);
+        assert!(lock_test_mutex(&TEST_DIRECT_HOST_TIMER_WRITES).is_empty());
         assert_eq!(
             with_timer_wheels(|timer_wheels| timer_wheels.cancel(token)),
             None
         );
+    }
+
+    #[test]
+    fn local_registration_and_cancellation_request_broker_recompute() {
+        let _guard = lock_test_mutex(&TEST_LOCK);
+        reset_global_timer_state();
+
+        let early_token = register_timer(10_000_000, Box::new(|_| {}));
+        let _late_token = register_timer(20_000_000, Box::new(|_| {}));
+
+        assert_eq!(lock_test_mutex(&TEST_BROKER_RECOMPUTES).as_slice(), &[0, 0]);
+        assert!(lock_test_mutex(&TEST_DIRECT_HOST_TIMER_WRITES).is_empty());
+
+        lock_test_mutex(&TEST_BROKER_RECOMPUTES).clear();
+        cancel_timer(early_token);
+
+        assert_eq!(lock_test_mutex(&TEST_BROKER_RECOMPUTES).as_slice(), &[0]);
+        assert!(lock_test_mutex(&TEST_DIRECT_HOST_TIMER_WRITES).is_empty());
+    }
+
+    #[test]
+    fn unknown_timer_token_requests_no_recompute() {
+        let _guard = lock_test_mutex(&TEST_LOCK);
+        reset_global_timer_state();
+
+        cancel_timer(usize::MAX);
+
+        assert!(lock_test_mutex(&TEST_BROKER_RECOMPUTES).is_empty());
+        assert!(lock_test_mutex(&TEST_REMOTE_RECOMPUTES).is_empty());
+        assert!(lock_test_mutex(&TEST_DIRECT_HOST_TIMER_WRITES).is_empty());
     }
 
     #[test]
@@ -412,7 +438,23 @@ mod tests {
     }
 
     #[test]
-    fn cancel_rearms_to_remaining_owner_deadline() {
+    fn deadline_provider_reads_only_current_cpu_and_saturates_to_u64() {
+        let _guard = lock_test_mutex(&TEST_LOCK);
+        reset_global_timer_state();
+
+        assert_eq!(current_cpu_deadline_nanos(), None);
+        with_timer_wheels(|timer_wheels| {
+            timer_wheels.register(0, 41, Duration::MAX, event(41));
+            timer_wheels.ensure_cpu(1);
+        });
+
+        assert_eq!(current_cpu_deadline_nanos(), Some(u64::MAX));
+        set_current_cpu_for_test(1);
+        assert_eq!(current_cpu_deadline_nanos(), None);
+    }
+
+    #[test]
+    fn cancel_exposes_remaining_owner_deadline() {
         let mut timer_wheels = TimerWheels::new();
         let early = Duration::from_secs(10);
         let late = Duration::from_secs(20);
@@ -425,7 +467,7 @@ mod tests {
     }
 
     #[test]
-    fn migration_reprogramming_deletes_stale_original_cpu_deadline() {
+    fn migration_removes_stale_original_cpu_deadline() {
         let mut timer_wheels = TimerWheels::new();
         let stale_deadline = Duration::from_secs(60);
         let migrated_deadline = Duration::from_millis(10);
@@ -462,32 +504,28 @@ mod tests {
     }
 
     #[test]
-    fn remote_cancel_reprograms_owner_cpu_timer() {
+    fn remote_cancel_requests_owner_cpu_broker_recompute() {
         let _guard = lock_test_mutex(&TEST_LOCK);
         reset_global_timer_state();
 
         set_current_cpu_for_test(0);
         let early_token = register_timer(10_000_000, Box::new(|_| {}));
         let late_token = register_timer(20_000_000, Box::new(|_| {}));
-        assert_eq!(lock_test_mutex(&TEST_REARMS).len(), 2);
 
-        lock_test_mutex(&TEST_REARMS).clear();
+        lock_test_mutex(&TEST_BROKER_RECOMPUTES).clear();
+        lock_test_mutex(&TEST_DIRECT_HOST_TIMER_WRITES).clear();
         set_current_cpu_for_test(1);
         cancel_timer(early_token);
 
-        assert_eq!(lock_test_mutex(&TEST_REMOTE_REARMS).as_slice(), &[0]);
-        assert_eq!(
-            lock_test_mutex(&TEST_REARMS).as_slice(),
-            &[(0, Some(Duration::from_nanos(20_000_000)))]
-        );
+        assert_eq!(lock_test_mutex(&TEST_REMOTE_RECOMPUTES).as_slice(), &[0]);
+        assert_eq!(lock_test_mutex(&TEST_BROKER_RECOMPUTES).as_slice(), &[0]);
+        assert!(lock_test_mutex(&TEST_DIRECT_HOST_TIMER_WRITES).is_empty());
 
-        lock_test_mutex(&TEST_REARMS).clear();
+        lock_test_mutex(&TEST_BROKER_RECOMPUTES).clear();
         cancel_timer(late_token);
 
-        assert_eq!(lock_test_mutex(&TEST_REMOTE_REARMS).as_slice(), &[0, 0]);
-        assert_eq!(
-            lock_test_mutex(&TEST_REARMS).as_slice(),
-            &[(0, Some(Duration::from_nanos(1_000_000_000)))]
-        );
+        assert_eq!(lock_test_mutex(&TEST_REMOTE_RECOMPUTES).as_slice(), &[0, 0]);
+        assert_eq!(lock_test_mutex(&TEST_BROKER_RECOMPUTES).as_slice(), &[0]);
+        assert!(lock_test_mutex(&TEST_DIRECT_HOST_TIMER_WRITES).is_empty());
     }
 }

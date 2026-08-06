@@ -25,8 +25,6 @@ impl GuestBootPlatform for LoongArch64Arch {
 }
 
 impl HostTimePlatform for LoongArch64Arch {
-    fn set_oneshot_timer(_deadline_ns: u64) {}
-
     fn register_timer_callback() {
         ax_std::os::arceos::modules::ax_task::register_timer_callback(|_| {
             crate::check_timer_events();

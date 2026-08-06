@@ -456,7 +456,7 @@ fn periodic_interval_nanos() -> u64 {
     ax_hal::time::NANOS_PER_SEC / ticks_per_sec()
 }
 
-#[cfg(feature = "irq")]
+#[cfg(all(feature = "irq", not(feature = "multitask")))]
 const TIMER_PARK_DELAY_NANOS: u64 = ax_hal::time::NANOS_PER_SEC;
 
 #[cfg(feature = "irq")]
@@ -476,19 +476,23 @@ fn next_periodic_disable_depth(depth: usize, enable_periodic: bool) -> usize {
     }
 }
 
-#[cfg(any(feature = "irq", test))]
-fn next_timer_deadline_for_policy(
-    periodic_enabled: bool,
-    periodic_deadline: u64,
-    task_deadline: Option<u64>,
-) -> Option<u64> {
-    let periodic_deadline = periodic_enabled.then_some(periodic_deadline);
-    match (periodic_deadline, task_deadline) {
-        (Some(periodic), Some(task)) => Some(core::cmp::min(periodic, task)),
-        (Some(periodic), None) => Some(periodic),
-        (None, Some(task)) => Some(task),
-        (None, None) => None,
-    }
+#[cfg(any(all(feature = "irq", feature = "multitask"), test))]
+fn publish_periodic_timer_deadline(
+    periodic_deadline_nanos: Option<u64>,
+    publish_periodic_deadline: impl FnOnce(Option<u64>),
+    request_broker_reconciliation: impl FnOnce(),
+) {
+    publish_periodic_deadline(periodic_deadline_nanos);
+    request_broker_reconciliation();
+}
+
+#[cfg(any(all(feature = "irq", not(feature = "multitask")), test))]
+fn program_direct_timer(
+    periodic_deadline_nanos: Option<u64>,
+    fallback_deadline_nanos: u64,
+    program_hardware: impl FnOnce(u64),
+) {
+    program_hardware(periodic_deadline_nanos.unwrap_or(fallback_deadline_nanos));
 }
 
 #[cfg(feature = "irq")]
@@ -574,19 +578,21 @@ fn program_next_timer() {
         deadline = now_ns.saturating_add(periodic_interval_nanos());
         with_periodic_deadline(|pin| NEXT_PERIODIC_DEADLINE_NANOS.write_current(pin, deadline));
     }
-    #[cfg(feature = "multitask")]
-    let task_deadline = ax_task::next_timer_deadline_nanos();
-    #[cfg(not(feature = "multitask"))]
-    let task_deadline = None;
-    let deadline =
-        next_timer_deadline_for_policy(periodic_timer_enabled(), deadline, task_deadline)
-            .unwrap_or_else(|| {
-                ax_hal::time::monotonic_time_nanos().saturating_add(TIMER_PARK_DELAY_NANOS)
-            });
+    let periodic_deadline = periodic_timer_enabled().then_some(deadline);
 
-    ax_hal::time::set_oneshot_timer(deadline);
     #[cfg(feature = "multitask")]
-    ax_task::note_programmed_timer_deadline_nanos(deadline);
+    publish_periodic_timer_deadline(
+        periodic_deadline,
+        ax_task::set_current_cpu_periodic_timer_deadline_nanos,
+        ax_task::reprogram_current_cpu_timer,
+    );
+
+    #[cfg(not(feature = "multitask"))]
+    program_direct_timer(
+        periodic_deadline,
+        ax_hal::time::monotonic_time_nanos().saturating_add(TIMER_PARK_DELAY_NANOS),
+        ax_hal::time::set_oneshot_timer,
+    );
 }
 
 #[cfg(any(feature = "multitask", test))]
@@ -663,27 +669,44 @@ mod tests {
     }
 
     #[test]
-    fn tickless_deadline_policy_keeps_one_shot_deadlines() {
-        assert_eq!(
-            super::next_timer_deadline_for_policy(false, 1_000, Some(800)),
-            Some(800)
+    fn multitask_timer_programming_publishes_periodic_deadline_and_reconciles() {
+        let published = Cell::new(None);
+        let reconciliations = Cell::new(0);
+
+        super::publish_periodic_timer_deadline(
+            Some(1_000),
+            |deadline| published.set(Some(deadline)),
+            || reconciliations.set(reconciliations.get() + 1),
         );
-        assert_eq!(
-            super::next_timer_deadline_for_policy(false, 1_000, None),
-            None
-        );
+
+        assert_eq!(published.get(), Some(Some(1_000)));
+        assert_eq!(reconciliations.get(), 1);
     }
 
     #[test]
-    fn periodic_deadline_policy_keeps_the_earliest_deadline() {
-        assert_eq!(
-            super::next_timer_deadline_for_policy(true, 1_000, Some(800)),
-            Some(800)
+    fn multitask_tickless_programming_publishes_no_periodic_deadline_and_reconciles() {
+        let published = Cell::new(None);
+        let reconciliations = Cell::new(0);
+
+        super::publish_periodic_timer_deadline(
+            None,
+            |deadline| published.set(Some(deadline)),
+            || reconciliations.set(reconciliations.get() + 1),
         );
-        assert_eq!(
-            super::next_timer_deadline_for_policy(true, 1_000, Some(1_200)),
-            Some(1_000)
-        );
+
+        assert_eq!(published.get(), Some(None));
+        assert_eq!(reconciliations.get(), 1);
+    }
+
+    #[test]
+    fn non_multitask_timer_programming_retains_direct_hardware_path() {
+        let direct_programming = Cell::new(None);
+
+        super::program_direct_timer(Some(1_000), 2_000, |deadline| {
+            direct_programming.set(Some(deadline))
+        });
+
+        assert_eq!(direct_programming.get(), Some(1_000));
     }
 
     #[test]

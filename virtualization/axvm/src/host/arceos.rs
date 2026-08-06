@@ -85,11 +85,6 @@ impl HostTime for ArceOsHost {
     fn monotonic_time(&self) -> Duration {
         modules::ax_hal::time::monotonic_time()
     }
-
-    fn set_oneshot_timer(&self, deadline_ns: u64) {
-        crate::rt_trace::host_timer_program(deadline_ns);
-        crate::arch::set_oneshot_timer(deadline_ns);
-    }
 }
 
 pub(crate) fn dispatch_host_irq(vector: usize) {

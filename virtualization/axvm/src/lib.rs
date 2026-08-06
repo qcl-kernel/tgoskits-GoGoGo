@@ -46,7 +46,7 @@ pub(crate) mod rt_trace {
     pub(crate) fn guest_exit(_vm_id: usize, _vcpu_id: usize) {}
     pub(crate) fn exit_handler_return(_vm_id: usize, _vcpu_id: usize, _vector: usize) {}
     pub(crate) fn deferred_finish(_vm_id: usize, _vcpu_id: usize) {}
-    pub(crate) fn host_timer_program(_deadline_ns: u64) {}
+    pub(crate) fn axvm_deadline_publish(_deadline_ns: Option<u64>) {}
 }
 mod task;
 mod timer;

@@ -54,13 +54,13 @@ pub(crate) trait BootImagePlatform {
     }
 }
 
-/// Architecture-specific host timer policy used by the ArceOS adapter.
+/// Architecture-specific host timer callback registration.
 pub(crate) trait HostTimePlatform {
-    fn set_oneshot_timer(deadline_ns: u64) {
-        ax_std::os::arceos::modules::ax_hal::time::set_oneshot_timer(deadline_ns);
+    fn register_timer_callback() {
+        ax_std::os::arceos::modules::ax_task::register_timer_callback(|_| {
+            crate::check_timer_events();
+        });
     }
-
-    fn register_timer_callback() {}
 }
 
 #[allow(

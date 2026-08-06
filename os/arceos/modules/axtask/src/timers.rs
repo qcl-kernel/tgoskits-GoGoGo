@@ -301,14 +301,6 @@ fn deadline_to_nanos(deadline: TimeValue) -> u64 {
     deadline.as_nanos().min(u64::MAX as u128) as u64
 }
 
-pub(crate) fn note_programmed_deadline_nanos(deadline_nanos: u64) {
-    with_local_pin(|pin| {
-        with_deadline_broker(pin, |state| {
-            state.programmed_deadline_nanos = Some(deadline_nanos)
-        })
-    });
-}
-
 pub(crate) fn maybe_reprogram_timer(deadline: TimeValue) {
     let deadline_nanos = deadline_to_nanos(deadline);
     with_local_pin(|pin| {
@@ -360,19 +352,6 @@ fn program_current_cpu_timer_once(pin: &ax_hal::percpu::CpuPin<'_>) {
             ax_hal::time::set_oneshot_timer,
         )
     });
-}
-
-pub(crate) fn next_deadline_nanos() -> Option<u64> {
-    let timer_list_deadline = with_local_exclusive(|exclusive| {
-        TIMER_LIST.with_current_mut(exclusive, |timer_list| timer_list.next_deadline())
-    });
-    let future_deadline = crate::future::next_timer_deadline();
-
-    match (timer_list_deadline, future_deadline) {
-        (Some(a), Some(b)) => Some(deadline_to_nanos(core::cmp::min(a, b))),
-        (Some(deadline), None) | (None, Some(deadline)) => Some(deadline_to_nanos(deadline)),
-        (None, None) => None,
-    }
 }
 
 pub(crate) fn set_alarm_wakeup(deadline: TimeValue, task: AxTaskRef) {

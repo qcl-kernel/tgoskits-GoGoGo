@@ -85,10 +85,6 @@ pub(crate) fn register_timer_callback() {
     CurrentArch::register_timer_callback();
 }
 
-pub(crate) fn set_oneshot_timer(deadline_ns: u64) {
-    CurrentArch::set_oneshot_timer(deadline_ns);
-}
-
 pub(crate) fn init_guest_boot_resources() {
     CurrentArch::init_guest_boot_resources();
 }

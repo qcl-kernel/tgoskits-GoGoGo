@@ -43,13 +43,13 @@ impl CounterSource {
 #[repr(u8)]
 #[derive(Clone, Copy)]
 enum TraceEvent {
-    GuestEntry        = 1,
-    GuestExit         = 2,
+    GuestEntry          = 1,
+    GuestExit           = 2,
     #[cfg(target_arch = "aarch64")]
-    ExitHandlerReturn = 3,
+    ExitHandlerReturn   = 3,
     #[cfg(target_arch = "aarch64")]
-    DeferredFinish    = 4,
-    HostTimerProgram  = 5,
+    DeferredFinish      = 4,
+    AxvmDeadlinePublish = 5,
 }
 
 struct TraceRecord {
@@ -83,7 +83,7 @@ static LAST_HANDLER: [AtomicU64; STREAMS] = [const { AtomicU64::new(0) }; STREAM
 static MAX_ENTRY_TO_EXIT: AtomicU64 = AtomicU64::new(0);
 static MAX_EXIT_TO_HANDLER: AtomicU64 = AtomicU64::new(0);
 static MAX_HANDLER_TO_FINISH: AtomicU64 = AtomicU64::new(0);
-static HOST_TIMER_PROGRAM_COUNT: AtomicUsize = AtomicUsize::new(0);
+static AXVM_DEADLINE_PUBLISH_COUNT: AtomicUsize = AtomicUsize::new(0);
 static EVENTS: [TraceRecord; CAPACITY] = [const { TraceRecord::new() }; CAPACITY];
 
 #[inline]
@@ -182,16 +182,21 @@ pub(crate) fn deferred_finish(vm_id: usize, vcpu_id: usize) {
     }
 }
 
-pub(crate) fn host_timer_program(deadline_ns: u64) {
-    record(TraceEvent::HostTimerProgram, 0, 0, deadline_ns);
-    HOST_TIMER_PROGRAM_COUNT.fetch_add(1, Ordering::Relaxed);
+pub(crate) fn axvm_deadline_publish(deadline_ns: Option<u64>) {
+    record(
+        TraceEvent::AxvmDeadlinePublish,
+        0,
+        0,
+        deadline_ns.unwrap_or(u64::MAX),
+    );
+    AXVM_DEADLINE_PUBLISH_COUNT.fetch_add(1, Ordering::Relaxed);
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 struct TraceReportState {
     guest_exits: usize,
     external_exits: usize,
-    host_timer_programs: usize,
+    axvm_deadline_publications: usize,
     entry_to_exit_ticks: u64,
     exit_to_handler_ticks: u64,
     handler_to_finish_ticks: u64,
@@ -202,7 +207,7 @@ fn report_state() -> TraceReportState {
     TraceReportState {
         guest_exits: GUEST_EXIT_COUNT.load(Ordering::Relaxed),
         external_exits: EXTERNAL_EXIT_COUNT.load(Ordering::Relaxed),
-        host_timer_programs: HOST_TIMER_PROGRAM_COUNT.load(Ordering::Relaxed),
+        axvm_deadline_publications: AXVM_DEADLINE_PUBLISH_COUNT.load(Ordering::Relaxed),
         entry_to_exit_ticks: MAX_ENTRY_TO_EXIT.load(Ordering::Relaxed),
         exit_to_handler_ticks: MAX_EXIT_TO_HANDLER.load(Ordering::Relaxed),
         handler_to_finish_ticks: MAX_HANDLER_TO_FINISH.load(Ordering::Relaxed),
@@ -218,13 +223,13 @@ fn maybe_report(guest_exits: usize) {
     let counter = counter_source().metadata();
     info!(
         "RTTRACE summary counter_unit={} counter_frequency_hz={} guest_exits={} external_exits={} \
-         host_timer_programs={} entry_to_exit_ticks={} exit_to_handler_ticks={} \
+         axvm_deadline_publications={} entry_to_exit_ticks={} exit_to_handler_ticks={} \
          handler_to_finish_ticks={} ring_records={}",
         counter.unit,
         counter.frequency_hz,
         report.guest_exits,
         report.external_exits,
-        report.host_timer_programs,
+        report.axvm_deadline_publications,
         report.entry_to_exit_ticks,
         report.exit_to_handler_ticks,
         report.handler_to_finish_ticks,
@@ -253,11 +258,14 @@ mod tests {
 
         guest_entry(usize::MAX, usize::MAX);
         guest_exit(usize::MAX, usize::MAX);
-        host_timer_program(123_456);
+        axvm_deadline_publish(Some(123_456));
 
         let after = report_state();
         assert_eq!(after.guest_exits, before.guest_exits + 1);
-        assert_eq!(after.host_timer_programs, before.host_timer_programs + 1);
+        assert_eq!(
+            after.axvm_deadline_publications,
+            before.axvm_deadline_publications + 1
+        );
         assert_eq!(after.records_written, before.records_written + 3);
     }
 }
