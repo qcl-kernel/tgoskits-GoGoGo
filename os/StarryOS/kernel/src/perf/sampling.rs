@@ -446,7 +446,7 @@ pub fn pmu_overflow_handler(_ctx: IrqContext) -> IrqReturn {
                 None => {
                     let curr = ax_task::current();
                     match curr.try_as_thread() {
-                        Some(thr) => (thr.proc_data.proc.pid() as u32, thr.tid()),
+                        Some(thr) => (thr.proc_data.proc.pid(), thr.tid()),
                         None => {
                             let id = curr.id().as_u64() as u32;
                             (id, id)
@@ -498,7 +498,8 @@ pub fn pmu_overflow_handler(_ctx: IrqContext) -> IrqReturn {
                     if unsafe { ring_write(ring_vaddr, ring_len, &lost_rec) } {
                         // SAFETY: as above.
                         unsafe {
-                            (*(lost_reported_ptr as *const AtomicU64)).store(total, Ordering::Relaxed)
+                            (*(lost_reported_ptr as *const AtomicU64))
+                                .store(total, Ordering::Relaxed)
                         };
                     }
                 }

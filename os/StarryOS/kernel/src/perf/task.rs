@@ -727,7 +727,7 @@ pub fn perf_sched_in(thr: &Thread) {
         // ([`perf_rotate_current`]) cycles the slots among the over-subscribed
         // events so each takes a turn on hardware.
         if let Some(n) = super::percpu::alloc_programmable_counter() {
-            arm_slice(ptc, n, now, thr.proc_data.proc.pid() as u32, thr.tid());
+            arm_slice(ptc, n, now, thr.proc_data.proc.pid(), thr.tid());
         }
     }
 }
@@ -887,7 +887,7 @@ pub fn perf_rotate_current() {
             && !ptc.running.load(Ordering::Acquire)
             && let Some(n) = super::percpu::alloc_programmable_counter()
         {
-            arm_slice(ptc, n, now, thr.proc_data.proc.pid() as u32, thr.tid());
+            arm_slice(ptc, n, now, thr.proc_data.proc.pid(), thr.tid());
         }
     }
 }
