@@ -21,6 +21,12 @@ pub use crate::task::{AxTaskExt, TaskExt};
 #[cfg_attr(doc, doc(cfg(all(feature = "multitask", feature = "irq"))))]
 #[cfg(feature = "irq")]
 pub use crate::timers::register_timer_callback;
+#[cfg(feature = "irq")]
+#[doc(hidden)]
+pub use crate::timers::{
+    TimerDeadlineProvider, register_current_cpu_timer_deadline_provider,
+    reprogram_current_cpu_timer, set_current_cpu_periodic_timer_deadline_nanos,
+};
 #[cfg_attr(doc, doc(cfg(feature = "multitask")))]
 pub use crate::{
     task::{CurrentTask, TaskId, TaskInner, TaskState},

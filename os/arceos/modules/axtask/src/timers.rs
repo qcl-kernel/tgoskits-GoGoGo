@@ -1,7 +1,7 @@
 use alloc::{boxed::Box, vec::Vec};
 use core::sync::atomic::{AtomicU64, Ordering};
 
-use ax_hal::time::{TimeValue, monotonic_time};
+use ax_hal::time::{NANOS_PER_SEC, TimeValue, monotonic_time, monotonic_time_nanos};
 use ax_kernel_guard::{NoOp, NoPreemptIrqSave};
 use ax_timer_list::{TimerEvent, TimerList};
 
@@ -11,10 +11,98 @@ use crate::{AxTaskRef, current_run_queue};
 
 static TIMER_TICKET_ID: AtomicU64 = AtomicU64::new(1);
 
+#[doc(hidden)]
+pub type TimerDeadlineProvider = fn() -> Option<u64>;
+
+#[derive(Clone, Copy, Default)]
+struct DeadlineBrokerState {
+    periodic_deadline_nanos: Option<u64>,
+    external_provider: Option<TimerDeadlineProvider>,
+    programmed_deadline_nanos: Option<u64>,
+    callback_dispatch_depth: usize,
+    reprogram_pending: bool,
+}
+
+impl DeadlineBrokerState {
+    const fn new() -> Self {
+        Self {
+            periodic_deadline_nanos: None,
+            external_provider: None,
+            programmed_deadline_nanos: None,
+            callback_dispatch_depth: 0,
+            reprogram_pending: false,
+        }
+    }
+
+    fn register_external_provider(&mut self, provider: TimerDeadlineProvider) {
+        assert!(
+            self.external_provider.is_none(),
+            "timer deadline provider already registered on this CPU"
+        );
+        self.external_provider = Some(provider);
+    }
+
+    fn set_periodic_deadline_nanos(&mut self, deadline_nanos: Option<u64>) {
+        self.periodic_deadline_nanos = deadline_nanos;
+    }
+
+    fn request_reprogram(&mut self) -> bool {
+        if self.callback_dispatch_depth == 0 {
+            true
+        } else {
+            self.reprogram_pending = true;
+            false
+        }
+    }
+
+    fn begin_callback_dispatch(&mut self) {
+        self.callback_dispatch_depth = self
+            .callback_dispatch_depth
+            .checked_add(1)
+            .expect("timer callback dispatch depth overflow");
+    }
+
+    fn end_callback_dispatch(&mut self) -> bool {
+        assert!(
+            self.callback_dispatch_depth > 0,
+            "timer callback dispatch depth underflow"
+        );
+        self.callback_dispatch_depth -= 1;
+        if self.callback_dispatch_depth == 0 {
+            core::mem::take(&mut self.reprogram_pending)
+        } else {
+            false
+        }
+    }
+
+    fn program_with(
+        &mut self,
+        now_nanos: u64,
+        task_deadline_nanos: Option<u64>,
+        future_deadline_nanos: Option<u64>,
+        external_deadline_nanos: Option<u64>,
+        program: impl FnOnce(u64),
+    ) {
+        let deadline_nanos = [
+            self.periodic_deadline_nanos,
+            task_deadline_nanos,
+            future_deadline_nanos,
+            external_deadline_nanos,
+        ]
+        .into_iter()
+        .flatten()
+        .min()
+        .unwrap_or_else(|| now_nanos.saturating_add(NANOS_PER_SEC));
+
+        program(deadline_nanos);
+        self.programmed_deadline_nanos = Some(deadline_nanos);
+    }
+}
+
 percpu_static! {
     TIMER_LIST: TimerList<TaskWakeupEvent> = TimerList::new(),
     TIMER_CALLBACKS: Vec<Box<dyn Fn(TimeValue) + Send + Sync>> = Vec::new(),
-    PROGRAMMED_DEADLINE_NANOS: u64 = 0,
+    DEADLINE_BROKER: DeadlineBrokerState = DeadlineBrokerState::new(),
 }
 
 struct TaskWakeupEvent {
@@ -65,6 +153,31 @@ where
     });
 }
 
+#[doc(hidden)]
+pub fn register_current_cpu_timer_deadline_provider(provider: TimerDeadlineProvider) {
+    with_local_pin(|pin| {
+        with_deadline_broker(pin, |state| state.register_external_provider(provider))
+    });
+}
+
+#[doc(hidden)]
+pub fn set_current_cpu_periodic_timer_deadline_nanos(deadline_nanos: Option<u64>) {
+    with_local_pin(|pin| {
+        with_deadline_broker(pin, |state| {
+            state.set_periodic_deadline_nanos(deadline_nanos)
+        })
+    });
+}
+
+#[doc(hidden)]
+pub fn reprogram_current_cpu_timer() {
+    with_local_pin(|pin| {
+        if with_deadline_broker(pin, DeadlineBrokerState::request_reprogram) {
+            program_current_cpu_timer_with_pin(pin);
+        }
+    });
+}
+
 fn check_callbacks() {
     with_local_pin(|pin| {
         TIMER_CALLBACKS.with_current(pin, |callbacks| {
@@ -80,17 +193,54 @@ fn deadline_to_nanos(deadline: TimeValue) -> u64 {
 }
 
 pub(crate) fn note_programmed_deadline_nanos(deadline_nanos: u64) {
-    with_local_pin(|pin| PROGRAMMED_DEADLINE_NANOS.write_current(pin, deadline_nanos));
+    with_local_pin(|pin| {
+        with_deadline_broker(pin, |state| {
+            state.programmed_deadline_nanos = Some(deadline_nanos)
+        })
+    });
 }
 
 pub(crate) fn maybe_reprogram_timer(deadline: TimeValue) {
     let deadline_nanos = deadline_to_nanos(deadline);
     with_local_pin(|pin| {
-        let programmed = PROGRAMMED_DEADLINE_NANOS.read_current(pin);
-        if programmed == 0 || deadline_nanos < programmed {
-            PROGRAMMED_DEADLINE_NANOS.write_current(pin, deadline_nanos);
-            ax_hal::time::set_oneshot_timer(deadline_nanos);
+        let should_program = with_deadline_broker(pin, |state| {
+            if state
+                .programmed_deadline_nanos
+                .is_none_or(|programmed| deadline_nanos < programmed)
+            {
+                state.request_reprogram()
+            } else {
+                false
+            }
+        });
+        if should_program {
+            program_current_cpu_timer_with_pin(pin);
         }
+    });
+}
+
+fn program_current_cpu_timer_with_pin(pin: &ax_hal::percpu::CpuPin<'_>) {
+    // SAFETY: the caller holds NoPreemptIrqSave, so the CPU pin cannot migrate
+    // and local IRQ re-entry cannot overlap the timer-list borrow.
+    let task_deadline = unsafe {
+        ax_hal::percpu::with_exclusive_cpu(pin, |exclusive| {
+            TIMER_LIST.with_current_mut(exclusive, |timer_list| timer_list.next_deadline())
+        })
+    };
+    let future_deadline = crate::future::next_timer_deadline();
+    let external_provider = DEADLINE_BROKER.with_current(pin, |state| state.external_provider);
+
+    // Timer-list and future-runtime borrows have ended before external code runs.
+    let external_deadline_nanos = external_provider.and_then(|provider| provider());
+    let now_nanos = monotonic_time_nanos();
+    with_deadline_broker(pin, |state| {
+        state.program_with(
+            now_nanos,
+            task_deadline.map(deadline_to_nanos),
+            future_deadline.map(deadline_to_nanos),
+            external_deadline_nanos,
+            ax_hal::time::set_oneshot_timer,
+        )
     });
 }
 
@@ -121,6 +271,7 @@ pub(crate) fn set_alarm_wakeup(deadline: TimeValue, task: AxTaskRef) {
 // SAFETY: only called in timer irq handler, so irq and preemption are
 // both disabled here.
 pub fn check_events(run_callbacks: bool) {
+    with_local_pin(|pin| with_deadline_broker(pin, DeadlineBrokerState::begin_callback_dispatch));
     if run_callbacks {
         check_callbacks();
     }
@@ -138,6 +289,29 @@ pub fn check_events(run_callbacks: bool) {
 
     // Handle async timer events
     crate::future::check_timer_events();
+
+    with_local_pin(|pin| {
+        let should_program = with_deadline_broker(pin, |state| {
+            state.request_reprogram();
+            state.end_callback_dispatch()
+        });
+        if should_program {
+            program_current_cpu_timer_with_pin(pin);
+        }
+    });
+}
+
+fn with_deadline_broker<R>(
+    pin: &ax_hal::percpu::CpuPin<'_>,
+    operation: impl FnOnce(&mut DeadlineBrokerState) -> R,
+) -> R {
+    // SAFETY: every caller holds NoPreemptIrqSave, which prevents migration,
+    // local IRQ re-entry, and conflicting access for the complete borrow.
+    unsafe {
+        ax_hal::percpu::with_exclusive_cpu(pin, |exclusive| {
+            DEADLINE_BROKER.with_current_mut(exclusive, operation)
+        })
+    }
 }
 
 fn with_local_pin<R>(
@@ -159,4 +333,76 @@ fn with_local_exclusive<R>(
         ax_hal::percpu::with_cpu_pin(|pin| ax_hal::percpu::with_exclusive_cpu(pin, operation))
     }
     .expect("timer access requires an installed CPU-local area")
+}
+
+#[cfg(test)]
+mod tests {
+    use core::cell::Cell;
+
+    use super::*;
+
+    fn empty_external_deadline() -> Option<u64> {
+        None
+    }
+
+    #[test]
+    fn broker_keeps_external_deadline_after_periodic_epilogue() {
+        let mut state = DeadlineBrokerState::default();
+        let programmed = Cell::new(None);
+        state.set_periodic_deadline_nanos(Some(20_000_000));
+
+        state.program_with(
+            10_000_000,
+            Some(30_000_000),
+            None,
+            Some(15_000_000),
+            |deadline| programmed.set(Some(deadline)),
+        );
+
+        assert_eq!(programmed.get(), Some(15_000_000));
+    }
+
+    #[test]
+    fn tickless_broker_keeps_external_deadline() {
+        let mut state = DeadlineBrokerState::default();
+        let programmed = Cell::new(None);
+
+        state.program_with(10_000_000, None, None, Some(15_000_000), |deadline| {
+            programmed.set(Some(deadline))
+        });
+
+        assert_eq!(programmed.get(), Some(15_000_000));
+    }
+
+    #[test]
+    fn empty_broker_parks_for_one_second() {
+        let mut state = DeadlineBrokerState::default();
+        let programmed = Cell::new(None);
+
+        state.program_with(10_000_000, None, None, None, |deadline| {
+            programmed.set(Some(deadline));
+        });
+
+        assert_eq!(programmed.get(), Some(1_010_000_000));
+    }
+
+    #[test]
+    #[should_panic(expected = "timer deadline provider already registered on this CPU")]
+    fn duplicate_external_provider_registration_fails() {
+        let mut state = DeadlineBrokerState::default();
+
+        state.register_external_provider(empty_external_deadline);
+        state.register_external_provider(empty_external_deadline);
+    }
+
+    #[test]
+    fn nested_callback_reprogramming_waits_for_outermost_exit() {
+        let mut state = DeadlineBrokerState::default();
+        state.begin_callback_dispatch();
+        state.begin_callback_dispatch();
+
+        assert!(!state.request_reprogram());
+        assert!(!state.end_callback_dispatch());
+        assert!(state.end_callback_dispatch());
+    }
 }
