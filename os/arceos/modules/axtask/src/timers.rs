@@ -11,6 +11,13 @@ use crate::{AxTaskRef, current_run_queue};
 
 static TIMER_TICKET_ID: AtomicU64 = AtomicU64::new(1);
 
+/// Returns the current CPU's next deadline from one external timer source.
+///
+/// The broker calls the provider with local IRQs and preemption disabled, after
+/// releasing all mutable axtask timer borrows. Providers must be bounded,
+/// nonblocking, nonallocating, and must not acquire or depend on mutable axtask
+/// timer borrows. Reprogram requests made by a provider are coalesced by the
+/// outer broker call.
 #[doc(hidden)]
 pub type TimerDeadlineProvider = fn() -> Option<u64>;
 
@@ -20,6 +27,7 @@ struct DeadlineBrokerState {
     external_provider: Option<TimerDeadlineProvider>,
     programmed_deadline_nanos: Option<u64>,
     callback_dispatch_depth: usize,
+    programming_depth: usize,
     reprogram_pending: bool,
 }
 
@@ -30,6 +38,7 @@ impl DeadlineBrokerState {
             external_provider: None,
             programmed_deadline_nanos: None,
             callback_dispatch_depth: 0,
+            programming_depth: 0,
             reprogram_pending: false,
         }
     }
@@ -47,7 +56,7 @@ impl DeadlineBrokerState {
     }
 
     fn request_reprogram(&mut self) -> bool {
-        if self.callback_dispatch_depth == 0 {
+        if self.callback_dispatch_depth == 0 && self.programming_depth == 0 {
             true
         } else {
             self.reprogram_pending = true;
@@ -73,6 +82,35 @@ impl DeadlineBrokerState {
         } else {
             false
         }
+    }
+
+    fn abort_callback_dispatch(&mut self) {
+        assert!(
+            self.callback_dispatch_depth > 0,
+            "timer callback dispatch depth underflow"
+        );
+        self.callback_dispatch_depth -= 1;
+        self.reprogram_pending = true;
+    }
+
+    fn begin_programming(&mut self) {
+        self.programming_depth = self
+            .programming_depth
+            .checked_add(1)
+            .expect("timer broker programming depth overflow");
+    }
+
+    fn take_reprogram_pending(&mut self) -> bool {
+        core::mem::take(&mut self.reprogram_pending)
+    }
+
+    fn end_programming(&mut self) {
+        assert!(
+            self.programming_depth > 0,
+            "timer broker programming depth underflow"
+        );
+        self.programming_depth -= 1;
+        self.reprogram_pending = false;
     }
 
     fn program_with(
@@ -108,6 +146,42 @@ percpu_static! {
 struct TaskWakeupEvent {
     ticket_id: u64,
     task: AxTaskRef,
+}
+
+struct CallbackDispatchGuard {
+    active: bool,
+}
+
+impl CallbackDispatchGuard {
+    fn begin() -> Self {
+        with_local_pin(|pin| {
+            with_deadline_broker(pin, DeadlineBrokerState::begin_callback_dispatch)
+        });
+        Self { active: true }
+    }
+
+    fn finish(mut self) {
+        let should_program = with_local_pin(|pin| {
+            with_deadline_broker(pin, |state| {
+                state.request_reprogram();
+                state.end_callback_dispatch()
+            })
+        });
+        self.active = false;
+        if should_program {
+            reprogram_current_cpu_timer();
+        }
+    }
+}
+
+impl Drop for CallbackDispatchGuard {
+    fn drop(&mut self) {
+        if self.active {
+            with_local_pin(|pin| {
+                with_deadline_broker(pin, DeadlineBrokerState::abort_callback_dispatch)
+            });
+        }
+    }
 }
 
 impl TimerEvent for TaskWakeupEvent {
@@ -220,6 +294,15 @@ pub(crate) fn maybe_reprogram_timer(deadline: TimeValue) {
 }
 
 fn program_current_cpu_timer_with_pin(pin: &ax_hal::percpu::CpuPin<'_>) {
+    with_deadline_broker(pin, DeadlineBrokerState::begin_programming);
+    program_current_cpu_timer_once(pin);
+    if with_deadline_broker(pin, DeadlineBrokerState::take_reprogram_pending) {
+        program_current_cpu_timer_once(pin);
+    }
+    with_deadline_broker(pin, DeadlineBrokerState::end_programming);
+}
+
+fn program_current_cpu_timer_once(pin: &ax_hal::percpu::CpuPin<'_>) {
     // SAFETY: the caller holds NoPreemptIrqSave, so the CPU pin cannot migrate
     // and local IRQ re-entry cannot overlap the timer-list borrow.
     let task_deadline = unsafe {
@@ -271,7 +354,7 @@ pub(crate) fn set_alarm_wakeup(deadline: TimeValue, task: AxTaskRef) {
 // SAFETY: only called in timer irq handler, so irq and preemption are
 // both disabled here.
 pub fn check_events(run_callbacks: bool) {
-    with_local_pin(|pin| with_deadline_broker(pin, DeadlineBrokerState::begin_callback_dispatch));
+    let dispatch_guard = CallbackDispatchGuard::begin();
     if run_callbacks {
         check_callbacks();
     }
@@ -290,15 +373,7 @@ pub fn check_events(run_callbacks: bool) {
     // Handle async timer events
     crate::future::check_timer_events();
 
-    with_local_pin(|pin| {
-        let should_program = with_deadline_broker(pin, |state| {
-            state.request_reprogram();
-            state.end_callback_dispatch()
-        });
-        if should_program {
-            program_current_cpu_timer_with_pin(pin);
-        }
-    });
+    dispatch_guard.finish();
 }
 
 fn with_deadline_broker<R>(

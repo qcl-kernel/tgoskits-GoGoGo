@@ -1,6 +1,8 @@
+#[cfg(feature = "irq")]
+use core::sync::atomic::AtomicBool;
 use core::sync::atomic::{AtomicUsize, Ordering};
 #[cfg(feature = "irq")]
-use std::sync::{Arc, Barrier};
+use std::sync::{Arc, Barrier, Once};
 use std::{
     panic::{AssertUnwindSafe, catch_unwind, resume_unwind},
     sync::{OnceLock, mpsc},
@@ -21,6 +23,54 @@ type TestResult = Result<(), Box<dyn core::any::Any + Send>>;
 type TestJob = (Box<dyn FnOnce() + Send + 'static>, mpsc::Sender<TestResult>);
 
 static TEST_WORKER: OnceLock<mpsc::Sender<TestJob>> = OnceLock::new();
+
+#[cfg(feature = "irq")]
+static TIMER_PROVIDER_REGISTRATION: Once = Once::new();
+#[cfg(feature = "irq")]
+static REENTRANT_PROVIDER_ENABLED: AtomicBool = AtomicBool::new(false);
+#[cfg(feature = "irq")]
+static TIMER_PROVIDER_ACTIVE_CALLS: AtomicUsize = AtomicUsize::new(0);
+#[cfg(feature = "irq")]
+static TIMER_PROVIDER_MAX_ACTIVE_CALLS: AtomicUsize = AtomicUsize::new(0);
+#[cfg(feature = "irq")]
+static TIMER_PROVIDER_TOTAL_CALLS: AtomicUsize = AtomicUsize::new(0);
+#[cfg(feature = "irq")]
+static PANICKING_TIMER_CALLBACK_REGISTRATION: Once = Once::new();
+#[cfg(feature = "irq")]
+static PANICKING_TIMER_CALLBACK_ENABLED: AtomicBool = AtomicBool::new(false);
+
+#[cfg(feature = "irq")]
+fn reentrant_test_timer_provider() -> Option<u64> {
+    let active_calls = TIMER_PROVIDER_ACTIVE_CALLS.fetch_add(1, Ordering::SeqCst) + 1;
+    TIMER_PROVIDER_MAX_ACTIVE_CALLS.fetch_max(active_calls, Ordering::SeqCst);
+    TIMER_PROVIDER_TOTAL_CALLS.fetch_add(1, Ordering::SeqCst);
+
+    if active_calls == 1 && REENTRANT_PROVIDER_ENABLED.load(Ordering::SeqCst) {
+        ax_task::reprogram_current_cpu_timer();
+    }
+
+    TIMER_PROVIDER_ACTIVE_CALLS.fetch_sub(1, Ordering::SeqCst);
+    Some(15_000_000)
+}
+
+#[cfg(feature = "irq")]
+fn ensure_test_timer_provider_registered() {
+    TIMER_PROVIDER_REGISTRATION.call_once(|| {
+        ax_task::register_current_cpu_timer_deadline_provider(reentrant_test_timer_provider)
+    });
+}
+
+#[cfg(feature = "irq")]
+fn ensure_panicking_timer_callback_registered() {
+    PANICKING_TIMER_CALLBACK_REGISTRATION.call_once(|| {
+        ax_task::register_timer_callback(|_| {
+            if PANICKING_TIMER_CALLBACK_ENABLED.swap(false, Ordering::SeqCst) {
+                ax_task::reprogram_current_cpu_timer();
+                panic!("intentional timer callback panic");
+            }
+        });
+    });
+}
 
 pub(crate) fn run_in_test_scheduler<F>(f: F)
 where
@@ -59,6 +109,42 @@ fn non_periodic_timer_irq_runs_registered_callbacks() {
 
         assert_eq!(callback_count.load(Ordering::Relaxed), 1);
         assert_eq!(ax_task::cpu_busy_ticks(0), busy_ticks_before);
+    });
+}
+
+#[test]
+#[cfg(feature = "irq")]
+fn reentrant_registered_provider_is_coalesced_outside_provider_stack() {
+    run_in_test_scheduler(|| {
+        ensure_test_timer_provider_registered();
+        TIMER_PROVIDER_ACTIVE_CALLS.store(0, Ordering::SeqCst);
+        TIMER_PROVIDER_MAX_ACTIVE_CALLS.store(0, Ordering::SeqCst);
+        TIMER_PROVIDER_TOTAL_CALLS.store(0, Ordering::SeqCst);
+        REENTRANT_PROVIDER_ENABLED.store(true, Ordering::SeqCst);
+
+        ax_task::reprogram_current_cpu_timer();
+
+        REENTRANT_PROVIDER_ENABLED.store(false, Ordering::SeqCst);
+        assert_eq!(TIMER_PROVIDER_MAX_ACTIVE_CALLS.load(Ordering::SeqCst), 1);
+        assert_eq!(TIMER_PROVIDER_TOTAL_CALLS.load(Ordering::SeqCst), 2);
+    });
+}
+
+#[test]
+#[cfg(feature = "irq")]
+fn caught_callback_panic_does_not_leave_reprogramming_deferred() {
+    run_in_test_scheduler(|| {
+        ensure_test_timer_provider_registered();
+        ensure_panicking_timer_callback_registered();
+        REENTRANT_PROVIDER_ENABLED.store(false, Ordering::SeqCst);
+        PANICKING_TIMER_CALLBACK_ENABLED.store(true, Ordering::SeqCst);
+
+        let result = catch_unwind(AssertUnwindSafe(|| ax_task::on_timer_irq(false, true)));
+        assert!(result.is_err());
+
+        TIMER_PROVIDER_TOTAL_CALLS.store(0, Ordering::SeqCst);
+        ax_task::reprogram_current_cpu_timer();
+        assert!(TIMER_PROVIDER_TOTAL_CALLS.load(Ordering::SeqCst) > 0);
     });
 }
 
