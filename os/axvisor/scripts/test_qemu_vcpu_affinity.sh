@@ -28,7 +28,10 @@ TEST_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/axvisor-qemu-artifact-test.XXXXXX")"
 FIXTURE_ROOT="${TEST_ROOT}/repo"
 FIXTURE_SCRIPTS="${FIXTURE_ROOT}/os/axvisor/scripts"
 FIXTURE_TARGET="${FIXTURE_ROOT}/target/aarch64-unknown-linux-musl/release"
-FIXTURE_CONFIGS="${FIXTURE_ROOT}/tmp/vmconfigs/three-guest-net"
+VM_CONFIG_ROOT="${FIXTURE_ROOT}/tmp/vmconfigs/three-guest-net"
+PUBLISHED_CONFIGS="${VM_CONFIG_ROOT}/run.fixture"
+FIXTURE_CONFIGS="${VM_CONFIG_ROOT}/current"
+OVERRIDE_CONFIGS="${TEST_ROOT}/override-vmconfigs"
 RUNNER="${FIXTURE_SCRIPTS}/run_qemu_vcpu_affinity.sh"
 HELPER="${FIXTURE_SCRIPTS}/validate_qemu_artifact.sh"
 DEFAULT_ELF="${FIXTURE_TARGET}/axvisor"
@@ -37,7 +40,11 @@ EMBED_C="${TEST_ROOT}/embed-configs.c"
 EMBED_ASM="${TEST_ROOT}/embed-configs.S"
 COMMAND_OUTPUT="${TEST_ROOT}/command.out"
 
-mkdir -p "$FIXTURE_SCRIPTS" "$FIXTURE_TARGET" "$FIXTURE_CONFIGS"
+mkdir -p \
+  "$FIXTURE_SCRIPTS" "$FIXTURE_TARGET" "$PUBLISHED_CONFIGS" "$OVERRIDE_CONFIGS"
+ln -s run.fixture "$FIXTURE_CONFIGS"
+[ "$(readlink "$FIXTURE_CONFIGS")" = run.fixture ] \
+  || fail "current fixture must be a relative symlink to run.fixture"
 cp "$SOURCE" "$RUNNER"
 cp "$HELPER_SOURCE" "$HELPER"
 chmod +x "$RUNNER" "$HELPER"
@@ -45,9 +52,22 @@ chmod +x "$RUNNER" "$HELPER"
 write_default_artifacts() {
   local host_policy_diagnostic="${1:-correct}"
   local include_runtime_witness="${2:-true}"
-  printf 'name = "linux-net-1"\n' >"${FIXTURE_CONFIGS}/linux-net-1.toml"
-  printf 'name = "linux-net-2"\n' >"${FIXTURE_CONFIGS}/linux-net-2.toml"
-  printf 'name = "zephyr-net"\n' >"${FIXTURE_CONFIGS}/zephyr-net.toml"
+  local config_name
+  printf 'name = "published-linux-net-1"\n' >"${PUBLISHED_CONFIGS}/linux-net-1.toml"
+  printf 'name = "published-linux-net-2"\n' >"${PUBLISHED_CONFIGS}/linux-net-2.toml"
+  printf 'name = "published-zephyr-net"\n' >"${PUBLISHED_CONFIGS}/zephyr-net.toml"
+  printf 'name = "stale-linux-net-1"\n' >"${VM_CONFIG_ROOT}/linux-net-1.toml"
+  printf 'name = "stale-linux-net-2"\n' >"${VM_CONFIG_ROOT}/linux-net-2.toml"
+  printf 'name = "stale-zephyr-net"\n' >"${VM_CONFIG_ROOT}/zephyr-net.toml"
+  for config_name in linux-net-1 linux-net-2 zephyr-net; do
+    ! cmp -s \
+      "${PUBLISHED_CONFIGS}/${config_name}.toml" \
+      "${VM_CONFIG_ROOT}/${config_name}.toml" \
+      || fail "stale sibling fixture matches published config: ${config_name}.toml"
+  done
+  cp "${PUBLISHED_CONFIGS}/linux-net-1.toml" "${OVERRIDE_CONFIGS}/linux-net-1.toml"
+  cp "${PUBLISHED_CONFIGS}/linux-net-2.toml" "${OVERRIDE_CONFIGS}/linux-net-2.toml"
+  cp "${PUBLISHED_CONFIGS}/zephyr-net.toml" "${OVERRIDE_CONFIGS}/zephyr-net.toml"
   cat >"$EMBED_C" <<'EOF'
 extern const unsigned char vm_config_1[];
 extern const unsigned char vm_config_2[];
@@ -104,21 +124,24 @@ EOF
 .global vm_config_1
 .type vm_config_1, @object
 vm_config_1:
-.incbin "${FIXTURE_CONFIGS}/linux-net-1.toml"
+.incbin "${PUBLISHED_CONFIGS}/linux-net-1.toml"
+.incbin "${VM_CONFIG_ROOT}/linux-net-1.toml"
 .size vm_config_1, . - vm_config_1
 
 .section .rodata.vm_config_2,"a",@progbits
 .global vm_config_2
 .type vm_config_2, @object
 vm_config_2:
-.incbin "${FIXTURE_CONFIGS}/linux-net-2.toml"
+.incbin "${PUBLISHED_CONFIGS}/linux-net-2.toml"
+.incbin "${VM_CONFIG_ROOT}/linux-net-2.toml"
 .size vm_config_2, . - vm_config_2
 
 .section .rodata.vm_config_3,"a",@progbits
 .global vm_config_3
 .type vm_config_3, @object
 vm_config_3:
-.incbin "${FIXTURE_CONFIGS}/zephyr-net.toml"
+.incbin "${PUBLISHED_CONFIGS}/zephyr-net.toml"
+.incbin "${VM_CONFIG_ROOT}/zephyr-net.toml"
 .size vm_config_3, . - vm_config_3
 
 .section .note.GNU-stack,"",@progbits
@@ -163,15 +186,19 @@ expect_failure() {
 
 assert_manifest() {
   local manifest="$1"
+  local config_root="${2:-$FIXTURE_CONFIGS}"
   local expected="${TEST_ROOT}/expected-manifest.tsv"
+  local stale_config
+  local stale_hash
+  local stale_path
   {
     printf 'version\t1\n'
     printf 'elf\t%s\t%s\n' "$(realpath "$DEFAULT_ELF")" "$(sha256sum "$DEFAULT_ELF" | awk '{print $1}')"
     printf 'raw\t%s\t%s\n' "$(realpath "$DEFAULT_RAW")" "$(sha256sum "$DEFAULT_RAW" | awk '{print $1}')"
     for config in \
-      "${FIXTURE_CONFIGS}/linux-net-1.toml" \
-      "${FIXTURE_CONFIGS}/linux-net-2.toml" \
-      "${FIXTURE_CONFIGS}/zephyr-net.toml"; do
+      "${config_root}/linux-net-1.toml" \
+      "${config_root}/linux-net-2.toml" \
+      "${config_root}/zephyr-net.toml"; do
       printf 'vm-config\t%s\t%s\n' "$(realpath "$config")" "$(sha256sum "$config" | awk '{print $1}')"
     done
   } >"$expected"
@@ -179,12 +206,31 @@ assert_manifest() {
     diff -u "$expected" "$manifest" >&2 || true
     fail "manifest rows, paths, hashes, or VM config order are incorrect"
   }
+  for stale_config in \
+    "${VM_CONFIG_ROOT}/linux-net-1.toml" \
+    "${VM_CONFIG_ROOT}/linux-net-2.toml" \
+    "${VM_CONFIG_ROOT}/zephyr-net.toml"; do
+    stale_path="$(realpath "$stale_config")"
+    stale_hash="$(sha256sum "$stale_config" | awk '{print $1}')"
+    if awk -F '\t' -v path="$stale_path" -v hash="$stale_hash" '
+      $1 == "vm-config" && ($2 == path || $3 == hash) { found = 1 }
+      END { exit found ? 0 : 1 }
+    ' "$manifest"; then
+      fail "manifest selected stale sibling VM config: ${stale_config}"
+    fi
+  done
 }
 
 write_default_artifacts
 DEFAULT_LOG="${TEST_ROOT}/logs/default.log"
-expect_success "valid default artifacts" run_validate "$DEFAULT_LOG"
+expect_success "valid atomically published default artifacts" run_validate "$DEFAULT_LOG"
 assert_manifest "${DEFAULT_LOG}.build-manifest.tsv"
+
+write_default_artifacts
+OVERRIDE_LOG="${TEST_ROOT}/logs/override.log"
+expect_success "explicit VM config override" run_validate "$OVERRIDE_LOG" \
+  AXVISOR_VM_CONFIGS="${OVERRIDE_CONFIGS}/linux-net-1.toml:${OVERRIDE_CONFIGS}/linux-net-2.toml:${OVERRIDE_CONFIGS}/zephyr-net.toml"
+assert_manifest "${OVERRIDE_LOG}.build-manifest.tsv" "$OVERRIDE_CONFIGS"
 
 write_default_artifacts correct false
 expect_failure "marker-only host policy diagnostic" "runtime host policy diagnostic witness is absent" \
@@ -227,7 +273,7 @@ EOF
 chmod +x "${MUTATOR_BIN}/python3"
 TOCTOU_LOG="${TEST_ROOT}/logs/toctou.log"
 expect_failure "input changed during validation" \
-  "input changed during validation: vm-config: ${FIXTURE_CONFIGS}/linux-net-2.toml" \
+  "input changed during validation: vm-config: ${PUBLISHED_CONFIGS}/linux-net-2.toml" \
   run_validate "$TOCTOU_LOG" \
   PATH="${MUTATOR_BIN}:${PATH}" \
   AXVISOR_TEST_REAL_PYTHON="$REAL_PYTHON" \
