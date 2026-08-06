@@ -17,7 +17,9 @@ static TIMER_TICKET_ID: AtomicU64 = AtomicU64::new(1);
 /// releasing all mutable axtask timer borrows. Providers must be bounded,
 /// nonblocking, nonallocating, and must not acquire or depend on mutable axtask
 /// timer borrows. Reprogram requests made by a provider are coalesced by the
-/// outer broker call.
+/// outer broker call. On unwind-capable hosts, provider panics propagate after
+/// the broker restores its in-progress state; recovery never programs hardware
+/// during unwind, and a later reprogram request retries normally.
 #[doc(hidden)]
 pub type TimerDeadlineProvider = fn() -> Option<u64>;
 
@@ -113,6 +115,15 @@ impl DeadlineBrokerState {
         self.reprogram_pending = false;
     }
 
+    fn abort_programming(&mut self) {
+        assert!(
+            self.programming_depth > 0,
+            "timer broker programming depth underflow"
+        );
+        self.programming_depth -= 1;
+        self.reprogram_pending = true;
+    }
+
     fn program_with(
         &mut self,
         now_nanos: u64,
@@ -150,6 +161,30 @@ struct TaskWakeupEvent {
 
 struct CallbackDispatchGuard {
     active: bool,
+}
+
+struct TimerProgrammingGuard {
+    active: bool,
+}
+
+impl TimerProgrammingGuard {
+    fn begin(pin: &ax_hal::percpu::CpuPin<'_>) -> Self {
+        with_deadline_broker(pin, DeadlineBrokerState::begin_programming);
+        Self { active: true }
+    }
+
+    fn finish(mut self, pin: &ax_hal::percpu::CpuPin<'_>) {
+        with_deadline_broker(pin, DeadlineBrokerState::end_programming);
+        self.active = false;
+    }
+}
+
+impl Drop for TimerProgrammingGuard {
+    fn drop(&mut self) {
+        if self.active {
+            with_local_pin(|pin| with_deadline_broker(pin, DeadlineBrokerState::abort_programming));
+        }
+    }
 }
 
 impl CallbackDispatchGuard {
@@ -294,12 +329,12 @@ pub(crate) fn maybe_reprogram_timer(deadline: TimeValue) {
 }
 
 fn program_current_cpu_timer_with_pin(pin: &ax_hal::percpu::CpuPin<'_>) {
-    with_deadline_broker(pin, DeadlineBrokerState::begin_programming);
+    let programming_guard = TimerProgrammingGuard::begin(pin);
     program_current_cpu_timer_once(pin);
     if with_deadline_broker(pin, DeadlineBrokerState::take_reprogram_pending) {
         program_current_cpu_timer_once(pin);
     }
-    with_deadline_broker(pin, DeadlineBrokerState::end_programming);
+    programming_guard.finish(pin);
 }
 
 fn program_current_cpu_timer_once(pin: &ax_hal::percpu::CpuPin<'_>) {

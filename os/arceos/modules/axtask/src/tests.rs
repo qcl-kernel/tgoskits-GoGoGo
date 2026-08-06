@@ -29,6 +29,8 @@ static TIMER_PROVIDER_REGISTRATION: Once = Once::new();
 #[cfg(feature = "irq")]
 static REENTRANT_PROVIDER_ENABLED: AtomicBool = AtomicBool::new(false);
 #[cfg(feature = "irq")]
+static PANICKING_TIMER_PROVIDER_ENABLED: AtomicBool = AtomicBool::new(false);
+#[cfg(feature = "irq")]
 static TIMER_PROVIDER_ACTIVE_CALLS: AtomicUsize = AtomicUsize::new(0);
 #[cfg(feature = "irq")]
 static TIMER_PROVIDER_MAX_ACTIVE_CALLS: AtomicUsize = AtomicUsize::new(0);
@@ -41,9 +43,13 @@ static PANICKING_TIMER_CALLBACK_ENABLED: AtomicBool = AtomicBool::new(false);
 
 #[cfg(feature = "irq")]
 fn reentrant_test_timer_provider() -> Option<u64> {
+    TIMER_PROVIDER_TOTAL_CALLS.fetch_add(1, Ordering::SeqCst);
+    if PANICKING_TIMER_PROVIDER_ENABLED.swap(false, Ordering::SeqCst) {
+        panic!("intentional timer provider panic");
+    }
+
     let active_calls = TIMER_PROVIDER_ACTIVE_CALLS.fetch_add(1, Ordering::SeqCst) + 1;
     TIMER_PROVIDER_MAX_ACTIVE_CALLS.fetch_max(active_calls, Ordering::SeqCst);
-    TIMER_PROVIDER_TOTAL_CALLS.fetch_add(1, Ordering::SeqCst);
 
     if active_calls == 1 && REENTRANT_PROVIDER_ENABLED.load(Ordering::SeqCst) {
         ax_task::reprogram_current_cpu_timer();
@@ -141,6 +147,25 @@ fn caught_callback_panic_does_not_leave_reprogramming_deferred() {
 
         let result = catch_unwind(AssertUnwindSafe(|| ax_task::on_timer_irq(false, true)));
         assert!(result.is_err());
+
+        TIMER_PROVIDER_TOTAL_CALLS.store(0, Ordering::SeqCst);
+        ax_task::reprogram_current_cpu_timer();
+        assert!(TIMER_PROVIDER_TOTAL_CALLS.load(Ordering::SeqCst) > 0);
+    });
+}
+
+#[test]
+#[cfg(feature = "irq")]
+fn caught_provider_panic_does_not_poison_timer_broker() {
+    run_in_test_scheduler(|| {
+        ensure_test_timer_provider_registered();
+        REENTRANT_PROVIDER_ENABLED.store(false, Ordering::SeqCst);
+        PANICKING_TIMER_PROVIDER_ENABLED.store(true, Ordering::SeqCst);
+        TIMER_PROVIDER_TOTAL_CALLS.store(0, Ordering::SeqCst);
+
+        let result = catch_unwind(AssertUnwindSafe(ax_task::reprogram_current_cpu_timer));
+        assert!(result.is_err());
+        assert_eq!(TIMER_PROVIDER_TOTAL_CALLS.load(Ordering::SeqCst), 1);
 
         TIMER_PROVIDER_TOTAL_CALLS.store(0, Ordering::SeqCst);
         ax_task::reprogram_current_cpu_timer();
