@@ -1,6 +1,6 @@
 //! Core vCPU and nested-paging contract implemented by every target architecture.
 
-use alloc::{format, vec::Vec};
+use std::{format, vec::Vec};
 
 use ax_memory_addr::VirtAddr;
 use axaddrspace::NestedPageTableOps;
@@ -10,6 +10,33 @@ use super::{BoundVcpuExit, VcpuRunAction};
 use crate::{AxVmResult, ax_err, irq::model::PendingVcpuInterrupt};
 
 pub(crate) trait ArchOps {
+    #[cfg(target_arch = "riscv64")]
+    fn ipi_targets(
+        vm: &crate::AxVMRef,
+        current_vcpu_id: usize,
+        target_cpu: u64,
+        target_cpu_aux: u64,
+        send_to_all: bool,
+        send_to_self: bool,
+    ) -> crate::CpuMask<64> {
+        let mut targets = crate::CpuMask::new();
+
+        if send_to_all {
+            for vcpu in vm.vcpu_list() {
+                if vcpu.id() != current_vcpu_id {
+                    targets.set(vcpu.id(), true);
+                }
+            }
+        } else if send_to_self {
+            targets.set(current_vcpu_id, true);
+        } else {
+            let _ = target_cpu_aux;
+            targets.set(target_cpu as usize, true);
+        }
+
+        targets
+    }
+
     type VCpu: VmArchVcpuOps;
     type PerCpu: VmArchPerCpuOps;
     type DeferredRunWork;
@@ -284,9 +311,9 @@ pub(crate) fn default_vcpu_affinities(
 
 #[cfg(all(test, feature = "host-test"))]
 mod tests {
-    use alloc::{sync::Arc, vec};
+    use std::{sync::Arc, vec};
 
-    use ax_kspin::SpinNoIrq;
+    use ax_std::os::arceos::sync::IrqSafeMutex;
     use axvm_types::{
         GuestPhysAddr, InterruptTriggerMode, NestedPagingConfig, VCpuId, VMId, VmArchPerCpuOps,
         VmArchVcpuOps, VmBackendError, VmBackendResult,
@@ -302,11 +329,11 @@ mod tests {
     }
 
     struct RecordingVcpu {
-        injections: Arc<SpinNoIrq<InjectionLog>>,
+        injections: Arc<IrqSafeMutex<InjectionLog>>,
     }
 
     impl VmArchVcpuOps for RecordingVcpu {
-        type CreateConfig = Arc<SpinNoIrq<InjectionLog>>;
+        type CreateConfig = Arc<IrqSafeMutex<InjectionLog>>;
         type SetupConfig = ();
         type Exit = ();
 
@@ -426,7 +453,7 @@ mod tests {
 
     #[test]
     fn inject_vcpu_interrupt_preserves_level_trigger_at_backend_boundary() {
-        let injections = Arc::new(SpinNoIrq::new(InjectionLog::default()));
+        let injections = Arc::new(IrqSafeMutex::new(InjectionLog::default()));
         let vcpu = Arc::new(AxVCpu::<RecordingVcpu>::new(1, 0, None, injections.clone()).unwrap());
         let interrupt = PendingVcpuInterrupt {
             id: VirtualInterruptId(0x31),
@@ -446,7 +473,7 @@ mod tests {
 
     #[test]
     fn dispatcher_drain_injects_fifo_once_and_consumes_failed_entries() {
-        let injections = Arc::new(SpinNoIrq::new(InjectionLog {
+        let injections = Arc::new(IrqSafeMutex::new(InjectionLog {
             failing_vector: Some(0x42),
             ..Default::default()
         }));

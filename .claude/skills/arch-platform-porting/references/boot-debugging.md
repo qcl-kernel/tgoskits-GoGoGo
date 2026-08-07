@@ -10,11 +10,49 @@ This reference captures project-specific lessons from enabling LoongArch dynamic
 | Build orchestration | `scripts/axbuild/src/{build.rs,context,test/qemu.rs,*}` | arch to target mapping, features, UEFI mode, QEMU command, rootfs image |
 | Test data | `test-suit/{arceos,starryos,axvisor}/**` | runtime TOML, build TOML, regexes, SMP count, firmware mode |
 | Bootloader | `platforms/someboot/src/**` | entry ABI, relocation, memory map, paging, trap, SMP, power |
-| CPU runtime | `components/axcpu/src/<arch>/**` | trap frame layout, context switch, FP/SIMD, user return |
+| CPU runtime | `components/axcpu/src/<arch>/**` | trap frame layout, context switch, FP/SIMD, user return, runtime stage-1 PTE format and TLB semantics |
 | Dynamic platform | `platforms/{axplat-dyn,somehal}/**` | runtime memory/IRQ/timer/power facts from firmware |
 | Drivers | `drivers/**`, `patches/virtio-drivers/**` | MMIO/iomap, DMA, PCI command bits, virtio transport |
 
 When a boot failure appears in a high layer, still audit lower-layer contracts. For example, a Starry rootfs failure can be caused by PCI command bits, and an Axvisor hang can be caused by a someboot post-UEFI handoff.
+
+## Axvisor Resolved Device Graph and Guest Firmware
+
+Axvisor architectures build and resolve their own device graphs before final
+guest firmware generation. The shared graph does not impose a common device
+order: AArch64 still installs VGIC before IRQ consumers, RISC-V retains PLIC
+hart/context setup, x86 retains LAPIC/IOAPIC/PIT/APIC-access ordering, and
+LoongArch retains IOCSR and EXTIOI/PCH cascading.
+
+When debugging a missing device or interrupt, follow one resource slot from
+`DeviceModel::requirements()`, through `ResolvedDeviceGraph`, into both the
+FDT/ACPI plan and `DeviceBuildContext`. Runtime devices must use the resolved
+address and `IrqLine.input()`. The exact dyn model retained by the graph performs
+the build, and the runtime seals only after every `ResourceClaimSet` slot becomes
+a lease. For `console0`, first verify whether machine fallback, host FDT/ACPI
+snapshot, or a same-ID user override supplied the final model and fixed binding.
+MMIO/PIO exits must call the runtime optional-dispatch path once; a `find_*`
+probe followed by a second dispatch indicates a stale routing path.
+
+For x86 direct Linux boot, verify all of the following before changing Linux
+command-line policy:
+
+- the ACPI image fits wholly in `0xe0000..0x100000` and the RSDP is 16-byte aligned;
+- `boot_params.acpi_rsdp_addr` contains that RSDP GPA;
+- E820 reserves the ACPI image and the legacy low-memory window;
+- RSDP/XSDT/table checksums and table pointer closure are valid;
+- the MP table uses the same APIC plan for the explicit `acpi=off` fallback.
+
+For x86 OVMF/BIOS boot, verify graph-fixed PIO windows `0x510..0x512` and
+`0x514..0x51c` are trapped and that fw_cfg publishes `etc/acpi/tables`,
+`etc/acpi/rsdp`, and `etc/table-loader`. A working selector read alone does not
+prove ACPI installation; check table-loader DMA operations and confirm Linux
+sees `DSDT`, `APIC`, `FACP`, and `XSDT` under `/sys/firmware/acpi/tables`.
+
+For AArch64 host replacement, compare every GICR region and stride in the
+immutable firmware plan with the `ArmVgicConfig` passed to the runtime. Do not
+infer configuration by downcasting a registered GIC frontend. Host GIC MMIO
+must remain trapped, and guest writes must never mutate host GICD/GICR state.
 
 ## CPU-local Register Ownership
 
@@ -95,6 +133,7 @@ execution and then fail only on traps or vCPU exits, so it is not a valid fallba
 ## Dynamic UEFI Platform Notes
 
 - Dynamic platform means the platform facts come from firmware/runtime discovery through `someboot`, `somehal`, and `axplat-dyn`. It does not remove the need for arch-specific page table, trap, timer, IRQ, and power code.
+- Keep page-table phases separate while debugging: `someboot` owns boot-table formats and the MMU handoff, `ax-cpu` owns runtime stage-1 PTE/TLB semantics, and virtualization components own stage-2 formats. All may use `page-table-generic` as an execution engine, but that crate must not select the active architecture.
 - Match the x86_64 dynamic UEFI path first: firmware disk layout, `to_bin` behavior, pflash/OVMF handling, and handoff expectations.
 - Keep dynamic platform features aligned across `ax-std`, `ax-hal`, `ax-driver`, `axvm`, and the OS package. A partial `plat-dyn` feature set often compiles but fails after device or memory init.
 - For std/musl targets, derive the initial JSON from a known Rust target where possible, then minimally adjust ABI, linker, relocation model, and soft-float. A `none-softfloat` target passing does not prove musl/std ABI correctness.
