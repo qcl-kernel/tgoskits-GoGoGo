@@ -438,6 +438,54 @@ SHA-256 依次为 `fcb7ab4fdb6e63d5c537356249b57a70279e85f0233bab8d73d0074ee093c
 条件记录 `cpu/host_ns/raw_count/offset/cval`。这些事件不改变 timer/GIC 状态，正式
 QEMU source 和 executable 均已恢复。
 
+### 迭代 155--163：排除 lost-wake 并归因 MTTCG TLB exclusive
+
+iteration 155--159 继续复用同一冻结 ELF/raw、三份 VM TOML 和 rootfs source；每轮
+均完成两条 Linux-to-Zephyr ICMP、Linux-1-to-Linux-2 TCP/8080 和 `9999/9999`
+callback。155--156 先用 GIC built-in/redist level 事件确认 PPI 27 已置位但 outer
+CPU 最长仍延迟 `25.274593 ms` 才 take。157--159 再逐步加入 GIC、PC 和 QEMU CPU
+thread 状态。MTTCG 的 kick 回调按设计只设置 `exit_request`，因此 trace 中
+`thread_kicked=0` 是正常状态，不能支持此前的 lost-wake 假设。159 的完整诊断补丁
+相对官方 QEMU 11.0.2 保存为 `qemu-arm-ppi27-diagnostic.patch`。
+
+iteration 160 在 `tcg_cpu_exec()` 返回后测量 BQL reacquire；仅两次等待超过
+`100 us`，最大 `156.931 us`，不能解释同轮 `23.778 ms` 最大延迟。iteration 161
+记录 3163 次 `cpu_exec_exclusive_stop`，三个 CPU 的 assert-to-take 都出现
+`57--77 ms` 区间，但没有 `cpu_exec_step_atomic_wait`；iteration 162 进一步确认
+`cpu_exec_step_atomic_region=0`，否定 `EXCP_ATOMIC`/atomic 单步假设。162 的 phase
+min/avg/max 为 `-25.593696/-25.538176/-0.885024 ms`，统计口径已经异常；CSV 保留
+原值并标记 `diagnostic_invalid_performance`，其 `0 us` 绝不作为性能改善。QEMU trace
+仍观察到 CPU 2 assert-to-take `25.242583 ms`。
+
+iteration 163 将 4152 个 exclusive work 的函数指针按同一 QEMU ASLR 偏移解码为
+`tlb_flush_range_by_mmuidx_async_1`、`tlb_flush_page_by_mmuidx_async_1` 和
+`tlb_flush_by_mmuidx_async_work`。其中一个直接
+因果样本为：CPU 0 在 `1700108734222285 ns` 请求 range-TLB exclusive，CPU 2 在
+`1700108734223085 ns` 停止；RTOS PPI 27 于 `1700108734564789 ns` assert，直到
+CPU 1 在 `1700108735633081 ns` 停止后 exclusive 才获得，TLB work 本体仅
+`1.040 us`，RTOS IRQ 于 `1700108735685340 ns` take。assert-to-take 的
+`1.120551 ms` 几乎全部是等待其他 vCPU 停止，而不是 flush 函数执行时间。
+
+QEMU `target/arm/tcg/tlb-insns.c` 对 shareable EL1 TLBI 调用
+`tlb_flush_*_all_cpus_synced()`；QEMU 注释同时说明它没有按 ASID 精确过滤。当前三个
+guest 都是单 vCPU 并分别绑定 pCPU 0/1/2，因此一个 Linux guest 的 shareable TLBI
+会通过 `async_safe_run_on_cpu()` 进入全 QEMU stop-the-world exclusive，并暂停 RTOS
+vCPU。Axvisor guest-entry 的 `tlbi alle2/alle1` 是本地维护，且本次函数归因是
+range/page all-CPU flush，不应删除该序列。此结论只解释 QEMU TCG 实验长尾，不代表
+真实 ARM 硬件具有同一根因；完整 v10 累积诊断补丁保存为
+`qemu-mttcg-exclusive-diagnostic.patch`。
+
+155--163 的 QEMU SHA-256 依次为
+`9da1a7d8ab7efdec6794e7dcc93b6bc2453e9f1d7c4bc30f7a319fd53750a79d`、
+`9da1a7d8ab7efdec6794e7dcc93b6bc2453e9f1d7c4bc30f7a319fd53750a79d`、
+`511d715a4c9cfc5a18fc6dfafa61da04b3b6ce6bd4f3797484fe76138edad01b`、
+`7ca97154913cc7378248c8e3d38f15a6817c22e9b9f63a1b60132bd8fab9946f`、
+`4d1780917558740273ac12349e97156b5ffcef52072b9fe5e7c571014563aa52`、
+`e5f0d3bb696a43cc733c5d1497341a452e2ab01d8d52658c40b7247b2f8f454f`、
+`8f689886bb62184aeaf15f3d5e9742c944ba93b0aeed5c2a77e566146b6174b8`、
+`168b1eb41ea071a148ae54b2171257dd7bfe04ddf74347e9b8855db6dbd671d8` 和
+`536075a8aff6b6218b7185edd2ce2b9152002f2eb55b9ad43d2bb514bf027ae4`。
+
 作为下一轮单变量对照，显式 `tcg,thread=multi` 的第 4 轮完成两条 ICMP、TCP/8080
 和 `9999/9999` callback，最大延迟为 `633 us`，`>100 us/>500 us/>1 ms` miss 为
 `1/1/0`。它没有稳定优于正式 no-poll 基线的 `515/307/84 us`，因此候选拒绝，正式
@@ -841,11 +889,18 @@ passthrough virtio SPI 的真实中断路径可用；原来的 1 ms MMIO 轮询�
 | 144--145 | SMP3 同步 schedstat/state/wchan 归因 | 9999/9999 | 0/0 us | 0/0 us | 1459/1362 us | 3/8 | 2/6 | 1/3 |
 | 146 | busy-WFI + main-loop 同步筛选（拒绝） | 9999/9999 | 0 us | 0 us | 1185 us | 8 | 2 | 1 |
 | 147 | timer-broker 同步筛选（finalization 产物缺失，无效） | 9999/9999 | 0 us | 0 us | 1236 us | 2 | 1 | 1 |
-| 148--150 | timer-broker 三轮同步筛选（稳定性拒绝） | 9999/9999 | 0/5000/5000 us | 0/5000/5000 us | 357/54484/24294 us | 7/59/26 | 0/57/24 | 0/55/24 |
+| 148--150 | timer-broker 三轮同步筛选（稳定性拒绝） | 9999/9999 | 0/0/0 us | 0/5000/5000 us | 357/54484/24294 us | 7/59/26 | 0/57/24 | 0/55/24 |
 | 151 | QEMU ARM timer 全量 trace（过度扰动诊断） | 9999/9999 | 0 us | 3367 us | 11345 us | 26 | 22 | 19 |
 | 152 | QEMU IRQ assert raw-count（缺 offset，无效归因） | 9999/9999 | 0 us | 643 us | 4632 us | 17 | 12 | 8 |
 | 153 | QEMU IRQ assert effective-count 诊断 | 9999/9999 | 0 us | 68 us | 4573 us | 10 | 6 | 4 |
 | 154 | QEMU assert 到 outer IRQ take 诊断 | 9999/9999 | 0 us | 105 us | 4614 us | 11 | 5 | 4 |
+| 155--159 | GIC PPI 27 state/PC/thread 诊断 | 9999/9999 | 0/0/0/0/0 us | 83/5000/5000/5000/4840 us | 3768/25041/21563/27792/8828 us | 9/50/80/35/32 | 8/43/73/33/28 | 6/42/69/31/25 |
+| 160 | MTTCG BQL reacquire 诊断 | 9999/9999 | 0 us | 5000 us | 23778 us | 35 | 35 | 31 |
+| 161 | MTTCG exclusive/atomic 诊断 | 9999/9999 | 536 us | 5000 us | 57334 us | 109 | 101 | 98 |
+| 162 | MTTCG atomic-region 诊断（phase 异常，性能无效） | 9999/9999 | 0 us | 0 us | 0 us | 0 | 0 | 0 |
+| 163 | MTTCG exclusive-work/TLB 函数归因 | 9999/9999 | 0 us | 639 us | 4626 us | 13 | 12 | 8 |
+第 162 轮表中数值仅是 CSV 原始输出的忠实抄录；负 phase 口径异常使整轮性能结果无效，
+这些零值不能用于性能比较或改善结论。
 其中第 87 轮虽完成 RTOS callback，但 Linux 因动态 BusyBox 无 loader 未完成网络启动，
 不计入正式性能比较；第 88--90 轮才是完整 pCPU 3 候选数据。
 
@@ -1104,6 +1159,9 @@ affinity 候选、迭代 124 的 QEMU RAM 2 GiB 筛选、迭代 125--127 的 `SC
   iteration 148 完成单次 TCG screen pass，但不提升为稳定性能或物理验收结论。
 - [x] 用同一冻结 artifact 完成 iteration 149--150，否定 iteration 148 的稳定性能收益；
   再以 iteration 151--154 将长尾收敛到 QEMU virtual timer assert 之后、outer IRQ take 之前。
+- [x] 用 iteration 155--163 排除 `thread_kicked=0` lost-wake、BQL reacquire 和
+  `EXCP_ATOMIC` 假设，并将至少一个 `>1 ms` miss 直接归因到 QEMU MTTCG 的跨 vCPU
+  TLB flush exclusive 等待；该结论不外推到真实 ARM 硬件。
 - [ ] 在 KVM/真实硬件上重复实验，建立可用于实时性承诺的测量基线；当前 QEMU
   AArch64 只支持 TCG，x86_64 主机的 `/dev/kvm` 不能提供 AArch64 KVM。
 
@@ -1139,7 +1197,7 @@ affinity 候选、迭代 124 的 QEMU RAM 2 GiB 筛选、迭代 125--127 的 `SC
 - clean archive、board、ELF/raw、setup/build manifest、三份 VM TOML 和 runner
   sidecar identity 已核对；iteration 148 的 QMP、metadata、schedstat summary 和
   annotated samples 完整，iteration 147 缺少 finalization 产物并按 invalid 记录。
-- RTOS 精度、绘图、三 guest 静态验证和 CSV schema 检查：通过；CSV 共 155 条数据行，
+- RTOS 精度、绘图、三 guest 静态验证和 CSV schema 检查：通过；CSV 共 164 条数据行，
   37 列；从迭代 140 起，`network_validation` 只记录网络结果，新列
   `candidate_decision` 独立记录候选处置；历史行保留原有混合状态值并将新列留空。
   延迟扩展列包括 `p99_99_ns`、`callback_duration_max_ns`、`tick_gap_min/max`。

@@ -1,0 +1,152 @@
+--- a/target/arm/helper.c
++++ b/target/arm/helper.c
+@@ -1362,6 +1362,16 @@
+     }
+ 
+     qemu_set_irq(cpu->gt_timer_outputs[timeridx], irqstate);
++    if (timeridx == GTIMER_VIRT && irqstate) {
++        uint64_t host_ns = qemu_clock_get_ns(QEMU_CLOCK_REALTIME);
++        uint64_t virtual_ns = qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL);
++        uint64_t raw_count = gt_get_countervalue(env);
++        uint64_t offset = env->cp15.cntvoff_el2;
++        uint64_t cval = env->cp15.c14_timer[timeridx].cval;
++
++        trace_arm_gt_irq_assert(CPU(cpu)->cpu_index, host_ns, virtual_ns,
++                                raw_count, offset, cval);
++    }
+     trace_arm_gt_update_irq(timeridx, irqstate);
+ }
+ 
+--- a/target/arm/trace-events
++++ b/target/arm/trace-events
+@@ -10,6 +10,8 @@
+ arm_gt_cntvoff_write(uint64_t value) "gt_cntvoff_write: value 0x%" PRIx64
+ arm_gt_cntpoff_write(uint64_t value) "gt_cntpoff_write: value 0x%" PRIx64
+ arm_gt_update_irq(int timer, int irqstate) "gt_update_irq: timer %d irqstate %d"
++arm_gt_irq_assert(int cpu_index, uint64_t host_ns, uint64_t virtual_ns, uint64_t raw_count, uint64_t offset, uint64_t cval) "gt_irq_assert: cpu %d host_ns %" PRIu64 " virtual_ns %" PRIu64 " raw_count 0x%" PRIx64 " offset 0x%" PRIx64 " cval 0x%" PRIx64
++arm_irq_take(int cpu_index, uint64_t host_ns, uint64_t raw_count, uint64_t offset, uint64_t cval) "irq_take: cpu %d host_ns %" PRIu64 " raw_count 0x%" PRIx64 " offset 0x%" PRIx64 " cval 0x%" PRIx64
+ 
+ # kvm.c
+ kvm_arm_fixup_msi_route(uint64_t iova, uint64_t gpa) "MSI iova = 0x%"PRIx64" is translated into 0x%"PRIx64
+--- a/target/arm/cpu-irq.c
++++ b/target/arm/cpu-irq.c
+@@ -10,6 +10,8 @@
+ #include "cpu.h"
+ #include "accel/tcg/cpu-ops.h"
+ #include "internals.h"
++#include "qemu/timer.h"
++#include "trace.h"
+ 
+ #ifdef CONFIG_TCG
+ static inline bool arm_excp_unmasked(CPUState *cs, unsigned int excp_idx,
+@@ -267,6 +269,14 @@
+     return false;
+ 
+  found:
++    if (excp_idx == EXCP_IRQ) {
++        uint64_t host_ns = qemu_clock_get_ns(QEMU_CLOCK_REALTIME);
++        uint64_t raw_count = gt_get_countervalue(env);
++        uint64_t offset = env->cp15.cntvoff_el2;
++        uint64_t cval = env->cp15.c14_timer[GTIMER_VIRT].cval;
++
++        trace_arm_irq_take(cs->cpu_index, host_ns, raw_count, offset, cval);
++    }
+     cs->exception_index = excp_idx;
+     env->exception.target_el = target_el;
+     cs->cc->tcg_ops->do_interrupt(cs);
+@@ -378,4 +388,3 @@
+         }
+     }
+ }
+-
+--- a/hw/intc/arm_gicv3_redist.c
++++ b/hw/intc/arm_gicv3_redist.c
+@@ -1151,6 +1151,9 @@
+     }
+ 
+     gicv3_redist_update(cs);
++    if (irq == 27) {
++        gicv3_trace_ppi27_state(cs, level);
++    }
+ }
+ 
+ void gicv3_redist_send_sgi(GICv3CPUState *cs, int grp, int irq, bool ns)
+--- a/hw/intc/arm_gicv3_cpuif.c
++++ b/hw/intc/arm_gicv3_cpuif.c
+@@ -16,6 +16,7 @@
+ #include "qemu/bitops.h"
+ #include "qemu/log.h"
+ #include "qemu/main-loop.h"
++#include "qemu/timer.h"
+ #include "trace.h"
+ #include "gicv3_internal.h"
+ #include "hw/core/irq.h"
+@@ -23,7 +24,9 @@
+ #include "target/arm/cpregs.h"
+ #include "target/arm/cpu-features.h"
+ #include "target/arm/internals.h"
++#include "target/arm/gtimer.h"
+ #include "system/tcg.h"
++#include "system/cpus.h"
+ #include "system/qtest.h"
+ 
+ /*
+@@ -32,6 +35,38 @@
+  */
+ #define HPPVI_INDEX_VLPI 16
+ 
++void gicv3_trace_ppi27_state(GICv3CPUState *cs, int level)
++{
++    ARMCPU *cpu = ARM_CPU(cs->cpu);
++    CPUARMState *env = &cpu->env;
++    const int irq = 27;
++    uint64_t gic_state;
++    uint64_t cpu_state;
++    uint64_t execution_state;
++
++    gic_state = level | (uint64_t)extract32(cs->gicr_ienabler0, irq, 1) << 1 |
++                (uint64_t)extract32(cs->gicr_ipendr0, irq, 1) << 2 |
++                (uint64_t)extract32(cs->gicr_iactiver0, irq, 1) << 3 |
++                (uint64_t)extract32(cs->edge_trigger, irq, 1) << 4 |
++                (uint64_t)(uint16_t)cs->hppi.irq << 8 |
++                (uint64_t)(uint8_t)cs->hppi.grp << 24 |
++                (uint64_t)cs->hppi.prio << 32;
++    cpu_state = env->irq_line_state |
++                (uint64_t)qatomic_read(&cs->cpu->interrupt_request) << 32;
++    execution_state = env->daif | (uint64_t)arm_current_el(env) << 32 |
++                      (uint64_t)!!cs->cpu->halted << 40 |
++                      (uint64_t)qatomic_read(&cs->cpu->thread_kicked) << 41 |
++                      (uint64_t)qemu_cpu_is_self(cs->cpu) << 42 |
++                      (uint64_t)cs->cpu->running << 43 |
++                      (uint64_t)cs->cpu->has_waiter << 44 |
++                      (uint64_t)cs->cpu->exit_request << 45;
++
++    trace_gicv3_redist_ppi27_state(
++        cs->cpu->cpu_index, qemu_clock_get_ns(QEMU_CLOCK_REALTIME), gic_state,
++        cpu_state, execution_state, env->cp15.c14_timer[GTIMER_VIRT].cval,
++        env->pc, env->xregs[30], env->xregs[31]);
++}
++
+ static GICv3CPUState *icc_cs_from_env(CPUARMState *env)
+ {
+     return env->gicv3state;
+--- a/hw/intc/gicv3_internal.h
++++ b/hw/intc/gicv3_internal.h
+@@ -609,6 +609,7 @@
+                                unsigned size, MemTxAttrs attrs);
+ void gicv3_dist_set_irq(GICv3State *s, int irq, int level);
+ void gicv3_redist_set_irq(GICv3CPUState *cs, int irq, int level);
++void gicv3_trace_ppi27_state(GICv3CPUState *cs, int level);
+ void gicv3_redist_process_lpi(GICv3CPUState *cs, int irq, int level);
+ /**
+  * gicv3_redist_process_vlpi:
+--- a/hw/intc/trace-events
++++ b/hw/intc/trace-events
+@@ -185,6 +185,7 @@
+ gicv3_redist_write(uint32_t cpu, uint64_t offset, uint64_t data, unsigned size, bool secure) "GICv3 redistributor 0x%x write: offset 0x%" PRIx64 " data 0x%" PRIx64 " size %u secure %d"
+ gicv3_redist_badwrite(uint32_t cpu, uint64_t offset, uint64_t data, unsigned size, bool secure) "GICv3 redistributor 0x%x write: offset 0x%" PRIx64 " data 0x%" PRIx64 " size %u secure %d: error"
+ gicv3_redist_set_irq(uint32_t cpu, int irq, int level) "GICv3 redistributor 0x%x interrupt %d level changed to %d"
++gicv3_redist_ppi27_state(int cpu_index, uint64_t host_ns, uint64_t gic_state, uint64_t cpu_state, uint64_t execution_state, uint64_t cval, uint64_t pc, uint64_t lr, uint64_t sp) "PPI27 state: cpu %d host_ns %" PRIu64 " gic_state 0x%" PRIx64 " cpu_state 0x%" PRIx64 " execution_state 0x%" PRIx64 " cval 0x%" PRIx64 " pc 0x%" PRIx64 " lr 0x%" PRIx64 " sp 0x%" PRIx64
+ gicv3_redist_send_sgi(uint32_t cpu, int irq) "GICv3 redistributor 0x%x pending SGI %d"
+ 
+ # arm_gicv3_its.c

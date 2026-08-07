@@ -57,8 +57,12 @@ def parse_p99_9_values(cell: str, count: int) -> list[Optional[float]]:
     return values
 
 
-def load_report_p99_9(report_path: Path = REPORT) -> dict[int, Optional[float]]:
-    """Read p99.9 values from the report's iteration summary table."""
+def load_report_percentile(
+    column_index: int,
+    percentile_name: str,
+    report_path: Path = REPORT,
+) -> dict[int, Optional[float]]:
+    """Read one percentile column from the report's iteration summary table."""
     lines = report_path.read_text(encoding="utf-8").splitlines()
     summary_headers = [
         index for index, line in enumerate(lines) if line.startswith(SUMMARY_HEADER_PREFIX)
@@ -92,14 +96,24 @@ def load_report_p99_9(report_path: Path = REPORT) -> dict[int, Optional[float]]:
             continue
         data_rows += 1
         iterations = parse_iterations(cells[0])
-        p99_9_values = parse_p99_9_values(cells[4], len(iterations))
-        for iteration, p99_9_value in zip(iterations, p99_9_values):
+        percentile_values = parse_p99_9_values(cells[column_index], len(iterations))
+        for iteration, percentile_value in zip(iterations, percentile_values):
             if iteration in values:
                 raise ValueError(f"duplicate iteration {iteration} in summary table")
-            values[iteration] = p99_9_value
+            values[iteration] = percentile_value
     if data_rows == 0:
         raise ValueError("summary table contains no data rows")
     return values
+
+
+def load_report_p99_9(report_path: Path = REPORT) -> dict[int, Optional[float]]:
+    """Read p99.9 values from the report's iteration summary table."""
+    return load_report_percentile(4, "p99.9", report_path)
+
+
+def load_report_p99(report_path: Path = REPORT) -> dict[int, Optional[float]]:
+    """Read p99 values from the report's iteration summary table."""
+    return load_report_percentile(3, "p99", report_path)
 
 
 class ReportParserValidationTests(unittest.TestCase):
@@ -215,6 +229,21 @@ class ReportArtifactTests(unittest.TestCase):
                     report_value,
                     csv_values[iteration],
                     f"iteration {iteration} p99.9 drift",
+                )
+
+    def test_report_p99_matches_csv(self) -> None:
+        rows = PLOT.load_rows(CSV)
+        csv_values = {
+            int(row["iteration"]): PLOT.parse_number(row["p99_us"])
+            for row in rows
+        }
+        for iteration, report_value in load_report_p99().items():
+            with self.subTest(iteration=iteration):
+                self.assertIn(iteration, csv_values)
+                self.assertEqual(
+                    report_value,
+                    csv_values[iteration],
+                    f"iteration {iteration} p99 drift",
                 )
 
 if __name__ == "__main__":
