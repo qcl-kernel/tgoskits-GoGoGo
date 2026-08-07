@@ -392,6 +392,52 @@ timer broker、host RAM reservation 和 current-config consumption 修复按 cor
 finalization artifacts 的无效轮，再记录 148 的完整有效轮。CSV 因此恰好追加两行，
 而不是把 147 的事实输出伪装成 valid synchronized metrics 或静默丢弃。
 
+### 迭代 149--154：稳定性否定与 PPI 27 边界收敛
+
+iteration 149--150 在不重建的前提下复用 iteration 148 的 ELF/raw、三份 VM TOML、
+QEMU 11.0.2 和冻结 rootfs source。两轮均完成三条网络门禁和 `9999/9999`
+callback，但 p99.99 分别为 `53.490304/23.302176 ms`，maximum 为
+`54.484/24.294 ms`，`>1 ms` miss 为 `55/24`。因此 148--150 的 p99.99
+min/median/max 为 `0.298016/23.302176/53.490304 ms`，maximum 为
+`0.357/24.294/54.484 ms`，miss `>100/>500/>1 ms` 合计 `92/81/79`；iteration
+148 的单轮 screen pass 不稳定，候选明确拒绝。
+
+149--150 的 callback max 只有 `28.576/28.000 us`，但 PPI 27 在 guest IRQ entry
+时已经 overdue `54.701984/24.559920 ms`。`irq_trace entries=9945/9976`，比同一
+trace 摘要内部的 `callbacks=10000` 少 `55/24`，恰好等于 `>1 ms` miss；坏轮主要
+由一次晚 IRQ 后 Zephyr 补跑多个 1 ms 周期形成，不是 callback 计算或统计开销。
+同步 schedstat 在最坏窗口内没有足以解释 24--54 ms 的 runnable delay；RTOS QEMU
+vCPU 从 `S/futex_do_wait` 唤醒的窗口与 callback 对齐。
+
+iteration 151 启用全部 QEMU ARM generic-timer 内置事件，产生 `1.5 GB`、
+`27834145` 行且缺少 CPU identity、时间和 CNTVOFF，按过度扰动、不可归因诊断记录。
+iteration 152 的低扰动自定义事件仍只记录 raw count，缺 CNTVOFF，按无效归因诊断记录。
+iteration 153 增加 offset 后证明 QEMU `GTIMER_VIRT` assert 点最大有效 overdue 只有
+`0.954576 ms`，而同轮 guest IRQ-entry overdue 为 `4.827776 ms`，否定“QEMU
+generic timer callback 本身解释全部长尾”的假设。
+
+iteration 154 再增加 QEMU outer IRQ take 锚点。guest 最坏 CVAL 为 `0x11aa83ac`；
+QEMU 首次 assert 的 host monotonic 时间为 `1679686471145298 ns`，实际
+`EXCP_IRQ` take 为 `1679686475979342 ns`，间隔 `4.834044 ms`，覆盖 guest
+`4.846992 ms` overdue 的绝大部分。由此根因边界收敛到 QEMU timer output 已 assert
+之后、外层 Axvisor CPU 实际接收 IRQ 之前；现有证据更具体地指向 level PPI 未形成
+及时唤醒/可接收转换，或外层 CPU 当时不能接收 IRQ。它尚不能区分 QEMU GIC line
+保持高电平未产生新 kick 与外层 guest IRQ mask，故本轮不做猜测性代码修复。
+
+151--154 使用诊断 QEMU 或额外 trace，均只用于边界定位，不作为正式性能候选、裸机
+对照或 physical acceptance。正式 QEMU 可执行文件已恢复并复核 SHA-256 为
+`84630fc116fb9c7cc665e329b7f7c071469a0dc356ed541630d37a91baa36956`。
+为了在临时文件清理后仍能复核诊断 provenance，iteration 152--154 的 QEMU
+SHA-256 依次为 `fcb7ab4fdb6e63d5c537356249b57a70279e85f0233bab8d73d0074ee093c041`、
+`a8b62e33f93494ec1aba0567144c4443ec50311ece55e2d5a68707c00c65421e` 和
+`9da1a7d8ab7efdec6794e7dcc93b6bc2453e9f1d7c4bc30f7a319fd53750a79d`。
+三者均以 QEMU 11.0.2 为基线，只在 `target/arm/helper.c` 的
+`timeridx == GTIMER_VIRT && irqstate` 条件记录 assert：152 的事件字段为
+`cpu/virtual_ns/count/cval`，153 改为 `cpu/virtual_ns/raw_count/offset/cval`，154
+再增加 `host_ns`；154 还在 `target/arm/cpu-irq.c` 的 `excp_idx == EXCP_IRQ`
+条件记录 `cpu/host_ns/raw_count/offset/cval`。这些事件不改变 timer/GIC 状态，正式
+QEMU source 和 executable 均已恢复。
+
 作为下一轮单变量对照，显式 `tcg,thread=multi` 的第 4 轮完成两条 ICMP、TCP/8080
 和 `9999/9999` callback，最大延迟为 `633 us`，`>100 us/>500 us/>1 ms` miss 为
 `1/1/0`。它没有稳定优于正式 no-poll 基线的 `515/307/84 us`，因此候选拒绝，正式
@@ -795,7 +841,11 @@ passthrough virtio SPI 的真实中断路径可用；原来的 1 ms MMIO 轮询�
 | 144--145 | SMP3 同步 schedstat/state/wchan 归因 | 9999/9999 | 0/0 us | 0/0 us | 1459/1362 us | 3/8 | 2/6 | 1/3 |
 | 146 | busy-WFI + main-loop 同步筛选（拒绝） | 9999/9999 | 0 us | 0 us | 1185 us | 8 | 2 | 1 |
 | 147 | timer-broker 同步筛选（finalization 产物缺失，无效） | 9999/9999 | 0 us | 0 us | 1236 us | 2 | 1 | 1 |
-| 148 | timer-broker 同步筛选（单次 TCG screen pass） | 9999/9999 | 0 us | 0 us | 357 us | 7 | 0 | 0 |
+| 148--150 | timer-broker 三轮同步筛选（稳定性拒绝） | 9999/9999 | 0/5000/5000 us | 0/5000/5000 us | 357/54484/24294 us | 7/59/26 | 0/57/24 | 0/55/24 |
+| 151 | QEMU ARM timer 全量 trace（过度扰动诊断） | 9999/9999 | 0 us | 3367 us | 11345 us | 26 | 22 | 19 |
+| 152 | QEMU IRQ assert raw-count（缺 offset，无效归因） | 9999/9999 | 0 us | 643 us | 4632 us | 17 | 12 | 8 |
+| 153 | QEMU IRQ assert effective-count 诊断 | 9999/9999 | 0 us | 68 us | 4573 us | 10 | 6 | 4 |
+| 154 | QEMU assert 到 outer IRQ take 诊断 | 9999/9999 | 0 us | 105 us | 4614 us | 11 | 5 | 4 |
 其中第 87 轮虽完成 RTOS callback，但 Linux 因动态 BusyBox 无 loader 未完成网络启动，
 不计入正式性能比较；第 88--90 轮才是完整 pCPU 3 候选数据。
 
@@ -968,7 +1018,7 @@ affinity 候选、迭代 124 的 QEMU RAM 2 GiB 筛选、迭代 125--127 的 `SC
 - [x] 评估 guest-entry EL2 上下文缓存；三轮最大值 251/664/1697 us，拒绝并移除候选。
 - [x] 三 guest 网络连通性验证通过。
 - [x] 单 guest idle/低优先级负载测试完成。
-- [x] 三 guest 网络实时性测试和优化迭代持续记录；CSV 已记录 iteration `0--148`，共 149 条数据行
+- [x] 三 guest 网络实时性测试和优化迭代持续记录；CSV 已记录 iteration `0--154`，共 155 条数据行
   （含 0 基线、44 轮既有实验、6 条裸机 QEMU 对照、3 条分层对照、3 条低扰动
   测量候选、3 条 `ic iallu` 候选、3 条内联 external IRQ 候选、6 条单 RTOS 分层对照
   、1 条最终 FDT 功能 smoke、3 条 `sched-rr` 候选和 3 条 AArch64 IRQ fetch
@@ -983,9 +1033,10 @@ affinity 候选、迭代 124 的 QEMU RAM 2 GiB 筛选、迭代 125--127 的 `SC
   候选、6 条 cooperative exit budget64 候选、3 条 QMP 精确 vCPU affinity 候选、
   1 条 QEMU RAM 2 GiB 筛选、3 条 `SCHED_IDLE` 候选、12 条 SMP3 控制/诊断/组合候选、
   3 条新鲜产物 SMP3 确认轮、3 条同步采集/归因记录、1 条 busy-WFI 筛选、1 条
-  缺少 finalization 产物的无效筛选和 1 条完整 timer-broker remediation 筛选）。其中 iteration
+  缺少 finalization 产物的无效筛选、3 条 timer-broker remediation 筛选和 4 条 QEMU
+  timer/IRQ 边界诊断）。其中 iteration
   83--86、91--111 的分类计数为
-  `1 + 3 + 1 + 3 + 3 + 4 + 3 + 3 + 4 = 25` 条；全部分类合计 149 条。
+  `1 + 3 + 1 + 3 + 3 + 4 + 3 + 3 + 4 = 25` 条；全部分类合计 155 条。
 - [x] 评估 callback 低扰动统计路径；callback 最大执行时间降至约 `16--25 us`，
   但三轮 latency 未稳定改善，保留为测量质量改进而非实时性收益。
 - [x] 评估移除 guest-entry `ic iallu`；三轮最大延迟 `8383/77/104 us`，拒绝并
@@ -1051,6 +1102,8 @@ affinity 候选、迭代 124 的 QEMU RAM 2 GiB 筛选、迭代 125--127 的 `SC
 - [x] 完成 timer broker、host RAM reservation 和 current-config consumption 的
   correctness 验证及 safety smoke；iteration 147 因缺少 finalization 产物记为无效失败轮，
   iteration 148 完成单次 TCG screen pass，但不提升为稳定性能或物理验收结论。
+- [x] 用同一冻结 artifact 完成 iteration 149--150，否定 iteration 148 的稳定性能收益；
+  再以 iteration 151--154 将长尾收敛到 QEMU virtual timer assert 之后、outer IRQ take 之前。
 - [ ] 在 KVM/真实硬件上重复实验，建立可用于实时性承诺的测量基线；当前 QEMU
   AArch64 只支持 TCG，x86_64 主机的 `/dev/kvm` 不能提供 AArch64 KVM。
 
@@ -1086,7 +1139,7 @@ affinity 候选、迭代 124 的 QEMU RAM 2 GiB 筛选、迭代 125--127 的 `SC
 - clean archive、board、ELF/raw、setup/build manifest、三份 VM TOML 和 runner
   sidecar identity 已核对；iteration 148 的 QMP、metadata、schedstat summary 和
   annotated samples 完整，iteration 147 缺少 finalization 产物并按 invalid 记录。
-- RTOS 精度、绘图、三 guest 静态验证和 CSV schema 检查：通过；CSV 共 149 条数据行，
+- RTOS 精度、绘图、三 guest 静态验证和 CSV schema 检查：通过；CSV 共 155 条数据行，
   37 列；从迭代 140 起，`network_validation` 只记录网络结果，新列
   `candidate_decision` 独立记录候选处置；历史行保留原有混合状态值并将新列留空。
   延迟扩展列包括 `p99_99_ns`、`callback_duration_max_ns`、`tick_gap_min/max`。
