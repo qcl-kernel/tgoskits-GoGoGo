@@ -5,7 +5,25 @@ use std::format;
 use super::Aarch64Arch;
 use crate::{architecture::*, *};
 
-impl HostTimePlatform for Aarch64Arch {}
+impl HostTimePlatform for Aarch64Arch {
+    fn set_periodic_timer(rate_us: u32) -> AxVmResult {
+        if rate_us == 0 {
+            // Stop periodic preemption: cancel any outstanding timer and clear
+            // the preemption-due flag.
+            crate::architecture::take_preemption_due();
+            return Ok(());
+        }
+        // Register a self-rearming one-shot timer that sets the per-CPU
+        // preemption-due flag.
+        let _token = crate::timer::register_timer(
+            (rate_us as u64) * 1_000,
+            alloc::boxed::Box::new(move |_deadline| {
+                crate::architecture::signal_preemption_due();
+            }),
+        );
+        Ok(())
+    }
+}
 
 impl MachinePlatform for Aarch64Arch {
     const MACHINE_ARCHITECTURE: crate::machine::MachineArchitecture =

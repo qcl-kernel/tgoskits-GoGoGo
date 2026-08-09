@@ -136,6 +136,21 @@ pub(crate) trait HostTimePlatform {
             notify.notify_irq();
         });
     }
+
+    fn register_timer_callback() {}
+
+    /// Sets a periodic timer for vCPU preemption scheduling.
+    ///
+    /// Each tick fires a preemption callback on the local CPU. `rate_us` is
+    /// the interval in microseconds; `0` means stop the periodic timer.
+    ///
+    /// The default implementation uses the host one-shot timer in a
+    /// self-rearming pattern. Architectures with hardware VM preemption
+    /// timers (e.g. x86 VMX) should override with a native implementation.
+    fn set_periodic_timer(_rate_us: u32) -> AxVmResult {
+        // Default: no-op. Architectures opt in by overriding this.
+        Ok(())
+    }
 }
 
 #[cfg(test)]

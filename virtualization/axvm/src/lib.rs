@@ -32,11 +32,13 @@ pub mod irq;
 pub mod layout;
 pub mod lifecycle;
 pub mod machine;
+mod lockless;
 mod manager;
 mod npt;
 mod percpu;
 mod runtime;
 mod sync;
+pub(crate) mod scheduler;
 mod task;
 mod timer;
 mod vcpu;
@@ -57,8 +59,9 @@ pub use arch::platform::*;
 pub use ax_cpumask::CpuMask;
 pub use axdevice::{SerialBackend, SerialBackendFactory};
 pub use axvm_types::{
-    AccessWidth, GuestPhysAddr, HostPhysAddr, InterruptTriggerMode, MappingFlags, Port, SysRegAddr,
-    VMId, VmVcpuState,
+    AccessWidth, CpuIsolationConfig, GuestPhysAddr, HostPhysAddr, InterruptTriggerMode,
+    MappingFlags, Port, RtBudgetParams, RtDeadlineParams, RtPriorityParams, RtSchedConfig,
+    RtSchedPolicy, RtVcpuConfig, SysRegAddr, VMId, VmVcpuState,
 };
 pub use configured::{
     ConfiguredDeviceCatalog, ConfiguredDeviceError, ConfiguredModelConstructor,

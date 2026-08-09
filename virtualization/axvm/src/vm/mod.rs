@@ -31,9 +31,12 @@ use ax_cpumask::CpuMask;
 use ax_memory_addr::align_up_4k;
 use ax_std::os::arceos::sync::IrqSafeMutex as Mutex;
 use axaddrspace::{AddrSpace, NestedPageTableOps};
-use axdevice::*;
-use axdevice_base::*;
-use axvm_types::*;
+use axdevice::{AxVmDevices, DeviceManagerError, FwCfg, FwCfgPlatformConfig};
+use axdevice_base::AccessWidth;
+use axvm_types::{
+    GuestPhysAddr, HostPhysAddr, HostVirtAddr, MappingFlags, NestedPagingConfig, RtSchedConfig,
+    VmVcpuState,
+};
 
 use crate::{
     arch::*, boot::*, config::*, host::paging::*, irq::model::*, layout::*, lifecycle::*,
@@ -181,6 +184,8 @@ pub(crate) struct VmRuntimeHandle {
     running_halting_vcpu_count: AtomicUsize,
     lifecycle_error: StdMutex<Option<AxVmError>>,
     deferred_reset_requested: AtomicBool,
+    /// Per-VM RT scheduler. `Some` when RT scheduling is enabled for this VM.
+    pub(crate) rt_scheduler: Option<Mutex<crate::scheduler::RtScheduler>>,
 }
 
 pub(crate) fn dispatch_vcpu_interrupt_with(
@@ -209,6 +214,7 @@ fn pulse_interrupt_with_snapshot(
         .pulse()?;
     Ok(())
 }
+}
 
 impl VmRuntimeHandle {
     pub(crate) fn new() -> Self {
@@ -222,7 +228,19 @@ impl VmRuntimeHandle {
             running_halting_vcpu_count: AtomicUsize::new(0),
             lifecycle_error: StdMutex::new(None),
             deferred_reset_requested: AtomicBool::new(false),
+            rt_scheduler: None,
         }
+    }
+
+    pub(crate) fn with_rt_scheduler(rt_sched_config: Option<RtSchedConfig>) -> Self {
+        let mut handle = Self::new();
+        if let Some(cfg) = rt_sched_config {
+            if cfg.enabled {
+                handle.rt_scheduler =
+                    Some(Mutex::new(crate::scheduler::RtScheduler::new(&cfg)));
+            }
+        }
+        handle
     }
 
     #[allow(dead_code)]
@@ -1016,7 +1034,10 @@ impl AxVM {
             .vcpu(0)
             .ok_or_else(|| ax_err_type!(BadState, "VM primary vCPU is not prepared"))?;
         let primary_task = crate::runtime::vcpus::build_vcpu_task(self, primary_vcpu);
-        let runtime = Arc::new(VmRuntimeHandle::new());
+        let rt_sched_config = self
+            .with_resources(|r| Ok(r.config.rt_sched_config().cloned()))
+            .unwrap_or(None);
+        let runtime = Arc::new(VmRuntimeHandle::with_rt_scheduler(rt_sched_config));
 
         self.with_resources(|resources| {
             resources
@@ -1051,6 +1072,12 @@ impl AxVM {
     /// Returns if the VM is running.
     pub fn running(&self) -> bool {
         self.status() == VmStatus::Running
+    }
+
+    /// Returns `true` when RT scheduling is enabled for this VM.
+    pub fn rt_scheduling_enabled(&self) -> bool {
+        self.with_resources(|r| Ok(r.config.rt_scheduling_enabled()))
+            .unwrap_or(false)
     }
 
     /// Returns if the VM is shutting down (in Stopping state).

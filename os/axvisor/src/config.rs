@@ -26,7 +26,8 @@ use anyhow::{Context, Result, bail};
 #[cfg(feature = "fs")]
 use axvm::{AxVmError, AxVmResult};
 use axvm::{boot::*, config::*, *};
-use axvmconfig::{GuestConfig, GuestType, HostDeviceAssignment};
+use axvm_types::CpuIsolationConfig;
+use axvmconfig::{AxVMCrateConfig, GuestConfig, GuestType, HostDeviceAssignment, VMType};
 
 #[cfg(all(
     feature = "fs",
@@ -229,6 +230,19 @@ pub(crate) fn build_axvm_config(cfg: &GuestConfig) -> AxVMConfig {
         serial_backend_factory: Some(crate::guest_console::serial_backend_factory(cfg.base.id)),
         virtual_device_requests: cfg.devices.virtual_devices.clone(),
         virtual_device_catalog: Some(alloc::sync::Arc::new(axvm::ConfiguredDeviceCatalog::new())),
+        interrupt_mode: cfg.devices.interrupt_mode,
+        rt_sched_config: cfg
+            .scheduling
+            .as_ref()
+            .map(|sched| sched.clone().into()),
+        cpu_isolation: cfg.scheduling.as_ref().and_then(|sched| {
+            sched.reserved_cpus.as_ref().map(|cpus| {
+                CpuIsolationConfig {
+                    reserved_cpus: cpus.clone(),
+                    disable_housekeeping: sched.disable_housekeeping,
+                }
+            })
+        }),
     })
 }
 
@@ -317,6 +331,222 @@ mod tests {
             flags: 0x7,
             map_type,
         }
+    }
+
+    fn rt_sched_toml(enabled: bool, priority0: u8, priority1: u8) -> String {
+        format!(
+            r#"
+            [base]
+            id = 1
+            name = "rt-test"
+            vm_type = 1
+            cpu_num = 2
+
+            [kernel]
+            entry_point = 0x80200000
+            kernel_path = "kernel.bin"
+            kernel_load_addr = 0x80200000
+            image_location = "memory"
+            memory_regions = [[0x80000000, 0x10000000, 0x7, 1]]
+
+            [devices]
+            interrupt_mode = "passthrough"
+
+            [scheduling]
+            enabled = {enabled}
+            base_timeslice_us = 500
+            reserved_cpus = [0, 1]
+
+            [[scheduling.vcpu_configs]]
+            policy = "fixed_priority"
+            priority = {priority0}
+            max_timeslice_us = 200
+
+            [[scheduling.vcpu_configs]]
+            policy = "fixed_priority"
+            priority = {priority1}
+            max_timeslice_us = 1000
+            "#
+        )
+    }
+
+    #[test]
+    fn rt_scheduling_enabled_when_scheduling_section_present() {
+        let raw = rt_sched_toml(true, 0, 10);
+        let crate_config = AxVMCrateConfig::from_toml(&raw).unwrap();
+        let vm_config = build_axvm_config(&crate_config);
+
+        assert!(vm_config.rt_scheduling_enabled());
+        let rt = vm_config.rt_sched_config().unwrap();
+        assert!(rt.enabled);
+        assert_eq!(rt.base_timeslice_us, 500);
+        assert_eq!(rt.vcpu_configs.len(), 2);
+        assert_eq!(rt.vcpu_configs[0].policy, axvm::RtSchedPolicy::FixedPriority);
+        assert_eq!(
+            rt.vcpu_configs[0].priority.as_ref().unwrap().priority,
+            0
+        );
+        assert_eq!(
+            rt.vcpu_configs[1].priority.as_ref().unwrap().priority,
+            10
+        );
+    }
+
+    #[test]
+    fn rt_scheduling_disabled_when_scheduling_section_absent() {
+        let raw = r#"
+            [base]
+            id = 1
+            name = "no-rt"
+            vm_type = 1
+            cpu_num = 1
+
+            [kernel]
+            entry_point = 0x80200000
+            kernel_path = "kernel.bin"
+            kernel_load_addr = 0x80200000
+            image_location = "memory"
+            memory_regions = [[0x80000000, 0x10000000, 0x7, 1]]
+
+            [devices]
+            interrupt_mode = "passthrough"
+        "#;
+        let crate_config = AxVMCrateConfig::from_toml(raw).unwrap();
+        let vm_config = build_axvm_config(&crate_config);
+
+        assert!(!vm_config.rt_scheduling_enabled());
+        assert!(vm_config.rt_sched_config().is_none());
+    }
+
+    #[test]
+    fn rt_scheduling_disabled_explicitly() {
+        let raw = rt_sched_toml(false, 0, 10);
+        let crate_config = AxVMCrateConfig::from_toml(&raw).unwrap();
+        let vm_config = build_axvm_config(&crate_config);
+
+        assert!(!vm_config.rt_scheduling_enabled());
+        let rt = vm_config.rt_sched_config().unwrap();
+        assert!(!rt.enabled);
+    }
+
+    #[test]
+    fn cpu_isolation_configured_when_reserved_cpus_present() {
+        let raw = rt_sched_toml(true, 0, 10);
+        let crate_config = AxVMCrateConfig::from_toml(&raw).unwrap();
+        let vm_config = build_axvm_config(&crate_config);
+
+        let iso = vm_config.cpu_isolation().unwrap();
+        assert_eq!(iso.reserved_cpus, vec![0, 1]);
+        assert_eq!(vm_config.reserved_cpu_mask(), 0b11);
+    }
+
+    #[test]
+    fn cpu_isolation_absent_when_scheduling_absent() {
+        let raw = r#"
+            [base]
+            id = 1
+            name = "no-iso"
+            vm_type = 1
+            cpu_num = 1
+
+            [kernel]
+            entry_point = 0x80200000
+            kernel_path = "kernel.bin"
+            kernel_load_addr = 0x80200000
+            image_location = "memory"
+            memory_regions = [[0x80000000, 0x10000000, 0x7, 1]]
+
+            [devices]
+            interrupt_mode = "passthrough"
+        "#;
+        let crate_config = AxVMCrateConfig::from_toml(raw).unwrap();
+        let vm_config = build_axvm_config(&crate_config);
+
+        assert!(vm_config.cpu_isolation().is_none());
+        assert_eq!(vm_config.reserved_cpu_mask(), 0);
+    }
+
+    #[test]
+    fn budget_scheduling_config_parses() {
+        let raw = r#"
+            [base]
+            id = 2
+            name = "budget-test"
+            vm_type = 1
+            cpu_num = 1
+
+            [kernel]
+            entry_point = 0x80200000
+            kernel_path = "kernel.bin"
+            kernel_load_addr = 0x80200000
+            image_location = "memory"
+            memory_regions = [[0x80000000, 0x10000000, 0x7, 1]]
+
+            [devices]
+            interrupt_mode = "passthrough"
+
+            [scheduling]
+            enabled = true
+            base_timeslice_us = 1000
+
+            [[scheduling.vcpu_configs]]
+            policy = "budget"
+            budget_us = 500
+            period_us = 5000
+        "#;
+        let crate_config = AxVMCrateConfig::from_toml(raw).unwrap();
+        let vm_config = build_axvm_config(&crate_config);
+
+        assert!(vm_config.rt_scheduling_enabled());
+        let rt = vm_config.rt_sched_config().unwrap();
+        assert_eq!(rt.vcpu_configs.len(), 1);
+        assert_eq!(rt.vcpu_configs[0].policy, axvm::RtSchedPolicy::Budget);
+        let budget = rt.vcpu_configs[0].budget.as_ref().unwrap();
+        assert_eq!(budget.budget_us, 500);
+        assert_eq!(budget.period_us, 5000);
+    }
+
+    #[test]
+    fn deadline_scheduling_config_parses() {
+        let raw = r#"
+            [base]
+            id = 3
+            name = "deadline-test"
+            vm_type = 1
+            cpu_num = 1
+
+            [kernel]
+            entry_point = 0x80200000
+            kernel_path = "kernel.bin"
+            kernel_load_addr = 0x80200000
+            image_location = "memory"
+            memory_regions = [[0x80000000, 0x10000000, 0x7, 1]]
+
+            [devices]
+            interrupt_mode = "passthrough"
+
+            [scheduling]
+            enabled = true
+            base_timeslice_us = 500
+
+            [[scheduling.vcpu_configs]]
+            policy = "deadline"
+            deadline_us = 10000
+            wcet_us = 2000
+            period_us = 20000
+            preemptive = true
+        "#;
+        let crate_config = AxVMCrateConfig::from_toml(raw).unwrap();
+        let vm_config = build_axvm_config(&crate_config);
+
+        assert!(vm_config.rt_scheduling_enabled());
+        let rt = vm_config.rt_sched_config().unwrap();
+        assert_eq!(rt.vcpu_configs.len(), 1);
+        assert_eq!(rt.vcpu_configs[0].policy, axvm::RtSchedPolicy::Deadline);
+        let deadline = rt.vcpu_configs[0].deadline.as_ref().unwrap();
+        assert_eq!(deadline.deadline_us, 10000);
+        assert_eq!(deadline.wcet_us, 2000);
+        assert_eq!(deadline.period_us, 20000);
     }
 
     #[test]

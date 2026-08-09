@@ -19,8 +19,9 @@ use std::{string::String, sync::Arc, vec::Vec};
 use axdevice::{NullSerialBackendFactory, SerialBackendFactory};
 use axvm_types::InterruptTriggerMode;
 pub use axvm_types::{
-    AddressSpacePolicy, GuestPhysAddr, HostAddressAssignment, HostDeviceAssignment,
-    HostPortAssignment, ReservedAddressConfig, VMBootProtocol, VmMemConfig, VmMemMappingType,
+    AddressSpacePolicy, CpuIsolationConfig, GuestPhysAddr, HostAddressAssignment,
+    HostDeviceAssignment, HostPortAssignment, ReservedAddressConfig, RtSchedConfig,
+    VMBootProtocol, VMInterruptMode, VmMemConfig, VmMemMappingType,
 };
 use axvmconfig::VirtualDeviceRequest;
 
@@ -107,6 +108,10 @@ pub struct AxVMConfig {
     serial_backend_factory: Arc<dyn SerialBackendFactory>,
     virtual_device_requests: Vec<VirtualDeviceRequest>,
     virtual_device_catalog: Arc<crate::ConfiguredDeviceCatalog>,
+    /// Real-time scheduling configuration (`None` = disabled).
+    pub rt_sched_config: Option<RtSchedConfig>,
+    /// Physical CPU isolation policy (`None` = no isolation).
+    pub cpu_isolation: Option<CpuIsolationConfig>,
 }
 
 /// Parameters used to build an [`AxVMConfig`].
@@ -133,6 +138,11 @@ pub struct AxVMConfigParams {
     pub virtual_device_requests: Vec<VirtualDeviceRequest>,
     /// Code-registered factories available to this VM.
     pub virtual_device_catalog: Option<Arc<crate::ConfiguredDeviceCatalog>>,
+    pub interrupt_mode: VMInterruptMode,
+    /// Real-time scheduling configuration (None = disabled).
+    pub rt_sched_config: Option<RtSchedConfig>,
+    /// Physical CPU isolation policy (None = no isolation).
+    pub cpu_isolation: Option<CpuIsolationConfig>,
 }
 
 impl AxVMConfig {
@@ -166,6 +176,9 @@ impl AxVMConfig {
             virtual_device_catalog: params
                 .virtual_device_catalog
                 .unwrap_or_else(|| Arc::new(crate::ConfiguredDeviceCatalog::new())),
+            interrupt_mode: params.interrupt_mode,
+            rt_sched_config: params.rt_sched_config,
+            cpu_isolation: params.cpu_isolation,
         }
     }
 
@@ -417,6 +430,35 @@ impl AxVMConfig {
 
     pub(crate) fn virtual_device_catalog(&self) -> &crate::ConfiguredDeviceCatalog {
         &self.virtual_device_catalog
+    }
+
+    /// Returns the RT scheduling configuration, if any.
+    pub fn rt_sched_config(&self) -> Option<&RtSchedConfig> {
+        self.rt_sched_config.as_ref()
+    }
+
+    /// Returns `true` when RT scheduling is enabled for this VM.
+    pub fn rt_scheduling_enabled(&self) -> bool {
+        self.rt_sched_config
+            .as_ref()
+            .is_some_and(|cfg| cfg.enabled)
+    }
+
+    /// Returns the CPU isolation policy, if any.
+    pub fn cpu_isolation(&self) -> Option<&CpuIsolationConfig> {
+        self.cpu_isolation.as_ref()
+    }
+
+    /// Returns the set of CPUs reserved for this VM by the isolation policy.
+    pub fn reserved_cpu_mask(&self) -> usize {
+        self.cpu_isolation
+            .as_ref()
+            .map(|iso| {
+                iso.reserved_cpus
+                    .iter()
+                    .fold(0usize, |mask, cpu| mask | (1usize << cpu))
+            })
+            .unwrap_or(0)
     }
 
     /// Relocate the guest kernel image while preserving the configured

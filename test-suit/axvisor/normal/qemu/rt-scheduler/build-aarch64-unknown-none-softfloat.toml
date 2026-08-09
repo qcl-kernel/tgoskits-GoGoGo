@@ -1,0 +1,12 @@
+# AxVisor RT Scheduler Build Configuration — AArch64 QEMU Test
+#
+# This build config is used by the CI "normal" test group to build AxVisor
+# with the `arceos-rt-smp2.toml` VM config that exercises the RT fixed-priority
+# scheduler.
+features = [
+    "ax-driver/virtio-blk",
+    "fs",
+]
+log = "Info"
+target = "aarch64-unknown-none-softfloat"
+vm_configs = ["os/axvisor/configs/vms/qemu/aarch64/arceos-rt-smp2.toml"]
