@@ -260,6 +260,19 @@ pub trait WifiControl {
 // Transmit queue
 // ---------------------------------------------------------------------------
 
+/// Hardware-notification policy for one transmit submission.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum TxNotify {
+    /// Make the submitted descriptor visible to the device immediately.
+    #[default]
+    Immediate,
+    /// Request deferral until [`ITxQueue::flush`] is called.
+    ///
+    /// Queues that do not implement notification batching may still notify
+    /// immediately, as specified by the default submission implementation.
+    Deferred,
+}
+
 /// Transmit queue interface.
 ///
 /// A driver creates one or more TX queues via [`Interface::create_tx_queue`]
@@ -276,6 +289,19 @@ pub trait ITxQueue: Send + 'static {
     /// `bus_addr` must point to a DMA-capable buffer whose first `len` bytes
     /// contain the packet to be transmitted.
     fn submit(&mut self, buffer: DmaBuffer) -> Result<(), NetError>;
+
+    /// Submit a DMA buffer with an explicit device-notification policy.
+    ///
+    /// The default implementation submits and notifies immediately. Drivers
+    /// whose hardware has an expensive doorbell may retain a deferred
+    /// notification and publish a whole descriptor batch from [`Self::flush`].
+    fn submit_with_notify(&mut self, buffer: DmaBuffer, _notify: TxNotify) -> Result<(), NetError> {
+        self.submit(buffer)
+    }
+
+    /// Make all successfully submitted deferred descriptors visible to the
+    /// device. Calling this method without pending descriptors is a no-op.
+    fn flush(&mut self) {}
 
     /// Reclaim the next completed transmit buffer.
     ///

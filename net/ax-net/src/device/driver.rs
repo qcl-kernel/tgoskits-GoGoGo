@@ -18,10 +18,11 @@
 //! driver-specific failures into retry, bad-state, unsupported, or I/O classes
 //! and keep policy decisions such as packet drops at the adapter/router layer.
 
-use alloc::{boxed::Box, collections::VecDeque, string::String, vec::Vec};
+use alloc::{boxed::Box, collections::VecDeque, string::String, sync::Arc, vec::Vec};
 
 use ax_sync::spin::SpinNoIrq;
 use irq_framework::IrqId;
+pub use rd_net::TxNotify;
 use rd_net::{Net, NetError, RxQueue, TxQueue};
 
 const RX_PREFETCH_TARGET: usize = 1;
@@ -122,6 +123,36 @@ pub trait EthernetIrqHandler: Send + 'static {
     fn handle_irq(&mut self) -> NetIrqEvents;
 }
 
+/// Independently synchronized transmit endpoint for queue-capable drivers.
+///
+/// Drivers may expose this optional capability when TX can progress without
+/// borrowing their control and receive state. The endpoint owns its queue
+/// synchronization; callers never reach through it to device control or IRQ
+/// state.
+pub trait EthernetTxEndpoint: Send + Sync {
+    /// Fills and submits one Ethernet frame.
+    ///
+    /// Once backing storage has been acquired and validated, the endpoint must
+    /// invoke `fill` exactly once with a slice whose length is `frame_len`.
+    fn transmit_frame(&self, frame_len: usize, fill: &mut dyn FnMut(&mut [u8])) -> NetDeviceResult;
+
+    /// Fills and submits one frame with a device-notification policy.
+    ///
+    /// Endpoints without deferred notification may keep the default immediate
+    /// behavior.
+    fn transmit_frame_with_notify(
+        &self,
+        frame_len: usize,
+        _notify: TxNotify,
+        fill: &mut dyn FnMut(&mut [u8]),
+    ) -> NetDeviceResult {
+        self.transmit_frame(frame_len, fill)
+    }
+
+    /// Makes all deferred transmit descriptors visible to the device.
+    fn flush(&self) {}
+}
+
 /// Minimal Ethernet driver contract consumed by [`EthernetDevice`].
 ///
 /// Drivers may own DMA rings, MMIO state, or virtual queues internally. ax-net
@@ -138,6 +169,14 @@ pub trait EthernetDriver: Send + Sync {
     fn disable_irq(&mut self);
     /// Returns the device MAC address.
     fn mac_address(&self) -> [u8; 6];
+    /// Returns an independently synchronized transmit endpoint when available.
+    ///
+    /// The default keeps existing drivers on the mutable device path. Queue-
+    /// capable drivers can return a shared endpoint so established flows do not
+    /// contend with receive and control operations.
+    fn tx_endpoint(&mut self) -> Option<Arc<dyn EthernetTxEndpoint>> {
+        None
+    }
     /// Allocates a TX buffer large enough for one Ethernet frame.
     fn alloc_tx_buffer(&mut self, size: usize) -> NetDeviceResult<Box<dyn NetTxBuffer>>;
     /// Reclaims completed TX buffers owned by the driver.
@@ -197,10 +236,61 @@ impl NetRxBuffer for VecRxBuffer {
     }
 }
 
-struct RdNetState {
-    tx_queue: TxQueue,
+struct RdNetRxState {
     rx_queue: RxQueue,
     pending_rx: VecDeque<VecRxBuffer>,
+}
+
+struct RdNetTxEndpoint {
+    queue: SpinNoIrq<TxQueue>,
+}
+
+impl RdNetTxEndpoint {
+    fn buf_size(&self) -> usize {
+        self.queue.lock().buf_size()
+    }
+
+    fn transmit_buffer(&self, packet: &[u8]) -> NetDeviceResult {
+        let frame_len = packet.len();
+        self.transmit_frame(frame_len, &mut |buffer| buffer.copy_from_slice(packet))
+    }
+
+    fn reclaim_completed(&self) -> NetDeviceResult {
+        self.queue
+            .lock()
+            .reclaim_completed()
+            .map(|_| ())
+            .map_err(map_net_error)
+    }
+}
+
+impl EthernetTxEndpoint for RdNetTxEndpoint {
+    fn transmit_frame(&self, frame_len: usize, fill: &mut dyn FnMut(&mut [u8])) -> NetDeviceResult {
+        self.transmit_frame_with_notify(frame_len, TxNotify::Immediate, fill)
+    }
+
+    fn transmit_frame_with_notify(
+        &self,
+        frame_len: usize,
+        notify: TxNotify,
+        fill: &mut dyn FnMut(&mut [u8]),
+    ) -> NetDeviceResult {
+        let tx_len = frame_len.max(ETH_ZLEN);
+        let mut queue = self.queue.lock();
+        let (_ret, mut pending) = queue
+            .prepare_send(tx_len, |buffer| {
+                fill(&mut buffer[..frame_len]);
+                buffer[frame_len..tx_len].fill(0);
+            })
+            .map_err(map_net_error)?;
+        pending
+            .try_submit_with_notify(notify)
+            .map_err(map_net_error)
+    }
+
+    fn flush(&self) {
+        self.queue.lock().flush();
+    }
 }
 
 pub struct RdNetDriver {
@@ -209,7 +299,8 @@ pub struct RdNetDriver {
     irq: Option<IrqId>,
     control: Net,
     irq_handler: Option<rd_net::IrqHandler>,
-    state: SpinNoIrq<RdNetState>,
+    tx_endpoint: Arc<RdNetTxEndpoint>,
+    rx_state: SpinNoIrq<RdNetRxState>,
 }
 
 impl RdNetDriver {
@@ -226,15 +317,17 @@ impl RdNetDriver {
             irq,
             control: net,
             irq_handler,
-            state: SpinNoIrq::new(RdNetState {
-                tx_queue,
+            tx_endpoint: Arc::new(RdNetTxEndpoint {
+                queue: SpinNoIrq::new(tx_queue),
+            }),
+            rx_state: SpinNoIrq::new(RdNetRxState {
                 rx_queue,
                 pending_rx: VecDeque::with_capacity(RX_PREFETCH_TARGET),
             }),
         })
     }
 
-    fn prefetch_rx_packets(&self, state: &mut RdNetState, target: usize) -> NetDeviceResult {
+    fn prefetch_rx_packets(&self, state: &mut RdNetRxState, target: usize) -> NetDeviceResult {
         while state.pending_rx.len() < target {
             let Some(packet) = state.rx_queue.receive(|packet| VecRxBuffer {
                 packet: packet.to_vec(),
@@ -268,8 +361,12 @@ impl EthernetDriver for RdNetDriver {
         self.mac
     }
 
+    fn tx_endpoint(&mut self) -> Option<Arc<dyn EthernetTxEndpoint>> {
+        Some(Arc::clone(&self.tx_endpoint) as Arc<dyn EthernetTxEndpoint>)
+    }
+
     fn alloc_tx_buffer(&mut self, size: usize) -> NetDeviceResult<Box<dyn NetTxBuffer>> {
-        let capacity = self.state.lock().tx_queue.buf_size();
+        let capacity = self.tx_endpoint.buf_size();
         if size > capacity {
             return Err(NetDeviceError::InvalidParam);
         }
@@ -277,26 +374,15 @@ impl EthernetDriver for RdNetDriver {
     }
 
     fn recycle_tx_buffers(&mut self) -> NetDeviceResult {
-        Ok(())
+        self.tx_endpoint.reclaim_completed()
     }
 
     fn transmit(&mut self, tx_buf: &mut dyn NetTxBuffer) -> NetDeviceResult {
-        let packet_len = tx_buf.packet_len();
-        let tx_len = packet_len.max(ETH_ZLEN);
-        let mut state = self.state.lock();
-        let (_ret, mut pending) = state
-            .tx_queue
-            .prepare_send(tx_len, |buffer| {
-                let packet = tx_buf.packet_mut();
-                buffer[..packet_len].copy_from_slice(packet);
-                buffer[packet_len..tx_len].fill(0);
-            })
-            .map_err(map_net_error)?;
-        pending.try_submit().map_err(map_net_error)
+        self.tx_endpoint.transmit_buffer(tx_buf.packet())
     }
 
     fn receive(&mut self) -> NetDeviceResult<Box<dyn NetRxBuffer>> {
-        let mut state = self.state.lock();
+        let mut state = self.rx_state.lock();
         self.prefetch_rx_packets(&mut state, RX_PREFETCH_TARGET)?;
         state
             .pending_rx

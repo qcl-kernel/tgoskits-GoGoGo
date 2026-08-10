@@ -1,10 +1,11 @@
 use alloc::{boxed::Box, collections::VecDeque, sync::Arc};
-use core::sync::atomic::{Ordering as AtomicOrdering, fence};
+use core::sync::atomic::{AtomicU8, Ordering as AtomicOrdering, fence};
 
 use ax_kspin::SpinRaw as Mutex;
 use dma_api::CoherentArray;
 use log::{debug, info, warn};
-use rdif_eth::{DmaBuffer, IRxQueue, ITxQueue, NetError, QueueConfig};
+use mbarrier::wmb;
+use rdif_eth::{DmaBuffer, IRxQueue, ITxQueue, NetError, QueueConfig, TxNotify};
 
 use crate::{
     DMA_ALIGN, EARLY_PACKET_LOG_COUNT, LINK_DOWN_DROP_LOG_INTERVAL, MAX_PACKET, QUEUE_ID0,
@@ -18,6 +19,184 @@ use crate::{
 };
 
 pub(crate) type QueueStart = Arc<Mutex<QueueStartState>>;
+pub(crate) type IrqPollControl = Arc<IrqPollState>;
+
+/// Coordinates administrative IRQ state with temporary poll-mode masking.
+///
+/// Hard IRQ and task context synchronize through one atomic state word. MMIO
+/// callbacks run only after the corresponding state transition, and rearm
+/// checks the state again after unmasking so a racing IRQ or disable operation
+/// always leaves the hardware masked.
+pub(crate) struct IrqPollState {
+    state: AtomicU8,
+}
+
+const IRQ_ENABLED: u8 = 1 << 0;
+const IRQ_POLLING: u8 = 1 << 1;
+pub(crate) const IRQ_TX_PENDING: u8 = 1 << 2;
+pub(crate) const IRQ_RX_PENDING: u8 = 1 << 3;
+const IRQ_MASKING: u8 = 1 << 4;
+const IRQ_QUEUE_PENDING: u8 = IRQ_TX_PENDING | IRQ_RX_PENDING;
+
+#[cfg(test)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum IrqPollPhase {
+    Disabled,
+    Enabled,
+    Polling,
+}
+
+impl IrqPollState {
+    pub(crate) const fn new() -> Self {
+        Self {
+            state: AtomicU8::new(0),
+        }
+    }
+
+    pub(crate) fn enable(&self, unmask: impl FnOnce(), remask: impl FnOnce()) {
+        if self
+            .state
+            .compare_exchange(
+                0,
+                IRQ_ENABLED,
+                AtomicOrdering::AcqRel,
+                AtomicOrdering::Acquire,
+            )
+            .is_err()
+        {
+            return;
+        }
+        unmask();
+        if self.state.load(AtomicOrdering::Acquire) != IRQ_ENABLED {
+            remask();
+        }
+    }
+
+    pub(crate) fn disable(&self, mask: impl FnOnce()) {
+        self.state.store(0, AtomicOrdering::Release);
+        mask();
+    }
+
+    pub(crate) fn is_enabled(&self) -> bool {
+        self.state.load(AtomicOrdering::Acquire) == IRQ_ENABLED
+    }
+
+    /// Enters poll mode from hard IRQ context.
+    pub(crate) fn begin_poll(
+        &self,
+        queue_events: u8,
+        mask: impl FnOnce(),
+        unmask: impl FnOnce(),
+        remask: impl FnOnce(),
+    ) -> bool {
+        debug_assert!(queue_events != 0 && queue_events & !IRQ_QUEUE_PENDING == 0);
+        let Ok(previous) =
+            self.state
+                .try_update(AtomicOrdering::AcqRel, AtomicOrdering::Acquire, |state| {
+                    if state & IRQ_ENABLED == 0 {
+                        return None;
+                    }
+                    let mut next = state | IRQ_POLLING | (queue_events & IRQ_QUEUE_PENDING);
+                    if state & IRQ_POLLING == 0 {
+                        next |= IRQ_MASKING;
+                    }
+                    Some(next)
+                })
+        else {
+            return false;
+        };
+        let started = previous & IRQ_POLLING == 0;
+        if !started {
+            return false;
+        }
+
+        mask();
+        let rearm = loop {
+            let state = self.state.load(AtomicOrdering::Acquire);
+            if state & (IRQ_ENABLED | IRQ_POLLING | IRQ_MASKING)
+                != (IRQ_ENABLED | IRQ_POLLING | IRQ_MASKING)
+            {
+                return true;
+            }
+            let mut next = state & !IRQ_MASKING;
+            if next & IRQ_QUEUE_PENDING == 0 {
+                next &= !IRQ_POLLING;
+            }
+            match self.state.compare_exchange_weak(
+                state,
+                next,
+                AtomicOrdering::AcqRel,
+                AtomicOrdering::Acquire,
+            ) {
+                Ok(_) => break next & IRQ_POLLING == 0,
+                Err(_) => continue,
+            }
+        };
+        if rearm {
+            self.finish_rearm(unmask, remask);
+        }
+        true
+    }
+
+    /// Marks one queue drained and rearms IRQ delivery after all pending queues drain.
+    pub(crate) fn complete_queue(
+        &self,
+        queue_event: u8,
+        unmask: impl FnOnce(),
+        remask: impl FnOnce(),
+    ) -> bool {
+        debug_assert!(queue_event.count_ones() == 1 && queue_event & !IRQ_QUEUE_PENDING == 0);
+        let rearm = loop {
+            let state = self.state.load(AtomicOrdering::Acquire);
+            if state & (IRQ_ENABLED | IRQ_POLLING | queue_event)
+                != (IRQ_ENABLED | IRQ_POLLING | queue_event)
+            {
+                return false;
+            }
+            let mut next = state & !queue_event;
+            if next & (IRQ_QUEUE_PENDING | IRQ_MASKING) == 0 {
+                next &= !IRQ_POLLING;
+            }
+            match self.state.compare_exchange_weak(
+                state,
+                next,
+                AtomicOrdering::AcqRel,
+                AtomicOrdering::Acquire,
+            ) {
+                Ok(_) => break next & IRQ_POLLING == 0,
+                Err(_) => continue,
+            }
+        };
+        if !rearm {
+            return false;
+        }
+        self.finish_rearm(unmask, remask)
+    }
+
+    fn finish_rearm(&self, unmask: impl FnOnce(), remask: impl FnOnce()) -> bool {
+        unmask();
+        if self.state.load(AtomicOrdering::Acquire) != IRQ_ENABLED {
+            remask();
+            false
+        } else {
+            true
+        }
+    }
+
+    #[cfg(test)]
+    fn phase(&self) -> IrqPollPhase {
+        let state = self.state.load(AtomicOrdering::Acquire);
+        if state == 0 {
+            IrqPollPhase::Disabled
+        } else if state == IRQ_ENABLED {
+            IrqPollPhase::Enabled
+        } else if state & (IRQ_ENABLED | IRQ_POLLING) == (IRQ_ENABLED | IRQ_POLLING) {
+            IrqPollPhase::Polling
+        } else {
+            unreachable!("invalid IRQ poll state")
+        }
+    }
+}
 
 #[derive(Default)]
 pub(crate) struct QueueStartState {
@@ -29,6 +208,7 @@ pub(crate) struct QueueStartState {
 
 pub(crate) struct Rtl8125TxQueue {
     pub(crate) regs: Regs,
+    pub(crate) irq_poll: IrqPollControl,
     pub(crate) desc: CoherentArray<TxDesc>,
     pub(crate) dma_mask: u64,
     pub(crate) bus_addrs: [Option<u64>; QUEUE_SIZE],
@@ -38,6 +218,23 @@ pub(crate) struct Rtl8125TxQueue {
     pub(crate) link_down_drops: u64,
     pub(crate) submitted: u64,
     pub(crate) reclaimed: u64,
+    pub(crate) notification: TxNotificationState,
+}
+
+#[derive(Default)]
+pub(crate) struct TxNotificationState {
+    pending: bool,
+}
+
+impl TxNotificationState {
+    fn descriptor_submitted(&mut self, notify: TxNotify) -> bool {
+        self.pending = true;
+        notify == TxNotify::Immediate && self.take_pending()
+    }
+
+    fn take_pending(&mut self) -> bool {
+        core::mem::take(&mut self.pending)
+    }
 }
 
 impl ITxQueue for Rtl8125TxQueue {
@@ -55,13 +252,21 @@ impl ITxQueue for Rtl8125TxQueue {
     }
 
     fn submit(&mut self, buffer: DmaBuffer) -> core::result::Result<(), NetError> {
+        self.submit_with_notify(buffer, TxNotify::Immediate)
+    }
+
+    fn submit_with_notify(
+        &mut self,
+        buffer: DmaBuffer,
+        notify: TxNotify,
+    ) -> core::result::Result<(), NetError> {
         if buffer.len > MAX_PACKET {
             return Err(NetError::NotSupported);
         }
 
-        if !self.observe_link_before_tx(buffer.len) {
+        if let Err(err) = tx_link_state(self.observe_link_before_tx(buffer.len)) {
             self.link_down_drops = self.link_down_drops.saturating_add(1);
-            return Err(NetError::Retry);
+            return Err(err);
         }
 
         let idx = self.next_submit;
@@ -78,7 +283,9 @@ impl ITxQueue for Rtl8125TxQueue {
         self.bus_addrs[idx] = Some(buffer.bus_addr);
         self.next_submit = next;
         self.submitted = self.submitted.saturating_add(1);
-        self.regs.poll_tx();
+        if self.notification.descriptor_submitted(notify) {
+            self.notify_device();
+        }
         if self.submitted <= EARLY_PACKET_LOG_COUNT
             || self.submitted.is_multiple_of(TX_SUBMIT_LOG_INTERVAL)
         {
@@ -93,11 +300,24 @@ impl ITxQueue for Rtl8125TxQueue {
         Ok(())
     }
 
+    fn flush(&mut self) {
+        if self.notification.take_pending() {
+            self.notify_device();
+        }
+    }
+
     fn reclaim(&mut self) -> Option<u64> {
         let idx = self.next_reclaim;
-        self.bus_addrs[idx]?;
-        let desc = self.desc.read_cpu(idx)?;
+        if self.bus_addrs[idx].is_none() {
+            self.complete_irq_poll();
+            return None;
+        }
+        let Some(desc) = self.desc.read_cpu(idx) else {
+            self.complete_irq_poll();
+            return None;
+        };
         if desc.is_owned_by_hw() {
+            self.complete_irq_poll();
             return None;
         }
 
@@ -119,7 +339,30 @@ impl ITxQueue for Rtl8125TxQueue {
     }
 }
 
+fn tx_link_state(link_up: bool) -> core::result::Result<(), NetError> {
+    if link_up {
+        Ok(())
+    } else {
+        Err(NetError::LinkDown)
+    }
+}
+
 impl Rtl8125TxQueue {
+    fn notify_device(&self) {
+        // Coherent DMA removes cache-maintenance requirements, but descriptor
+        // ownership still has to reach the device before the MMIO doorbell.
+        wmb();
+        self.regs.poll_tx();
+    }
+
+    fn complete_irq_poll(&self) {
+        self.irq_poll.complete_queue(
+            IRQ_TX_PENDING,
+            || self.regs.write_interrupt_mask(DEFAULT_IRQ_MASK),
+            || self.regs.write_interrupt_mask(0),
+        );
+    }
+
     fn observe_link_before_tx(&mut self, len: usize) -> bool {
         let must_sample = self.link_up != Some(true)
             || self.submitted == 0
@@ -155,6 +398,7 @@ impl Rtl8125TxQueue {
 
 pub(crate) struct Rtl8125RxQueue {
     pub(crate) regs: Regs,
+    pub(crate) irq_poll: IrqPollControl,
     pub(crate) desc: CoherentArray<RxDesc>,
     pub(crate) dma_mask: u64,
     pub(crate) start: QueueStart,
@@ -233,16 +477,22 @@ impl IRxQueue for Rtl8125RxQueue {
 
     fn reclaim(&mut self) -> Option<(u64, usize)> {
         let idx = self.next_reclaim;
-        let bus_addr = self.bus_addrs[idx]?;
-        let desc = self.desc.read_cpu(idx)?;
+        let Some(bus_addr) = self.bus_addrs[idx] else {
+            self.complete_irq_poll();
+            return None;
+        };
+        let Some(desc) = self.desc.read_cpu(idx) else {
+            self.complete_irq_poll();
+            return None;
+        };
         if desc.is_owned_by_hw() {
             self.idle_polls = self.idle_polls.saturating_add(1);
-            let status = read_status(self.regs);
-            if irq_has_rx_overflow(status.intr_status)
-                && self.idle_polls.saturating_sub(self.last_rx_rearm_idle)
-                    >= RX_OVERFLOW_REARM_IDLE_POLLS
+            if self.idle_polls.saturating_sub(self.last_rx_rearm_idle)
+                >= RX_OVERFLOW_REARM_IDLE_POLLS
+                && irq_has_rx_overflow(self.regs.read_interrupt_status())
             {
                 self.last_rx_rearm_idle = self.idle_polls;
+                let status = read_status(self.regs);
                 warn!(
                     "RTL8125 rx overflow rearm: idx={idx}, opts1={:#x}, submitted={}, \
                      reclaimed={}, status={status:?}",
@@ -254,16 +504,21 @@ impl IRxQueue for Rtl8125RxQueue {
                 self.regs.commit();
             }
             if self.idle_polls.is_multiple_of(RX_IDLE_LOG_INTERVAL) {
+                let status = read_status(self.regs);
                 debug!(
                     "RTL8125 rx idle: idx={idx}, opts1={:#x}, submitted={}, reclaimed={}, \
                      status={:?}",
                     desc.opts1, self.submitted, self.reclaimed, status,
                 );
             }
+            self.complete_irq_poll();
             return None;
         }
         acquire_dma_descriptor();
-        let desc = self.desc.read_cpu(idx)?;
+        let Some(desc) = self.desc.read_cpu(idx) else {
+            self.complete_irq_poll();
+            return None;
+        };
         self.idle_polls = 0;
         self.last_rx_rearm_idle = 0;
 
@@ -298,6 +553,14 @@ impl IRxQueue for Rtl8125RxQueue {
 }
 
 impl Rtl8125RxQueue {
+    fn complete_irq_poll(&self) {
+        self.irq_poll.complete_queue(
+            IRQ_RX_PENDING,
+            || self.regs.write_interrupt_mask(DEFAULT_IRQ_MASK),
+            || self.regs.write_interrupt_mask(0),
+        );
+    }
+
     fn flush_deferred_refill(&mut self) {
         while self.deferred_refill.len() >= RX_DESC_PER_CACHE_LINE {
             let Some(bus_addr) = self.deferred_refill.pop_front() else {
@@ -363,7 +626,6 @@ pub(crate) fn try_start_queues(regs: Regs, dma_mask: u64, start: &QueueStart) {
     regs.write_default_tx_config();
     regs.write_interrupt_status(u32::MAX);
     set_rx_mode(regs);
-    regs.write_interrupt_mask(DEFAULT_IRQ_MASK);
     regs.commit();
     info!("RTL8125 queues started: status={:?}", read_status(regs));
 }
@@ -374,4 +636,186 @@ pub(crate) fn boxed_tx(queue: Rtl8125TxQueue) -> Box<dyn ITxQueue> {
 
 pub(crate) fn boxed_rx(queue: Rtl8125RxQueue) -> Box<dyn IRxQueue> {
     Box::new(queue)
+}
+
+#[cfg(test)]
+mod tests {
+    use core::sync::atomic::{AtomicUsize, Ordering};
+
+    use rdif_eth::TxNotify;
+
+    use super::{
+        IRQ_RX_PENDING, IRQ_TX_PENDING, IrqPollPhase, IrqPollState, TxNotificationState,
+        tx_link_state,
+    };
+
+    fn begin_poll(state: &IrqPollState, queue_events: u8) -> bool {
+        state.begin_poll(queue_events, || {}, || {}, || {})
+    }
+
+    #[test]
+    fn deferred_descriptors_share_one_device_notification() {
+        let mut notification = TxNotificationState::default();
+
+        assert!(!notification.descriptor_submitted(TxNotify::Deferred));
+        assert!(!notification.descriptor_submitted(TxNotify::Deferred));
+        assert!(notification.take_pending());
+        assert!(!notification.take_pending());
+        assert!(notification.descriptor_submitted(TxNotify::Immediate));
+        assert!(!notification.take_pending());
+    }
+
+    #[test]
+    fn link_down_is_distinct_from_transient_ring_backpressure() {
+        assert!(matches!(tx_link_state(true), Ok(())));
+        assert!(matches!(
+            tx_link_state(false),
+            Err(rdif_eth::NetError::LinkDown)
+        ));
+    }
+
+    #[test]
+    fn irq_poll_stays_masked_until_the_ring_is_drained() {
+        let state = IrqPollState::new();
+        state.enable(|| {}, || {});
+
+        assert!(begin_poll(&state, IRQ_RX_PENDING));
+        assert!(!begin_poll(&state, IRQ_RX_PENDING));
+        assert_eq!(state.phase(), IrqPollPhase::Polling);
+        assert!(!state.is_enabled());
+
+        // A budget-exhausted worker does not complete the phase. Only the
+        // later empty-ring observation re-enables delivery.
+        assert_eq!(state.phase(), IrqPollPhase::Polling);
+        assert!(state.complete_queue(IRQ_RX_PENDING, || {}, || {}));
+        assert_eq!(state.phase(), IrqPollPhase::Enabled);
+    }
+
+    #[test]
+    fn irq_arriving_during_rearm_keeps_delivery_masked() {
+        let state = IrqPollState::new();
+        let mask_count = AtomicUsize::new(0);
+        state.enable(|| {}, || {});
+        assert!(begin_poll(&state, IRQ_RX_PENDING));
+
+        let completed = state.complete_queue(
+            IRQ_RX_PENDING,
+            || {
+                assert!(state.begin_poll(
+                    IRQ_RX_PENDING,
+                    || {
+                        mask_count.fetch_add(1, Ordering::AcqRel);
+                    },
+                    || {},
+                    || {},
+                ));
+            },
+            || {
+                mask_count.fetch_add(1, Ordering::AcqRel);
+            },
+        );
+
+        assert!(!completed);
+        assert_eq!(state.phase(), IrqPollPhase::Polling);
+        assert_eq!(mask_count.load(Ordering::Acquire), 2);
+    }
+
+    #[test]
+    fn poll_completion_cannot_rearm_before_hardware_mask_finishes() {
+        let state = IrqPollState::new();
+        let hardware_enabled = core::sync::atomic::AtomicBool::new(false);
+        state.enable(
+            || hardware_enabled.store(true, Ordering::Release),
+            || hardware_enabled.store(false, Ordering::Release),
+        );
+
+        assert!(state.begin_poll(
+            IRQ_RX_PENDING,
+            || {
+                // Model a worker on another CPU observing the published Polling
+                // state before the hard-IRQ CPU has completed its MMIO mask write.
+                assert!(!state.complete_queue(
+                    IRQ_RX_PENDING,
+                    || hardware_enabled.store(true, Ordering::Release),
+                    || hardware_enabled.store(false, Ordering::Release),
+                ));
+                hardware_enabled.store(false, Ordering::Release);
+            },
+            || hardware_enabled.store(true, Ordering::Release),
+            || hardware_enabled.store(false, Ordering::Release),
+        ));
+
+        assert_eq!(state.phase(), IrqPollPhase::Enabled);
+        assert!(hardware_enabled.load(Ordering::Acquire));
+    }
+
+    #[test]
+    fn repeated_enable_does_not_cancel_an_active_poll() {
+        let state = IrqPollState::new();
+        let unmask_count = AtomicUsize::new(0);
+        state.enable(
+            || {
+                unmask_count.fetch_add(1, Ordering::AcqRel);
+            },
+            || {},
+        );
+        assert!(begin_poll(&state, IRQ_RX_PENDING));
+
+        state.enable(
+            || {
+                unmask_count.fetch_add(1, Ordering::AcqRel);
+            },
+            || {},
+        );
+
+        assert_eq!(state.phase(), IrqPollPhase::Polling);
+        assert_eq!(unmask_count.load(Ordering::Acquire), 1);
+    }
+
+    #[test]
+    fn rx_drain_does_not_rearm_while_tx_completion_is_pending() {
+        let state = IrqPollState::new();
+        state.enable(|| {}, || {});
+        assert!(begin_poll(&state, IRQ_TX_PENDING | IRQ_RX_PENDING));
+
+        let completed = state.complete_queue(IRQ_RX_PENDING, || {}, || {});
+
+        assert!(!completed);
+        assert_eq!(state.phase(), IrqPollPhase::Polling);
+        assert!(state.complete_queue(IRQ_TX_PENDING, || {}, || {}));
+        assert_eq!(state.phase(), IrqPollPhase::Enabled);
+    }
+
+    #[test]
+    fn queue_event_arriving_during_poll_is_latched_until_its_queue_drains() {
+        let state = IrqPollState::new();
+        state.enable(|| {}, || {});
+        assert!(begin_poll(&state, IRQ_RX_PENDING));
+        assert!(!begin_poll(&state, IRQ_TX_PENDING));
+
+        assert!(!state.complete_queue(IRQ_RX_PENDING, || {}, || {}));
+        assert_eq!(state.phase(), IrqPollPhase::Polling);
+        assert!(state.complete_queue(IRQ_TX_PENDING, || {}, || {}));
+        assert_eq!(state.phase(), IrqPollPhase::Enabled);
+    }
+
+    #[test]
+    fn administrative_disable_prevents_poll_completion_from_unmasking() {
+        let state = IrqPollState::new();
+        let unmask_count = AtomicUsize::new(0);
+        state.enable(|| {}, || {});
+        assert!(begin_poll(&state, IRQ_RX_PENDING));
+        state.disable(|| {});
+
+        assert!(!state.complete_queue(
+            IRQ_RX_PENDING,
+            || {
+                unmask_count.fetch_add(1, Ordering::AcqRel);
+            },
+            || {},
+        ));
+        assert_eq!(state.phase(), IrqPollPhase::Disabled);
+        assert_eq!(unmask_count.load(Ordering::Acquire), 0);
+        assert!(!begin_poll(&state, IRQ_RX_PENDING));
+    }
 }

@@ -9,7 +9,10 @@ use descriptor::{RING_END, RxDesc, TxDesc};
 use dma_api::{DeviceDma, DmaOp};
 use log::info;
 use mmio_api::{Mmio, MmioAddr, MmioOp};
-use queue::{QueueStart, QueueStartState, Rtl8125RxQueue, Rtl8125TxQueue};
+use queue::{
+    IRQ_RX_PENDING, IRQ_TX_PENDING, IrqPollControl, IrqPollState, QueueStart, QueueStartState,
+    Rtl8125RxQueue, Rtl8125TxQueue, TxNotificationState,
+};
 use rdif_eth::{Event, IRxQueue, ITxQueue, Interface};
 use registers::*;
 
@@ -95,6 +98,7 @@ pub struct Rtl8125 {
     rx_created: bool,
     phy_ocp_base: u32,
     queue_start: QueueStart,
+    irq_poll: IrqPollControl,
 }
 
 impl Rtl8125 {
@@ -126,6 +130,7 @@ impl Rtl8125 {
             rx_created: false,
             phy_ocp_base: OCP_STD_PHY_BASE,
             queue_start: Arc::new(Mutex::new(QueueStartState::default())),
+            irq_poll: Arc::new(IrqPollState::new()),
         };
         dev.init()?;
         info!(
@@ -248,6 +253,7 @@ impl Interface for Rtl8125 {
 
         Some(queue::boxed_tx(Rtl8125TxQueue {
             regs: self.regs,
+            irq_poll: Arc::clone(&self.irq_poll),
             desc,
             dma_mask: self.dma.dma_mask(),
             bus_addrs: [None; QUEUE_SIZE],
@@ -257,6 +263,7 @@ impl Interface for Rtl8125 {
             link_down_drops: 0,
             submitted: 0,
             reclaimed: 0,
+            notification: TxNotificationState::default(),
         }))
     }
 
@@ -279,6 +286,7 @@ impl Interface for Rtl8125 {
 
         Some(queue::boxed_rx(Rtl8125RxQueue {
             regs: self.regs,
+            irq_poll: Arc::clone(&self.irq_poll),
             desc,
             dma_mask: self.dma.dma_mask(),
             start: self.queue_start.clone(),
@@ -295,44 +303,67 @@ impl Interface for Rtl8125 {
     }
 
     fn enable_irq(&mut self) {
-        self.ack_events(u32::MAX);
-        self.regs.write_interrupt_mask(DEFAULT_IRQ_MASK);
+        self.irq_poll.enable(
+            || {
+                self.ack_events(u32::MAX);
+                self.regs.write_interrupt_mask(DEFAULT_IRQ_MASK);
+            },
+            || self.regs.write_interrupt_mask(0),
+        );
     }
 
     fn disable_irq(&mut self) {
-        self.regs.write_interrupt_mask(0);
+        self.irq_poll.disable(|| self.regs.write_interrupt_mask(0));
     }
 
     fn is_irq_enabled(&self) -> bool {
-        self.regs.read_interrupt_mask() != 0
+        self.irq_poll.is_enabled()
     }
 
     fn handle_irq(&mut self) -> Event {
-        rtl8125_irq_event(self.regs)
+        rtl8125_irq_event(self.regs, &self.irq_poll)
     }
 
     fn take_irq_handler(&mut self) -> Option<rdif_eth::BIrqHandler> {
-        Some(Box::new(Rtl8125IrqHandler { regs: self.regs }))
+        Some(Box::new(Rtl8125IrqHandler {
+            regs: self.regs,
+            irq_poll: Arc::clone(&self.irq_poll),
+        }))
     }
 }
 
 struct Rtl8125IrqHandler {
     regs: Regs,
+    irq_poll: IrqPollControl,
 }
 
 impl rdif_eth::IrqHandler for Rtl8125IrqHandler {
     fn handle_irq(&mut self) -> Event {
-        rtl8125_irq_event(self.regs)
+        rtl8125_irq_event(self.regs, &self.irq_poll)
     }
 }
 
-fn rtl8125_irq_event(regs: Regs) -> Event {
+fn rtl8125_irq_event(regs: Regs, irq_poll: &IrqPollControl) -> Event {
     let status = regs.read_interrupt_status();
     if status == 0 || status == u32::MAX {
         return Event::none();
     }
 
-    regs.write_interrupt_status(status);
+    let mut queue_events = 0;
+    if irq_has_tx_event(status) {
+        queue_events |= IRQ_TX_PENDING;
+    }
+    if irq_has_rx_event(status) {
+        queue_events |= IRQ_RX_PENDING;
+    }
+    if queue_events != 0 {
+        irq_poll.begin_poll(
+            queue_events,
+            || regs.write_interrupt_mask(0),
+            || regs.write_interrupt_mask(DEFAULT_IRQ_MASK),
+            || regs.write_interrupt_mask(0),
+        );
+    }
 
     let mut event = Event::none();
     if irq_has_tx_event(status) {
@@ -344,6 +375,7 @@ fn rtl8125_irq_event(regs: Regs) -> Event {
     if irq_has_link_change(status) {
         info!("RTL8125 irq link change: status={:?}", read_status(regs));
     }
+    regs.write_interrupt_status(status);
     event
 }
 

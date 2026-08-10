@@ -6451,6 +6451,7 @@ dependencies = [
 name = "rd-net"
 version = "0.2.4"
 dependencies = [
+ "ax-kspin",
  "dma-api",
  "futures",
  "rdif-eth",
@@ -6662,6 +6663,7 @@ dependencies = [
  "ax-kspin",
  "dma-api",
  "log",
+ "mbarrier",
  "mmio-api",
  "rdif-eth",
  "thiserror 2.0.20",

@@ -55,6 +55,35 @@ pub struct ArpEntry {
     pub device: String,
 }
 
+/// Result of attempting a packet on a device's detached transmit path.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum DeviceTxOutcome {
+    /// The packet needs the normal queued device path, for example because
+    /// neighbour resolution is pending or the hardware TX ring is full.
+    Fallback,
+    /// The fast path consumed the packet. A zero frame length preserves the
+    /// existing `Device::send` meaning for a failed transmission.
+    Consumed(usize),
+}
+
+/// Transmit-only capability detached from mutable device control and RX state.
+///
+/// The router uses this path after route and neighbour selection so established
+/// flows do not contend with the RX worker for the complete [`Device`] object.
+pub trait DeviceTxPath: Send + Sync {
+    /// Attempts to consume one IP packet with the selected next hop.
+    fn try_send(
+        &self,
+        next_hop: IpAddress,
+        packet: &[u8],
+        timestamp: Instant,
+        notify: TxNotify,
+    ) -> DeviceTxOutcome;
+
+    /// Makes all deferred transmissions visible to the device.
+    fn flush(&self) {}
+}
+
 /// Packet I/O endpoint behind the multi-device router.
 pub trait Device: Send + Sync {
     /// Human-readable device name used in logs and userspace queries.
@@ -83,6 +112,11 @@ pub trait Device: Send + Sync {
         timestamp: Instant,
         snoop: &mut dyn FnMut(&[u8]),
     ) -> usize;
+
+    /// Reclaims completed transmit buffers before the receive side drains a
+    /// device wake event.
+    fn reclaim_tx_completions(&mut self) {}
+
     /// Sends a packet to the next hop.
     ///
     /// Returns the L2 frame byte count (excluding FCS) actually transmitted,
@@ -90,6 +124,26 @@ pub trait Device: Send + Sync {
     /// resolution) or could not be sent. The returned byte count aligns with
     /// Linux `/proc/net/dev` semantics.
     fn send(&mut self, next_hop: IpAddress, packet: &[u8], timestamp: Instant) -> usize;
+
+    /// Attempts to send a packet while preserving transient device backpressure.
+    ///
+    /// [`NetDeviceError::Again`] means that the caller still owns the packet and
+    /// must retry it later. The default preserves existing devices whose
+    /// [`send`](Self::send) implementation consumes or queues every packet.
+    fn try_send(
+        &mut self,
+        next_hop: IpAddress,
+        packet: &[u8],
+        timestamp: Instant,
+    ) -> NetDeviceResult<usize> {
+        Ok(self.send(next_hop, packet, timestamp))
+    }
+
+    /// Returns a transmit-only capability when the data path can progress
+    /// independently from mutable control and receive state.
+    fn tx_path(&self) -> Option<Arc<dyn DeviceTxPath>> {
+        None
+    }
 
     /// Returns the per-packet L2 frame byte counts for packets transmitted
     /// on a side path during `recv()` (e.g. ARP resolution and replies)
