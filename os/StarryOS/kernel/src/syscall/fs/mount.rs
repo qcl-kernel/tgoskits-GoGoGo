@@ -31,6 +31,22 @@ use crate::{
     task::{AsThread, tasks},
 };
 
+/// Serialises mount-tree mutations across CPUs, like Linux's `namespace_sem`.
+///
+/// The mount tree (and, for `pivot_root`, the cross-`FsContext` root/cwd rewrite)
+/// is a globally shared structure, but each mount syscall only took the per-task
+/// `FsContext` lock — nothing serialised two mount operations running on different
+/// CPUs. That was harmless while task placement kept a process's work on one CPU,
+/// but with SMP round-robin task distribution two processes' mount ops (e.g.
+/// `test-pivot-root`'s children fanned out across cores) interleave and corrupt the
+/// shared tree — a raced setup makes `pivot_root` see a non-distinct new-root and
+/// leaves `/dev`, `/tmp`, `/bin` half-moved for every other process. Hold this
+/// across the whole of each mount-mutating syscall so those mutations are atomic
+/// w.r.t. each other. Acquired before any `FsContext` lock; path resolution never
+/// takes it, so there is no lock-order inversion. Sleepable, so a mount that blocks
+/// on I/O does not stall other CPUs.
+static MOUNT_OP_LOCK: Mutex<()> = Mutex::new(());
+
 const MNT_FORCE: i32 = 1;
 const MNT_DETACH: i32 = 2;
 const MNT_EXPIRE: i32 = 4;
@@ -597,6 +613,9 @@ pub fn sys_mount(
     };
     debug!("sys_mount <= source: {source:?}, target: {target:?}, fs_type: {fs_type:?}");
 
+    // Serialise mount-tree mutations across CPUs (see `MOUNT_OP_LOCK`).
+    let _mount_op = MOUNT_OP_LOCK.lock();
+
     if !current().as_thread().cred().has_cap_sys_admin() {
         return Err(AxError::OperationNotPermitted);
     }
@@ -778,6 +797,9 @@ pub fn sys_umount2(target: *const c_char, flags: i32) -> AxResult<isize> {
     let target = vm_load_string(target)?;
     debug!("sys_umount2 <= target: {target:?}, flags: {flags:#x}");
 
+    // Serialise mount-tree mutations across CPUs (see `MOUNT_OP_LOCK`).
+    let _mount_op = MOUNT_OP_LOCK.lock();
+
     if (flags & !VALID_UMOUNT_FLAGS) != 0 {
         return Err(AxError::InvalidInput);
     }
@@ -862,6 +884,11 @@ pub fn sys_pivot_root(new_root: *const c_char, put_old: *const c_char) -> AxResu
         "sys_pivot_root <= new_root: {:?}, put_old: {:?}",
         new_root, put_old
     );
+
+    // Serialise mount-tree mutations across CPUs (see `MOUNT_OP_LOCK`). This also
+    // makes the mount-tree change + the cross-`FsContext` root/cwd propagation
+    // atomic w.r.t. any other CPU's concurrent mount op.
+    let _mount_op = MOUNT_OP_LOCK.lock();
 
     if !current().as_thread().cred().has_cap_sys_admin() {
         return Err(AxError::OperationNotPermitted);
