@@ -67,8 +67,9 @@ impl VcpuSchedStats {
     /// Records one interrupt injection with the given latency.
     pub fn record_interrupt(&mut self, latency_ns: u64) {
         self.interrupt_count = self.interrupt_count.saturating_add(1);
-        self.cumulative_interrupt_latency_ns =
-            self.cumulative_interrupt_latency_ns.saturating_add(latency_ns);
+        self.cumulative_interrupt_latency_ns = self
+            .cumulative_interrupt_latency_ns
+            .saturating_add(latency_ns);
     }
 
     /// Records one scheduling context switch with the given latency.

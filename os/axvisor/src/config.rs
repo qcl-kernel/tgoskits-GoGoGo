@@ -231,10 +231,7 @@ pub(crate) fn build_axvm_config(cfg: &GuestConfig) -> AxVMConfig {
         virtual_device_requests: cfg.devices.virtual_devices.clone(),
         virtual_device_catalog: Some(alloc::sync::Arc::new(axvm::ConfiguredDeviceCatalog::new())),
         interrupt_mode: cfg.devices.interrupt_mode,
-        rt_sched_config: cfg
-            .scheduling
-            .as_ref()
-            .map(|sched| sched.clone().into()),
+        rt_sched_config: cfg.scheduling.as_ref().map(|sched| sched.clone().into()),
         cpu_isolation: cfg.scheduling.as_ref().and_then(|sched| {
             sched.reserved_cpus.as_ref().map(|cpus| {
                 if sched.disable_housekeeping {
@@ -248,7 +245,11 @@ pub(crate) fn build_axvm_config(cfg: &GuestConfig) -> AxVMConfig {
                     "VM[{}] CPU isolation active: reserved CPUs {:?}, housekeeping {}",
                     cfg.base.id,
                     cpus,
-                    if sched.disable_housekeeping { "suppressed (not yet enforced)" } else { "permitted" }
+                    if sched.disable_housekeeping {
+                        "suppressed (not yet enforced)"
+                    } else {
+                        "permitted"
+                    }
                 );
                 CpuIsolationConfig {
                     reserved_cpus: cpus.clone(),
@@ -394,15 +395,12 @@ mod tests {
         assert!(rt.enabled);
         assert_eq!(rt.base_timeslice_us, 500);
         assert_eq!(rt.vcpu_configs.len(), 2);
-        assert_eq!(rt.vcpu_configs[0].policy, axvm::RtSchedPolicy::FixedPriority);
         assert_eq!(
-            rt.vcpu_configs[0].priority.as_ref().unwrap().priority,
-            0
+            rt.vcpu_configs[0].policy,
+            axvm::RtSchedPolicy::FixedPriority
         );
-        assert_eq!(
-            rt.vcpu_configs[1].priority.as_ref().unwrap().priority,
-            10
-        );
+        assert_eq!(rt.vcpu_configs[0].priority.as_ref().unwrap().priority, 0);
+        assert_eq!(rt.vcpu_configs[1].priority.as_ref().unwrap().priority, 10);
     }
 
     #[test]

@@ -27,8 +27,8 @@ use alloc::{collections::BTreeSet, string::String, vec, vec::Vec};
 
 pub use axvm_types::{
     AddressSpacePolicy, CpuIsolationConfig, HostAddressAssignment, HostDeviceAssignment,
-    HostPortAssignment, ReservedAddressConfig, RtSchedConfig, VMBootProtocol,
-    VMInterruptMode, VMType, VmMemConfig, VmMemMappingType,
+    HostPortAssignment, ReservedAddressConfig, RtSchedConfig, VMBootProtocol, VMInterruptMode,
+    VMType, VmMemConfig, VmMemMappingType,
 };
 
 mod error;
@@ -708,7 +708,7 @@ impl From<RtVcpuConfigSerde> for axvm_types::RtVcpuConfig {
             deadline: value.deadline_us.map(|d| axvm_types::RtDeadlineParams {
                 deadline_us: d,
                 wcet_us: value.wcet_us.unwrap_or(0),
-                period_us: value.period_us.unwrap_or(0) as u64,
+                period_us: value.period_us.map(|p| p as u64).unwrap_or(0),
             }),
             preemptive: value.preemptive,
         }
@@ -738,11 +738,7 @@ impl From<RtSchedConfigSerde> for axvm_types::RtSchedConfig {
         Self {
             enabled: value.enabled,
             base_timeslice_us: value.base_timeslice_us.unwrap_or(1000),
-            vcpu_configs: value
-                .vcpu_configs
-                .into_iter()
-                .map(Into::into)
-                .collect(),
+            vcpu_configs: value.vcpu_configs.into_iter().map(Into::into).collect(),
         }
     }
 }

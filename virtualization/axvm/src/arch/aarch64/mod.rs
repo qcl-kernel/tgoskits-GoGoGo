@@ -219,20 +219,16 @@ impl ArchOps for Aarch64Arch {
                 // When RT scheduling is active, check whether a preemption
                 // timer has fired on this CPU. If so, yield so the scheduler
                 // can re-evaluate.
-                if vm.rt_scheduling_enabled()
-                    && crate::architecture::take_preemption_due()
-                {
+                if vm.rt_scheduling_enabled() && crate::architecture::take_preemption_due() {
                     debug!(
                         "VM[{}] VCpu[{}] preemption due, yielding for scheduler",
                         vm.id(),
                         vcpu.id()
                     );
-                    return Ok(BoundVcpuExit::YieldForScheduler {
-                        consumed_ns: 0,
-                    });
+                    return Ok(BoundVcpuExit::YieldForScheduler { consumed_ns: 0 });
                 }
                 Ok(BoundVcpuExit::Complete(VcpuRunAction::nothing()))
-            },
+            }
             _ => ax_err!(Unsupported, "unsupported AArch64 VM exit"),
         }
     }

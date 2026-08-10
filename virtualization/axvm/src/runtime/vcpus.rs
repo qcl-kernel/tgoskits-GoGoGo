@@ -498,11 +498,7 @@ fn vcpu_run() {
 
     info!("VM[{}] VCpu[{}] running...", vm.id(), vcpu.id());
 
-    let run_start_ns = || -> u64 {
-        crate::host::default_host()
-            .monotonic_time()
-            .as_nanos() as u64
-    };
+    let run_start_ns = || -> u64 { crate::host::default_host().monotonic_time().as_nanos() as u64 };
 
     loop {
         if vcpu_id == 0 {
@@ -562,13 +558,12 @@ fn vcpu_run() {
                 }
                 notify_all_vcpus(vm_id);
             }
-            Ok(ref action_inner @ VcpuRunAction {
-                waits_for_event: true,
-                ..
-            Ok(ref action_inner @ VcpuRunAction {
-                waits_for_event: true,
-                ..
-            }) => {
+            Ok(
+                ref action_inner @ VcpuRunAction {
+                    waits_for_event: true,
+                    ..
+                },
+            ) => {
                 // --- RT Scheduling: mark vCPU blocked before sleeping ---
                 if sched_enabled {
                     if let Some(decision) = crate::scheduler::after_vcpu_exit(
@@ -578,9 +573,7 @@ fn vcpu_run() {
                         consumed_ns,
                         exit_ns,
                     ) {
-                        crate::scheduler::handle_sched_decision(
-                            &runtime, decision,
-                        );
+                        crate::scheduler::handle_sched_decision(&runtime, decision);
                     }
                     crate::scheduler::set_runnable(&runtime, vm_id, vcpu_id, false);
                 }
@@ -589,23 +582,19 @@ fn vcpu_run() {
                     crate::scheduler::set_runnable(&runtime, vm_id, vcpu_id, true);
                 }
             }
-            Ok(ref action_inner @ VcpuRunAction {
-                budget_exhausted: true,
-                ..
-            }) => {
+            Ok(
+                ref action_inner @ VcpuRunAction {
+                    budget_exhausted: true,
+                    ..
+                },
+            ) => {
                 // --- RT Scheduling: budget consumed, re-evaluate ---
                 let consumed = action_inner.consumed_ns.max(consumed_ns);
                 if sched_enabled {
                     if let Some(decision) = crate::scheduler::after_vcpu_exit(
-                        &runtime,
-                        vm_id,
-                        vcpu_id,
-                        consumed,
-                        exit_ns,
+                        &runtime, vm_id, vcpu_id, consumed, exit_ns,
                     ) {
-                        crate::scheduler::handle_sched_decision(
-                            &runtime, decision,
-                        );
+                        crate::scheduler::handle_sched_decision(&runtime, decision);
                     }
                 }
             }
@@ -619,9 +608,7 @@ fn vcpu_run() {
                         consumed_ns,
                         exit_ns,
                     ) {
-                        crate::scheduler::handle_sched_decision(
-                            &runtime, decision,
-                        );
+                        crate::scheduler::handle_sched_decision(&runtime, decision);
                     }
                 }
             }

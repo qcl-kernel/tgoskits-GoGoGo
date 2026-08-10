@@ -38,11 +38,15 @@ extern crate alloc;
 use alloc::collections::{BTreeMap, BinaryHeap};
 use core::cmp::Ordering;
 
-use axvm_types::{RtBudgetParams, RtDeadlineParams, RtPriorityParams, RtSchedConfig, RtSchedPolicy, RtVcpuConfig};
+use axvm_types::{
+    RtBudgetParams, RtDeadlineParams, RtPriorityParams, RtSchedConfig, RtSchedPolicy, RtVcpuConfig,
+};
 
 pub(crate) mod stats;
 
-pub(crate) use self::sched_glue::{after_vcpu_exit, before_vcpu_enter, handle_sched_decision, register_vcpu, set_runnable};
+pub(crate) use self::sched_glue::{
+    after_vcpu_exit, before_vcpu_enter, handle_sched_decision, register_vcpu, set_runnable,
+};
 
 // ---------------------------------------------------------------------------
 // Per-vCPU Scheduling State
@@ -82,7 +86,10 @@ impl VcpuSchedState {
             }
             RtSchedPolicy::Deadline => {
                 let deadline = config.deadline.unwrap_or_default();
-                ((deadline.wcet_us as u64) * 1000, deadline.deadline_us * 1000)
+                (
+                    (deadline.wcet_us as u64) * 1000,
+                    deadline.deadline_us * 1000,
+                )
             }
             _ => (u64::MAX, 0),
         };
@@ -134,7 +141,9 @@ impl PartialOrd for EdFEntry {
 impl Ord for EdFEntry {
     fn cmp(&self, other: &Self) -> Ordering {
         // Reverse: BinaryHeap is a max-heap; we want the *earliest* deadline on top.
-        other.deadline_ns.cmp(&self.deadline_ns)
+        other
+            .deadline_ns
+            .cmp(&self.deadline_ns)
             .then_with(|| other.vm_id.cmp(&self.vm_id))
             .then_with(|| other.vcpu_id.cmp(&self.vcpu_id))
     }
@@ -256,12 +265,7 @@ impl RtScheduler {
     ///
     /// Returns the timeslice to program as the preemption timer, or 0 to use
     /// the architecture default.
-    pub fn before_vcpu_enter(
-        &mut self,
-        vm_id: usize,
-        vcpu_id: usize,
-        now_ns: u64,
-    ) -> u64 {
+    pub fn before_vcpu_enter(&mut self, vm_id: usize, vcpu_id: usize, now_ns: u64) -> u64 {
         if !self.enabled {
             return 0;
         }
@@ -329,11 +333,7 @@ impl RtScheduler {
                 next_timeslice_ns: 0,
             },
             RtSchedPolicy::FixedPriority => {
-                let my_priority = state
-                    .config
-                    .priority
-                    .map(|p| p.priority)
-                    .unwrap_or(255);
+                let my_priority = state.config.priority.map(|p| p.priority).unwrap_or(255);
 
                 // Check for a higher-priority runnable vCPU.
                 if let Some(higher) = self
@@ -361,8 +361,7 @@ impl RtScheduler {
                 }
             }
             RtSchedPolicy::Budget => {
-                state.remaining_budget_ns =
-                    state.remaining_budget_ns.saturating_sub(consumed_ns);
+                state.remaining_budget_ns = state.remaining_budget_ns.saturating_sub(consumed_ns);
 
                 if state.remaining_budget_ns == 0 {
                     // Budget exhausted: replenish and yield.
@@ -371,23 +370,18 @@ impl RtScheduler {
                     SchedDecision::Yield
                 } else {
                     SchedDecision::Continue {
-                        next_timeslice_ns: state
-                            .remaining_budget_ns
-                            .min(self.default_timeslice_ns),
+                        next_timeslice_ns: state.remaining_budget_ns.min(self.default_timeslice_ns),
                     }
                 }
             }
             RtSchedPolicy::Deadline => {
-                state.remaining_budget_ns =
-                    state.remaining_budget_ns.saturating_sub(consumed_ns);
+                state.remaining_budget_ns = state.remaining_budget_ns.saturating_sub(consumed_ns);
 
                 if state.remaining_budget_ns == 0 {
                     // WCET budget exhausted. Replenish at next period.
                     let deadline = state.config.deadline.unwrap_or_default();
                     state.remaining_budget_ns = (deadline.wcet_us as u64) * 1000;
-                    state.deadline_ns = state
-                        .deadline_ns
-                        .saturating_add(deadline.period_us * 1000);
+                    state.deadline_ns = state.deadline_ns.saturating_add(deadline.period_us * 1000);
                 }
 
                 // Pick the vCPU with the earliest deadline.
@@ -399,13 +393,9 @@ impl RtScheduler {
                             vm_id,
                             vcpu_id,
                         });
-                        let next_state = self
-                            .vcpu_states
-                            .get(&(entry.vm_id, entry.vcpu_id));
+                        let next_state = self.vcpu_states.get(&(entry.vm_id, entry.vcpu_id));
                         let timeslice = next_state
-                            .map(|s| {
-                                s.remaining_budget_ns.min(self.default_timeslice_ns)
-                            })
+                            .map(|s| s.remaining_budget_ns.min(self.default_timeslice_ns))
                             .unwrap_or(self.default_timeslice_ns);
                         return SchedDecision::Preempt {
                             next_vm_id: entry.vm_id,
@@ -440,9 +430,7 @@ impl RtScheduler {
                     self.default_timeslice_ns
                 }
             }
-            RtSchedPolicy::Budget => {
-                state.remaining_budget_ns.min(self.default_timeslice_ns)
-            }
+            RtSchedPolicy::Budget => state.remaining_budget_ns.min(self.default_timeslice_ns),
             _ => self.default_timeslice_ns,
         }
     }
@@ -483,10 +471,7 @@ impl RtScheduler {
 pub(crate) mod sched_glue {
     use alloc::sync::Arc;
 
-    use crate::{
-        AxVmResult, vm::VmRuntimeHandle,
-        runtime::VMRef,
-    };
+    use crate::{AxVmResult, runtime::VMRef, vm::VmRuntimeHandle};
 
     pub(crate) fn register_vcpu(
         runtime: &Arc<VmRuntimeHandle>,
@@ -498,12 +483,8 @@ pub(crate) mod sched_glue {
         };
         let rt_config = vm
             .with_config(|cfg| {
-                cfg.rt_sched_config().map(|rt| {
-                    rt.vcpu_configs
-                        .get(vcpu.id())
-                        .cloned()
-                        .unwrap_or_default()
-                })
+                cfg.rt_sched_config()
+                    .map(|rt| rt.vcpu_configs.get(vcpu.id()).cloned().unwrap_or_default())
             })
             .unwrap_or_default()
             .unwrap_or_default();
@@ -522,10 +503,9 @@ pub(crate) mod sched_glue {
         let timeslice_ns = sched.lock().before_vcpu_enter(vm_id, vcpu_id, now_ns);
         if timeslice_ns > 0 {
             let rate_us = (timeslice_ns / 1000).max(1) as u32;
-            crate::arch::CurrentArch::set_periodic_timer(rate_us)
-                .unwrap_or_else(|err| {
-                    warn!("failed to set periodic timer for RT preemption: {err:?}");
-                });
+            crate::arch::CurrentArch::set_periodic_timer(rate_us).unwrap_or_else(|err| {
+                warn!("failed to set periodic timer for RT preemption: {err:?}");
+            });
         }
     }
 
@@ -537,7 +517,11 @@ pub(crate) mod sched_glue {
         now_ns: u64,
     ) -> Option<super::SchedDecision> {
         let sched = runtime.rt_scheduler.as_ref()?;
-        Some(sched.lock().after_vcpu_exit(vm_id, vcpu_id, consumed_ns, now_ns))
+        Some(
+            sched
+                .lock()
+                .after_vcpu_exit(vm_id, vcpu_id, consumed_ns, now_ns),
+        )
     }
 
     pub(crate) fn set_runnable(
@@ -565,9 +549,7 @@ pub(crate) mod sched_glue {
                 next_vcpu_id,
                 ..
             } => {
-                debug!(
-                    "Scheduler: preempting to VM[{next_vm_id}] VCpu[{next_vcpu_id}]"
-                );
+                debug!("Scheduler: preempting to VM[{next_vm_id}] VCpu[{next_vcpu_id}]");
                 // Wake the target vCPU so it can enter the guest.
                 if let Some(vm) = crate::get_vm_by_id(next_vm_id) {
                     let _ = vm.with_runtime(|r| {
@@ -586,8 +568,9 @@ pub(crate) mod sched_glue {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use alloc::vec;
+
+    use super::*;
 
     fn fixed_priority_config(priority: u8, max_timeslice_us: u32) -> RtVcpuConfig {
         RtVcpuConfig {
@@ -622,8 +605,8 @@ mod tests {
             enabled: true,
             base_timeslice_us: 1000,
             vcpu_configs: vec![
-                fixed_priority_config(10, 500),  // vCPU 0: lower priority
-                fixed_priority_config(0, 200),   // vCPU 1: higher priority
+                fixed_priority_config(10, 500), // vCPU 0: lower priority
+                fixed_priority_config(0, 200),  // vCPU 1: higher priority
             ],
         };
         let mut sched = RtScheduler::new(&cfg);
@@ -633,11 +616,14 @@ mod tests {
         let decision = sched.after_vcpu_exit(0, 0, 300_000, 300_000);
 
         assert!(
-            matches!(decision, SchedDecision::Preempt {
-                next_vm_id: 0,
-                next_vcpu_id: 1,
-                ..
-            }),
+            matches!(
+                decision,
+                SchedDecision::Preempt {
+                    next_vm_id: 0,
+                    next_vcpu_id: 1,
+                    ..
+                }
+            ),
             "higher-priority vCPU 1 should preempt vCPU 0, got {decision:?}"
         );
     }

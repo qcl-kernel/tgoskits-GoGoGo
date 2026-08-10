@@ -20,8 +20,8 @@ use axdevice::{NullSerialBackendFactory, SerialBackendFactory};
 use axvm_types::InterruptTriggerMode;
 pub use axvm_types::{
     AddressSpacePolicy, CpuIsolationConfig, GuestPhysAddr, HostAddressAssignment,
-    HostDeviceAssignment, HostPortAssignment, ReservedAddressConfig, RtSchedConfig,
-    VMBootProtocol, VMInterruptMode, VmMemConfig, VmMemMappingType,
+    HostDeviceAssignment, HostPortAssignment, ReservedAddressConfig, RtSchedConfig, VMBootProtocol,
+    VMInterruptMode, VmMemConfig, VmMemMappingType,
 };
 use axvmconfig::VirtualDeviceRequest;
 
@@ -439,9 +439,7 @@ impl AxVMConfig {
 
     /// Returns `true` when RT scheduling is enabled for this VM.
     pub fn rt_scheduling_enabled(&self) -> bool {
-        self.rt_sched_config
-            .as_ref()
-            .is_some_and(|cfg| cfg.enabled)
+        self.rt_sched_config.as_ref().is_some_and(|cfg| cfg.enabled)
     }
 
     /// Returns the CPU isolation policy, if any.

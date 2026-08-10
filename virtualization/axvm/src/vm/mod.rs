@@ -214,7 +214,6 @@ fn pulse_interrupt_with_snapshot(
         .pulse()?;
     Ok(())
 }
-}
 
 impl VmRuntimeHandle {
     pub(crate) fn new() -> Self {
@@ -236,8 +235,7 @@ impl VmRuntimeHandle {
         let mut handle = Self::new();
         if let Some(cfg) = rt_sched_config {
             if cfg.enabled {
-                handle.rt_scheduler =
-                    Some(Mutex::new(crate::scheduler::RtScheduler::new(&cfg)));
+                handle.rt_scheduler = Some(Mutex::new(crate::scheduler::RtScheduler::new(&cfg)));
             }
         }
         handle

@@ -106,8 +106,6 @@ impl TimerEvent for VmTimerEvent {
     }
 }
 
-}
-
 struct TimerWheels {
     wheels: BTreeMap<usize, TimerList<VmTimerEvent>>,
     owners: BTreeMap<usize, usize>,

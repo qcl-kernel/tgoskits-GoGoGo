@@ -482,7 +482,10 @@ fn rt_scheduling_toml_parses_budget_policy() {
     let config = AxVMCrateConfig::from_toml(raw).unwrap();
     let sched = config.scheduling.unwrap();
     assert_eq!(sched.vcpu_configs.len(), 1);
-    assert_eq!(sched.vcpu_configs[0].policy, crate::RtSchedPolicySerde::Budget);
+    assert_eq!(
+        sched.vcpu_configs[0].policy,
+        crate::RtSchedPolicySerde::Budget
+    );
     assert_eq!(sched.vcpu_configs[0].budget_us, Some(500));
     assert_eq!(sched.vcpu_configs[0].period_us, Some(5000));
 }
@@ -520,7 +523,10 @@ fn rt_scheduling_toml_parses_deadline_policy() {
     let config = AxVMCrateConfig::from_toml(raw).unwrap();
     let sched = config.scheduling.unwrap();
     assert_eq!(sched.vcpu_configs.len(), 1);
-    assert_eq!(sched.vcpu_configs[0].policy, crate::RtSchedPolicySerde::Deadline);
+    assert_eq!(
+        sched.vcpu_configs[0].policy,
+        crate::RtSchedPolicySerde::Deadline
+    );
     assert_eq!(sched.vcpu_configs[0].deadline_us, Some(10000));
     assert_eq!(sched.vcpu_configs[0].wcet_us, Some(2000));
     assert_eq!(sched.vcpu_configs[0].period_us, Some(20000));

@@ -88,5 +88,6 @@ pub fn get_vm_config_template(params: VmTemplateParams) -> GuestConfig {
         // Machine-profile devices, including the virtual serial port, are
         // intentionally absent from the user configuration.
         devices: GuestDevices::default(),
+        scheduling: None,
     }
 }

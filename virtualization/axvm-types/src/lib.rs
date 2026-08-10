@@ -23,7 +23,7 @@ extern crate alloc;
 
 mod error;
 
-use alloc::string::String;
+use alloc::{string::String, vec::Vec};
 use core::fmt::{Debug, Formatter, LowerHex, UpperHex};
 
 use ax_memory_addr::{AddrRange, PhysAddr, VirtAddr, def_usize_addr, def_usize_addr_formatter};

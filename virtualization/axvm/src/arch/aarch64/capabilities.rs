@@ -1,8 +1,7 @@
 //! AArch64 implementations of AxVM platform capability hooks.
 
-use core::sync::atomic::{AtomicUsize, Ordering};
-
 use alloc::format;
+use core::sync::atomic::{AtomicUsize, Ordering};
 
 use super::Aarch64Arch;
 use crate::{architecture::*, *};
