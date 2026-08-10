@@ -46,21 +46,11 @@ pub fn create_guest_fdt(
             phys_cpu_ids,
         )
     })?;
-    if !passthrough_device_names.is_empty() {
-        let root_id = guest_tree.inner().root_id();
-        if let Some(root) = guest_tree.inner_mut().node_mut(root_id) {
-            root.remove_property("dma-coherent");
-        }
-    }
-    for device_path in passthrough_device_names {
-        if let Some(node_id) = guest_tree.inner().get_by_path_id(device_path)
-            && let Some(node) = guest_tree.inner_mut().node_mut(node_id)
-        {
-            // The outer QEMU device reads guest RAM directly, so coherent DMA
-            // advertised by the host FDT is not valid across nested guests.
-            node.remove_property("dma-coherent");
-        }
-    }
+    // Preserve dma-coherent on passthrough devices and root. In GPPT
+    // identity-mapped mode, guest PA equals host PA, so DMA between the
+    // guest and the passthrough device (e.g. QEMU virtio-mmio) is genuinely
+    // coherent. Removing the property causes the guest to perform spurious
+    // cache maintenance and breaks virtio-net DMA buffer management.
     Ok(guest_tree.finish())
 }
 
@@ -651,13 +641,13 @@ mod tests {
         );
     }
 
-    #[test]
-    fn generated_fdt_removes_dma_coherent_from_passthrough_virtio_mmio() {
-        let mut fdt = Fdt::new();
-        let root = fdt.root_id();
-        fdt.node_mut(root)
-            .unwrap()
-            .set_property(Property::new("dma-coherent", alloc::vec![]));
+   #[test]
+    fn generated_fdt_preserves_dma_coherent_on_passthrough_virtio_mmio() {
+       let mut fdt = Fdt::new();
+       let root = fdt.root_id();
+       fdt.node_mut(root)
+           .unwrap()
+           .set_property(Property::new("dma-coherent", alloc::vec![]));
 
         let passthrough = fdt.add_node(root, Node::new("virtio_mmio@a000000"));
         fdt.node_mut(passthrough)
@@ -674,14 +664,14 @@ mod tests {
         let dtb = super::create_guest_fdt(&fdt, &["/virtio_mmio@a000000".into()], &cfg).unwrap();
         let reparsed = Fdt::from_bytes(&dtb).unwrap();
 
-        let passthrough = reparsed.get_by_path("/virtio_mmio@a000000").unwrap();
-        assert!(passthrough.as_node().get_property("dma-coherent").is_none());
+       let passthrough = reparsed.get_by_path("/virtio_mmio@a000000").unwrap();
+        assert!(passthrough.as_node().get_property("dma-coherent").is_some());
         assert!(
             reparsed
                 .node(reparsed.root_id())
                 .unwrap()
                 .get_property("dma-coherent")
-                .is_none()
+                .is_some()
         );
-    }
+   }
 }

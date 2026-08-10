@@ -172,3 +172,49 @@ RT-Thread virtio-net 驱动初始化成功但网络数据包传输不工作。
 3. 运行抢占延迟和中断延迟基准测试 (P1)
 4. 在真实硬件上验证 (P2)
 5. 优化 RT-Thread 实时性 (P3)
+
+---
+
+## 8. virtio-net 网络通信深度调试（2026-08-11）
+
+### 8.1 调试方法
+
+启用 Axvisor Debug 日志级别，获得完整的 GPPT GICD/GICR 访问追踪。
+通过 QEMU filter-dump 捕获两侧网络数据包（pcap），验证数据路径。
+
+### 8.2 已排除的问题
+
+1. **SPI 路由正确**: assign_irq 设置 GICD_IROUTER, IRQ 48 (SPI 16) 路由到 CPU 0, IRQ 50 (SPI 18) 路由到 CPU 2
+2. **GPPT IRQ 过滤正常**: 非分配 IRQ 的 IROUTER/ISENABLER 写操作被正确过滤
+3. **SPI 使能正确**: Linux 通过 ISENABLER 正确使能 IRQ 48
+4. **TX 部分工作**: pcap 捕获到 3 个 ARP 请求包成功到达 RT-Thread 侧
+5. **Stage-2 地址映射正确**: virtio_mmio MMIO 区域正确 identity 映射
+
+### 8.3 核心问题
+
+Linux virtio_net TX 队列超时: 数据包发出后, TX 完成中断无法返回 Linux。
+pcap 证明数据包确实到达 RT-Thread 侧, 但 RT-Thread 从未回复 ARP。
+
+### 8.4 已实施的修复
+
+| 修复项 | 文件 | 说明 |
+|--------|------|------|
+| FDT dma-coherent 保留 | virtualization/axvm/src/boot/fdt/core/create.rs | 不再移除 passthrough 设备的 dma-coherent |
+| virtio queue version 2 | components/drivers/virtio/virtio.c | 使用非 legacy 寄存器设置队列地址 |
+| rtbench.c 编译修复 | applications/rtbench.c | 修复字符串字面量换行符 |
+
+### 8.5 未解决的根因
+
+TX 完成中断在 GIC 层面正确配置, 但无法被 Linux 接收。
+可能原因:
+- QEMU TCG GICv3 在嵌套虚拟化下的中断投递限制
+- Linux 报告 "LPIs enabled, memory probably corrupted" (GICR 脏状态)
+- HCR_EL2.IMO=0 时的物理中断投递时序问题
+
+### 8.6 下一步
+
+1. 验证 QEMU TCG 在 HCR_EL2.IMO=0 时是否正确投递物理 SPI 到 EL1
+2. 检查 /proc/interrupts 确认中断计数
+3. 尝试 GICv2 模式排除 GICv3 问题
+4. 检查 ICC_IGRPEN1_EL1 设置
+5. 添加中断投递追踪日志
