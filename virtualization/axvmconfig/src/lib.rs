@@ -649,19 +649,14 @@ pub struct GuestConfig {
 
 /// Serde-compatible RT scheduling policy tag.
 #[cfg_attr(all(feature = "std", any(windows, unix)), derive(schemars::JsonSchema))]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum RtSchedPolicySerde {
+    #[default]
     None,
     FixedPriority,
     Budget,
     Deadline,
-}
-
-impl Default for RtSchedPolicySerde {
-    fn default() -> Self {
-        Self::None
-    }
 }
 
 impl From<RtSchedPolicySerde> for axvm_types::RtSchedPolicy {

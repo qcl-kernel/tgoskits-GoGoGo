@@ -683,7 +683,7 @@ pub enum RtSchedPolicy {
 }
 
 /// Per-vCPU parameters for fixed-priority real-time scheduling.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Default, Clone, Copy)]
 pub struct RtPriorityParams {
     /// Scheduling priority: 0 = highest, 255 = lowest.
     pub priority: u8,
@@ -693,18 +693,8 @@ pub struct RtPriorityParams {
     pub max_timeslice_us: u32,
 }
 
-impl Default for RtPriorityParams {
-    fn default() -> Self {
-        Self {
-            priority: 128,
-            min_timeslice_us: 0,
-            max_timeslice_us: 0,
-        }
-    }
-}
-
 /// Per-vCPU parameters for budget-based (CBS) real-time scheduling.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Default, Clone, Copy)]
 pub struct RtBudgetParams {
     /// CPU budget in microseconds per period.
     pub budget_us: u32,
@@ -712,17 +702,8 @@ pub struct RtBudgetParams {
     pub period_us: u32,
 }
 
-impl Default for RtBudgetParams {
-    fn default() -> Self {
-        Self {
-            budget_us: 0,
-            period_us: 0,
-        }
-    }
-}
-
 /// Per-vCPU parameters for deadline-driven (EDF) real-time scheduling.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Default, Clone, Copy)]
 pub struct RtDeadlineParams {
     /// Relative deadline in microseconds from scheduling instant.
     pub deadline_us: u64,
@@ -732,18 +713,8 @@ pub struct RtDeadlineParams {
     pub period_us: u64,
 }
 
-impl Default for RtDeadlineParams {
-    fn default() -> Self {
-        Self {
-            deadline_us: 0,
-            wcet_us: 0,
-            period_us: 0,
-        }
-    }
-}
-
 /// Per-vCPU real-time configuration.
-#[derive(Debug, Clone)]
+#[derive(Debug, Default, Clone)]
 pub struct RtVcpuConfig {
     /// RT scheduling policy for this vCPU.
     pub policy: RtSchedPolicy,
@@ -758,20 +729,8 @@ pub struct RtVcpuConfig {
     pub preemptive: bool,
 }
 
-impl Default for RtVcpuConfig {
-    fn default() -> Self {
-        Self {
-            policy: RtSchedPolicy::None,
-            priority: None,
-            budget: None,
-            deadline: None,
-            preemptive: false,
-        }
-    }
-}
-
 /// Global real-time scheduling configuration for a VM.
-#[derive(Debug, Clone)]
+#[derive(Debug, Default, Clone)]
 pub struct RtSchedConfig {
     /// Whether RT scheduling is active for this VM.
     pub enabled: bool,
@@ -781,18 +740,8 @@ pub struct RtSchedConfig {
     pub vcpu_configs: Vec<RtVcpuConfig>,
 }
 
-impl Default for RtSchedConfig {
-    fn default() -> Self {
-        Self {
-            enabled: false,
-            base_timeslice_us: 1000,
-            vcpu_configs: Vec::new(),
-        }
-    }
-}
-
 /// Physical CPU reservation policy for real-time workloads.
-#[derive(Debug, Clone)]
+#[derive(Debug, Default, Clone)]
 pub struct CpuIsolationConfig {
     /// Physical CPU IDs reserved exclusively for RT VMs.
     /// Non-RT vCPUs will not be scheduled on these cores.
@@ -800,15 +749,6 @@ pub struct CpuIsolationConfig {
     /// When `true`, host housekeeping (periodic timers, IPIs) is
     /// suppressed on reserved CPUs to reduce jitter.
     pub disable_housekeeping: bool,
-}
-
-impl Default for CpuIsolationConfig {
-    fn default() -> Self {
-        Self {
-            reserved_cpus: Vec::new(),
-            disable_housekeeping: false,
-        }
-    }
 }
 
 /// The type of emulated device.
