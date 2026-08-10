@@ -196,6 +196,10 @@ pub(crate) fn build_axvm_config(cfg: &GuestConfig) -> AxVMConfig {
             },
         );
     }
+    let mut virtual_device_catalog = axvm::ConfiguredDeviceCatalog::new();
+    virtual_device_catalog
+        .register(crate::virtio_net::REGISTRATION)
+        .expect("the static virtio-net model registration is valid and unique");
     AxVMConfig::new(AxVMConfigParams {
         id: cfg.base.id,
         name: cfg.base.name.clone(),
@@ -229,7 +233,7 @@ pub(crate) fn build_axvm_config(cfg: &GuestConfig) -> AxVMConfig {
         serial_profile: Some(serial_profile),
         serial_backend_factory: Some(crate::guest_console::serial_backend_factory(cfg.base.id)),
         virtual_device_requests: cfg.devices.virtual_devices.clone(),
-        virtual_device_catalog: Some(alloc::sync::Arc::new(axvm::ConfiguredDeviceCatalog::new())),
+        virtual_device_catalog: Some(alloc::sync::Arc::new(virtual_device_catalog)),
         interrupt_mode: cfg.devices.interrupt_mode,
         rt_sched_config: cfg.scheduling.as_ref().map(|sched| sched.clone().into()),
         cpu_isolation: cfg.scheduling.as_ref().and_then(|sched| {
