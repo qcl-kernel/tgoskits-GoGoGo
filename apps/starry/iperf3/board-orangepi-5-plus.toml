@@ -1,0 +1,26 @@
+board_type = "OrangePi-5-Plus"
+shell_prefix = "root@starry:/root #"
+success_regex = [
+  '(?m)^STARRY_IPERF3_APP_PASSED$',
+]
+fail_regex = [
+  '(?i)\bpanic(?:ked)?\b',
+  '(?i)segmentation fault',
+  '(?i)SIGSEGV',
+  '(?m)^STARRY_IPERF3_APP_FAILED$',
+  '(?m)^iperf3-app: invalid configuration$',
+  '(?m)^iperf3-app: iperf3 is not installed in the StarryOS rootfs$',
+]
+timeout = 600
+
+shell_init_cmd = """
+export IPERF3_SERVER='${boardServerIp}'
+export IPERF3_PORT='5201'
+export IPERF3_DURATION='10'
+export IPERF3_OMIT='2'
+export IPERF3_PARALLEL='1'
+export IPERF3_BLOCK_SIZE='128K'
+export IPERF3_OUTPUT_DIR='/tmp/starry-iperf3'
+export IPERF3_SUCCESS_MARKER='STARRY_IPERF3_APP_PASSED'
+export IPERF3_SESSION_MARKER='STARRY_IPERF3_APP'
+"""

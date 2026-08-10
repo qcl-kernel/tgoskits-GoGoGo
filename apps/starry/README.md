@@ -7,6 +7,21 @@ some x86_64 QEMU demos provide their own `cargo xtask starry qemu` commands.
 Cases are intentionally separate from `test-suit/starryos`: apps are
 operator-facing workflows, while the test suit remains CI-oriented coverage.
 
+## iperf3
+
+The `iperf3` board app runs a quick TCP upload and download check between an
+Orange Pi 5 Plus (RK3588) and the host running the ostool server. Start an
+iperf3 server on the host, then run:
+
+```bash
+iperf3 --server --port 5201
+cargo xtask starry app board -t iperf3 -b OrangePi-5-Plus
+```
+
+The app records JSON results without imposing a machine-specific throughput
+threshold. See `iperf3/README.md` for rootfs preparation, parameter profiles,
+manual commands, result interpretation, and troubleshooting.
+
 ## Case Layout
 
 ```text
