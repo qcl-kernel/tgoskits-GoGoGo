@@ -328,7 +328,6 @@ fn rejects_invalid_toml_with_public_error() {
     let result = GuestConfig::from_toml("[base");
     assert!(matches!(result, Err(AxVmConfigError::TomlParse { .. })));
 }
-}
 
 #[test]
 fn test_default_implementations() {

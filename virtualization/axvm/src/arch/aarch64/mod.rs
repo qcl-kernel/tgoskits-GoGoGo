@@ -255,6 +255,7 @@ impl ArchOps for Aarch64Arch {
             }
         }
         Ok(VcpuRunAction::nothing())
+    }
 
     fn wait_for_vcpu_event(
         vm: &crate::AxVMRef,
