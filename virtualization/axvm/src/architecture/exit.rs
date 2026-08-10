@@ -189,12 +189,7 @@ pub(crate) fn handle_hypercall<V: VmArchVcpuOps, D>(
             complete_hypercall_decode_error(vcpu, exit.nr, abi);
         }
     }
-    Ok(BoundVcpuExit::Complete(VcpuRunAction {
-        waits_for_event: false,
-        stop_reason: None,
-        resets_vm: false,
-        exits_vcpu: false,
-    }))
+    Ok(BoundVcpuExit::Complete(VcpuRunAction::nothing()))
 }
 
 #[cfg(test)]

@@ -159,12 +159,7 @@ impl ArchOps for LoongArch64Arch {
                     exits_vcpu: false,
                 }))
             }
-            LoongArchVmExit::Nothing => Ok(BoundVcpuExit::Complete(VcpuRunAction {
-                waits_for_event: false,
-                stop_reason: None,
-                resets_vm: false,
-                exits_vcpu: false,
-            })),
+            LoongArchVmExit::Nothing => Ok(BoundVcpuExit::Complete(VcpuRunAction::nothing())),
             _ => Err(AxVmError::unsupported(
                 "handle LoongArch VM exit",
                 "unsupported VM exit reason",
@@ -183,12 +178,7 @@ impl ArchOps for LoongArch64Arch {
             }
             LoongArchDeferredRunWork::Idle => idle::wait(vcpu),
         }
-        Ok(VcpuRunAction {
-            waits_for_event: false,
-            stop_reason: None,
-            resets_vm: false,
-            exits_vcpu: false,
-        })
+        Ok(VcpuRunAction::nothing())
     }
 
     fn clean_dcache_range(addr: VirtAddr, size: usize) {
@@ -206,7 +196,16 @@ fn handle_loongarch_nested_page_fault(
     access_flags: LoongArchAccessFlags,
 ) -> AxVmResult<BoundVcpuExit<LoongArchDeferredRunWork>> {
     let ax_addr = loong_guest_phys_addr_to_ax(addr);
-    if let Some(decoded) = vcpu.get_arch_vcpu().decode_mmio_fault(addr, access_flags) {
+    if vm.get_devices()?.find_mmio_dev(ax_addr).is_some() {
+        let Some(decoded) = vcpu.get_arch_vcpu().decode_mmio_fault(addr, access_flags) else {
+            warn!(
+                "VM[{}] VCpu[{}] nested page fault at {:#x} maps MMIO but cannot be decoded",
+                vm.id(),
+                vcpu.id(),
+                ax_addr.as_usize()
+            );
+            return Ok(BoundVcpuExit::Complete(VcpuRunAction::nothing()));
+        };
         let handled = match decoded {
             LoongArchVmExit::MmioRead {
                 addr,
@@ -253,12 +252,7 @@ fn handle_loongarch_nested_page_fault(
             ax_addr.as_usize(),
             ax_flags
         );
-        Ok(BoundVcpuExit::Complete(VcpuRunAction {
-            waits_for_event: false,
-            stop_reason: None,
-            resets_vm: false,
-            exits_vcpu: false,
-        }))
+        Ok(BoundVcpuExit::Complete(VcpuRunAction::nothing()))
     }
 }
 

@@ -107,14 +107,28 @@ impl ArchOps for X86_64Arch {
                     width: x86_access_width_to_ax(width),
                 },
             ),
-            X86VmExit::PortIoWrite { port, width, data } => exit::handle_io_write(
-                vm,
-                IoWriteExit {
-                    port: x86_port_to_ax(port),
-                    width: x86_access_width_to_ax(width),
-                    data,
-                },
-            ),
+            X86VmExit::PortIoWrite { port, width, data } => {
+                if x86_qemu_shutdown_port(port, width, data) {
+                    warn!("VM[{}] run VCpu[{}] SystemDown", vm.id(), vcpu.id());
+                    Ok(BoundVcpuExit::Complete(VcpuRunAction {
+                        waits_for_event: false,
+                        budget_exhausted: false,
+                        consumed_ns: 0,
+                        stop_reason: Some(StopReason::SystemDown),
+                        resets_vm: false,
+                        exits_vcpu: false,
+                    }))
+                } else {
+                    exit::handle_io_write(
+                        vm,
+                        IoWriteExit {
+                            port: x86_port_to_ax(port),
+                            width: x86_access_width_to_ax(width),
+                            data,
+                        },
+                    )
+                }
+            }
             X86VmExit::PortIoString(exit) => exit::handle_io_string(vm, vcpu, exit),
             X86VmExit::MmioRead {
                 addr,
@@ -185,6 +199,8 @@ impl ArchOps for X86_64Arch {
                 warn!("VM[{}] run VCpu[{}] SystemDown", vm.id(), vcpu.id());
                 Ok(BoundVcpuExit::Complete(VcpuRunAction {
                     waits_for_event: false,
+                    budget_exhausted: false,
+                    consumed_ns: 0,
                     stop_reason: Some(StopReason::SystemDown),
                     resets_vm: false,
                     exits_vcpu: false,
@@ -198,12 +214,7 @@ impl ArchOps for X86_64Arch {
                     vm.id(),
                     vcpu.id()
                 );
-                Ok(BoundVcpuExit::Complete(VcpuRunAction {
-                    waits_for_event: false,
-                    stop_reason: None,
-                    resets_vm: false,
-                    exits_vcpu: false,
-                }))
+                Ok(BoundVcpuExit::Complete(VcpuRunAction::nothing()))
             }
             X86VmExit::Nothing => Ok(BoundVcpuExit::Continue),
             _ => Err(AxVmError::unsupported(
@@ -228,6 +239,8 @@ fn x86_halt_action() -> VcpuRunAction {
         stop_reason: None,
         resets_vm: false,
         exits_vcpu: false,
+        budget_exhausted: false,
+        consumed_ns: 0,
     }
 }
 
@@ -811,6 +824,15 @@ fn handle_x86_nested_page_fault(
     vm: &crate::AxVMRef,
     exit: NestedPageFaultExit,
 ) -> AxVmResult<BoundVcpuExit<DeferredRunWork>> {
+    if vm.get_devices()?.find_mmio_dev(exit.addr).is_some() {
+        warn!(
+            "VM[{}] nested page fault at {:#x} maps MMIO but x86 core did not decode it",
+            vm.id(),
+            exit.addr.as_usize()
+        );
+        return Ok(BoundVcpuExit::Complete(VcpuRunAction::nothing()));
+    }
+
     if vm.handle_nested_page_fault(exit.addr, exit.access_flags) {
         Ok(BoundVcpuExit::Continue)
     } else {
@@ -820,12 +842,7 @@ fn handle_x86_nested_page_fault(
             exit.addr.as_usize(),
             exit.access_flags
         );
-        Ok(BoundVcpuExit::Complete(VcpuRunAction {
-            waits_for_event: false,
-            stop_reason: None,
-            resets_vm: false,
-            exits_vcpu: false,
-        }))
+        Ok(BoundVcpuExit::Complete(VcpuRunAction::nothing()))
     }
 }
 

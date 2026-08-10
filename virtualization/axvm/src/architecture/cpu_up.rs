@@ -57,12 +57,7 @@ pub(crate) fn handle<A: CpuUpOps>(
             exit.target_cpu
         );
         vcpu.set_return_value(usize::MAX);
-        return Ok(BoundVcpuExit::Complete(VcpuRunAction {
-            waits_for_event: false,
-            stop_reason: None,
-            resets_vm: false,
-            exits_vcpu: false,
-        }));
+        return Ok(BoundVcpuExit::Complete(VcpuRunAction::nothing()));
     };
 
     match crate::runtime::vcpus::vcpu_on(
@@ -77,10 +72,5 @@ pub(crate) fn handle<A: CpuUpOps>(
             vcpu.set_return_value(usize::MAX);
         }
     }
-    Ok(BoundVcpuExit::Complete(VcpuRunAction {
-        waits_for_event: false,
-        stop_reason: None,
-        resets_vm: false,
-        exits_vcpu: false,
-    }))
+    Ok(BoundVcpuExit::Complete(VcpuRunAction::nothing()))
 }

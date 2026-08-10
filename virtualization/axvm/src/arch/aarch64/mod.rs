@@ -192,25 +192,44 @@ impl ArchOps for Aarch64Arch {
                 warn!("VM[{}] run VCpu[{}] SystemDown", vm.id(), vcpu.id());
                 Ok(BoundVcpuExit::Complete(VcpuRunAction {
                     waits_for_event: false,
+                    budget_exhausted: false,
+                    consumed_ns: 0,
                     stop_reason: Some(crate::StopReason::SystemDown),
                     resets_vm: false,
                     exits_vcpu: false,
                 }))
             }
-            ArmVmExit::SendIPI { value } => {
-                vcpu.get_arch_vcpu().write_sgi1r(value)?;
-                Ok(BoundVcpuExit::Continue)
+            ArmVmExit::SendIPI {
+                target_cpu,
+                target_cpu_aux,
+                send_to_all,
+                send_to_self,
+                vector,
+            } => ipi::handle(
+                vm,
+                vcpu.id(),
+                SendIpiExit {
+                    target_cpu,
+                    target_cpu_aux,
+                    send_to_all,
+                    send_to_self,
+                    vector,
+                },
+            ),
+            ArmVmExit::Nothing => {
+                // When RT scheduling is active, check whether a preemption
+                // timer has fired on this CPU. If so, yield so the scheduler
+                // can re-evaluate.
+                if vm.rt_scheduling_enabled() && crate::architecture::take_preemption_due() {
+                    debug!(
+                        "VM[{}] VCpu[{}] preemption due, yielding for scheduler",
+                        vm.id(),
+                        vcpu.id()
+                    );
+                    return Ok(BoundVcpuExit::YieldForScheduler { consumed_ns: 0 });
+                }
+                Ok(BoundVcpuExit::Complete(VcpuRunAction::nothing()))
             }
-            ArmVmExit::DeactivateInterrupt { intid } => {
-                vcpu.get_arch_vcpu().deactivate(intid)?;
-                Ok(BoundVcpuExit::Continue)
-            }
-            ArmVmExit::Nothing => Ok(BoundVcpuExit::Complete(VcpuRunAction {
-                waits_for_event: false,
-                stop_reason: None,
-                resets_vm: false,
-                exits_vcpu: false,
-            })),
             _ => ax_err!(Unsupported, "unsupported AArch64 VM exit"),
         }
     }
@@ -232,12 +251,7 @@ impl ArchOps for Aarch64Arch {
                 crate::check_timer_events();
             }
         }
-        Ok(VcpuRunAction {
-            waits_for_event: false,
-            stop_reason: None,
-            resets_vm: false,
-            exits_vcpu: false,
-        })
+        Ok(VcpuRunAction::nothing())
     }
 
     fn wait_for_vcpu_event(

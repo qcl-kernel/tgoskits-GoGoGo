@@ -18,7 +18,9 @@ use crate::{
     AsVCpuTask, AxVmResult, GuestPhysAddr, StopReason, VCpuTask, VmStatus, VmVcpuState,
     arch::{ArchOps, CurrentArch, VcpuRunAction},
     ax_err_type,
+    host::default_host,
     runtime::{VCpuRef, VMRef, sub_running_vm_count},
+    scheduler,
     vm::{PendingInterrupt, VmRuntimeHandle},
 };
 
@@ -363,8 +365,31 @@ pub(crate) fn build_vcpu_task(vm: &VMRef, vcpu: VCpuRef) -> crate::TaskInner {
     );
 
     if let Some(phys_cpu_set) = vcpu.phys_cpu_set() {
+        // Apply CPU isolation: if this VM has RT scheduling disabled, subtract
+        // the reserved CPU mask so that non-RT vCPUs are not placed on CPUs
+        // reserved for RT workloads.
+        let isolation_mask = if vm.rt_scheduling_enabled() {
+            // RT VM: allow vCPUs to run on reserved CPUs.
+            0
+        } else {
+            // Non-RT VM: exclude CPUs reserved by any RT VM's isolation policy.
+            vm.with_resources(|r| Ok(r.config.reserved_cpu_mask()))
+                .unwrap_or(0)
+        };
+        let effective_mask = phys_cpu_set & !isolation_mask;
+        let mask_to_use = if effective_mask != 0 {
+            effective_mask
+        } else {
+            warn!(
+                "VM[{}] VCpu[{}] requested CPU mask {phys_cpu_set:#x} but all bits are reserved \
+                 ({isolation_mask:#x}); falling back to global enabled mask",
+                vm.id(),
+                vcpu.id()
+            );
+            phys_cpu_set
+        };
         vcpu_task.set_cpumask(crate::host::task::cpu_mask_from_raw_bits(
-            vcpu_task_cpu_mask(vm.id(), vcpu.id(), phys_cpu_set),
+            vcpu_task_cpu_mask(vm.id(), vcpu.id(), mask_to_use),
         ));
     }
 
@@ -426,6 +451,13 @@ fn vcpu_run() {
         return;
     };
 
+    let sched_enabled = vm.rt_scheduling_enabled();
+
+    // Register this vCPU with the RT scheduler.
+    if sched_enabled {
+        crate::scheduler::register_vcpu(&runtime, &vcpu, &vm);
+    }
+
     info!("VM[{}] VCpu[{}] waiting for running", vm.id(), vcpu.id());
     let cpu_on_start_ack = runtime.cpu_on_start_ack(vcpu_id);
     wait_for(&runtime, || {
@@ -466,12 +498,24 @@ fn vcpu_run() {
 
     info!("VM[{}] VCpu[{}] running...", vm.id(), vcpu.id());
 
+    let run_start_ns = || -> u64 { crate::host::default_host().monotonic_time().as_nanos() as u64 };
+
     loop {
         if vcpu_id == 0 {
             poll_vm_devices(&vm);
         }
 
-        match CurrentArch::run_vcpu(&vm, &vcpu) {
+        // --- RT Scheduling: record entry time and set preemption timer ---
+        let entry_ns = run_start_ns();
+        if sched_enabled {
+            crate::scheduler::before_vcpu_enter(&runtime, vm_id, vcpu_id, entry_ns);
+        }
+
+        let action = CurrentArch::run_vcpu(&vm, &vcpu);
+        let exit_ns = run_start_ns();
+        let consumed_ns = exit_ns.saturating_sub(entry_ns);
+
+        match action {
             Ok(VcpuRunAction {
                 exits_vcpu: true, ..
             }) => {
@@ -514,11 +558,60 @@ fn vcpu_run() {
                 }
                 notify_all_vcpus(vm_id);
             }
-            Ok(VcpuRunAction {
-                waits_for_event: true,
-                ..
-            }) => CurrentArch::wait_for_vcpu_event(&vm, &vcpu, &runtime),
-            Ok(VcpuRunAction { .. }) => {}
+            Ok(
+                ref action_inner @ VcpuRunAction {
+                    waits_for_event: true,
+                    ..
+                },
+            ) => {
+                // --- RT Scheduling: mark vCPU blocked before sleeping ---
+                if sched_enabled {
+                    if let Some(decision) = crate::scheduler::after_vcpu_exit(
+                        &runtime,
+                        vm_id,
+                        vcpu_id,
+                        consumed_ns,
+                        exit_ns,
+                    ) {
+                        crate::scheduler::handle_sched_decision(&runtime, decision);
+                    }
+                    crate::scheduler::set_runnable(&runtime, vm_id, vcpu_id, false);
+                }
+                CurrentArch::wait_for_vcpu_event(&vm, &vcpu, &runtime);
+                if sched_enabled {
+                    crate::scheduler::set_runnable(&runtime, vm_id, vcpu_id, true);
+                }
+            }
+            Ok(
+                ref action_inner @ VcpuRunAction {
+                    budget_exhausted: true,
+                    ..
+                },
+            ) => {
+                // --- RT Scheduling: budget consumed, re-evaluate ---
+                let consumed = action_inner.consumed_ns.max(consumed_ns);
+                if sched_enabled {
+                    if let Some(decision) = crate::scheduler::after_vcpu_exit(
+                        &runtime, vm_id, vcpu_id, consumed, exit_ns,
+                    ) {
+                        crate::scheduler::handle_sched_decision(&runtime, decision);
+                    }
+                }
+            }
+            Ok(VcpuRunAction { .. }) => {
+                // --- RT Scheduling: normal exit, check for pending preemptions ---
+                if sched_enabled {
+                    if let Some(decision) = crate::scheduler::after_vcpu_exit(
+                        &runtime,
+                        vm_id,
+                        vcpu_id,
+                        consumed_ns,
+                        exit_ns,
+                    ) {
+                        crate::scheduler::handle_sched_decision(&runtime, decision);
+                    }
+                }
+            }
             Err(err) => {
                 error!("VM[{vm_id}] run VCpu[{vcpu_id}] get error {err:?}");
                 if let Err(err) = vm.stop(StopReason::Fault(format!("{err:?}"))) {

@@ -14,6 +14,8 @@ use std::{
     time::Duration,
 };
 
+use ax_kspin::SpinRaw;
+use ax_lazyinit::LazyInit;
 use ax_std::os::arceos::{guard::NoPreempt, modules::ax_task::IrqNotify, sync::IrqSafeMutex};
 use ax_timer_list::{TimeValue, TimerEvent, TimerList};
 
@@ -199,6 +201,9 @@ impl TimerWheels {
 
 static TIMER_WHEELS: std::sync::OnceLock<IrqSafeMutex<TimerWheels>> = std::sync::OnceLock::new();
 
+#[ax_percpu::def_percpu]
+static TIMER_LIST: LazyInit<SpinRaw<TimerList<VmTimerEvent>>> = LazyInit::new();
+
 pub(crate) fn register_timer(
     deadline_ns: u64,
     callback: Box<dyn FnOnce(Duration) + Send + 'static>,
@@ -244,6 +249,7 @@ pub(crate) fn cancel_timer(token: usize) {
 }
 
 pub(crate) fn check_events() {
+    // Drain expired timers from the old global wheel (legacy path).
     loop {
         let now = current_host_time();
         let (expired, next_deadline) = with_current_timer_wheels(|cpu_id, timer_wheels| {
@@ -262,6 +268,32 @@ pub(crate) fn check_events() {
             rearm_host_timer(next_deadline);
             break;
         }
+    }
+
+    // Also drain the per-CPU timer list (RT scheduler timers, etc.).
+    // SAFETY: Called from a vCPU task pinned to a CPU whose timer list was
+    // initialized during AxVM host initialization.
+    #[cfg(not(test))]
+    {
+        let timer_list = unsafe { TIMER_LIST.current_ref_mut_raw() };
+        let expired = {
+            let mut expired = alloc::vec::Vec::new();
+            let now = default_host().monotonic_time();
+            loop {
+                let entry = timer_list.lock().expire_one(now);
+                match entry {
+                    Some((deadline, event)) => expired.push((deadline, event)),
+                    None => break,
+                }
+            }
+            expired
+        };
+        let now = default_host().monotonic_time();
+        for (_deadline, event) in expired {
+            trace!("handle VM timer event scheduled at {_deadline:#?}");
+            event.callback(now);
+        }
+        rearm_host_timer(timer_list.lock().next_deadline());
     }
 }
 
@@ -336,6 +368,16 @@ pub(crate) fn init_percpu() {
     worker.set_cpumask(crate::host::task::cpu_mask_from_raw_bits(cpu_bit));
     crate::host::task::spawn_task(worker);
     crate::arch::register_timer_source(deadline_source, notify);
+
+    // Also initialize the per-CPU timer list.
+    // SAFETY: Called once per CPU during hypervisor initialization before this
+    // CPU can register VM timers.
+    #[cfg(not(test))]
+    {
+        let timer_list = unsafe { TIMER_LIST.current_ref_mut_raw() };
+        timer_list.init_once(SpinRaw::new(TimerList::new()));
+    }
+    crate::arch::register_timer_callback();
 }
 
 fn with_timer_wheels<R>(operation: impl FnOnce(&mut TimerWheels) -> R) -> R {

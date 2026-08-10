@@ -191,6 +191,15 @@ pub(crate) trait ArchOps {
                 unbind_result?;
                 Self::finish_deferred_run_work(vm, vcpu, work)
             }
+            Ok(BoundVcpuExit::YieldForScheduler { consumed_ns }) => {
+                unbind_result?;
+                Ok(VcpuRunAction {
+                    waits_for_event: false,
+                    budget_exhausted: true,
+                    stop_reason: None,
+                    consumed_ns,
+                })
+            }
             Ok(BoundVcpuExit::Continue) => unreachable!("continued exits do not leave run loop"),
             Err(err) => {
                 if let Err(unbind_err) = unbind_result {

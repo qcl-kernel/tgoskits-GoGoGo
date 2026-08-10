@@ -26,8 +26,9 @@ extern crate log;
 use alloc::{collections::BTreeSet, string::String, vec, vec::Vec};
 
 pub use axvm_types::{
-    AddressSpacePolicy, HostAddressAssignment, HostDeviceAssignment, HostPortAssignment,
-    ReservedAddressConfig, VMBootProtocol, VmMemConfig, VmMemMappingType,
+    AddressSpacePolicy, CpuIsolationConfig, HostAddressAssignment, HostDeviceAssignment,
+    HostPortAssignment, ReservedAddressConfig, RtSchedConfig, VMBootProtocol, VMInterruptMode,
+    VMType, VmMemConfig, VmMemMappingType,
 };
 
 mod error;
@@ -641,6 +642,100 @@ pub struct GuestConfig {
     pub kernel: VMKernelConfig,
     /// The devices configuration for the VM.
     pub devices: GuestDevices,
+    /// Real-time scheduling configuration (optional).
+    #[serde(default)]
+    pub scheduling: Option<RtSchedConfigSerde>,
+}
+
+/// Serde-compatible RT scheduling policy tag.
+#[cfg_attr(all(feature = "std", any(windows, unix)), derive(schemars::JsonSchema))]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RtSchedPolicySerde {
+    #[default]
+    None,
+    FixedPriority,
+    Budget,
+    Deadline,
+}
+
+impl From<RtSchedPolicySerde> for axvm_types::RtSchedPolicy {
+    fn from(value: RtSchedPolicySerde) -> Self {
+        match value {
+            RtSchedPolicySerde::None => Self::None,
+            RtSchedPolicySerde::FixedPriority => Self::FixedPriority,
+            RtSchedPolicySerde::Budget => Self::Budget,
+            RtSchedPolicySerde::Deadline => Self::Deadline,
+        }
+    }
+}
+
+/// Serde-compatible per-vCPU RT configuration.
+#[cfg_attr(all(feature = "std", any(windows, unix)), derive(schemars::JsonSchema))]
+#[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
+pub struct RtVcpuConfigSerde {
+    #[serde(default)]
+    pub policy: RtSchedPolicySerde,
+    pub priority: Option<u8>,
+    pub min_timeslice_us: Option<u32>,
+    pub max_timeslice_us: Option<u32>,
+    pub budget_us: Option<u32>,
+    pub period_us: Option<u32>,
+    pub deadline_us: Option<u64>,
+    pub wcet_us: Option<u32>,
+    #[serde(default)]
+    pub preemptive: bool,
+}
+
+impl From<RtVcpuConfigSerde> for axvm_types::RtVcpuConfig {
+    fn from(value: RtVcpuConfigSerde) -> Self {
+        Self {
+            policy: value.policy.into(),
+            priority: value.priority.map(|p| axvm_types::RtPriorityParams {
+                priority: p,
+                min_timeslice_us: value.min_timeslice_us.unwrap_or(0),
+                max_timeslice_us: value.max_timeslice_us.unwrap_or(0),
+            }),
+            budget: value.budget_us.map(|b| axvm_types::RtBudgetParams {
+                budget_us: b,
+                period_us: value.period_us.unwrap_or(0),
+            }),
+            deadline: value.deadline_us.map(|d| axvm_types::RtDeadlineParams {
+                deadline_us: d,
+                wcet_us: value.wcet_us.unwrap_or(0),
+                period_us: value.period_us.map(|p| p as u64).unwrap_or(0),
+            }),
+            preemptive: value.preemptive,
+        }
+    }
+}
+
+/// Serde-compatible RT scheduling configuration section.
+#[cfg_attr(all(feature = "std", any(windows, unix)), derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct RtSchedConfigSerde {
+    #[serde(default = "default_sched_enabled")]
+    pub enabled: bool,
+    pub base_timeslice_us: Option<u32>,
+    #[serde(default)]
+    pub vcpu_configs: Vec<RtVcpuConfigSerde>,
+    pub reserved_cpus: Option<Vec<usize>>,
+    #[serde(default)]
+    pub disable_housekeeping: bool,
+}
+
+fn default_sched_enabled() -> bool {
+    true
+}
+
+impl From<RtSchedConfigSerde> for axvm_types::RtSchedConfig {
+    fn from(value: RtSchedConfigSerde) -> Self {
+        Self {
+            enabled: value.enabled,
+            base_timeslice_us: value.base_timeslice_us.unwrap_or(1000),
+            vcpu_configs: value.vcpu_configs.into_iter().map(Into::into).collect(),
+        }
+    }
 }
 
 impl GuestConfig {

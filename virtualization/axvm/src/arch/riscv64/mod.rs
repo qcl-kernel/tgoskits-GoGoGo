@@ -198,12 +198,7 @@ impl ArchOps for Riscv64Arch {
                     exits_vcpu: false,
                 }))
             }
-            RiscvVmExit::Nothing => Ok(BoundVcpuExit::Complete(VcpuRunAction {
-                waits_for_event: false,
-                stop_reason: None,
-                resets_vm: false,
-                exits_vcpu: false,
-            })),
+            RiscvVmExit::Nothing => Ok(BoundVcpuExit::Complete(VcpuRunAction::nothing())),
         }
     }
 
@@ -217,12 +212,7 @@ impl ArchOps for Riscv64Arch {
                 Self::after_external_interrupt(vm, vcpu, vector);
             }
         }
-        Ok(VcpuRunAction {
-            waits_for_event: false,
-            stop_reason: None,
-            resets_vm: false,
-            exits_vcpu: false,
-        })
+        Ok(VcpuRunAction::nothing())
     }
 
     fn on_last_vcpu_exit(vm: &crate::AxVMRef) -> AxVmResult {
@@ -269,7 +259,16 @@ fn handle_riscv_nested_page_fault(
     access_flags: RiscvAccessFlags,
 ) -> AxVmResult<BoundVcpuExit<RiscvDeferredRunWork>> {
     let ax_addr = riscv_guest_phys_addr_to_ax(addr);
-    if let Some(decoded) = vcpu.get_arch_vcpu().decode_mmio_fault(addr, access_flags) {
+    if vm.get_devices()?.find_mmio_dev(ax_addr).is_some() {
+        let Some(decoded) = vcpu.get_arch_vcpu().decode_mmio_fault(addr, access_flags) else {
+            warn!(
+                "VM[{}] VCpu[{}] nested page fault at {:#x} maps MMIO but cannot be decoded",
+                vm.id(),
+                vcpu.id(),
+                ax_addr.as_usize()
+            );
+            return Ok(BoundVcpuExit::Complete(VcpuRunAction::nothing()));
+        };
         let handled = match decoded {
             RiscvVmExit::MmioRead {
                 addr,
@@ -317,12 +316,7 @@ fn handle_riscv_nested_page_fault(
             ax_addr.as_usize(),
             ax_flags
         );
-        Ok(BoundVcpuExit::Complete(VcpuRunAction {
-            waits_for_event: false,
-            stop_reason: None,
-            resets_vm: false,
-            exits_vcpu: false,
-        }))
+        Ok(BoundVcpuExit::Complete(VcpuRunAction::nothing()))
     }
 }
 

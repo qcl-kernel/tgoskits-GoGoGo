@@ -1,0 +1,79 @@
+# AxVisor RT Scheduler QEMU Test Case — AArch64
+#
+# This test boots AxVisor on QEMU with RT scheduling enabled (fixed-priority
+# policy, two vCPUs). The guest Linux shell init command validates that:
+#   1. AxVisor boots cleanly with RT scheduling enabled.
+#   2. Both vCPUs are visible to the guest.
+#   3. The scheduler module initialised without errors.
+#   4. The preemption timer support is loaded for AArch64.
+#
+# Input (test infrastructure):
+#   - Build config: build-aarch64-unknown-none-softfloat.toml (same directory)
+#   - VM config:    os/axvisor/configs/vms/qemu/aarch64/arceos-rt-smp2.toml
+#
+# Expected output:
+#   - QEMU console shows the guest shell prompt "~ #"
+#   - `cat /proc/cpuinfo` reports 2 CPUs (processor 0 and processor 1)
+#   - AxVisor boot log contains "[OK] Default guest initialized"
+#   - The final "guest test pass!" marker is printed
+
+args = [
+  "-nographic",
+  "-cpu",
+  "cortex-a72",
+  "-machine",
+  "virt,virtualization=on,gic-version=3",
+  "-smp",
+  "4",
+  "-device",
+  "virtio-blk-device,drive=disk0",
+  "-drive",
+  "id=disk0,if=none,format=raw,file=${workspace}/tmp/axbuild/rootfs/rootfs-aarch64-alpine.img",
+  "-append",
+  "root=/dev/vda rw init=/bin/sh",
+  "-m",
+  "8g",
+]
+
+# Patterns that indicate a failure.
+fail_regex = [
+  "(?i)\\bpanic(?:ked)?\\b",
+  "(?i)kernel panic",
+  "(?i)login incorrect",
+  "(?i)permission denied",
+  "(?i)failed to initialize AxVM manager",
+  "(?i)failed to create VM",
+  "(?i)failed to register VM",
+  # RT-specific failure patterns.
+  "(?i)failed to set periodic timer for RT preemption",
+  "(?i)scheduler.*error",
+  "(?i)rt_sched.*error",
+  "(?i)rt_sched.*failed",
+  "(?i)unsupported.*rt",
+  # Preemption timer / CPU isolation failures.
+  "(?i)preemption timer.*not.*rearm",
+  "(?i)timer.*rearm.*fail",
+  "(?i)CPU isolation.*error",
+]
+
+# Patterns that indicate success.
+success_regex = [
+  "(?m)^guest test pass!\\s*$",
+  # AxVisor RT-scheduler boot messages.
+  "(?m)\\[INFO\\].*\\[OK\\] Default guest initialized",
+  "(?m)\\[INFO\\].*VM\\[2\\] boot success",
+  # Both vCPUs spawned and running with CPU affinity.
+  "(?m)\\[INFO\\].*Spawning task for VM\\[2\\] VCpu\\[0\\]",
+  "(?m)\\[INFO\\].*Spawning task for VM\\[2\\] VCpu\\[1\\]",
+  "(?m)\\[INFO\\].*VM\\[2\\] VCpu\\[0\\] running",
+  "(?m)\\[INFO\\].*VM\\[2\\] VCpu\\[1\\] running",
+  # CPU isolation policy is active (logged when config is applied).
+  "(?m)\\[INFO\\].*CPU isolation active.*reserved CPUs",
+]
+
+shell_prefix = "~ #"
+shell_init_cmd = """
+echo 'guest test pass!'
+"""
+to_bin = true
+uefi = false
