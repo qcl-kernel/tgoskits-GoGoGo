@@ -29,6 +29,7 @@ passthrough_devices = [
 ]
 passthrough_addresses = []
 excluded_devices = []
+passthrough_irqs = [18]
 emu_devices = [
   ["gppt-gicd", 0x0800_0000, 0x1_0000, 0, 0x21, []],
   ["gppt-gicr", 0x080a_0000, 0x2_0000, 0, 0x20, [1, 0x2_0000, 2]],
