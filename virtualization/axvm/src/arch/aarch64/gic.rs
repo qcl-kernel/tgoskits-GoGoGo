@@ -146,3 +146,51 @@ pub(crate) fn handle_current_irq() -> Option<usize> {
 pub(crate) fn fetch_irq() -> usize {
     handle_current_irq().unwrap_or(0)
 }
+
+use alloc::vec::Vec;
+
+static PASSTHROUGH_SPIS_PTR: core::sync::atomic::AtomicPtr<u32> =
+    core::sync::atomic::AtomicPtr::new(core::ptr::null_mut());
+static PASSTHROUGH_SPIS_LEN: core::sync::atomic::AtomicUsize =
+    core::sync::atomic::AtomicUsize::new(0);
+
+pub(crate) fn install_passthrough_spis(spis: Vec<u32>) {
+    let len = spis.len();
+    let boxed: alloc::boxed::Box<[u32]> = spis.into_boxed_slice();
+    let raw = alloc::boxed::Box::into_raw(boxed) as *mut u32;
+    let old = PASSTHROUGH_SPIS_PTR.swap(raw, core::sync::atomic::Ordering::AcqRel);
+    PASSTHROUGH_SPIS_LEN.store(len, core::sync::atomic::Ordering::Release);
+    if !old.is_null() {
+        let old_len = PASSTHROUGH_SPIS_LEN.load(core::sync::atomic::Ordering::Acquire);
+        unsafe { let _ = alloc::boxed::Box::from_raw(core::slice::from_raw_parts_mut(old, old_len)); }
+    }
+}
+
+fn write_gicd_set_clear(irqs: &[u32], is_enable: bool) {
+    let gicd_base = host_gicd_base().as_usize();
+    let base_reg = if is_enable { 0x0100 } else { 0x0180 };
+    for &irq in irqs {
+        let reg = base_reg + ((irq as usize) / 32) * 4;
+        let bit = 1u32 << ((irq % 32) as u32);
+        let paddr = ax_memory_addr::PhysAddr::from_usize(gicd_base + reg);
+        let vaddr = crate::host::default_host().phys_to_virt(paddr);
+        unsafe { core::ptr::write_volatile(vaddr.as_usize() as *mut u32, bit); }
+    }
+    unsafe { core::arch::asm!("dsb st", "isb"); }
+}
+
+pub(crate) fn disable_passthrough_spis() {
+    let raw = PASSTHROUGH_SPIS_PTR.load(core::sync::atomic::Ordering::Acquire);
+    let len = PASSTHROUGH_SPIS_LEN.load(core::sync::atomic::Ordering::Acquire);
+    if raw.is_null() || len == 0 { return; }
+    let spis: &[u32] = unsafe { core::slice::from_raw_parts(raw, len) };
+    write_gicd_set_clear(spis, false);
+}
+
+pub(crate) fn reenable_passthrough_spis() {
+    let raw = PASSTHROUGH_SPIS_PTR.load(core::sync::atomic::Ordering::Acquire);
+    let len = PASSTHROUGH_SPIS_LEN.load(core::sync::atomic::Ordering::Acquire);
+    if raw.is_null() || len == 0 { return; }
+    let spis: &[u32] = unsafe { core::slice::from_raw_parts(raw, len) };
+    write_gicd_set_clear(spis, true);
+}

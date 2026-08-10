@@ -36,7 +36,7 @@ mod ipi;
 mod npt;
 #[path = "../../architecture/sysreg.rs"]
 mod sysreg;
-mod vm;
+pub(crate) mod vm;
 mod vtimer;
 
 pub use capabilities::{host_fdt_bootarg, host_phys_to_virt};
@@ -226,6 +226,14 @@ impl ArmHostOps for AxvmArmHostOps {
 
     fn handle_current_host_irq() {
         gic::handle_current_irq();
+    }
+
+    fn disable_passthrough_spis() {
+        gic::disable_passthrough_spis();
+    }
+
+    fn reenable_passthrough_spis() {
+        gic::reenable_passthrough_spis();
     }
 }
 

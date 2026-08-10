@@ -18,6 +18,12 @@ pub trait ArmHostOps {
 
     /// Dispatch a host IRQ taken while running at the current exception level.
     fn handle_current_host_irq();
+
+    /// Disable passthrough SPIs at the physical GICD before guest exit.
+    fn disable_passthrough_spis() {}
+
+    /// Re-enable passthrough SPIs at the physical GICD before guest entry.
+    fn reenable_passthrough_spis() {}
 }
 
 static CURRENT_EL_IRQ_HANDLER: AtomicPtr<()> = AtomicPtr::new(core::ptr::null_mut());

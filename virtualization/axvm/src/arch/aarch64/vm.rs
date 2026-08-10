@@ -155,15 +155,24 @@ fn assign_passthrough_spis(config: &AxVMConfig, devices: &axdevice::DeviceRuntim
         gicd.assign_spi(route)
             .map_err(|error| AxVmError::interrupt("assign passthrough SPI", error))?;
     }
+
+    super::gic::install_passthrough_spis(
+        config.pass_through_spis().iter().map(|spi| spi + 32).collect(),
+    );
+
     Ok(())
 }
 
 /// Typed architecture capability used only for passthrough SPI assignment.
-trait Aarch64GicDistributorOps: Send + Sync {
+pub(crate) trait Aarch64GicDistributorOps: Send + Sync {
     fn assign_spi(&self, route: Aarch64PassthroughSpiRoute) -> DeviceManagerResult;
+
+    fn disable_assigned_spis(&self);
+
+    fn reenable_assigned_spis(&self);
 }
 
-struct Aarch64GicDistributorKey;
+pub(crate) struct Aarch64GicDistributorKey;
 
 impl ServiceKey for Aarch64GicDistributorKey {
     type Service = dyn Aarch64GicDistributorOps;
@@ -179,6 +188,14 @@ impl Aarch64GicDistributorOps for arm_vgic::v3::vgicd::VGicD {
                 operation: "assign passthrough SPI",
                 detail: alloc::format!("{error}"),
             })
+    }
+
+    fn disable_assigned_spis(&self) {
+        arm_vgic::v3::vgicd::VGicD::disable_assigned_spis(self);
+    }
+
+    fn reenable_assigned_spis(&self) {
+        arm_vgic::v3::vgicd::VGicD::reenable_assigned_spis(self);
     }
 }
 

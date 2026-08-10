@@ -54,8 +54,12 @@ pub struct ArmVcpu<H: ArmHostOps> {
     ctx: TrapFrame,
     host: HostRuntimeContext,
     guest_system_regs: GuestSystemRegisters,
-    /// The MPIDR_EL1 value for the vCPU.
+   /// The MPIDR_EL1 value for the vCPU.
     mpidr: u64,
+    /// Whether physical interrupts are passed through to the guest (IMO=0).
+    /// When true, IRQs remain masked at EL2 between guest runs so they are
+    /// not consumed by the host's IRQ handler.
+    passthrough_interrupt: bool,
     _host: PhantomData<fn() -> H>,
 }
 
@@ -130,6 +134,7 @@ impl<H: ArmHostOps> ArmVcpu<H> {
             host: HostRuntimeContext::default(),
             guest_system_regs: GuestSystemRegisters::default(),
             mpidr: config.mpidr_el1,
+            passthrough_interrupt: false,
             _host: PhantomData,
         })
     }
@@ -166,16 +171,34 @@ impl<H: ArmHostOps> ArmVcpu<H> {
             core::arch::asm!("msr daifset, #2");
         }
 
+        // In passthrough mode, re-enable assigned SPIs at the physical GICD
+        // before entering the guest. This ensures any SPI that became pending
+        // while the guest was not running fires inside the guest at EL1
+        // instead of being consumed by the host's EL2 IRQ handler.
+        if self.passthrough_interrupt {
+            H::reenable_passthrough_spis();
+        }
+
         let exit_reason = unsafe {
             self.restore_vm_system_regs();
             self.run_guest()
         };
 
+        // In passthrough mode, immediately disable assigned SPIs at the
+        // physical GICD after guest exit. This prevents the SPIs from firing
+        // at EL2 while the host processes the exit or while the scheduler
+        // runs with IRQs unmasked. Pending bits are preserved.
+        if self.passthrough_interrupt {
+            H::disable_passthrough_spis();
+        }
+
         let trap_kind = TrapKind::try_from(exit_reason as u8).expect("Invalid TrapKind");
         let result = self.vmexit_handler(trap_kind);
 
-        unsafe {
-            core::arch::asm!("msr daifclr, #2");
+        if !self.passthrough_interrupt {
+            unsafe {
+                core::arch::asm!("msr daifclr, #2");
+            }
         }
 
         result
@@ -222,6 +245,8 @@ impl<H: ArmHostOps> ArmVcpu<H> {
 
     /// Init guest context. Also set some el2 register value.
     fn init_vm_context(&mut self, config: ArmVcpuSetupConfig) {
+        self.passthrough_interrupt = config.passthrough_interrupt;
+
         // CNTHCTL_EL2.modify(CNTHCTL_EL2::EL1PCEN::SET + CNTHCTL_EL2::EL1PCTEN::SET);
         // Set CNTVOFF_EL2 to the current physical counter so the guest's
         // virtual counter (CNTVCT_EL0 = CNTPCT_EL0 - CNTVOFF_EL2) starts near zero.

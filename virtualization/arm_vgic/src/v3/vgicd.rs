@@ -51,6 +51,47 @@ pub struct VGicD {
 }
 
 impl VGicD {
+
+    /// Disables all assigned SPIs at the physical GICD.
+    ///
+    /// Called on vCPU exit in GPPT passthrough mode so passthrough SPIs
+    /// cannot fire at EL2 while the host processes the exit. Pending bits
+    /// are preserved; re-enabling before guest entry delivers them at EL1.
+    pub fn disable_assigned_spis(&self) {
+        let assigned = self.assigned_irqs.lock();
+        for irq in 32..MAX_IRQ_V3 {
+            if assigned.get(irq) {
+                let reg = GICD_ICENABLER + (irq / 32) * 4;
+                let bit = 1u32 << (irq % 32);
+                let _ = perform_mmio_write(
+                    self.host_gicd_addr + reg,
+                    AccessWidth::Dword,
+                    bit as usize,
+                );
+            }
+        }
+        unsafe { core::arch::asm!("dsb st", "isb"); }
+    }
+
+    /// Re-enables all assigned SPIs at the physical GICD.
+    ///
+    /// Called just before guest entry so pending SPIs fire inside the guest.
+    pub fn reenable_assigned_spis(&self) {
+        let assigned = self.assigned_irqs.lock();
+        for irq in 32..MAX_IRQ_V3 {
+            if assigned.get(irq) {
+                let reg = GICD_ISENABLER + (irq / 32) * 4;
+                let bit = 1u32 << (irq % 32);
+                let _ = perform_mmio_write(
+                    self.host_gicd_addr + reg,
+                    AccessWidth::Dword,
+                    bit as usize,
+                );
+            }
+        }
+        unsafe { core::arch::asm!("dsb st", "isb"); }
+    }
+
     /// Validates that an IRQ identifier can be represented by the VGIC.
     pub fn validate_irq(irq: u32) -> VgicResult {
         if irq >= MAX_IRQ_V3 as u32 {
