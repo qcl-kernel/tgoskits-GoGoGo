@@ -6,7 +6,7 @@ features = [
     # activate panic backtrace. Disabled by default for release.
     # "backtrace",
 ]
-log = "Info"
+log = "Debug"
 target = "aarch64-unknown-none-softfloat"
 vm_configs = []
 
