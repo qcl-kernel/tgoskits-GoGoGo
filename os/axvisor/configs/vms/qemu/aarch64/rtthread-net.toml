@@ -1,0 +1,35 @@
+[base]
+id = 3
+name = "rtthread-net"
+vm_type = 1
+cpu_num = 1
+phys_cpu_ids = [2]
+host_timer_policy = "periodic"
+host_vcpu_yield = false
+host_vcpu_idle_policy = "halt"
+
+[kernel]
+entry_point = 0xa008_0000
+image_location = "memory"
+kernel_path = "/path/to/rtthread.bin"
+kernel_load_addr = 0xa008_0000
+dtb_load_addr = 0xaf00_0000
+memory_regions = [
+  [0xa000_0000, 0x1000_0000, 0x7, 2],
+]
+
+[devices]
+interrupt_mode = "passthrough"
+passthrough_devices = [
+  ["/intc@8000000"],
+  ["/timer"],
+  ["/psci"],
+  ["/pl011@9000000"],
+  ["/virtio_mmio@a000400"],
+]
+passthrough_addresses = []
+excluded_devices = []
+emu_devices = [
+  ["gppt-gicd", 0x0800_0000, 0x1_0000, 0, 0x21, []],
+  ["gppt-gicr", 0x080a_0000, 0x2_0000, 0, 0x20, [1, 0x2_0000, 2]],
+]

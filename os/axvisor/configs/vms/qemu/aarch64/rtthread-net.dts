@@ -1,0 +1,88 @@
+/dts-v1/;
+
+/ {
+	#address-cells = <2>;
+	#size-cells = <2>;
+	model = "RT-Thread QEMU Virt";
+	compatible = "rt-thread,qemu-virt64";
+
+	cpus {
+		#address-cells = <1>;
+		#size-cells = <0>;
+
+		cpu@0 {
+			device_type = "cpu";
+			compatible = "arm,cortex-a72";
+			reg = <0>;
+		};
+	};
+
+	psci {
+		compatible = "arm,psci-0.2";
+		method = "hvc";
+	};
+
+	timer {
+		compatible = "arm,armv8-timer";
+		interrupt-parent = <&gic>;
+		interrupts = <1 13 2 0xa0>,
+		             <1 14 2 0xa0>,
+		             <1 11 2 0xa0>,
+		             <1 10 2 0xa0>;
+	};
+
+	uartclk: apb-pclk {
+		compatible = "fixed-clock";
+		clock-frequency = <24000000>;
+		#clock-cells = <0>;
+	};
+
+	memory@a0000000 {
+		device_type = "memory";
+		reg = <0x0 0xa0000000 0x0 0x10000000>;
+	};
+
+	soc {
+		#address-cells = <2>;
+		#size-cells = <2>;
+		compatible = "simple-bus";
+		ranges;
+		interrupt-parent = <&gic>;
+
+		gic: interrupt-controller@8000000 {
+			compatible = "arm,gic-v3", "arm,gic";
+			reg = <0x0 0x08000000 0x0 0x00010000>,
+			      <0x0 0x080a0000 0x0 0x00f60000>;
+			interrupt-controller;
+			#interrupt-cells = <4>;
+			#address-cells = <2>;
+			#size-cells = <2>;
+			status = "okay";
+
+			its: its@8080000 {
+				compatible = "arm,gic-v3-its";
+				reg = <0x0 0x08080000 0x0 0x00020000>;
+				msi-controller;
+			};
+		};
+
+		uart0: uart@9000000 {
+			compatible = "arm,pl011", "arm,primecell";
+			reg = <0x0 0x09000000 0x0 0x1000>;
+			interrupts = <0 1 4>;
+			clocks = <&uartclk>;
+			status = "okay";
+		};
+
+		virtio_mmio@a000400 {
+			compatible = "virtio,mmio";
+			reg = <0x0 0x0a000400 0x0 0x200>;
+			interrupts = <0 18 1>;
+			dma-coherent;
+		};
+	};
+
+	chosen {
+		stdout-path = "/soc/uart@9000000";
+	};
+};
