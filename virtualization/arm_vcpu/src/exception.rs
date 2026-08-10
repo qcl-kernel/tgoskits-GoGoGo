@@ -167,7 +167,7 @@ fn handle_data_abort(context_frame: &mut TrapFrame) -> ArmVcpuResult<ArmVmExit> 
     let reg_width = exception_data_abort_access_reg_width();
 
     trace!(
-        "Data fault @{:?}, ELR {:#x}, esr: 0x{:x}",
+        "Data fault @{:?}, ELR {:#x}, esr: {:#x}",
         addr,
         context_frame.exception_pc(),
         exception_esr(),

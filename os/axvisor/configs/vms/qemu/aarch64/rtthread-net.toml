@@ -9,10 +9,10 @@ host_vcpu_yield = false
 host_vcpu_idle_policy = "halt"
 
 [kernel]
-entry_point = 0xa008_0000
+entry_point = 0xa000_0000
 image_location = "memory"
-kernel_path = "/path/to/rtthread.bin"
-kernel_load_addr = 0xa008_0000
+kernel_path = "/home/yfblock/Code/hyper-rtos/.worktrees/rtthread-guest/tmp/rt-thread-5.2.2/bsp/qemu-virt64-aarch64/rtthread.bin"
+kernel_load_addr = 0xa000_0000
 dtb_load_addr = 0xaf00_0000
 memory_regions = [
   [0xa000_0000, 0x1000_0000, 0x7, 2],

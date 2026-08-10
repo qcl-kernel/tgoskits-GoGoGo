@@ -7,7 +7,7 @@ args = [
   "-global",
   "virtio-mmio.force-legacy=false",
   "-smp",
-  "4",
+  "3",
   "-device",
   "nvme,drive=disk0,serial=tgoskits,max_ioqpairs=64,msix_qsize=65",
   "-drive",
