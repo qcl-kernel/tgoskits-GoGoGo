@@ -22,6 +22,7 @@
 
 use alloc::{boxed::Box, string::String, sync::Arc, vec, vec::Vec};
 
+use ax_kspin::SpinRwLock as RwLock;
 use ax_sync::spin::SpinNoIrq;
 use axpoll::PollSet;
 use hashbrown::HashMap;
@@ -31,7 +32,7 @@ use smoltcp::{
     time::{Duration, Instant},
     wire::{
         ArpOperation, ArpPacket, ArpRepr, EthernetAddress, EthernetFrame, EthernetProtocol,
-        EthernetRepr, IpAddress, Ipv4Cidr,
+        EthernetRepr, IpAddress, IpVersion, Ipv4Cidr,
     },
 };
 
@@ -39,8 +40,9 @@ use crate::{
     config::InterfaceId,
     consts::{ETHERNET_MAX_PENDING_PACKETS, STANDARD_MTU},
     device::{
-        ArpEntry, Device, ETH_ZLEN, EthernetDriver, EthernetIrqHandler, NetDeviceError,
-        NetIrqEvents,
+        ArpEntry, Device, DeviceTxOutcome, DeviceTxPath, ETH_ZLEN, EthernetDriver,
+        EthernetIrqHandler, EthernetTxEndpoint, NetDeviceError, NetDeviceResult, NetIrqEvents,
+        TxNotify,
     },
 };
 
@@ -102,6 +104,7 @@ pub fn set_ethernet_irq_registrar(registrar: &'static dyn EthernetIrqRegistrar) 
     ETHERNET_IRQ_REGISTRAR.call_once(|| registrar);
 }
 
+#[derive(Clone, Copy)]
 struct Neighbor {
     hardware_address: EthernetAddress,
     expires_at: Instant,
@@ -123,10 +126,103 @@ struct EthernetIrqState {
     poll_ready: Arc<PollSet>,
 }
 
+type SharedNeighbors = Arc<RwLock<HashMap<IpAddress, Neighbor>>>;
+
+struct EthernetTxPath {
+    name: String,
+    endpoint: Arc<dyn EthernetTxEndpoint>,
+    source: EthernetAddress,
+    neighbors: SharedNeighbors,
+}
+
+impl EthernetTxPath {
+    fn send<F>(
+        &self,
+        destination: EthernetAddress,
+        size: usize,
+        fill_payload: F,
+        protocol: EthernetProtocol,
+        notify: TxNotify,
+    ) -> NetDeviceResult<usize>
+    where
+        F: FnOnce(&mut [u8]),
+    {
+        let repr = EthernetRepr {
+            src_addr: self.source,
+            dst_addr: destination,
+            ethertype: protocol,
+        };
+        let frame_len = repr.buffer_len() + size;
+        let wire_len = frame_len.max(ETH_ZLEN);
+        let mut fill_once = Some(fill_payload);
+        let mut fill_frame = |buffer: &mut [u8]| {
+            let mut frame = EthernetFrame::new_unchecked(buffer);
+            repr.emit(&mut frame);
+            fill_once
+                .take()
+                .expect("driver must fill each frame exactly once")(frame.payload_mut());
+        };
+        self.endpoint
+            .transmit_frame_with_notify(frame_len, notify, &mut fill_frame)?;
+        trace!("SEND {frame_len} bytes");
+        Ok(wire_len)
+    }
+}
+
+impl DeviceTxPath for EthernetTxPath {
+    fn try_send(
+        &self,
+        next_hop: IpAddress,
+        packet: &[u8],
+        timestamp: Instant,
+        notify: TxNotify,
+    ) -> DeviceTxOutcome {
+        let protocol = match IpVersion::of_packet(packet) {
+            Ok(IpVersion::Ipv4) => EthernetProtocol::Ipv4,
+            Ok(IpVersion::Ipv6) => EthernetProtocol::Ipv6,
+            Err(err) => {
+                warn!("{}: invalid IP packet on transmit: {err:?}", self.name);
+                return DeviceTxOutcome::Consumed(0);
+            }
+        };
+        let destination = if next_hop.is_broadcast() {
+            EthernetAddress::BROADCAST
+        } else {
+            let neighbors = self.neighbors.read();
+            let Some(neighbor) = neighbors
+                .get(&next_hop)
+                .filter(|neighbor| neighbor.expires_at > timestamp)
+            else {
+                return DeviceTxOutcome::Fallback;
+            };
+            neighbor.hardware_address
+        };
+        match self.send(
+            destination,
+            packet.len(),
+            |buffer| buffer.copy_from_slice(packet),
+            protocol,
+            notify,
+        ) {
+            Ok(frame_len) => DeviceTxOutcome::Consumed(frame_len),
+            Err(NetDeviceError::Again) => DeviceTxOutcome::Fallback,
+            Err(err) => {
+                warn!("{}: transmit endpoint failed: {err:?}", self.name);
+                DeviceTxOutcome::Consumed(0)
+            }
+        }
+    }
+
+    fn flush(&self) {
+        self.endpoint.flush();
+    }
+}
+
 pub struct EthernetDevice {
     name: String,
     inner: Arc<EthernetIrqState>,
-    neighbors: HashMap<IpAddress, Neighbor>,
+    tx_path: Option<Arc<EthernetTxPath>>,
+    neighbors: SharedNeighbors,
     pending_neighbors: HashMap<IpAddress, PendingNeighbor>,
     ip: Option<Ipv4Cidr>,
 
@@ -203,12 +299,23 @@ impl EthernetDevice {
         let irq = inner.irq_id();
         let registrar = irq.and_then(|_| ETHERNET_IRQ_REGISTRAR.get().copied());
         let irq_handler = registrar.and_then(|_| inner.take_irq_handler());
+        let source = EthernetAddress(inner.mac_address());
+        let tx_endpoint = inner.tx_endpoint();
         let inner = Arc::new(EthernetIrqState {
             irq,
             irq_registration: spin::Once::new(),
             oob_rx,
             driver: SpinNoIrq::new(inner),
             poll_ready: Arc::new(PollSet::new()),
+        });
+        let neighbors = Arc::new(RwLock::new(HashMap::new()));
+        let tx_path = tx_endpoint.map(|endpoint| {
+            Arc::new(EthernetTxPath {
+                name: name.clone(),
+                endpoint,
+                source,
+                neighbors: Arc::clone(&neighbors),
+            })
         });
         let pending_packets = PacketBuffer::new(
             vec![PacketMetadata::EMPTY; ETHERNET_MAX_PENDING_PACKETS],
@@ -252,7 +359,8 @@ impl EthernetDevice {
         Self {
             name,
             inner,
-            neighbors: HashMap::new(),
+            tx_path,
+            neighbors,
             pending_neighbors: HashMap::new(),
             ip,
 
@@ -273,46 +381,29 @@ impl EthernetDevice {
 
     /// Builds an Ethernet frame around `size` bytes of payload written by `f`,
     /// emits it via `inner.transmit()`, and returns the total L2 frame length
-    /// (including padding to [`ETH_ZLEN`], excluding FCS) on success, or 0 on
-    /// failure.
+    /// (including padding to [`ETH_ZLEN`], excluding FCS) on success.
+    /// [`NetDeviceError::Again`] leaves ownership with the caller so it can
+    /// retain and retry the packet after TX descriptors become available.
     fn send_to<F>(
         inner: &mut dyn EthernetDriver,
         dst: EthernetAddress,
         size: usize,
         f: F,
         proto: EthernetProtocol,
-    ) -> usize
+    ) -> NetDeviceResult<usize>
     where
         F: FnOnce(&mut [u8]),
     {
-        if let Err(err) = inner.recycle_tx_buffers() {
-            warn!(
-                "{}: recycle_tx_buffers failed: {:?}",
-                inner.device_name(),
-                err
-            );
-            return 0;
-        }
+        inner.recycle_tx_buffers()?;
 
         let repr = EthernetRepr {
             src_addr: EthernetAddress(inner.mac_address()),
             dst_addr: dst,
             ethertype: proto,
         };
-
         let total_frame_len = repr.buffer_len() + size;
-        // Drivers pad short frames to ETH_ZLEN (60 bytes) in transmit(). The
-        // returned length reflects the actual on-wire frame length excluding
-        // FCS, aligned with Linux /proc/net/dev semantics.
         let wire_len = total_frame_len.max(ETH_ZLEN);
-
-        let mut tx_buf = match inner.alloc_tx_buffer(total_frame_len) {
-            Ok(buf) => buf,
-            Err(err) => {
-                warn!("{}: alloc_tx_buffer failed: {:?}", inner.device_name(), err);
-                return 0;
-            }
-        };
+        let mut tx_buf = inner.alloc_tx_buffer(total_frame_len)?;
         let mut frame = EthernetFrame::new_unchecked(tx_buf.packet_mut());
         repr.emit(&mut frame);
         f(frame.payload_mut());
@@ -321,12 +412,8 @@ impl EthernetDevice {
             tx_buf.packet_len(),
             tx_buf.packet()
         );
-        if let Err(err) = inner.transmit(&mut *tx_buf) {
-            warn!("{}: transmit failed: {:?}", inner.device_name(), err);
-            0
-        } else {
-            wire_len
-        }
+        inner.transmit(&mut *tx_buf)?;
+        Ok(wire_len)
     }
 
     /// Parses and handles a single Ethernet frame.
@@ -391,16 +478,12 @@ impl EthernetDevice {
         }
     }
 
-    fn request_arp(&mut self, target_ip: IpAddress, timestamp: Instant) -> bool {
+    fn request_arp(&mut self, target_ip: IpAddress, timestamp: Instant) -> NetDeviceResult {
         let IpAddress::Ipv4(target_ipv4) = target_ip else {
-            warn!("IPv6 address ARP is not supported: {}", target_ip);
-            self.deferred_tx_errors += 1;
-            return false;
+            return Err(NetDeviceError::Unsupported);
         };
         let Some(ip) = self.ip else {
-            warn!("cannot request ARP for {target_ipv4}: ethernet IPv4 is not configured");
-            self.deferred_tx_errors += 1;
-            return false;
+            return Err(NetDeviceError::BadState);
         };
         info!("{}: requesting ARP for {}", self.name, target_ipv4);
 
@@ -412,22 +495,16 @@ impl EthernetDevice {
             target_protocol_addr: target_ipv4,
         };
 
-        let mut inner = self.inner.driver.lock();
-        let arp_frame_len = Self::send_to(
-            &mut **inner,
-            EthernetAddress::BROADCAST,
-            arp_repr.buffer_len(),
-            |buf| arp_repr.emit(&mut ArpPacket::new_unchecked(buf)),
-            EthernetProtocol::Arp,
-        );
-        if arp_frame_len == 0 {
-            warn!(
-                "{}: failed to send ARP request for {}",
-                self.name, target_ipv4
-            );
-            self.deferred_tx_errors += 1;
-            return false;
-        }
+        let arp_frame_len = {
+            let mut driver = self.inner.driver.lock();
+            Self::send_to(
+                &mut **driver,
+                EthernetAddress::BROADCAST,
+                arp_repr.buffer_len(),
+                |buf| arp_repr.emit(&mut ArpPacket::new_unchecked(buf)),
+                EthernetProtocol::Arp,
+            )?
+        };
         // ARP requests are successfully transmitted L2 frames — record
         // their length so the router RX worker can count them in TX stats.
         self.deferred_tx_frame_lens.push(arp_frame_len);
@@ -438,7 +515,7 @@ impl EthernetDevice {
                 requested_at: timestamp,
             },
         );
-        true
+        Ok(())
     }
 
     fn process_arp(&mut self, payload: &[u8], now: Instant) {
@@ -488,7 +565,7 @@ impl EthernetDevice {
             );
             self.pending_neighbors
                 .remove(&IpAddress::Ipv4(source_protocol_addr));
-            self.neighbors.insert(
+            self.neighbors.write().insert(
                 IpAddress::Ipv4(source_protocol_addr),
                 Neighbor {
                     hardware_address: source_hardware_addr,
@@ -505,20 +582,25 @@ impl EthernetDevice {
                     target_protocol_addr: source_protocol_addr,
                 };
 
-                let mut inner = self.inner.driver.lock();
-                let arp_frame_len = Self::send_to(
-                    &mut **inner,
-                    source_hardware_addr,
-                    response.buffer_len(),
-                    |buf| response.emit(&mut ArpPacket::new_unchecked(buf)),
-                    EthernetProtocol::Arp,
-                );
+                let arp_frame_len = {
+                    let mut driver = self.inner.driver.lock();
+                    Self::send_to(
+                        &mut **driver,
+                        source_hardware_addr,
+                        response.buffer_len(),
+                        |buf| response.emit(&mut ArpPacket::new_unchecked(buf)),
+                        EthernetProtocol::Arp,
+                    )
+                };
                 // ARP replies are successfully transmitted L2 frames — record
                 // their length so the router RX worker can count them in TX stats.
-                if arp_frame_len > 0 {
-                    self.deferred_tx_frame_lens.push(arp_frame_len);
-                } else {
-                    self.deferred_tx_errors += 1;
+                match arp_frame_len {
+                    Ok(frame_len) => self.deferred_tx_frame_lens.push(frame_len),
+                    Err(NetDeviceError::Again) => self.deferred_tx_drops += 1,
+                    Err(err) => {
+                        warn!("{}: failed to send ARP reply: {err:?}", self.name);
+                        self.deferred_tx_errors += 1;
+                    }
                 }
             }
 
@@ -543,7 +625,7 @@ impl EthernetDevice {
                     Refresh(Vec<u8>),
                     Keep(Vec<u8>),
                 }
-                let action = match self.neighbors.get(&next_hop) {
+                let action = match self.neighbors.read().get(&next_hop) {
                     Some(neighbor) if neighbor.expires_at > now => {
                         Action::Send(neighbor.hardware_address, buf.to_vec())
                     }
@@ -556,31 +638,44 @@ impl EthernetDevice {
 
                 match action {
                     Action::Send(mac, payload) => {
-                        let mut inner = self.inner.driver.lock();
                         info!(
                             "{}: sending pending IPv4 packet to {} via {}",
                             self.name, next_hop, mac
                         );
                         let payload_len = payload.len();
-                        let frame_len = Self::send_to(
-                            &mut **inner,
-                            mac,
-                            payload_len,
-                            |b| b.copy_from_slice(&payload),
-                            EthernetProtocol::Ipv4,
-                        );
-                        if frame_len > 0 {
-                            self.deferred_tx_frame_lens.push(frame_len);
-                        } else {
-                            self.deferred_tx_errors += 1;
+                        let frame_len = {
+                            let mut driver = self.inner.driver.lock();
+                            Self::send_to(
+                                &mut **driver,
+                                mac,
+                                payload_len,
+                                |b| b.copy_from_slice(&payload),
+                                EthernetProtocol::Ipv4,
+                            )
+                        };
+                        match frame_len {
+                            Ok(frame_len) => self.deferred_tx_frame_lens.push(frame_len),
+                            Err(NetDeviceError::Again) => kept.push((next_hop, payload)),
+                            Err(err) => {
+                                warn!(
+                                    "{}: failed to send pending packet to {}: {err:?}",
+                                    self.name, next_hop
+                                );
+                                self.deferred_tx_errors += 1;
+                            }
                         }
                     }
                     Action::Refresh(payload) => {
-                        self.neighbors.remove(&next_hop);
-                        // request_arp() internally increments deferred_tx_errors
-                        // on failure.  Each Refresh triggers independent
-                        // accounting; repeated failures accumulate.
-                        let _ = self.request_arp(next_hop, now);
+                        self.neighbors.write().remove(&next_hop);
+                        if let Err(err) = self.request_arp(next_hop, now)
+                            && !matches!(err, NetDeviceError::Again)
+                        {
+                            warn!(
+                                "{}: failed to refresh ARP entry for {}: {err:?}",
+                                self.name, next_hop
+                            );
+                            self.deferred_tx_errors += 1;
+                        }
                         kept.push((next_hop, payload));
                     }
                     Action::Keep(payload) => {
@@ -607,6 +702,12 @@ impl Device for EthernetDevice {
         &self.name
     }
 
+    fn tx_path(&self) -> Option<Arc<dyn DeviceTxPath>> {
+        self.tx_path
+            .as_ref()
+            .map(|path| Arc::clone(path) as Arc<dyn DeviceTxPath>)
+    }
+
     fn recv(
         &mut self,
         interface_id: InterfaceId,
@@ -616,8 +717,8 @@ impl Device for EthernetDevice {
     ) -> usize {
         loop {
             let mut rx_buf = {
-                let mut inner = self.inner.driver.lock();
-                match inner.receive() {
+                let mut driver = self.inner.driver.lock();
+                match driver.receive() {
                     Ok(buf) => buf,
                     Err(err) => {
                         if !matches!(err, NetDeviceError::Again) {
@@ -646,41 +747,65 @@ impl Device for EthernetDevice {
         }
     }
 
+    fn reclaim_tx_completions(&mut self) {
+        if let Err(err) = self.inner.driver.lock().recycle_tx_buffers() {
+            warn!("recycle_tx_buffers failed: {:?}", err);
+            self.deferred_tx_errors += 1;
+        }
+    }
+
     fn send(&mut self, next_hop: IpAddress, packet: &[u8], timestamp: Instant) -> usize {
+        match self.try_send(next_hop, packet, timestamp) {
+            Ok(frame_len) => frame_len,
+            Err(NetDeviceError::Again) => {
+                self.deferred_tx_drops += 1;
+                0
+            }
+            Err(err) => {
+                warn!("{}: transmit failed: {err:?}", self.name);
+                self.deferred_tx_errors += 1;
+                0
+            }
+        }
+    }
+
+    fn try_send(
+        &mut self,
+        next_hop: IpAddress,
+        packet: &[u8],
+        timestamp: Instant,
+    ) -> NetDeviceResult<usize> {
         let is_subnet_broadcast =
             self.ip.and_then(|ip| ip.broadcast()).map(IpAddress::Ipv4) == Some(next_hop);
         if next_hop.is_broadcast() || is_subnet_broadcast {
-            let mut inner = self.inner.driver.lock();
-            let frame_len = Self::send_to(
-                &mut **inner,
-                EthernetAddress::BROADCAST,
-                packet.len(),
-                |buf| buf.copy_from_slice(packet),
-                EthernetProtocol::Ipv4,
-            );
-            if frame_len == 0 {
-                self.deferred_tx_errors += 1;
-            }
-            return frame_len;
-        }
-
-        let need_request = match self.neighbors.get(&next_hop) {
-            Some(neighbor) if neighbor.expires_at > timestamp => {
-                let mut inner = self.inner.driver.lock();
-                let frame_len = Self::send_to(
-                    &mut **inner,
-                    neighbor.hardware_address,
+            return {
+                let mut driver = self.inner.driver.lock();
+                Self::send_to(
+                    &mut **driver,
+                    EthernetAddress::BROADCAST,
                     packet.len(),
                     |buf| buf.copy_from_slice(packet),
                     EthernetProtocol::Ipv4,
-                );
-                if frame_len == 0 {
-                    self.deferred_tx_errors += 1;
-                }
-                return frame_len;
+                )
+            };
+        }
+
+        let neighbor = self.neighbors.read().get(&next_hop).copied();
+        let need_request = match neighbor {
+            Some(neighbor) if neighbor.expires_at > timestamp => {
+                return {
+                    let mut driver = self.inner.driver.lock();
+                    Self::send_to(
+                        &mut **driver,
+                        neighbor.hardware_address,
+                        packet.len(),
+                        |buf| buf.copy_from_slice(packet),
+                        EthernetProtocol::Ipv4,
+                    )
+                };
             }
             Some(_) => {
-                self.neighbors.remove(&next_hop);
+                self.neighbors.write().remove(&next_hop);
                 true
             }
             None => self
@@ -688,15 +813,8 @@ impl Device for EthernetDevice {
                 .get(&next_hop)
                 .is_none_or(|pending| timestamp >= pending.requested_at + Self::ARP_REQUEST_RETRY),
         };
-        if need_request && !self.request_arp(next_hop, timestamp) {
-            warn!(
-                "{}: ARP request failed for {}, dropping packet",
-                self.name, next_hop
-            );
-            // request_arp() internally increments deferred_tx_errors for all
-            // failure modes (hardware send_to failure, IPv6 not supported,
-            // IPv4 not configured), so the caller does not add a second counter.
-            return 0;
+        if need_request {
+            self.request_arp(next_hop, timestamp)?;
         }
         if self.pending_packets.is_full() {
             warn!(
@@ -704,15 +822,15 @@ impl Device for EthernetDevice {
                 self.name
             );
             self.deferred_tx_drops += 1;
-            return 0;
+            return Ok(0);
         }
         let Ok(dst_buffer) = self.pending_packets.enqueue(packet.len(), next_hop) else {
             warn!("Failed to enqueue packet in pending packets buffer");
             self.deferred_tx_drops += 1;
-            return 0;
+            return Ok(0);
         };
         dst_buffer.copy_from_slice(packet);
-        0
+        Ok(0)
     }
 
     fn drain_deferred_tx(&mut self) -> Vec<usize> {
@@ -741,7 +859,7 @@ impl Device for EthernetDevice {
 
     fn set_ipv4_addr(&mut self, addr: Option<Ipv4Cidr>) {
         self.ip = addr;
-        self.neighbors.clear();
+        self.neighbors.write().clear();
         self.pending_neighbors.clear();
         // The deferred TX/RX frame-length accumulators are deliberately left
         // intact. They hold L2 frames that were already successfully
@@ -755,6 +873,7 @@ impl Device for EthernetDevice {
 
     fn arp_entries(&self, timestamp: Instant) -> Vec<ArpEntry> {
         self.neighbors
+            .read()
             .iter()
             .filter_map(|(ip_addr, neighbor)| {
                 if neighbor.expires_at <= timestamp {
@@ -792,7 +911,7 @@ impl Device for EthernetDevice {
 mod ethernet_counter_tests {
     use alloc::collections::VecDeque;
 
-    use smoltcp::wire::{Ipv4Address, Ipv4Cidr};
+    use smoltcp::wire::{Ipv4Address, Ipv4Cidr, Ipv6Address};
 
     use super::*;
     use crate::device::{NetDeviceResult, NetRxBuffer, NetTxBuffer};
@@ -831,9 +950,9 @@ mod ethernet_counter_tests {
     struct MockEthernetDriver {
         mac: [u8; 6],
         /// Pre-canned frames returned by `receive()` in FIFO order.
-        rx_frames: VecDeque<Vec<u8>>,
+        rx_frames: SpinNoIrq<VecDeque<Vec<u8>>>,
         /// Frames transmitted through `transmit()`, captured for inspection.
-        tx_frames: Vec<Vec<u8>>,
+        tx_frames: SpinNoIrq<Vec<Vec<u8>>>,
         /// When set, `alloc_tx_buffer` returns an error.
         tx_alloc_fail: bool,
     }
@@ -842,14 +961,14 @@ mod ethernet_counter_tests {
         fn new(mac: [u8; 6]) -> Self {
             Self {
                 mac,
-                rx_frames: VecDeque::new(),
-                tx_frames: Vec::new(),
+                rx_frames: SpinNoIrq::new(VecDeque::new()),
+                tx_frames: SpinNoIrq::new(Vec::new()),
                 tx_alloc_fail: false,
             }
         }
 
         fn enqueue_rx_frame(&mut self, frame: Vec<u8>) {
-            self.rx_frames.push_back(frame);
+            self.rx_frames.lock().push_back(frame);
         }
     }
 
@@ -872,7 +991,7 @@ mod ethernet_counter_tests {
 
         fn alloc_tx_buffer(&mut self, size: usize) -> NetDeviceResult<Box<dyn NetTxBuffer>> {
             if self.tx_alloc_fail {
-                return Err(NetDeviceError::Again);
+                return Err(NetDeviceError::NoMemory);
             }
             Ok(Box::new(MockTxBuffer {
                 packet: alloc::vec![0; size],
@@ -884,15 +1003,104 @@ mod ethernet_counter_tests {
         }
 
         fn transmit(&mut self, tx_buf: &mut dyn NetTxBuffer) -> NetDeviceResult {
-            self.tx_frames.push(tx_buf.packet().to_vec());
+            self.tx_frames.lock().push(tx_buf.packet().to_vec());
             Ok(())
         }
 
         fn receive(&mut self) -> NetDeviceResult<Box<dyn NetRxBuffer>> {
             self.rx_frames
+                .lock()
                 .pop_front()
                 .map(|packet| Box::new(MockRxBuffer { packet }) as Box<dyn NetRxBuffer>)
                 .ok_or(NetDeviceError::Again)
+        }
+
+        fn recycle_rx_buffer(&mut self, _rx_buf: &mut dyn NetRxBuffer) -> NetDeviceResult {
+            Ok(())
+        }
+
+        fn handle_irq(&mut self) -> NetIrqEvents {
+            NetIrqEvents::empty()
+        }
+    }
+
+    struct DirectTxEndpoint {
+        frames: SpinNoIrq<Vec<Vec<u8>>>,
+        notifications: SpinNoIrq<Vec<TxNotify>>,
+        flushes: SpinNoIrq<usize>,
+        failure: SpinNoIrq<Option<NetDeviceError>>,
+    }
+
+    impl EthernetTxEndpoint for DirectTxEndpoint {
+        fn transmit_frame(
+            &self,
+            frame_len: usize,
+            fill: &mut dyn FnMut(&mut [u8]),
+        ) -> NetDeviceResult {
+            self.transmit_frame_with_notify(frame_len, TxNotify::Immediate, fill)
+        }
+
+        fn transmit_frame_with_notify(
+            &self,
+            frame_len: usize,
+            notify: TxNotify,
+            fill: &mut dyn FnMut(&mut [u8]),
+        ) -> NetDeviceResult {
+            if let Some(error) = *self.failure.lock() {
+                return Err(error);
+            }
+            let mut frame = alloc::vec![0; frame_len];
+            fill(&mut frame);
+            self.frames.lock().push(frame);
+            self.notifications.lock().push(notify);
+            Ok(())
+        }
+
+        fn flush(&self) {
+            *self.flushes.lock() += 1;
+        }
+    }
+
+    struct DirectTxDriver {
+        mac: [u8; 6],
+        endpoint: Arc<DirectTxEndpoint>,
+    }
+
+    impl EthernetDriver for DirectTxDriver {
+        fn device_name(&self) -> &str {
+            "direct-tx"
+        }
+
+        fn irq_id(&self) -> Option<IrqId> {
+            None
+        }
+
+        fn enable_irq(&mut self) {}
+
+        fn disable_irq(&mut self) {}
+
+        fn mac_address(&self) -> [u8; 6] {
+            self.mac
+        }
+
+        fn tx_endpoint(&mut self) -> Option<Arc<dyn EthernetTxEndpoint>> {
+            Some(Arc::clone(&self.endpoint) as Arc<dyn EthernetTxEndpoint>)
+        }
+
+        fn alloc_tx_buffer(&mut self, _size: usize) -> NetDeviceResult<Box<dyn NetTxBuffer>> {
+            panic!("direct frame submission must not allocate an intermediate TX buffer")
+        }
+
+        fn recycle_tx_buffers(&mut self) -> NetDeviceResult {
+            Ok(())
+        }
+
+        fn transmit(&mut self, _tx_buf: &mut dyn NetTxBuffer) -> NetDeviceResult {
+            panic!("direct frame submission must not use the buffered transmit path")
+        }
+
+        fn receive(&mut self) -> NetDeviceResult<Box<dyn NetRxBuffer>> {
+            Err(NetDeviceError::Again)
         }
 
         fn recycle_rx_buffer(&mut self, _rx_buf: &mut dyn NetRxBuffer) -> NetDeviceResult {
@@ -1217,7 +1425,7 @@ mod ethernet_counter_tests {
         let mut mock = MockEthernetDriver::new(DEV_MAC);
         let wire_len =
             EthernetDevice::send_to(&mut mock, dst, 0, |_buf| {}, EthernetProtocol::Ipv4);
-        assert_eq!(wire_len, 60);
+        assert_eq!(wire_len, Ok(60));
 
         // 46-byte payload: 14 + 46 = 60 → exactly at ETH_ZLEN, no padding needed.
         let mut mock = MockEthernetDriver::new(DEV_MAC);
@@ -1228,7 +1436,7 @@ mod ethernet_counter_tests {
             |buf| buf.copy_from_slice(&[0xAAu8; 46]),
             EthernetProtocol::Ipv4,
         );
-        assert_eq!(wire_len, 60);
+        assert_eq!(wire_len, Ok(60));
 
         // 100-byte payload: 14 + 100 = 114 → above ETH_ZLEN, no padding.
         let mut mock = MockEthernetDriver::new(DEV_MAC);
@@ -1239,7 +1447,120 @@ mod ethernet_counter_tests {
             |buf| buf.copy_from_slice(&[0xAAu8; 100]),
             EthernetProtocol::Ipv4,
         );
-        assert_eq!(wire_len, 114);
+        assert_eq!(wire_len, Ok(114));
+    }
+
+    #[test]
+    fn detached_tx_endpoint_submits_and_flushes_without_mutable_driver_path() {
+        let endpoint = Arc::new(DirectTxEndpoint {
+            frames: SpinNoIrq::new(Vec::new()),
+            notifications: SpinNoIrq::new(Vec::new()),
+            flushes: SpinNoIrq::new(0),
+            failure: SpinNoIrq::new(None),
+        });
+        let driver = DirectTxDriver {
+            mac: DEV_MAC,
+            endpoint: Arc::clone(&endpoint),
+        };
+        let mut payload = [0x5a; 100];
+        payload[0] = 0x45;
+        let device = EthernetDevice::new("direct-tx".into(), Box::new(driver), None);
+        device.neighbors.write().insert(
+            IpAddress::Ipv4(REMOTE_IP),
+            Neighbor {
+                hardware_address: EthernetAddress(REMOTE_MAC),
+                expires_at: Instant::from_millis(10),
+            },
+        );
+        let path = device.tx_path().expect("driver provided a TX endpoint");
+
+        let outcome = path.try_send(
+            IpAddress::Ipv4(REMOTE_IP),
+            &payload,
+            Instant::from_millis(0),
+            TxNotify::Deferred,
+        );
+        path.flush();
+
+        assert_eq!(outcome, DeviceTxOutcome::Consumed(114));
+        let frames = endpoint.frames.lock();
+        assert_eq!(frames.len(), 1);
+        assert_eq!(&frames[0][14..], &payload);
+        assert_eq!(&*endpoint.notifications.lock(), &[TxNotify::Deferred]);
+        assert_eq!(*endpoint.flushes.lock(), 1);
+    }
+
+    #[test]
+    fn direct_tx_backpressure_falls_back_to_the_software_queue() {
+        let endpoint = Arc::new(DirectTxEndpoint {
+            frames: SpinNoIrq::new(Vec::new()),
+            notifications: SpinNoIrq::new(Vec::new()),
+            flushes: SpinNoIrq::new(0),
+            failure: SpinNoIrq::new(Some(NetDeviceError::Again)),
+        });
+        let driver = DirectTxDriver {
+            mac: DEV_MAC,
+            endpoint: Arc::clone(&endpoint),
+        };
+        let mut payload = [0x5a; 100];
+        payload[0] = 0x45;
+        let device = EthernetDevice::new("direct-tx".into(), Box::new(driver), None);
+        device.neighbors.write().insert(
+            IpAddress::Ipv4(REMOTE_IP),
+            Neighbor {
+                hardware_address: EthernetAddress(REMOTE_MAC),
+                expires_at: Instant::from_millis(10),
+            },
+        );
+        let path = device.tx_path().expect("driver provided a TX endpoint");
+
+        let outcome = path.try_send(
+            IpAddress::Ipv4(REMOTE_IP),
+            &payload,
+            Instant::from_millis(0),
+            TxNotify::Deferred,
+        );
+
+        assert_eq!(outcome, DeviceTxOutcome::Fallback);
+        assert!(endpoint.frames.lock().is_empty());
+    }
+
+    #[test]
+    fn detached_tx_endpoint_uses_the_ipv6_ether_type_for_ipv6_packets() {
+        let endpoint = Arc::new(DirectTxEndpoint {
+            frames: SpinNoIrq::new(Vec::new()),
+            notifications: SpinNoIrq::new(Vec::new()),
+            flushes: SpinNoIrq::new(0),
+            failure: SpinNoIrq::new(None),
+        });
+        let driver = DirectTxDriver {
+            mac: DEV_MAC,
+            endpoint: Arc::clone(&endpoint),
+        };
+        let mut packet = [0u8; 40];
+        packet[0] = 0x60;
+        let next_hop = IpAddress::Ipv6(Ipv6Address::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 1));
+        let device = EthernetDevice::new("direct-tx".into(), Box::new(driver), None);
+        device.neighbors.write().insert(
+            next_hop,
+            Neighbor {
+                hardware_address: EthernetAddress(REMOTE_MAC),
+                expires_at: Instant::from_millis(10),
+            },
+        );
+        let path = device.tx_path().expect("driver provided a TX endpoint");
+
+        let outcome = path.try_send(
+            next_hop,
+            &packet,
+            Instant::from_millis(0),
+            TxNotify::Immediate,
+        );
+
+        assert_eq!(outcome, DeviceTxOutcome::Consumed(60));
+        let frames = endpoint.frames.lock();
+        let frame = EthernetFrame::new_checked(frames[0].as_slice()).expect("valid Ethernet frame");
+        assert_eq!(frame.ethertype(), EthernetProtocol::Ipv6);
     }
 
     // ── Integration: combined ARP + IP recv/drain cycle ────────────────

@@ -347,6 +347,16 @@ impl TxQueue {
         self.config.buf_size
     }
 
+    /// Publishes descriptors submitted with deferred device notification.
+    pub fn flush(&mut self) {
+        self.interface.flush();
+    }
+
+    /// Reclaims every completion that can currently be present in the ring.
+    pub fn reclaim_completed(&mut self) -> Result<usize, NetError> {
+        self.reclaim_bounded(self.capacity().saturating_add(1))
+    }
+
     pub fn prepare_send<R>(
         &mut self,
         len: usize,
@@ -356,8 +366,7 @@ impl TxQueue {
             return Err(other_error("tx packet too large"));
         }
 
-        self.reclaim_bounded(self.capacity().max(1))?;
-
+        self.reclaim_completed()?;
         let mut buff = self.pool.alloc()?;
         let bus_addr = buff.dma_addr().as_u64();
         let ret = buff.write_with_cpu(len, f);
@@ -394,17 +403,24 @@ impl TxPending<'_> {
     }
 
     pub fn try_submit(&mut self) -> Result<(), NetError> {
-        self.queue.reclaim_bounded(self.queue.capacity().max(1))?;
+        self.try_submit_with_notify(TxNotify::Immediate)
+    }
+
+    /// Submits this prepared DMA buffer with the requested notification policy.
+    pub fn try_submit_with_notify(&mut self, notify: TxNotify) -> Result<(), NetError> {
         let buff = self
             .buff
             .as_ref()
             .expect("tx pending buffer should exist until submit succeeds");
         buff.prepare_for_device(0, self.len);
-        self.queue.interface.submit(DmaBuffer {
-            virt: buff.as_ptr(),
-            bus_addr: self.bus_addr,
-            len: self.len,
-        })?;
+        self.queue.interface.submit_with_notify(
+            DmaBuffer {
+                virt: buff.as_ptr(),
+                bus_addr: self.bus_addr,
+                len: self.len,
+            },
+            notify,
+        )?;
         let buff = self
             .buff
             .take()
@@ -525,17 +541,21 @@ impl Drop for RxPacket<'_> {
 
 #[cfg(test)]
 mod tests {
-    use alloc::{boxed::Box, sync::Arc};
+    use alloc::{
+        alloc::{alloc_zeroed, dealloc},
+        boxed::Box,
+        sync::Arc,
+    };
     use core::{
         any::Any,
         num::NonZeroUsize,
         ptr::NonNull,
-        sync::atomic::{AtomicUsize, Ordering},
+        sync::atomic::{AtomicU64, AtomicUsize, Ordering},
         task::{RawWaker, RawWakerVTable, Waker},
     };
 
     use dma_api::{DmaAllocHandle, DmaConstraints, DmaDirection, DmaError, DmaMapHandle};
-    use rdif_eth::{DriverGeneric, Event, IRxQueue, ITxQueue, IdList, Interface};
+    use rdif_eth::{DriverGeneric, Event, ITxQueue, IdList, Interface};
 
     use super::*;
 
@@ -582,6 +602,111 @@ mod tests {
 
         unsafe fn unmap_streaming(&self, _handle: DmaMapHandle) {
             panic!("test should not unmap streaming DMA")
+        }
+    }
+
+    struct AllocatingTestDma;
+
+    impl dma_api::DmaOp for AllocatingTestDma {
+        fn page_size(&self) -> usize {
+            4096
+        }
+
+        unsafe fn alloc_contiguous(
+            &self,
+            _constraints: DmaConstraints,
+            layout: core::alloc::Layout,
+        ) -> Option<DmaAllocHandle> {
+            // SAFETY: the matching callback below deallocates the pointer with
+            // the same layout after the test DMA pool releases it.
+            let cpu_addr = NonNull::new(unsafe { alloc_zeroed(layout) })?;
+            let dma_addr = cpu_addr.as_ptr() as usize as u64;
+            // SAFETY: this test models an identity DMA mapping whose backing
+            // allocation stays live for the lifetime of the handle.
+            Some(unsafe { DmaAllocHandle::new(cpu_addr, dma_addr.into(), layout) })
+        }
+
+        unsafe fn dealloc_contiguous(&self, handle: DmaAllocHandle) {
+            // SAFETY: the handle originated from alloc_contiguous above and is
+            // returned exactly once by the DMA pool.
+            unsafe { dealloc(handle.as_ptr().as_ptr(), handle.layout()) };
+        }
+
+        unsafe fn alloc_coherent(
+            &self,
+            _constraints: DmaConstraints,
+            _layout: core::alloc::Layout,
+        ) -> Option<DmaAllocHandle> {
+            panic!("test should not allocate coherent DMA")
+        }
+
+        unsafe fn dealloc_coherent(&self, _handle: DmaAllocHandle) -> Result<(), DmaError> {
+            panic!("test should not deallocate coherent DMA")
+        }
+
+        unsafe fn map_streaming(
+            &self,
+            _constraints: DmaConstraints,
+            _addr: NonNull<u8>,
+            _size: NonZeroUsize,
+            _direction: DmaDirection,
+        ) -> Result<DmaMapHandle, DmaError> {
+            panic!("test should not map streaming DMA")
+        }
+
+        unsafe fn unmap_streaming(&self, _handle: DmaMapHandle) {
+            panic!("test should not unmap streaming DMA")
+        }
+    }
+
+    struct TestTxQueue {
+        reclaim_calls: Arc<AtomicUsize>,
+        submit_calls: Arc<AtomicUsize>,
+        submitted_bus_addr: Arc<AtomicU64>,
+        notify: Arc<AtomicUsize>,
+        flush_calls: Arc<AtomicUsize>,
+        config: QueueConfig,
+    }
+
+    impl ITxQueue for TestTxQueue {
+        fn id(&self) -> usize {
+            0
+        }
+
+        fn config(&self) -> QueueConfig {
+            self.config
+        }
+
+        fn submit(&mut self, buffer: DmaBuffer) -> Result<(), NetError> {
+            self.submit_calls.fetch_add(1, Ordering::AcqRel);
+            self.submitted_bus_addr
+                .store(buffer.bus_addr, Ordering::Release);
+            Ok(())
+        }
+
+        fn submit_with_notify(
+            &mut self,
+            buffer: DmaBuffer,
+            notify: TxNotify,
+        ) -> Result<(), NetError> {
+            self.notify.store(
+                match notify {
+                    TxNotify::Immediate => 1,
+                    TxNotify::Deferred => 2,
+                },
+                Ordering::Release,
+            );
+            self.submit(buffer)
+        }
+
+        fn flush(&mut self) {
+            self.flush_calls.fetch_add(1, Ordering::AcqRel);
+        }
+
+        fn reclaim(&mut self) -> Option<u64> {
+            self.reclaim_calls.fetch_add(1, Ordering::AcqRel);
+            let bus_addr = self.submitted_bus_addr.swap(0, Ordering::AcqRel);
+            (bus_addr != 0).then_some(bus_addr)
         }
     }
 
@@ -674,6 +799,84 @@ mod tests {
         static VTABLE: RawWakerVTable = RawWakerVTable::new(clone, wake, wake_by_ref, drop);
         let raw = RawWaker::new(Arc::into_raw(counter).cast(), &VTABLE);
         unsafe { Waker::from_raw(raw) }
+    }
+
+    #[test]
+    fn tx_reclaims_once_before_preparing_the_next_buffer() {
+        static DMA: AllocatingTestDma = AllocatingTestDma;
+        let config = QueueConfig {
+            dma_mask: u64::MAX,
+            align: 64,
+            buf_size: 2048,
+            ring_size: 4,
+        };
+        let reclaim_calls = Arc::new(AtomicUsize::new(0));
+        let submit_calls = Arc::new(AtomicUsize::new(0));
+        let submitted_bus_addr = Arc::new(AtomicU64::new(0));
+        let notify = Arc::new(AtomicUsize::new(0));
+        let flush_calls = Arc::new(AtomicUsize::new(0));
+        let pool = make_pool(&DMA, config, DmaDirection::ToDevice).unwrap();
+        let mut queue = TxQueue {
+            interface: Box::new(TestTxQueue {
+                reclaim_calls: Arc::clone(&reclaim_calls),
+                submit_calls: Arc::clone(&submit_calls),
+                submitted_bus_addr,
+                notify: Arc::clone(&notify),
+                flush_calls: Arc::clone(&flush_calls),
+                config,
+            }),
+            pool,
+            inflight: BTreeMap::new(),
+            config,
+            _waker: Arc::new(AtomicWaker::new()),
+        };
+
+        let (_result, mut pending) = queue.prepare_send(64, |frame| frame.fill(0x5a)).unwrap();
+        assert_eq!(reclaim_calls.load(Ordering::Acquire), 1);
+
+        pending.try_submit().unwrap();
+
+        assert_eq!(reclaim_calls.load(Ordering::Acquire), 1);
+        assert_eq!(submit_calls.load(Ordering::Acquire), 1);
+        assert_eq!(notify.load(Ordering::Acquire), 1);
+        assert_eq!(flush_calls.load(Ordering::Acquire), 0);
+        assert_eq!(queue.reclaim_completed().unwrap(), 1);
+    }
+
+    #[test]
+    fn deferred_notification_reaches_driver_queue_and_flushes_explicitly() {
+        static DMA: AllocatingTestDma = AllocatingTestDma;
+        let config = QueueConfig {
+            dma_mask: u64::MAX,
+            align: 64,
+            buf_size: 2048,
+            ring_size: 4,
+        };
+        let notify = Arc::new(AtomicUsize::new(0));
+        let flush_calls = Arc::new(AtomicUsize::new(0));
+        let pool = make_pool(&DMA, config, DmaDirection::ToDevice).unwrap();
+        let mut queue = TxQueue {
+            interface: Box::new(TestTxQueue {
+                reclaim_calls: Arc::new(AtomicUsize::new(0)),
+                submit_calls: Arc::new(AtomicUsize::new(0)),
+                submitted_bus_addr: Arc::new(AtomicU64::new(0)),
+                notify: Arc::clone(&notify),
+                flush_calls: Arc::clone(&flush_calls),
+                config,
+            }),
+            pool,
+            inflight: BTreeMap::new(),
+            config,
+            _waker: Arc::new(AtomicWaker::new()),
+        };
+
+        let (_result, mut pending) = queue.prepare_send(64, |frame| frame.fill(0x5a)).unwrap();
+        pending.try_submit_with_notify(TxNotify::Deferred).unwrap();
+        assert_eq!(notify.load(Ordering::Acquire), 2);
+        assert_eq!(flush_calls.load(Ordering::Acquire), 0);
+
+        queue.flush();
+        assert_eq!(flush_calls.load(Ordering::Acquire), 1);
     }
 
     #[test]
