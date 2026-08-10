@@ -1,0 +1,33 @@
+args = [
+  "-nographic",
+  "-cpu",
+  "cortex-a72",
+  "-machine",
+  "virt,virtualization=on,gic-version=3",
+  "-smp",
+  "2",
+  # `-m 1g`: the dynamic test's guest uses a 256M MAP_IDENTICAL region, and the
+  # hypervisor plus that region must both fit in QEMU's total RAM (same sizing as
+  # the control test, whose guest config the dynamic guest mirrors).
+  "-m",
+  "1g",
+]
+timeout = 600
+# The runner's stream matcher stops at the FIRST match (fail checked before
+# success), so per-step status lines cannot be asserted independently. The
+# binary runs the base control lifecycle self-test first, then the create/delete
+# self-test; each prints its own FAILED sentinel and each has an independent
+# pass/fail result. The create/delete test only prints PASSED if the full
+# remove -> create -> ready -> 409 -> remove -> 404 sequence met every
+# expectation, so both FAILED sentinels must be caught or a control-lifecycle
+# failure followed by a create/delete pass would falsely report success.
+fail_regex = [
+  "(?i)\\bpanic(?:ked)?\\b",
+  "HTTP self-test: control lifecycle FAILED",
+  "HTTP self-test: dynamic create/delete FAILED",
+]
+success_regex = [
+  "HTTP self-test: dynamic create/delete PASSED",
+]
+to_bin = true
+uefi = false

@@ -1583,6 +1583,7 @@ dependencies = [
  "axbacktrace",
  "axbuild",
  "axtest",
+ "axum",
  "axvm",
  "axvmconfig",
  "clap",
@@ -1590,10 +1591,12 @@ dependencies = [
  "prettyplease 0.3.0",
  "proc-macro2",
  "quote",
+ "serde_json",
  "shlex 2.0.1",
  "syn 3.0.3",
  "tokio",
  "toml 1.1.4+spec-1.1.0",
+ "tower",
 ]
 
 [[package]]
