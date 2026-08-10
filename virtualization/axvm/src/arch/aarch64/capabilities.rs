@@ -1,26 +1,64 @@
 //! AArch64 implementations of AxVM platform capability hooks.
 
-use std::format;
+use core::sync::atomic::{AtomicUsize, Ordering};
+
+use alloc::format;
 
 use super::Aarch64Arch;
 use crate::{architecture::*, *};
 
+// ---------------------------------------------------------------------------
+// Periodic preemption timer (software self-rearming)
+// ---------------------------------------------------------------------------
+
+/// Token of the currently-registered periodic preemption timer, or 0 if none.
+#[ax_percpu::def_percpu]
+static PERIODIC_TIMER_TOKEN: AtomicUsize = AtomicUsize::new(0);
+
+/// Register (or re-register) a one-shot tick that fires after `rate_us`
+/// microseconds, signals preemption, and then rearms itself for the next
+/// period.
+fn rearm_periodic_tick(rate_us: u32) {
+    let rate_ns = (rate_us as u64) * 1_000;
+    let token = crate::timer::register_timer(
+        rate_ns,
+        alloc::boxed::Box::new(move |_deadline| {
+            crate::architecture::signal_preemption_due();
+            rearm_periodic_tick(rate_us);
+        }),
+    );
+    // SAFETY: called from the vCPU task pinned to the local CPU.
+    #[allow(static_mut_refs)]
+    unsafe {
+        PERIODIC_TIMER_TOKEN
+            .current_ref_mut_raw()
+            .store(token, Ordering::Relaxed);
+    }
+}
+
 impl HostTimePlatform for Aarch64Arch {
     fn set_periodic_timer(rate_us: u32) -> AxVmResult {
+        // Cancel any outstanding periodic tick so we don't leak timers.
+        // SAFETY: called from the vCPU task pinned to the local CPU.
+        #[allow(static_mut_refs)]
+        let prev_token = unsafe {
+            PERIODIC_TIMER_TOKEN
+                .current_ref_mut_raw()
+                .swap(0, Ordering::Relaxed)
+        };
+        if prev_token != 0 {
+            crate::timer::cancel_timer(prev_token);
+        }
+
         if rate_us == 0 {
             // Stop periodic preemption: cancel any outstanding timer and clear
             // the preemption-due flag.
             crate::architecture::take_preemption_due();
             return Ok(());
         }
-        // Register a self-rearming one-shot timer that sets the per-CPU
-        // preemption-due flag.
-        let _token = crate::timer::register_timer(
-            (rate_us as u64) * 1_000,
-            alloc::boxed::Box::new(move |_deadline| {
-                crate::architecture::signal_preemption_due();
-            }),
-        );
+
+        // Register the first tick; it will rearm itself after each fire.
+        rearm_periodic_tick(rate_us);
         Ok(())
     }
 }

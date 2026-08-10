@@ -365,8 +365,31 @@ pub(crate) fn build_vcpu_task(vm: &VMRef, vcpu: VCpuRef) -> crate::TaskInner {
     );
 
     if let Some(phys_cpu_set) = vcpu.phys_cpu_set() {
+        // Apply CPU isolation: if this VM has RT scheduling disabled, subtract
+        // the reserved CPU mask so that non-RT vCPUs are not placed on CPUs
+        // reserved for RT workloads.
+        let isolation_mask = if vm.rt_scheduling_enabled() {
+            // RT VM: allow vCPUs to run on reserved CPUs.
+            0
+        } else {
+            // Non-RT VM: exclude CPUs reserved by any RT VM's isolation policy.
+            vm.with_resources(|r| Ok(r.config.reserved_cpu_mask()))
+                .unwrap_or(0)
+        };
+        let effective_mask = phys_cpu_set & !isolation_mask;
+        let mask_to_use = if effective_mask != 0 {
+            effective_mask
+        } else {
+            warn!(
+                "VM[{}] VCpu[{}] requested CPU mask {phys_cpu_set:#x} but all bits are reserved \
+                 ({isolation_mask:#x}); falling back to global enabled mask",
+                vm.id(),
+                vcpu.id()
+            );
+            phys_cpu_set
+        };
         vcpu_task.set_cpumask(crate::host::task::cpu_mask_from_raw_bits(
-            vcpu_task_cpu_mask(vm.id(), vcpu.id(), phys_cpu_set),
+            vcpu_task_cpu_mask(vm.id(), vcpu.id(), mask_to_use),
         ));
     }
 

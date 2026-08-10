@@ -466,7 +466,6 @@ impl RtScheduler {
                 && s.config.priority.map(|p| p.priority).unwrap_or(255) < my_priority
         })
     }
-}
 
     #[cfg(test)]
     pub(crate) fn total_guest_ns(&self, vm_id: usize, vcpu_id: usize) -> u64 {

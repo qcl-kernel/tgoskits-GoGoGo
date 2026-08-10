@@ -648,6 +648,7 @@ pub struct GuestConfig {
 }
 
 /// Serde-compatible RT scheduling policy tag.
+#[cfg_attr(all(feature = "std", any(windows, unix)), derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum RtSchedPolicySerde {
@@ -675,6 +676,7 @@ impl From<RtSchedPolicySerde> for axvm_types::RtSchedPolicy {
 }
 
 /// Serde-compatible per-vCPU RT configuration.
+#[cfg_attr(all(feature = "std", any(windows, unix)), derive(schemars::JsonSchema))]
 #[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
 pub struct RtVcpuConfigSerde {
     #[serde(default)]
@@ -706,7 +708,7 @@ impl From<RtVcpuConfigSerde> for axvm_types::RtVcpuConfig {
             deadline: value.deadline_us.map(|d| axvm_types::RtDeadlineParams {
                 deadline_us: d,
                 wcet_us: value.wcet_us.unwrap_or(0),
-                period_us: value.period_us.unwrap_or(0),
+                period_us: value.period_us.unwrap_or(0) as u64,
             }),
             preemptive: value.preemptive,
         }

@@ -237,6 +237,19 @@ pub(crate) fn build_axvm_config(cfg: &GuestConfig) -> AxVMConfig {
             .map(|sched| sched.clone().into()),
         cpu_isolation: cfg.scheduling.as_ref().and_then(|sched| {
             sched.reserved_cpus.as_ref().map(|cpus| {
+                if sched.disable_housekeeping {
+                    warn!(
+                        "VM[{}] CPU isolation: disable_housekeeping is configured but not yet \
+                         enforced; host housekeeping tasks may still run on reserved CPUs {:?}",
+                        cfg.base.id, cpus
+                    );
+                }
+                info!(
+                    "VM[{}] CPU isolation active: reserved CPUs {:?}, housekeeping {}",
+                    cfg.base.id,
+                    cpus,
+                    if sched.disable_housekeeping { "suppressed (not yet enforced)" } else { "permitted" }
+                );
                 CpuIsolationConfig {
                     reserved_cpus: cpus.clone(),
                     disable_housekeeping: sched.disable_housekeeping,

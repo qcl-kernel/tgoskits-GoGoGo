@@ -50,6 +50,10 @@ fail_regex = [
   "(?i)rt_sched.*error",
   "(?i)rt_sched.*failed",
   "(?i)unsupported.*rt",
+  # Preemption timer / CPU isolation failures.
+  "(?i)preemption timer.*not.*rearm",
+  "(?i)timer.*rearm.*fail",
+  "(?i)CPU isolation.*error",
 ]
 
 # Patterns that indicate success.
@@ -58,6 +62,13 @@ success_regex = [
   # AxVisor RT-scheduler boot messages.
   "(?m)\\[INFO\\].*\\[OK\\] Default guest initialized",
   "(?m)\\[INFO\\].*VM\\[2\\] boot success",
+  # Both vCPUs spawned and running with CPU affinity.
+  "(?m)\\[INFO\\].*Spawning task for VM\\[2\\] VCpu\\[0\\]",
+  "(?m)\\[INFO\\].*Spawning task for VM\\[2\\] VCpu\\[1\\]",
+  "(?m)\\[INFO\\].*VM\\[2\\] VCpu\\[0\\] running",
+  "(?m)\\[INFO\\].*VM\\[2\\] VCpu\\[1\\] running",
+  # CPU isolation policy is active (logged when config is applied).
+  "(?m)\\[INFO\\].*CPU isolation active.*reserved CPUs",
 ]
 
 shell_prefix = "~ #"
