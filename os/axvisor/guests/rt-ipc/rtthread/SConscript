@@ -1,0 +1,9 @@
+from building import *
+
+cwd = GetCurrentDir()
+src = Glob('*.c') + Glob(cwd + '/../common/rt_ipc.c')
+CPPPATH = [cwd, cwd + '/../common']
+
+group = DefineGroup('rtipic-server', src, depend = ['RT_USING_LWIP'], CPPPATH = CPPPATH)
+
+Return('group')
