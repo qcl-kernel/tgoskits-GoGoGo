@@ -30,11 +30,13 @@ fn inject_platform_irq(
     guest_intid: usize,
     physical_intid: usize,
 ) -> bool {
-    match crate::runtime::vcpus::queue_external_interrupt(
+    match crate::runtime::vcpus::queue_pending_interrupt(
         vm_id,
         vcpu_id,
-        guest_intid,
-        physical_intid,
+        crate::vm::PendingInterrupt::External {
+            vector: guest_intid,
+            physical_irq: physical_intid,
+        },
     ) {
         Ok(()) => true,
         Err(error) => {

@@ -1,10 +1,9 @@
 [base]
 id = 1
 name = "linux-net"
-vm_type = 1
-cpu_num = 1
-phys_cpu_ids = [0]
-host_timer_policy = "periodic"
+guest_type = "passthrough"
+cpu_num = 2
+phys_cpu_ids = [0, 1]
 
 [kernel]
 entry_point = 0x8020_0000
@@ -19,18 +18,10 @@ memory_regions = [
 ]
 
 [devices]
-interrupt_mode = "passthrough"
-passthrough_devices = [
-  ["/intc@8000000"],
-  ["/timer"],
-  ["/psci"],
-  ["/pl011@9000000"],
-  ["/virtio_mmio@a000000"],
-]
-passthrough_addresses = []
-excluded_devices = []
-passthrough_irqs = [16]
-emu_devices = [
-  ["gppt-gicd", 0x0800_0000, 0x1_0000, 0, 0x21, []],
-  ["gppt-gicr", 0x080a_0000, 0x2_0000, 0, 0x20, [1, 0x2_0000, 0]],
-]
+passthrough = []
+disabled = []
+
+[[devices.virtual]]
+id = "virtnet0"
+model = "virtio-net"
+guest_mac = [0x52, 0x54, 0x00, 0x77, 0x00, 0x01]

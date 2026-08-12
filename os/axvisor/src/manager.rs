@@ -78,10 +78,6 @@ impl AxvmManager {
 
     /// Remove a VM by ID.
     pub fn remove_vm(vm_id: VMId) -> Option<AxVMRef> {
-        #[cfg(target_arch = "aarch64")]
-        unregister_aarch64_passthrough_irq_routes(vm_id);
-        #[cfg(target_arch = "loongarch64")]
-        unregister_loongarch_passthrough_irq_routes(vm_id);
         AxvmRuntime::remove_vm(vm_id)
     }
 
@@ -228,50 +224,6 @@ impl AxvmManager {
     }
 }
 
-#[cfg(target_arch = "aarch64")]
-pub(crate) fn register_aarch64_passthrough_irq_routes(vm_id: VMId) {
-    let Some(vm) = axvm::get_vm_by_id(vm_id) else {
-        warn!("cannot register AArch64 routed SPIs for missing VM[{vm_id}]");
-        return;
-    };
-    let Some((spis, placements)) = vm.with_config(|config| {
-        (config.interrupt_mode() == axvm::config::VMInterruptMode::RoutedPassthrough).then(|| {
-            (
-                config.configured_pass_through_irqs().to_vec(),
-                config.vcpu_placements(),
-            )
-        })
-    }) else {
-        return;
-    };
-    if spis.is_empty() {
-        return;
-    }
-    let Some(&(vcpu_id, _, target_cpu)) = placements.first() else {
-        warn!("VM[{vm_id}] has passthrough SPIs but no vCPU placement");
-        return;
-    };
-
-    info!(
-        "Registering {} AArch64 routed SPI(s) for VM[{vm_id}] on VCpu[{vcpu_id}]/pCPU{target_cpu}",
-        spis.len()
-    );
-    for spi in spis {
-        let intid = spi as usize + 32;
-        axvm::register_aarch64_guest_irq_route(
-            intid,
-            vm_id,
-            vcpu_id,
-            intid,
-            target_cpu,
-        );
-    }
-}
-
-#[cfg(target_arch = "aarch64")]
-fn unregister_aarch64_passthrough_irq_routes(vm_id: VMId) {
-    axvm::unregister_aarch64_guest_irq_routes(vm_id);
-}
 
 #[cfg(target_arch = "loongarch64")]
 pub(crate) fn register_loongarch_passthrough_irq_routes(vm_id: VMId) {

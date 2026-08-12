@@ -114,14 +114,14 @@ impl DeviceModel for VirtioNetModel {
                 ResourceSlot::new(MMIO_SLOT)?,
                 MMIO_SIZE,
                 4,
-                ResourceRequest::Fixed(0x0a00_0000),
+                ResourceRequest::Auto,
             )?
             .with_wired_irq(
                 ResourceSlot::new(IRQ_SLOT)?,
                 self.controller,
                 InterruptTrigger::EdgeTriggered,
                 InterruptSharing::Exclusive,
-                ResourceRequest::Fixed(axdevice_base::ControllerInputId::new(48)),
+                ResourceRequest::Auto,
             )
     }
 
