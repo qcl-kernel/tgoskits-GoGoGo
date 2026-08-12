@@ -106,16 +106,19 @@ fn build_vcpu_setup_config(
     config: &AxVMConfig,
     _memory_regions: &[crate::vm::VMMemoryRegion],
 ) -> AxVmResult<<super::AxvmArmVcpu as VmArchVcpuOps>::SetupConfig> {
-    let passthrough = config.interrupt_mode() == VMInterruptMode::Passthrough;
+    let direct_passthrough = config.interrupt_mode() == VMInterruptMode::Passthrough;
     Ok(ArmVcpuSetupConfig {
-        passthrough_interrupt: passthrough,
-        passthrough_timer: passthrough,
+        passthrough_interrupt: direct_passthrough,
+        passthrough_timer: direct_passthrough,
         trap_wfi: config.host_vcpu_idle_policy() == HostVcpuIdlePolicy::Busy,
     })
 }
 
 fn assign_arch_device_state(config: &AxVMConfig, devices: &axdevice::DeviceRuntime) -> AxVmResult {
-    if config.interrupt_mode() == VMInterruptMode::Passthrough {
+    if matches!(
+        config.interrupt_mode(),
+        VMInterruptMode::Passthrough | VMInterruptMode::RoutedPassthrough
+    ) {
         assign_passthrough_spis(config, devices)?;
     }
     Ok(())
@@ -155,10 +158,6 @@ fn assign_passthrough_spis(config: &AxVMConfig, devices: &axdevice::DeviceRuntim
         gicd.assign_spi(route)
             .map_err(|error| AxVmError::interrupt("assign passthrough SPI", error))?;
     }
-
-    super::gic::install_passthrough_spis(
-        config.pass_through_spis().iter().map(|spi| spi + 32).collect(),
-    );
 
     Ok(())
 }

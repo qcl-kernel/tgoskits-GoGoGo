@@ -92,6 +92,8 @@ pub struct AxVMConfig {
     boot_policy: GuestBootPolicy,
     // Physical interrupt sources forwarded to the guest in passthrough mode.
     passthrough_irq_list: Vec<u32>,
+    // Physical IRQs explicitly selected for EL2-routed injection.
+    configured_passthrough_irq_list: Vec<u32>,
     interrupt_mode: VMInterruptMode,
     host_timer_policy: HostTimerPolicy,
     host_vcpu_yield: bool,
@@ -139,6 +141,7 @@ impl AxVMConfig {
             }
         }
 
+        let configured_passthrough_irq_list = passthrough_irq_list.clone();
         Self {
             id: params.id,
             name: params.name,
@@ -156,6 +159,7 @@ impl AxVMConfig {
             memory_regions: params.memory_regions,
             boot_policy: params.boot_policy,
             passthrough_irq_list,
+            configured_passthrough_irq_list,
             interrupt_mode: params.interrupt_mode,
             host_timer_policy: params.host_timer_policy,
             host_vcpu_yield: params.host_vcpu_yield,
@@ -277,6 +281,11 @@ impl AxVMConfig {
         &mut self.phys_cpu_ls
     }
 
+    /// Returns normalized vCPU placement tuples `(vCPU, affinity mask, pCPU)`.
+    pub fn vcpu_placements(&self) -> Vec<(usize, Option<usize>, usize)> {
+        self.phys_cpu_ls.get_vcpu_affinities_pcpu_ids()
+    }
+
     /// Returns the list of excluded devices.
     pub fn excluded_devices(&self) -> &Vec<Vec<String>> {
         &self.excluded_devices
@@ -372,6 +381,11 @@ impl AxVMConfig {
     /// Returns the physical interrupt sources forwarded to the guest.
     pub fn pass_through_irqs(&self) -> &Vec<u32> {
         &self.passthrough_irq_list
+    }
+
+    /// Returns only IRQs explicitly declared in the VM configuration.
+    pub fn configured_pass_through_irqs(&self) -> &[u32] {
+        &self.configured_passthrough_irq_list
     }
 
     /// Returns the interrupt mode of the VM.

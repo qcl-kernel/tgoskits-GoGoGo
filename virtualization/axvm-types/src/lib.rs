@@ -665,6 +665,8 @@ pub enum VMInterruptMode {
     Emulated,
     /// The VM will use the passthrough interrupt controller (including GPPT) to handle interrupts.
     Passthrough,
+    /// Physical device IRQs are routed through EL2 and injected through the virtual controller.
+    RoutedPassthrough,
 }
 
 /// The type of emulated device.

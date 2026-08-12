@@ -87,18 +87,27 @@ fn probe_gic(probe: ProbeFdt<'_>) -> Result<(), OnProbeError> {
 pub struct ActiveIrq {
     irq: rdrive::IrqId,
     ack: Ack,
+    deactivate_on_drop: bool,
 }
 
 impl ActiveIrq {
     pub fn id(&self) -> rdrive::IrqId {
         self.irq
     }
+
+    pub fn defer_deactivation_to_guest(&mut self) -> Result<(), crate::irq::IrqError> {
+        if !TRAP.eoi_mode_ns() {
+            return Err(crate::irq::IrqError::Unsupported);
+        }
+        self.deactivate_on_drop = false;
+        Ok(())
+    }
 }
 
 impl Drop for ActiveIrq {
     fn drop(&mut self) {
         TRAP.eoi(self.ack);
-        if TRAP.eoi_mode_ns() {
+        if TRAP.eoi_mode_ns() && self.deactivate_on_drop {
             TRAP.dir(self.ack);
         }
     }
@@ -119,6 +128,7 @@ pub fn begin_irq() -> Option<ActiveIrq> {
     Some(ActiveIrq {
         irq: (irq_num as usize).into(),
         ack,
+        deactivate_on_drop: true,
     })
 }
 

@@ -19,7 +19,7 @@ memory_regions = [
 ]
 
 [devices]
-interrupt_mode = "passthrough"
+interrupt_mode = "routed_passthrough"
 passthrough_devices = [
   ["/intc@8000000"],
   ["/timer"],

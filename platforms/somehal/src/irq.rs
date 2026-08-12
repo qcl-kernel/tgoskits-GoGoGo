@@ -267,6 +267,11 @@ impl ActiveIrq {
     pub fn id(&self) -> IrqId {
         resolve_irq_route(Plat::active_irq_id(&self.inner))
     }
+
+    /// Leaves the physical interrupt active for a guest hardware-backed LR.
+    pub fn defer_deactivation_to_guest(&mut self) -> Result<(), IrqError> {
+        Plat::defer_irq_deactivation(&mut self.inner)
+    }
 }
 
 pub fn map_irq_route(parent: IrqId, leaf: IrqId) -> Result<(), IrqError> {

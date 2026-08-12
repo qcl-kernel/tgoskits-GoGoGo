@@ -148,6 +148,14 @@ impl ActiveIrq {
             Self::V3(active) => active.id(),
         }
     }
+
+
+    pub fn defer_deactivation_to_guest(&mut self) -> Result<(), crate::irq::IrqError> {
+        match self {
+            Self::V2(active) => active.defer_deactivation_to_guest(),
+            Self::V3(active) => active.defer_deactivation_to_guest(),
+        }
+    }
 }
 
 pub fn begin_irq() -> Option<ActiveIrq> {

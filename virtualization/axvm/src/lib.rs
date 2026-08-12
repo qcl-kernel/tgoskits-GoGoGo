@@ -36,18 +36,7 @@ pub mod lifecycle;
 mod manager;
 mod npt;
 mod percpu;
-#[cfg(feature = "rt-trace")]
-pub(crate) mod rt_trace;
 mod runtime;
-#[cfg(not(feature = "rt-trace"))]
-#[allow(dead_code)]
-pub(crate) mod rt_trace {
-    pub(crate) fn guest_entry(_vm_id: usize, _vcpu_id: usize) {}
-    pub(crate) fn guest_exit(_vm_id: usize, _vcpu_id: usize) {}
-    pub(crate) fn exit_handler_return(_vm_id: usize, _vcpu_id: usize, _vector: usize) {}
-    pub(crate) fn deferred_finish(_vm_id: usize, _vcpu_id: usize) {}
-    pub(crate) fn axvm_deadline_publish(_deadline_ns: Option<u64>) {}
-}
 mod task;
 mod timer;
 mod vcpu;

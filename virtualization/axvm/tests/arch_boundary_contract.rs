@@ -383,7 +383,6 @@ fn find_target_arch_cfg_outside_arch(
         }
 
         if path.extension().is_some_and(|extension| extension == "rs")
-            && path.file_name().and_then(|name| name.to_str()) != Some("rt_trace.rs")
             && std::fs::read_to_string(&path)
                 .expect("AxVM source file must be readable")
                 .contains("target_arch")

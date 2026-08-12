@@ -218,3 +218,85 @@ TX 完成中断在 GIC 层面正确配置, 但无法被 Linux 接收。
 3. 尝试 GICv2 模式排除 GICv3 问题
 4. 检查 ICC_IGRPEN1_EL1 设置
 5. 添加中断投递追踪日志
+
+## 调试代码清理（2026-08-12）
+
+### 清理范围
+
+- 删除运行时跟踪模块 `rt_trace.rs`（271 行）及其 5 个调用点（guest_entry/guest_exit/exit_handler_return/deferred_finish/axvm_deadline_publish）。
+- 删除 `rt-trace` Cargo feature（axvm 和 axvisor 两个 Cargo.toml）。
+- 删除 3 个仅用于 trace 的 board/QEMU 配置文件（rt-trace、three-guest-net-rt-trace、three-guest-net-trace）。
+- 删除 6 个 QEMU 调度诊断脚本（collect_qemu_sched_trace、qemu_sched_probe、qemu_sched_thread_map、run_qemu_vcpu_affinity、test_qemu_sched_trace、test_qemu_vcpu_affinity）。
+- 删除 2 个临时诊断补丁（qemu-arm-ppi27-diagnostic.patch、qemu-mttcg-exclusive-diagnostic.patch）。
+- 恢复生产 board 配置日志级别从 `Debug` 到 `Info`。
+- 移除 `inject_external_interrupt` 中新增的逐中断 debug 日志。
+- 修正精度测试脚本：移除已删除的 combined trace-board 契约，改为精确 multiset 校验。
+- 修复 `timer.rs` 中因删除 trace 调用产生的 clippy let_and_return 警告。
+
+### 保留范围
+
+- AArch64 物理 SPI 路由、GIC 硬件 LR 注入（HW=1 + PINTID）、延迟 deactivate。
+- RT-Thread 中断驱动 virtio-net（轮询补丁移除 RX 定时器）。
+- RT-IPC 协议核心、Linux 客户端、RT-Thread 服务端及全部测试。
+- 实时基准程序（抢占延迟、中断延迟、网络 RTT）和中文测试报告。
+- 历史实验数据和报告（rtos-realtime-iterations.csv 等）。
+
+### 验证结果
+
+| 验证项 | 命令 | 结果 |
+|--------|------|------|
+| 缺失契约 | `test ! -e rt_trace.rs && ! rg rt-trace ...` | PASS |
+| 空白检查 | `git diff --check` | PASS（无错误） |
+| 架构边界测试 | `cargo test -p axvm --test arch_boundary_contract` | 19/19 PASS |
+| AxVM 全量测试 | `cargo test -p axvm` | 175/175 PASS |
+| Clippy | `cargo clippy -p axvm` | 无新增警告 |
+| RT-IPC 协议 | `make test` | 8/8 PASS |
+| RT-IPC 可靠性 | `make test_loopback` | 3/3 PASS |
+| 精度测试 board 契约 | Python board feature check | PASS |
+| 精度测试 QEMU 网络 | `test_rtbench_precision.sh` | 未通过（QEMU 网络环境限制，与清理无关） |
+| 受保护文件 | `test -f run_test.sh` 等 | 全部存在 |
+
+### 代码量统计
+
+清理动作（相对清理前基线）：
+
+| 指标 | 值 |
+|------|-----|
+| 变更文件数 | 23 |
+| 新增行 | 14 |
+| 删除行 | 2,948 |
+| 净增行 | -2,934 |
+
+当前工作树相对 `dev` 分支：
+
+| 指标 | 值 |
+|------|-----|
+| 变更文件数 | 112 |
+| 新增行 | 13,690 |
+| 删除行 | 405 |
+| 净增行 | +13,285 |
+| 二进制文件 | 1 |
+
+按子系统分类（相对 `dev`）：
+
+| 子系统 | 文件数 | 新增 | 删除 | 净增 |
+--------|--------|------|------|------|
+| Axvisor/guest | 27 | 4,175 | 46 | +4,129 |
+| RT-IPC | 9 | 1,593 | 0 | +1,593 |
+| docs/tests | 19 | 4,762 | 0 | +4,762 |
+| virtualization | 35 | 1,968 | 298 | +1,670 |
+| platforms | 11 | 381 | 6 | +375 |
+| other | 11 | 811 | 55 | +756 |
+
+未提交受保护文件（不纳入 numstat）：
+
+| 文件 | 行数 |
+|------|------|
+| platforms/ax-plat/src/irq/aarch64_hv.rs | 19 |
+| platforms/axplat-dyn/src/irq/aarch64_hv.rs | 242 |
+| virtualization/axvm/src/arch/aarch64/irq.rs | 48 |
+| os/axvisor/patches/rtthread/0001-virtio-net-remove-rx-polling.patch | 57 |
+
+### 历史说明
+
+报告中提到的 QEMU 诊断补丁（qemu-arm-ppi27-diagnostic.patch、qemu-mttcg-exclusive-diagnostic.patch）和调度 trace 脚本是当时实验的分析依据，源文件已在本次产品清理中移除，历史数据和结论保留在报告和 CSV 中作为实验记录。

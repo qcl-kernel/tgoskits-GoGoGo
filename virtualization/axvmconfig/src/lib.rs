@@ -531,6 +531,8 @@ enum VMInterruptModeSerde {
     Emulated,
     #[serde(rename = "passthrough", alias = "pt")]
     Passthrough,
+    #[serde(rename = "routed_passthrough", alias = "routed_pt")]
+    RoutedPassthrough,
 }
 
 impl From<VMInterruptModeSerde> for VMInterruptMode {
@@ -539,6 +541,7 @@ impl From<VMInterruptModeSerde> for VMInterruptMode {
             VMInterruptModeSerde::NoIrq => Self::NoIrq,
             VMInterruptModeSerde::Emulated => Self::Emulated,
             VMInterruptModeSerde::Passthrough => Self::Passthrough,
+            VMInterruptModeSerde::RoutedPassthrough => Self::RoutedPassthrough,
         }
     }
 }
@@ -549,6 +552,7 @@ impl From<&VMInterruptMode> for VMInterruptModeSerde {
             VMInterruptMode::NoIrq => Self::NoIrq,
             VMInterruptMode::Emulated => Self::Emulated,
             VMInterruptMode::Passthrough => Self::Passthrough,
+            VMInterruptMode::RoutedPassthrough => Self::RoutedPassthrough,
         }
     }
 }

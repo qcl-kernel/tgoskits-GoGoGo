@@ -537,6 +537,11 @@ emu_devices = []
     test_deser("emu", VMInterruptMode::Emulated);
     test_deser("passthrough", VMInterruptMode::Passthrough);
     test_deser("pt", VMInterruptMode::Passthrough);
+    test_deser(
+        "routed_passthrough",
+        VMInterruptMode::RoutedPassthrough,
+    );
+    test_deser("routed_pt", VMInterruptMode::RoutedPassthrough);
     test_deser("no_irq", VMInterruptMode::NoIrq);
     test_deser("no", VMInterruptMode::NoIrq);
     test_deser("none", VMInterruptMode::NoIrq);

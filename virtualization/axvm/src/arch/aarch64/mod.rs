@@ -33,6 +33,7 @@ pub(crate) mod fdt;
 mod gic;
 mod images;
 mod ipi;
+pub mod irq;
 mod npt;
 #[path = "../../architecture/sysreg.rs"]
 mod sysreg;
@@ -69,6 +70,35 @@ impl ArchOps for Aarch64Arch {
 
     fn has_hardware_support() -> bool {
         arm_vcpu::has_hardware_support()
+    }
+
+    fn register_platform_irq_injector() {
+        irq::register_platform_irq_injector();
+    }
+
+    fn inject_pending_interrupt(
+        _vm: &crate::AxVMRef,
+        vcpu: &crate::vm::AxVCpuRef<Self::VCpu>,
+        interrupt: crate::vm::PendingInterrupt,
+    ) {
+        match interrupt {
+            crate::vm::PendingInterrupt::Normal(vector) => {
+                if let Err(error) = vcpu.inject_interrupt(vector) {
+                    warn!(
+                        "failed to inject queued interrupt {vector:#x} into VM[{}] VCpu[{}]: \
+                         {error:?}",
+                        vcpu.vm_id(),
+                        vcpu.id()
+                    );
+                }
+            }
+            crate::vm::PendingInterrupt::External {
+                vector,
+                physical_irq,
+            } => {
+                gic::inject_external_interrupt(vector, physical_irq);
+            }
+        }
     }
 
     fn clean_dcache_range(addr: VirtAddr, size: usize) {
@@ -130,7 +160,6 @@ impl ArchOps for Aarch64Arch {
             ),
             ArmVmExit::ExternalInterrupt { vector } => {
                 debug!("VM[{}] run VCpu[{}] get irq {vector}", vm.id(), vcpu.id());
-                crate::rt_trace::exit_handler_return(vm.id(), vcpu.id(), vector as usize);
                 Ok(BoundVcpuExit::Defer(
                     Aarch64DeferredRunWork::ExternalInterrupt {
                         vector: vector as usize,
@@ -202,7 +231,6 @@ impl ArchOps for Aarch64Arch {
         match work {
             Aarch64DeferredRunWork::ExternalInterrupt { vector } => {
                 Self::after_external_interrupt(vm, vcpu, vector);
-                crate::rt_trace::deferred_finish(vm.id(), vcpu.id());
             }
         }
         Ok(VcpuRunAction {
@@ -228,13 +256,6 @@ impl ArmHostOps for AxvmArmHostOps {
         gic::handle_current_irq();
     }
 
-    fn disable_passthrough_spis() {
-        gic::disable_passthrough_spis();
-    }
-
-    fn reenable_passthrough_spis() {
-        gic::reenable_passthrough_spis();
-    }
 }
 
 pub(crate) struct AxvmArmVcpu(ArmVcpu<AxvmArmHostOps>);

@@ -112,18 +112,27 @@ pub fn is_support_icc() -> bool {
 pub struct ActiveIrq {
     irq: rdrive::IrqId,
     ack: IntId,
+    deactivate_on_drop: bool,
 }
 
 impl ActiveIrq {
     pub fn id(&self) -> rdrive::IrqId {
         self.irq
     }
+
+    pub fn defer_deactivation_to_guest(&mut self) -> Result<(), crate::irq::IrqError> {
+        if !eoi_mode() {
+            return Err(crate::irq::IrqError::Unsupported);
+        }
+        self.deactivate_on_drop = false;
+        Ok(())
+    }
 }
 
 impl Drop for ActiveIrq {
     fn drop(&mut self) {
         eoi1(self.ack);
-        if eoi_mode() {
+        if eoi_mode() && self.deactivate_on_drop {
             dir(self.ack);
         }
     }
@@ -138,6 +147,7 @@ pub fn begin_irq() -> Option<ActiveIrq> {
     Some(ActiveIrq {
         irq: (ack.to_u32() as usize).into(),
         ack,
+        deactivate_on_drop: true,
     })
 }
 
@@ -239,9 +249,9 @@ fn init_cpu_interface(cpu_idx: usize) -> Result<(), &'static str> {
     cpu.init_current_cpu()?;
     #[cfg(feature = "hv")]
     {
-        // EL1 guests such as Zephyr may expect EOIR to both drop priority
-        // and deactivate the interrupt, as it does in the architectural reset state.
-        cpu.set_eoi_mode(false);
+        // Two-step EOI lets routed guest SPIs keep their physical active state
+        // until a hardware-backed virtual LR is EOI'd by the guest.
+        cpu.set_eoi_mode(true);
         info!("GICv3 CPU {cpu_idx} EOI mode: two_step={}", cpu.eoi_mode());
     }
 

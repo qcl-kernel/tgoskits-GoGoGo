@@ -184,11 +184,9 @@ pub(crate) fn check_events() {
 }
 
 pub(crate) fn current_cpu_deadline_nanos() -> Option<u64> {
-    let deadline_nanos = with_current_timer_wheels(|cpu_id, timer_wheels| {
+    with_current_timer_wheels(|cpu_id, timer_wheels| {
         timer_wheels.next_deadline(cpu_id).map(deadline_to_nanos)
-    });
-    crate::rt_trace::axvm_deadline_publish(deadline_nanos);
-    deadline_nanos
+    })
 }
 
 fn deadline_to_nanos(deadline: TimeValue) -> u64 {

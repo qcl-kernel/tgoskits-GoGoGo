@@ -16,6 +16,11 @@ pub mod loongarch64_hv;
 #[cfg(target_arch = "loongarch64")]
 pub use loongarch64_hv::LoongArchHvIrqIf;
 
+#[cfg(target_arch = "aarch64")]
+pub mod aarch64_hv;
+#[cfg(target_arch = "aarch64")]
+pub use aarch64_hv::Aarch64HvIrqIf;
+
 /// Compatibility IRQ domain used while non-domainized platforms migrate.
 pub const LEGACY_IRQ_DOMAIN: IrqDomainId = IrqDomainId(0);
 

@@ -433,7 +433,10 @@ impl AxVMResources {
 fn guest_memory_mapping_flags(interrupt_mode: VMInterruptMode) -> MappingFlags {
     let mut flags =
         MappingFlags::READ | MappingFlags::WRITE | MappingFlags::EXECUTE | MappingFlags::USER;
-    if interrupt_mode == VMInterruptMode::Passthrough {
+    if matches!(
+        interrupt_mode,
+        VMInterruptMode::Passthrough | VMInterruptMode::RoutedPassthrough
+    ) {
         flags |= MappingFlags::UNCACHED;
     }
     flags

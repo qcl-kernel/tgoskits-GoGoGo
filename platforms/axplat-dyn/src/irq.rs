@@ -10,6 +10,9 @@ use ax_plat::irq::{
 #[cfg(all(target_arch = "loongarch64", feature = "hv"))]
 mod loongarch64_hv;
 
+#[cfg(any(all(target_arch = "aarch64", feature = "hv"), test))]
+mod aarch64_hv;
+
 #[cfg(all(target_arch = "riscv64", feature = "hv"))]
 static VIRTUAL_IRQ_INJECTOR: AtomicPtr<()> = AtomicPtr::new(core::ptr::null_mut());
 #[cfg(all(target_arch = "riscv64", feature = "hv"))]
@@ -68,8 +71,21 @@ impl IrqIf for IrqIfImpl {
     /// Handles the IRQ.
     fn handle(vector: TrapVector) -> Option<IrqId> {
         let irq = {
-            let active = somehal::irq::begin_irq(vector.0)?;
+            let mut active = somehal::irq::begin_irq(vector.0)?;
             let irq = active.id();
+
+            #[cfg(all(target_arch = "aarch64", feature = "hv"))]
+            if is_aarch64_guest_forwardable(irq)
+                && aarch64_hv::inject_virtual_irq(irq.hwirq.0 as usize)
+            {
+                if let Err(error) = active.defer_deactivation_to_guest() {
+                    warn!(
+                        "AArch64 routed SPI {} could not defer physical deactivation: {error:?}",
+                        irq.hwirq.0
+                    );
+                }
+                return Some(irq);
+            }
 
             #[cfg(all(target_arch = "riscv64", feature = "hv"))]
             if should_forward_riscv_guest_irq(irq, IrqOutcome::default())
@@ -165,6 +181,12 @@ fn riscv_plic_source_index(irq: IrqId) -> Option<usize> {
 fn is_loongarch_guest_forwardable(irq: IrqId) -> bool {
     somehal::irq::domain_is_kind(irq.domain, somehal::irq::IrqDomainKind::LoongArchEioIntc)
         || somehal::irq::domain_is_kind(irq.domain, somehal::irq::IrqDomainKind::LoongArchPchPic)
+}
+
+#[cfg(all(target_arch = "aarch64", feature = "hv"))]
+fn is_aarch64_guest_forwardable(irq: IrqId) -> bool {
+    somehal::irq::domain_is_kind(irq.domain, somehal::irq::IrqDomainKind::AArch64Gic)
+        && irq.hwirq.0 >= 32
 }
 
 #[cfg(all(target_arch = "riscv64", feature = "hv"))]
