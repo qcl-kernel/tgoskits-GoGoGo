@@ -29,6 +29,7 @@ members = [
     "components/axklib",
     "components/axpanic",
     "components/axpoll",
+    "components/ax-rt",
     "components/axsched",
     "components/cpumask",
     "components/crate_interface",
@@ -95,6 +96,7 @@ members = [
     "os/arceos/modules/axipi",
     "os/arceos/modules/axlog",
     "os/arceos/modules/axmm",
+    "os/arceos/modules/ax-realtime",
     "net/ax-net",
     "os/arceos/modules/axruntime",
     "os/arceos/modules/axsync",
@@ -163,6 +165,7 @@ ax-percpu-macros = { version = "0.4.12", path = "components/percpu/percpu_macros
 ax-plat = { version = "0.12.3", path = "platforms/ax-plat" }
 ax-plat-macros = { version = "0.3.10", path = "platforms/ax-plat-macros" }
 ax-posix-api = { version = "0.5.32", path = "os/arceos/api/arceos_posix_api" }
+ax-realtime = { version = "0.1.0", path = "os/arceos/modules/ax-realtime" }
 ax-riscv-plic = { version = "0.4.9", path = "drivers/intc/riscv_plic" }
 ax-runtime = { version = "0.10.7", path = "os/arceos/modules/axruntime" }
 ax-sched = { version = "0.5.8", path = "components/axsched" }
@@ -183,6 +186,7 @@ axhvc = { version = "0.4.13", path = "virtualization/axhvc" }
 axklib = { version = "0.7.8", path = "components/axklib" }
 axplat-dyn = { version = "0.7.15", path = "platforms/axplat-dyn", default-features = false }
 axpoll = { version = "0.5.4", path = "components/axpoll" }
+ax-rt = { version = "0.1.0", path = "components/ax-rt" }
 axvisor = { version = "0.5.24", path = "os/axvisor" }
 axvirtio-common = { version = "0.1.0", path = "virtualization/axvirtio-common" }
 axvirtio-net = { version = "0.1.0", path = "virtualization/axvirtio-net" }

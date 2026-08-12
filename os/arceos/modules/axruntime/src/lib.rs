@@ -173,7 +173,48 @@ use core::sync::atomic::{AtomicUsize, Ordering};
 static INITED_CPUS: AtomicUsize = AtomicUsize::new(0);
 
 fn is_init_ok() -> bool {
-    INITED_CPUS.load(Ordering::Acquire) == ax_hal::cpu_num()
+    INITED_CPUS.load(Ordering::Acquire) == host_cpu_count()
+}
+
+#[cfg(feature = "smp")]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum SecondaryCpuOwner {
+    Host,
+    Realtime,
+    Offline,
+}
+
+#[cfg(feature = "smp")]
+pub(crate) fn secondary_cpu_owner(cpu_id: usize) -> SecondaryCpuOwner {
+    if cpu_id >= build_info::CPU_CAPACITY {
+        return SecondaryCpuOwner::Offline;
+    }
+    if build_info::REALTIME_CPU_ENABLED && cpu_id == build_info::REALTIME_CPU {
+        return SecondaryCpuOwner::Realtime;
+    }
+
+    SecondaryCpuOwner::Host
+}
+
+#[cfg(feature = "smp")]
+fn host_cpu_count() -> usize {
+    (0..ax_hal::cpu_num())
+        .filter(|&cpu_id| secondary_cpu_owner(cpu_id) == SecondaryCpuOwner::Host)
+        .count()
+}
+
+#[cfg(not(feature = "smp"))]
+fn host_cpu_count() -> usize {
+    1
+}
+
+#[cfg(feature = "smp")]
+pub(crate) fn run_realtime_secondary(cpu_id: usize) -> ! {
+    unsafe extern "Rust" {
+        safe fn ax_realtime_secondary_main(cpu_id: usize) -> !;
+    }
+
+    ax_realtime_secondary_main(cpu_id)
 }
 
 /// The main entry point of the ArceOS runtime.
@@ -351,10 +392,16 @@ pub fn rust_main(cpu_id: usize, arg: usize) -> ! {
     }
 
     #[cfg(all(feature = "irq", feature = "ipi"))]
-    ax_ipi::wait_for_all_cpus_ready();
+    if host_cpu_count() == ax_hal::cpu_num() {
+        ax_ipi::wait_for_all_cpus_ready();
+    }
 
     #[cfg(all(feature = "smp", feature = "ipi"))]
-    fs::online_smp();
+    if host_cpu_count() == ax_hal::cpu_num() {
+        fs::online_smp();
+    } else {
+        warn!("Skip block runtime SMP online while Axvisor realtime CPU split is active.");
+    }
 
     ax_app_entry();
 
@@ -434,13 +481,27 @@ pub(crate) fn init_percpu_irq(cpu_id: usize) {
     ax_hal::irq::init_common_irq_handler();
 
     if ax_hal::percpu::this_cpu_is_bsp() {
-        let cpus = ax_hal::irq::CpuMask::first_n(ax_hal::cpu_num());
+        let cpus = ax_hal::irq::CpuMask::first_n(host_cpu_count());
         ax_hal::irq::request_percpu_irq(ax_hal::time::irq_num(), cpus, timer_irq_handler)
             .expect("failed to register timer IRQ handler");
 
         #[cfg(any(feature = "ipi", feature = "wake-ipi"))]
-        ax_hal::irq::request_percpu_irq(ax_hal::irq::ipi_irq(), cpus, ipi_irq_handler)
-            .expect("failed to register IPI IRQ handler");
+        {
+            // On riscv64 there is exactly one supervisor software interrupt per
+            // hart, so a reserved realtime core's mailbox doorbell must share
+            // this same line as a separate per-CPU action (the scheduler IPI
+            // fires only on the host CPUs, the doorbell only on the reserved
+            // core). Register the line as shared so that second action can
+            // attach. Other architectures keep the exclusive line: they either
+            // run no reserved-core doorbell or route it through a dedicated line
+            // (e.g. aarch64 uses a separate GIC SGI).
+            #[cfg(target_arch = "riscv64")]
+            ax_hal::irq::request_percpu_shared_irq(ax_hal::irq::ipi_irq(), cpus, ipi_irq_handler)
+                .expect("failed to register IPI IRQ handler");
+            #[cfg(not(target_arch = "riscv64"))]
+            ax_hal::irq::request_percpu_irq(ax_hal::irq::ipi_irq(), cpus, ipi_irq_handler)
+                .expect("failed to register IPI IRQ handler");
+        }
     }
 
     init_timer();
