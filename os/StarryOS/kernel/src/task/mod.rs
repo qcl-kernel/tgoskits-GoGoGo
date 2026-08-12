@@ -1328,6 +1328,16 @@ impl ProcessData {
 
     /// Record that this tracee is stopped by `signo`.
     pub fn set_ptrace_stop(&self, tid: u32, signo: Signo, uctx: &UserContext) {
+        self.set_ptrace_stop_record(tid, signo, uctx, None);
+    }
+
+    fn set_ptrace_stop_record(
+        &self,
+        tid: u32,
+        signo: Signo,
+        uctx: &UserContext,
+        syscall_no: Option<usize>,
+    ) {
         let pending_event = self.ptrace_pending_event.lock().remove(&tid);
         self.ptrace_stop.lock().insert(
             tid,
@@ -1335,8 +1345,8 @@ impl ProcessData {
                 signo: Some(signo),
                 uctx: *uctx,
                 siginfo: Some(SignalInfo::new_kernel(signo)),
-                is_syscall: false,
-                syscall_no: None,
+                is_syscall: syscall_no.is_some(),
+                syscall_no,
                 reported: false,
                 event: pending_event.as_ref().map_or(0, |event| event.event),
                 event_msg: pending_event.as_ref().map_or(0, |event| event.msg),
@@ -1353,11 +1363,7 @@ impl ProcessData {
         uctx: &UserContext,
         syscall_no: usize,
     ) {
-        self.set_ptrace_stop(tid, signo, uctx);
-        if let Some(stop) = self.ptrace_stop.lock().get_mut(&tid) {
-            stop.is_syscall = true;
-            stop.syscall_no = Some(syscall_no);
-        }
+        self.set_ptrace_stop_record(tid, signo, uctx, Some(syscall_no));
     }
 
     pub fn ptrace_stop_tid(&self) -> Option<u32> {

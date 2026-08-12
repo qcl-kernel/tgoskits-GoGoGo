@@ -33,7 +33,6 @@ use crate::{
 const RING_BUFFER_INIT_SIZE: usize = 65536; // 64 KiB
 const RING_BUFFER_MAX_SIZE: usize = 1024 * 1024; // 1 MiB
 const PIPE_BUF: usize = PAGE_SIZE_4K;
-
 struct Shared {
     state: Mutex<PipeState>,
     poll_rx: PollSet,
@@ -112,7 +111,6 @@ impl PipeState {
         }
     }
 }
-
 pub struct Pipe {
     read_side: bool,
     shared: Arc<Shared>,
@@ -172,6 +170,28 @@ impl Pipe {
         (read_end, write_end)
     }
 
+    /// Opens another file description for the same pipe endpoint.
+    ///
+    /// Unlike `dup`, reopening `/proc/self/fd/<n>` creates independent file
+    /// status flags while retaining the same underlying pipe buffer. The
+    /// endpoint count must therefore be incremented so closing either file
+    /// description cannot prematurely report EOF or a broken pipe.
+    pub(crate) fn reopen(&self, non_blocking: bool) -> Pipe {
+        let mut state = self.shared.state.lock();
+        if self.read_side {
+            state.readers += 1;
+        } else {
+            state.writers += 1;
+        }
+        drop(state);
+
+        Pipe {
+            read_side: self.read_side,
+            shared: self.shared.clone(),
+            non_blocking: AtomicBool::new(non_blocking),
+        }
+    }
+
     pub const fn is_read(&self) -> bool {
         self.read_side
     }
@@ -211,6 +231,17 @@ impl Pipe {
             unsafe { self.shared.poll_tx.wake(IoEvents::OUT) };
         }
         Ok(())
+    }
+
+    #[cfg(axtest)]
+    pub(crate) fn duplicate_read_end_for_test(&self) -> Pipe {
+        assert!(self.is_read());
+        self.shared.state.lock().readers += 1;
+        Pipe {
+            read_side: true,
+            shared: self.shared.clone(),
+            non_blocking: AtomicBool::new(self.nonblocking()),
+        }
     }
 
     fn write_with_broken_pipe_handler(
@@ -304,17 +335,6 @@ impl Pipe {
         // write transition is identical, but SIGPIPE delivery is outside this
         // direct pipe test and cannot be requested from that task.
         self.write_with_broken_pipe_handler(src, || {})
-    }
-
-    #[cfg(axtest)]
-    pub(crate) fn duplicate_read_end_for_test(&self) -> Pipe {
-        assert!(self.is_read());
-        self.shared.state.lock().readers += 1;
-        Pipe {
-            read_side: true,
-            shared: self.shared.clone(),
-            non_blocking: AtomicBool::new(self.nonblocking()),
-        }
     }
 
     #[cfg(axtest)]
@@ -505,7 +525,6 @@ fn wait_for_pipe_test_condition(mut condition: impl FnMut() -> bool) -> bool {
     }
     false
 }
-
 fn raise_pipe() {
     let curr = current();
     send_signal_to_process(

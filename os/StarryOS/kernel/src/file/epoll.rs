@@ -636,6 +636,32 @@ impl Epoll {
         self.inner.register_waker_only(interest);
     }
 
+    fn register_waker_and_recheck(&self, interest: &Arc<EpollInterest>) {
+        if !interest.can_refresh_waker_from_current_process() {
+            return;
+        }
+
+        let Some(file) = interest.key.get_file() else {
+            return;
+        };
+
+        if !interest.is_enabled() {
+            return;
+        }
+
+        let waker = Waker::from(Arc::new(InterestWaker {
+            epoll: Arc::downgrade(&self.inner),
+            interest: Arc::downgrade(interest),
+        }));
+
+        let mut context = Context::from_waker(&waker);
+        file.register(&mut context, register_events(interest.event.events));
+
+        if !match_ready_events(file.poll(), interest.event.events).is_empty() {
+            waker.wake_by_ref();
+        }
+    }
+
     /// Registers enabled interests with the thread currently waiting in epoll.
     pub fn register_waiter_wakers(&self) -> AxResult {
         let interests = self.inner.snapshot_interests()?;
@@ -917,18 +943,12 @@ impl Epoll {
                     }
                 }
                 ConsumeResult::NoEvent => {
-                    // Spurious wakeup: the waker fired but file.poll() did
-                    // not match the interest mask (e.g. a shared PollSet
-                    // wake on a socket that has only EPOLLOUT ready when
-                    // the interest is for EPOLLIN).  Re-arm with a plain
-                    // waker registration — using check_and_register_waker
-                    // here would immediately re-queue the interest via
-                    // waker.wake_by_ref() whenever file.poll() is non-empty,
-                    // which a connected TCP socket (always EPOLLOUT-ready)
-                    // satisfies on every iteration, producing a tight loop
-                    // that fills the ready_queue with phantom events.
+                    // Register before rechecking only this interest's event
+                    // mask. This closes the consume-to-register lost-wakeup
+                    // window without treating an unrelated persistent event
+                    // such as EPOLLOUT as a phantom match.
                     interest.mark_not_in_queue();
-                    self.register_waker_only(&interest);
+                    self.register_waker_and_recheck(&interest);
                 }
             }
         }

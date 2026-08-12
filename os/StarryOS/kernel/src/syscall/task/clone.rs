@@ -3,7 +3,7 @@ use alloc::sync::Arc;
 use ax_errno::{AxError, AxResult};
 use ax_fs_ng::vfs::FS_CONTEXT;
 use ax_runtime::hal::cpu::uspace::UserContext;
-use ax_task::{AxTaskExt, current, spawn_task_with};
+use ax_task::{AxTaskExt, current, spawn_task_with, spawn_task_with_balanced};
 use bitflags::bitflags;
 use linux_raw_sys::general::*;
 use scope_local::Scope;
@@ -159,6 +159,14 @@ impl CloneArgs {
     }
 
     pub fn do_clone(self, uctx: &UserContext) -> AxResult<isize> {
+        self.do_clone_in_cgroup(uctx, None)
+    }
+
+    pub(super) fn do_clone_in_cgroup(
+        self,
+        uctx: &UserContext,
+        requested_cgroup: Option<Arc<ax_cgroup::CgroupNode>>,
+    ) -> AxResult<isize> {
         self.validate()?;
 
         let Self {
@@ -291,7 +299,9 @@ impl CloneArgs {
             proc_data.set_umask(old_proc_data.umask());
             proc_data.set_nice(old_proc_data.nice());
             let inherited_cgroup = old_proc_data.cgroup.read().clone();
-            *proc_data.cgroup.write() = inherited_cgroup.clone();
+            *proc_data.cgroup.write() = requested_cgroup
+                .clone()
+                .unwrap_or_else(|| inherited_cgroup.clone());
             proc_data.set_heap_top(old_proc_data.get_heap_top());
             proc_data.replace_personality(old_proc_data.personality());
             // Inherit parent dumpable (PR_SET_DUMPABLE state). Linux: child
@@ -470,7 +480,11 @@ impl CloneArgs {
             guard.commit();
         }
 
-        spawn_task_with(new_task, add_task_to_table);
+        if flags.contains(CloneFlags::THREAD) {
+            spawn_task_with(new_task, add_task_to_table);
+        } else {
+            spawn_task_with_balanced(new_task, add_task_to_table);
+        }
 
         if trace_clone && needs_vfork_block {
             let _ = crate::task::send_signal_to_thread(

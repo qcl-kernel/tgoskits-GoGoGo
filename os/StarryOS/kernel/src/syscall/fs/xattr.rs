@@ -12,13 +12,18 @@ use alloc::{
     sync::Arc,
     vec::Vec,
 };
-use core::ffi::c_char;
+use core::{
+    ffi::c_char,
+    mem::{MaybeUninit, size_of},
+    slice,
+};
 
 use ax_errno::{AxError, AxResult, LinuxError};
-use axfs_ng_vfs::Location;
+use ax_memory_addr::PAGE_SIZE_4K;
+use axfs_ng_vfs::{Location, MetadataUpdate, NodePermission};
 use linux_raw_sys::general::{
     AT_EMPTY_PATH, AT_FDCWD, AT_SYMLINK_NOFOLLOW, XATTR_CREATE, XATTR_LIST_MAX, XATTR_NAME_MAX,
-    XATTR_REPLACE, XATTR_SIZE_MAX,
+    XATTR_REPLACE, XATTR_SIZE_MAX, xattr_args,
 };
 use starry_vm::{vm_read_slice, vm_write_slice};
 
@@ -30,6 +35,20 @@ use crate::{
 };
 
 type XattrMap = BTreeMap<String, Vec<u8>>;
+
+const POSIX_ACL_ACCESS_XATTR: &str = "system.posix_acl_access";
+const POSIX_ACL_DEFAULT_XATTR: &str = "system.posix_acl_default";
+const POSIX_ACL_XATTR_VERSION: u32 = 2;
+const POSIX_ACL_XATTR_HEADER_SIZE: usize = size_of::<u32>();
+const POSIX_ACL_XATTR_ENTRY_SIZE: usize = size_of::<u16>() * 2 + size_of::<u32>();
+
+const ACL_USER_OBJ: u16 = 0x01;
+const ACL_USER: u16 = 0x02;
+const ACL_GROUP_OBJ: u16 = 0x04;
+const ACL_GROUP: u16 = 0x08;
+const ACL_MASK: u16 = 0x10;
+const ACL_OTHER: u16 = 0x20;
+const ACL_VALID_PERMISSIONS: u16 = 0x07;
 
 #[derive(Default)]
 struct XattrStore {
@@ -64,10 +83,82 @@ fn read_name(name: *const c_char) -> AxResult<String> {
     if bytes.is_empty() || bytes.len() > XATTR_NAME_MAX as usize {
         return Err(AxError::InvalidInput);
     }
-    if !name.starts_with("user.") {
+    if !name.starts_with("user.")
+        && name != POSIX_ACL_ACCESS_XATTR
+        && name != POSIX_ACL_DEFAULT_XATTR
+    {
         return Err(AxError::OperationNotSupported);
     }
     Ok(name)
+}
+
+fn read_u16_le(bytes: &[u8]) -> u16 {
+    u16::from_le_bytes(bytes.try_into().unwrap())
+}
+
+fn read_u32_le(bytes: &[u8]) -> u32 {
+    u32::from_le_bytes(bytes.try_into().unwrap())
+}
+
+fn posix_acl_mode(value: &[u8]) -> AxResult<NodePermission> {
+    if value.len() < POSIX_ACL_XATTR_HEADER_SIZE
+        || !(value.len() - POSIX_ACL_XATTR_HEADER_SIZE).is_multiple_of(POSIX_ACL_XATTR_ENTRY_SIZE)
+        || read_u32_le(&value[..POSIX_ACL_XATTR_HEADER_SIZE]) != POSIX_ACL_XATTR_VERSION
+    {
+        return Err(AxError::InvalidInput);
+    }
+
+    let mut expected_tag = ACL_USER_OBJ;
+    let mut needs_mask = false;
+    let mut owner_permissions = None;
+    let mut group_permissions = None;
+    let mut mask_permissions = None;
+    let mut other_permissions = None;
+
+    let (entries, []) =
+        value[POSIX_ACL_XATTR_HEADER_SIZE..].as_chunks::<POSIX_ACL_XATTR_ENTRY_SIZE>()
+    else {
+        return Err(AxError::InvalidInput);
+    };
+
+    for entry in entries {
+        let tag = read_u16_le(&entry[..2]);
+        let permissions = read_u16_le(&entry[2..4]);
+        if permissions & !ACL_VALID_PERMISSIONS != 0 {
+            return Err(AxError::InvalidInput);
+        }
+
+        match tag {
+            ACL_USER_OBJ if expected_tag == ACL_USER_OBJ => {
+                owner_permissions = Some(permissions);
+                expected_tag = ACL_USER;
+            }
+            ACL_USER if expected_tag == ACL_USER => needs_mask = true,
+            ACL_GROUP_OBJ if expected_tag == ACL_USER => {
+                group_permissions = Some(permissions);
+                expected_tag = ACL_GROUP;
+            }
+            ACL_GROUP if expected_tag == ACL_GROUP => needs_mask = true,
+            ACL_MASK if expected_tag == ACL_GROUP => {
+                mask_permissions = Some(permissions);
+                expected_tag = ACL_OTHER;
+            }
+            ACL_OTHER if expected_tag == ACL_OTHER || expected_tag == ACL_GROUP && !needs_mask => {
+                other_permissions = Some(permissions);
+                expected_tag = 0;
+            }
+            _ => return Err(AxError::InvalidInput),
+        }
+    }
+
+    if expected_tag != 0 {
+        return Err(AxError::InvalidInput);
+    }
+
+    let mode = owner_permissions.unwrap() << 6
+        | mask_permissions.unwrap_or(group_permissions.unwrap()) << 3
+        | other_permissions.unwrap();
+    Ok(NodePermission::from_bits_truncate(mode))
 }
 
 /// Read an xattr value from userspace with Linux size limits.
@@ -95,6 +186,18 @@ fn resolve_path(path: *const c_char, nofollow: bool) -> AxResult<Location> {
         .ok_or(AxError::BadFileDescriptor)
 }
 
+fn resolve_xattrat(dirfd: i32, path: *const c_char, at_flags: u32) -> AxResult<Location> {
+    const VALID_FLAGS: u32 = AT_EMPTY_PATH | AT_SYMLINK_NOFOLLOW;
+
+    if at_flags & !VALID_FLAGS != 0 {
+        return Err(AxError::InvalidInput);
+    }
+    let path = vm_load_path_string(path)?;
+    resolve_at(dirfd, Some(&path), at_flags)?
+        .into_file()
+        .ok_or(AxError::BadFileDescriptor)
+}
+
 /// Resolve an fd argument used by fd-based xattr syscalls.
 fn resolve_fd(fd: i32) -> AxResult<Location> {
     if fd_is_path(fd) {
@@ -103,6 +206,35 @@ fn resolve_fd(fd: i32) -> AxResult<Location> {
     resolve_at(fd, None, AT_EMPTY_PATH)?
         .into_file()
         .ok_or(AxError::BadFileDescriptor)
+}
+
+fn read_xattr_args(args: *const xattr_args, args_size: usize) -> AxResult<xattr_args> {
+    let known_size = size_of::<xattr_args>();
+    if args_size < known_size {
+        return Err(AxError::InvalidInput);
+    }
+    if args_size > PAGE_SIZE_4K {
+        return Err(AxError::ArgumentListTooLong);
+    }
+
+    let mut raw_args = MaybeUninit::<xattr_args>::uninit();
+    vm_read_slice(args, slice::from_mut(&mut raw_args))?;
+    if args_size > known_size {
+        let tail_size = args_size - known_size;
+        let mut tail = Vec::<u8>::with_capacity(tail_size);
+        vm_read_slice(
+            args.cast::<u8>().wrapping_add(known_size),
+            &mut tail.spare_capacity_mut()[..tail_size],
+        )?;
+        // SAFETY: vm_read_slice initialized the whole requested tail.
+        unsafe { tail.set_len(tail_size) };
+        if tail.iter().any(|byte| *byte != 0) {
+            return Err(AxError::ArgumentListTooLong);
+        }
+    }
+
+    // SAFETY: vm_read_slice initialized the complete v0 structure.
+    Ok(unsafe { raw_args.assume_init() })
 }
 
 /// Copy a single xattr value to userspace, or return its required size.
@@ -198,6 +330,14 @@ fn set_xattr(
 
     let name = read_name(name)?;
     let value = read_value(value, size)?;
+    let acl_mode = if name == POSIX_ACL_ACCESS_XATTR {
+        Some(posix_acl_mode(&value)?)
+    } else if name == POSIX_ACL_DEFAULT_XATTR {
+        posix_acl_mode(&value)?;
+        None
+    } else {
+        None
+    };
     let old_attrs = existing_attrs(&overlay::visible_target(&loc)?);
 
     if let Some(attrs) = &old_attrs {
@@ -213,6 +353,15 @@ fn set_xattr(
     }
 
     let loc = overlay::ensure_copy_up_target(&loc)?;
+    if let Some(acl_mode) = acl_mode {
+        let metadata = loc.entry().metadata()?;
+        let special_bits = metadata.mode
+            & (NodePermission::SET_UID | NodePermission::SET_GID | NodePermission::STICKY);
+        loc.update_metadata(MetadataUpdate {
+            mode: Some(special_bits | acl_mode),
+            ..Default::default()
+        })?;
+    }
     let store = store_for_update(&loc);
     let mut attrs = store.attrs.lock();
     if attrs.is_empty()
@@ -290,6 +439,26 @@ pub fn sys_fgetxattr(fd: i32, name: *const c_char, value: *mut u8, size: usize) 
     get_xattr(resolve_fd(fd)?, name, value, size)
 }
 
+pub fn sys_getxattrat(
+    dirfd: i32,
+    path: *const c_char,
+    at_flags: u32,
+    name: *const c_char,
+    args: *const xattr_args,
+    args_size: usize,
+) -> AxResult<isize> {
+    let args = read_xattr_args(args, args_size)?;
+    if args.flags != 0 {
+        return Err(AxError::InvalidInput);
+    }
+    get_xattr(
+        resolve_xattrat(dirfd, path, at_flags)?,
+        name,
+        args.value as *mut u8,
+        args.size as usize,
+    )
+}
+
 pub fn sys_setxattr(
     path: *const c_char,
     name: *const c_char,
@@ -298,6 +467,24 @@ pub fn sys_setxattr(
     flags: i32,
 ) -> AxResult<isize> {
     set_xattr(resolve_path(path, false)?, name, value, size, flags)
+}
+
+pub fn sys_setxattrat(
+    dirfd: i32,
+    path: *const c_char,
+    at_flags: u32,
+    name: *const c_char,
+    args: *const xattr_args,
+    args_size: usize,
+) -> AxResult<isize> {
+    let args = read_xattr_args(args, args_size)?;
+    set_xattr(
+        resolve_xattrat(dirfd, path, at_flags)?,
+        name,
+        args.value as *const u8,
+        args.size as usize,
+        args.flags as i32,
+    )
 }
 
 pub fn sys_lsetxattr(

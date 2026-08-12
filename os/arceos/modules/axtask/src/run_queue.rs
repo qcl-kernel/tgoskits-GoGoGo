@@ -66,6 +66,13 @@ static mut RUN_QUEUES: [MaybeUninit<NonNull<AxRunQueue>>; crate::build_info::CPU
 #[allow(clippy::declare_interior_mutable_const)] // It's ok because it's used only for initialization `RUN_QUEUES`.
 const ARRAY_REPEAT_VALUE: MaybeUninit<NonNull<AxRunQueue>> = MaybeUninit::uninit();
 
+/// CPUs whose scheduler run queues have been initialized and published.
+///
+/// Secondary CPUs publish their queues independently after entering the runtime.
+/// New tasks must only select queues whose permanent pointers are visible.
+static RUN_QUEUE_READY: [core::sync::atomic::AtomicBool; crate::build_info::CPU_CAPACITY] =
+    [const { core::sync::atomic::AtomicBool::new(false) }; crate::build_info::CPU_CAPACITY];
+
 /// Per-CPU count of scheduler ticks during which a non-idle task was running, for
 /// the ondemand cpufreq governor's load metric. Bumped once per timer tick in
 /// [`AxRunQueue::scheduler_timer_tick`] when the current task is not the idle task
@@ -115,7 +122,8 @@ pub(crate) fn current_run_queue<G: GuardState>() -> CurrentRunQueueRef<G> {
 ///
 /// ## Panics
 ///
-/// This function will panic if `cpu_mask` is empty, indicating that there are no available CPUs for task execution.
+/// Panics if `cpumask` is empty or none of its CPUs has published an initialized
+/// run queue.
 #[cfg(feature = "smp")]
 // The modulo operation is safe here because `CPU_CAPACITY` is always greater than 1 with "smp" enabled.
 #[allow(clippy::modulo_one)]
@@ -126,14 +134,23 @@ fn select_run_queue_index(cpumask: AxCpuMask) -> usize {
 
     assert!(!cpumask.is_empty(), "No available CPU for task execution");
 
-    // Round-robin selection of the run queue index.
-    loop {
+    for _ in 0..crate::build_info::CPU_CAPACITY {
         let index =
-            RUN_QUEUE_INDEX.fetch_add(1, Ordering::SeqCst) % crate::build_info::CPU_CAPACITY;
-        if cpumask.get(index) {
+            RUN_QUEUE_INDEX.fetch_add(1, Ordering::Relaxed) % crate::build_info::CPU_CAPACITY;
+        if cpumask.get(index) && RUN_QUEUE_READY[index].load(Ordering::Acquire) {
             return index;
         }
     }
+
+    // A task is commonly created from the current CPU while secondary
+    // schedulers are still publishing their queues. Preserve its affinity
+    // without selecting an unpublished remote queue.
+    let current_cpu = this_cpu_id();
+    if cpumask.get(current_cpu) && RUN_QUEUE_READY[current_cpu].load(Ordering::Acquire) {
+        return current_cpu;
+    }
+
+    panic!("No initialized run queue matches task CPU affinity");
 }
 
 /// Retrieves the permanent pointer to a run queue by logical CPU index.
@@ -153,9 +170,9 @@ fn select_run_queue_index(cpumask: AxCpuMask) -> usize {
 #[cfg(feature = "smp")]
 #[inline]
 fn get_run_queue(index: usize) -> RunQueueAccess {
-    // SAFETY: scheduler initialization publishes one permanent pointer for
-    // every online CPU before remote scheduling can select it. Callers retain
-    // their guard and serialize scheduler state through the embedded lock.
+    // SAFETY: a release publication to `RUN_QUEUE_READY` follows each queue
+    // initialization. Every caller selected a queue after acquiring that
+    // publication and holds a guard while accessing its scheduler state.
     unsafe { RunQueueAccess::new(RUN_QUEUES[index].assume_init()) }
 }
 
@@ -555,10 +572,13 @@ pub(crate) fn select_run_queue<G: GuardState>(task: &AxTaskRef) -> AxRunQueueRef
         // When SMP is enabled, prefer the current CPU to keep the task's
         // cache warm. Fall back to round-robin only when affinity forbids it.
         let current_cpu = this_cpu_id();
-        let index = if task.cpumask().get(current_cpu) {
+        let cpumask = task.cpumask();
+        let index = if cpumask.get(current_cpu)
+            && RUN_QUEUE_READY[current_cpu].load(core::sync::atomic::Ordering::Acquire)
+        {
             current_cpu
         } else {
-            select_run_queue_index(task.cpumask())
+            select_run_queue_index(cpumask)
         };
         AxRunQueueRef {
             inner: get_run_queue(index),
@@ -568,12 +588,38 @@ pub(crate) fn select_run_queue<G: GuardState>(task: &AxTaskRef) -> AxRunQueueRef
     }
 }
 
+/// Selects a run queue for a task that has not run yet.
+///
+/// A newly spawned task has no CPU-local state to preserve. Spread it across
+/// its allowed CPUs instead of co-locating every child with its parent.
+#[inline]
+pub(crate) fn select_new_task_run_queue<G: GuardState>(task: &AxTaskRef) -> AxRunQueueRef<G> {
+    let irq_state = G::acquire();
+    #[cfg(not(feature = "smp"))]
+    {
+        let _ = task;
+        AxRunQueueRef {
+            // SAFETY: `irq_state` retains G's exclusive scheduler guard.
+            inner: unsafe { RunQueueAccess::new(current_run_queue_pointer()) },
+            state: irq_state,
+            _phantom: core::marker::PhantomData,
+        }
+    }
+    #[cfg(feature = "smp")]
+    {
+        AxRunQueueRef {
+            inner: get_run_queue(select_run_queue_index(task.cpumask())),
+            state: irq_state,
+            _phantom: core::marker::PhantomData,
+        }
+    }
+}
+
 /// Selects a run queue for waking a blocked task.
 ///
-/// Unlike new task placement, wakeups prefer the CPU that performs the wakeup
-/// when the task affinity allows it. This keeps most wakeups local while still
-/// falling back to the task's previous CPU or the normal selector if affinity
-/// requires it.
+/// Prefer the task's previous CPU when its affinity still allows it. This
+/// preserves the task's cache locality and prevents one producer that wakes
+/// several tasks from collapsing all of them onto the producer's CPU.
 #[inline]
 pub(crate) fn select_wake_run_queue<G: GuardState>(task: &AxTaskRef) -> AxRunQueueRef<G> {
     let irq_state = G::acquire();
@@ -592,10 +638,15 @@ pub(crate) fn select_wake_run_queue<G: GuardState>(task: &AxTaskRef) -> AxRunQue
         let current_cpu = this_cpu_id();
         let last_cpu = task.cpu_id() as usize;
         let cpumask = task.cpumask();
-        let index = if cpumask.get(current_cpu) {
-            current_cpu
-        } else if last_cpu < crate::build_info::CPU_CAPACITY && cpumask.get(last_cpu) {
+        let index = if last_cpu < crate::build_info::CPU_CAPACITY
+            && cpumask.get(last_cpu)
+            && RUN_QUEUE_READY[last_cpu].load(core::sync::atomic::Ordering::Acquire)
+        {
             last_cpu
+        } else if cpumask.get(current_cpu)
+            && RUN_QUEUE_READY[current_cpu].load(core::sync::atomic::Ordering::Acquire)
+        {
+            current_cpu
         } else {
             select_run_queue_index(cpumask)
         };
@@ -1451,6 +1502,7 @@ pub(crate) fn init() {
     unsafe {
         RUN_QUEUES[cpu_id].write(run_queue);
     }
+    RUN_QUEUE_READY[cpu_id].store(true, core::sync::atomic::Ordering::Release);
 }
 
 pub(crate) fn init_secondary(stack_ptr: VirtAddr, stack_size: usize) {
@@ -1495,6 +1547,7 @@ pub(crate) fn init_secondary(stack_ptr: VirtAddr, stack_size: usize) {
     unsafe {
         RUN_QUEUES[cpu_id].write(run_queue);
     }
+    RUN_QUEUE_READY[cpu_id].store(true, core::sync::atomic::Ordering::Release);
 }
 
 #[cfg(axtest)]

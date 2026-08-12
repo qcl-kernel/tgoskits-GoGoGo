@@ -35,8 +35,29 @@ pub fn sys_execve(
     envp: *const *const c_char,
 ) -> AxResult<isize> {
     let path = vm_load_string(path)?;
-    let loc = ax_fs_ng::vfs::current_fs_context().lock().resolve(&path)?;
+    let loc = if let Some(fd) = self_fd_number(&path) {
+        match resolve_at(fd, Some(""), AT_EMPTY_PATH)? {
+            ResolveAtResult::File(loc) => loc,
+            ResolveAtResult::Other(file) => file
+                .downcast_ref::<Memfd>()
+                .ok_or(AxError::PermissionDenied)?
+                .inner()
+                .inner()
+                .location()
+                .clone(),
+        }
+    } else {
+        ax_fs_ng::vfs::current_fs_context().lock().resolve(&path)?
+    };
     do_execve(uctx, loc, path, argv, envp)
+}
+
+fn self_fd_number(path: &str) -> Option<c_int> {
+    ["/proc/self/fd/", "/dev/fd/"]
+        .into_iter()
+        .find_map(|prefix| path.strip_prefix(prefix))?
+        .parse()
+        .ok()
 }
 
 /// execveat(2) — like execve, but the program is identified by `dirfd` plus
@@ -416,11 +437,12 @@ fn do_execve(
         has_ldso,
     );
 
-    // All ptrace tracees (both TRACEME and ATTACH) unconditionally
-    // stop with SIGTRAP on execve (Linux ptrace(2)). PTRACE_O_TRACEEXEC
-    // only controls whether the stop carries PTRACE_EVENT_EXEC data,
-    // not whether the stop itself occurs.
-    if proc_data.is_ptrace_traceme() || proc_data.is_ptrace_attached() {
+    // PTRACE_O_TRACEEXEC replaces the legacy exec SIGTRAP with an exec event.
+    // Publish that choice when exec commits so the user-return path cannot
+    // observe both forms of the same stop.
+    if (proc_data.is_ptrace_traceme() || proc_data.is_ptrace_attached())
+        && !crate::syscall::ptrace_notify_exec(proc_data.proc.pid())
+    {
         proc_data.set_ptrace_exec_stop_pending();
     }
 
