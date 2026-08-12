@@ -61,6 +61,7 @@ pub mod irq;
 mod registers;
 #[cfg(feature = "serial")]
 pub mod serial;
+pub mod sync;
 
 #[cfg(all(feature = "net", feature = "fs"))]
 mod unix_ns;
@@ -421,7 +422,10 @@ fn init_interrupt() {
     ax_hal::asm::enable_irqs();
 
     #[cfg(feature = "ipi")]
-    ax_ipi::mark_current_cpu_ready();
+    {
+        ax_hal::asm::flush_tlb(None);
+        ax_ipi::mark_current_cpu_ready();
+    }
 }
 
 #[cfg(feature = "irq")]
@@ -448,7 +452,7 @@ unsafe fn ax_ipi_run_on_cpu_sync(
     f: unsafe fn(*mut ()),
     arg: *mut (),
 ) -> Result<(), ax_hal::irq::IrqError> {
-    unsafe { ax_ipi::run_on_cpu_sync_raw(cpu, f, arg) }
+    unsafe { ax_ipi::call_on_cpu(ax_hal::irq::CpuId(cpu), f, arg) }
 }
 
 #[cfg(feature = "irq")]
@@ -456,44 +460,9 @@ fn periodic_interval_nanos() -> u64 {
     ax_hal::time::NANOS_PER_SEC / ticks_per_sec()
 }
 
-#[cfg(all(feature = "irq", not(feature = "multitask")))]
-const TIMER_PARK_DELAY_NANOS: u64 = ax_hal::time::NANOS_PER_SEC;
-
 #[cfg(feature = "irq")]
 #[ax_percpu::def_percpu]
 static NEXT_PERIODIC_DEADLINE_NANOS: u64 = 0;
-
-#[cfg(feature = "irq")]
-#[ax_percpu::def_percpu]
-static PERIODIC_TIMER_DISABLE_DEPTH: usize = 0;
-
-#[cfg(any(feature = "irq", test))]
-fn next_periodic_disable_depth(depth: usize, enable_periodic: bool) -> usize {
-    if enable_periodic {
-        depth.saturating_sub(1)
-    } else {
-        depth.saturating_add(1)
-    }
-}
-
-#[cfg(any(all(feature = "irq", feature = "multitask"), test))]
-fn publish_periodic_timer_deadline(
-    periodic_deadline_nanos: Option<u64>,
-    publish_periodic_deadline: impl FnOnce(Option<u64>),
-    request_broker_reconciliation: impl FnOnce(),
-) {
-    publish_periodic_deadline(periodic_deadline_nanos);
-    request_broker_reconciliation();
-}
-
-#[cfg(any(all(feature = "irq", not(feature = "multitask")), test))]
-fn program_direct_timer(
-    periodic_deadline_nanos: Option<u64>,
-    fallback_deadline_nanos: u64,
-    program_hardware: impl FnOnce(u64),
-) {
-    program_hardware(periodic_deadline_nanos.unwrap_or(fallback_deadline_nanos));
-}
 
 #[cfg(feature = "irq")]
 fn with_periodic_deadline<R>(
@@ -518,36 +487,7 @@ fn init_timer() {
 }
 
 #[cfg(feature = "irq")]
-fn periodic_timer_enabled() -> bool {
-    with_periodic_deadline(|pin| PERIODIC_TIMER_DISABLE_DEPTH.read_current(pin) == 0)
-}
-
-/// Enables or disables the periodic scheduler timer on the current CPU.
-///
-/// Disabling the periodic timer does not disable the hardware timer IRQ. Any
-/// task or AxVM one-shot deadline is still programmed and delivered. The
-/// default state is enabled for every CPU.
-#[cfg(feature = "irq")]
-pub fn set_current_cpu_periodic_timer_enabled(enabled: bool) {
-    let _guard = ax_kernel_guard::NoPreemptIrqSave::new();
-    with_periodic_deadline(|pin| {
-        let depth = PERIODIC_TIMER_DISABLE_DEPTH.read_current(pin);
-        PERIODIC_TIMER_DISABLE_DEPTH
-            .write_current(pin, next_periodic_disable_depth(depth, enabled));
-        if enabled && depth == 1 {
-            let now_ns = ax_hal::time::monotonic_time_nanos();
-            NEXT_PERIODIC_DEADLINE_NANOS
-                .write_current(pin, now_ns.saturating_add(periodic_interval_nanos()));
-        }
-    });
-    program_next_timer();
-}
-
-#[cfg(feature = "irq")]
 fn advance_periodic_timer(now_ns: u64) -> bool {
-    if !periodic_timer_enabled() {
-        return false;
-    }
     let mut deadline = with_periodic_deadline(|pin| NEXT_PERIODIC_DEADLINE_NANOS.read_current(pin));
     if deadline == 0 {
         with_periodic_deadline(|pin| {
@@ -578,56 +518,43 @@ fn program_next_timer() {
         deadline = now_ns.saturating_add(periodic_interval_nanos());
         with_periodic_deadline(|pin| NEXT_PERIODIC_DEADLINE_NANOS.write_current(pin, deadline));
     }
-    let periodic_deadline = periodic_timer_enabled().then_some(deadline);
-
     #[cfg(feature = "multitask")]
-    publish_periodic_timer_deadline(
-        periodic_deadline,
-        ax_task::set_current_cpu_periodic_timer_deadline_nanos,
-        ax_task::reprogram_current_cpu_timer,
-    );
-
-    #[cfg(not(feature = "multitask"))]
-    program_direct_timer(
-        periodic_deadline,
-        ax_hal::time::monotonic_time_nanos().saturating_add(TIMER_PARK_DELAY_NANOS),
-        ax_hal::time::set_oneshot_timer,
-    );
-}
-
-#[cfg(any(feature = "multitask", test))]
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-struct TaskTimerIrqDispatch {
-    scheduler_tick: bool,
-}
-
-#[cfg(any(feature = "multitask", test))]
-impl TaskTimerIrqDispatch {
-    const fn new(scheduler_tick: bool) -> Self {
-        Self { scheduler_tick }
+    let task_deadline = ax_task::next_timer_deadline_nanos();
+    #[cfg(feature = "multitask")]
+    if let Some(task_deadline) = task_deadline {
+        deadline = core::cmp::min(deadline, task_deadline);
     }
 
-    fn deliver(self, on_timer_irq: impl FnOnce(bool, bool)) {
-        on_timer_irq(self.scheduler_tick, true);
-    }
+    ax_hal::time::set_oneshot_timer(deadline);
+    #[cfg(feature = "multitask")]
+    ax_task::note_programmed_timer_deadline_nanos(deadline);
 }
 
 #[cfg(feature = "irq")]
 fn timer_irq_handler(ctx: ax_hal::irq::IrqContext) -> ax_hal::irq::IrqReturn {
     let _ = ctx;
+    // SAFETY: the local timer IRQ excludes migration and nested local
+    // scheduler-clock publication for this complete stamp.
+    unsafe { ax_hal::time::scheduler_clock_tick() }
+        .expect("current CPU scheduler clock must be online before timer IRQs");
     #[cfg(feature = "multitask")]
     let scheduler_tick = advance_periodic_timer(ax_hal::time::monotonic_time_nanos());
     #[cfg(not(feature = "multitask"))]
     let _ = advance_periodic_timer(ax_hal::time::monotonic_time_nanos());
     #[cfg(feature = "multitask")]
-    TaskTimerIrqDispatch::new(scheduler_tick).deliver(ax_task::on_timer_irq);
+    ax_task::on_timer_irq(scheduler_tick);
     program_next_timer();
     ax_hal::irq::IrqReturn::Handled
 }
 
 #[cfg(all(feature = "irq", feature = "ipi"))]
 fn ipi_irq_handler(_ctx: ax_hal::irq::IrqContext) -> ax_hal::irq::IrqReturn {
-    ax_ipi::ipi_handler();
+    ax_ipi::claim_current_delivery();
+    #[cfg(all(feature = "multitask", feature = "smp"))]
+    ax_task::handle_ipi_reschedule();
+    ax_ipi::drain_hard_calls()
+        .unwrap_or_else(|error| panic!("failed to continue hard-call draining: {error:?}"));
+    ax_ipi::legacy::drain_current_callbacks();
     ax_hal::irq::IrqReturn::Handled
 }
 
@@ -646,69 +573,6 @@ fn init_tls() {
 
 #[cfg(test)]
 mod tests {
-    use core::cell::Cell;
-
-    #[test]
-    fn non_periodic_timer_irq_dispatches_callbacks_without_scheduler_tick() {
-        let observed = Cell::new(None);
-
-        super::TaskTimerIrqDispatch::new(false).deliver(|scheduler_tick, run_callbacks| {
-            observed.set(Some((scheduler_tick, run_callbacks)));
-        });
-
-        assert_eq!(observed.get(), Some((false, true)));
-    }
-
-    #[test]
-    fn periodic_timer_disable_depth_is_nested_and_saturating() {
-        assert_eq!(super::next_periodic_disable_depth(0, false), 1);
-        assert_eq!(super::next_periodic_disable_depth(1, false), 2);
-        assert_eq!(super::next_periodic_disable_depth(2, true), 1);
-        assert_eq!(super::next_periodic_disable_depth(1, true), 0);
-        assert_eq!(super::next_periodic_disable_depth(0, true), 0);
-    }
-
-    #[test]
-    fn multitask_timer_programming_publishes_periodic_deadline_and_reconciles() {
-        let published = Cell::new(None);
-        let reconciliations = Cell::new(0);
-
-        super::publish_periodic_timer_deadline(
-            Some(1_000),
-            |deadline| published.set(Some(deadline)),
-            || reconciliations.set(reconciliations.get() + 1),
-        );
-
-        assert_eq!(published.get(), Some(Some(1_000)));
-        assert_eq!(reconciliations.get(), 1);
-    }
-
-    #[test]
-    fn multitask_tickless_programming_publishes_no_periodic_deadline_and_reconciles() {
-        let published = Cell::new(None);
-        let reconciliations = Cell::new(0);
-
-        super::publish_periodic_timer_deadline(
-            None,
-            |deadline| published.set(Some(deadline)),
-            || reconciliations.set(reconciliations.get() + 1),
-        );
-
-        assert_eq!(published.get(), Some(None));
-        assert_eq!(reconciliations.get(), 1);
-    }
-
-    #[test]
-    fn non_multitask_timer_programming_retains_direct_hardware_path() {
-        let direct_programming = Cell::new(None);
-
-        super::program_direct_timer(Some(1_000), 2_000, |deadline| {
-            direct_programming.set(Some(deadline))
-        });
-
-        assert_eq!(direct_programming.get(), Some(1_000));
-    }
-
     #[test]
     fn fs_init_accepts_bootargs_without_fs_feature() {
         crate::fs::init(Some("root=/dev/nvme0n1"));

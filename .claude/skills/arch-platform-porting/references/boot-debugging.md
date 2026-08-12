@@ -10,11 +10,76 @@ This reference captures project-specific lessons from enabling LoongArch dynamic
 | Build orchestration | `scripts/axbuild/src/{build.rs,context,test/qemu.rs,*}` | arch to target mapping, features, UEFI mode, QEMU command, rootfs image |
 | Test data | `test-suit/{arceos,starryos,axvisor}/**` | runtime TOML, build TOML, regexes, SMP count, firmware mode |
 | Bootloader | `platforms/someboot/src/**` | entry ABI, relocation, memory map, paging, trap, SMP, power |
-| CPU runtime | `components/axcpu/src/<arch>/**` | trap frame layout, context switch, FP/SIMD, user return |
+| CPU runtime | `components/axcpu/src/<arch>/**` | trap frame layout, context switch, FP/SIMD, user return, runtime stage-1 PTE format and TLB semantics |
 | Dynamic platform | `platforms/{axplat-dyn,somehal}/**` | runtime memory/IRQ/timer/power facts from firmware |
 | Drivers | `drivers/**`, `patches/virtio-drivers/**` | MMIO/iomap, DMA, PCI command bits, virtio transport |
 
 When a boot failure appears in a high layer, still audit lower-layer contracts. For example, a Starry rootfs failure can be caused by PCI command bits, and an Axvisor hang can be caused by a someboot post-UEFI handoff.
+
+## Axvisor Resolved Device Graph and Guest Firmware
+
+Axvisor architectures build and resolve their own device graphs before final
+guest firmware generation. The shared graph does not impose a common device
+order: AArch64 still installs VGIC before IRQ consumers, RISC-V retains PLIC
+hart/context setup, x86 retains LAPIC/IOAPIC/PIT/APIC-access ordering, and
+LoongArch retains IOCSR and EXTIOI/PCH cascading.
+
+When debugging a missing device or interrupt, follow one resource slot from
+`DeviceModel::requirements()`, through `ResolvedDeviceGraph`, into both the
+FDT/ACPI plan and `DeviceBuildContext`. Runtime devices must use the resolved
+address and `IrqLine.input()`. The exact dyn model retained by the graph performs
+the build, and the runtime seals only after every `ResourceClaimSet` slot becomes
+a lease. For `console0`, first verify whether machine fallback, host FDT/ACPI
+snapshot, or a same-ID user override supplied the final model and fixed binding.
+MMIO/PIO exits must call the runtime optional-dispatch path once; a `find_*`
+probe followed by a second dispatch indicates a stale routing path.
+
+For x86 direct Linux boot, verify all of the following before changing Linux
+command-line policy:
+
+- the ACPI image fits wholly in `0xe0000..0x100000` and the RSDP is 16-byte aligned;
+- `boot_params.acpi_rsdp_addr` contains that RSDP GPA;
+- E820 reserves the ACPI image and the legacy low-memory window;
+- RSDP/XSDT/table checksums and table pointer closure are valid;
+- the MP table uses the same APIC plan for the explicit `acpi=off` fallback.
+
+For x86 OVMF/BIOS boot, verify graph-fixed PIO windows `0x510..0x512` and
+`0x514..0x51c` are trapped and that fw_cfg publishes `etc/acpi/tables`,
+`etc/acpi/rsdp`, and `etc/table-loader`. A working selector read alone does not
+prove ACPI installation; check table-loader DMA operations and confirm Linux
+uses the XSDT to discover `DSDT`, `APIC`, `FACP`, and `SPCR` under
+`/sys/firmware/acpi/tables` (Linux does not export the root XSDT there).
+
+For the Axvisor x86 nested OVMF validation cases, troubleshoot in this order:
+
+1. List the `normal` group and confirm both `ovmf-acpi-vmx` and
+   `ovmf-acpi-svm` are discovered. Run VMX only on an Intel/VMX KVM host and
+   SVM only on an AMD/SVM KVM host; neither build config may select a backend
+   Cargo feature.
+2. Read the asset-preparation evidence before interpreting firmware output.
+   It records the actual Ostool CODE and VARS paths, byte sizes, SHA-256
+   digests, the split or monolithic layout, and the final 4 MiB guest image.
+   A monolithic CODE image must report the recorded VARS as unused.
+3. Confirm the final guest-image path is the same path selected by
+   `uefi_firmware_path` in the shared guest TOML. Do not confuse this nested
+   firmware with the outer QEMU pflash used to boot the Axvisor host.
+4. Verify fw_cfg publishes the three ACPI files above, then inspect the
+   table-loader allocation, pointer, checksum, and DMA error tests. A selector
+   read or firmware banner is only an intermediate checkpoint.
+5. Require the guest initramfs marker `AXVISOR_X86_OVMF_ACPI_PASSED`. It means
+   OVMF handed off to Linux and Linux accepted DSDT, APIC, FACP, SPCR, ttyS0,
+   and IOAPIC. Preserve the full command, firmware evidence, last reliable
+   state, and first definite error if the marker is absent.
+
+The current nested OVMF cases still receive their Linux kernel, initramfs, and
+command line through fw_cfg. They do not prove a guest PCI boot disk, ESP, or
+Linux EFI-stub boot path, and a failure in those later capabilities must not be
+fixed by changing these validation-only cases.
+
+For AArch64 host replacement, compare every GICR region and stride in the
+immutable firmware plan with the `ArmVgicConfig` passed to the runtime. Do not
+infer configuration by downcasting a registered GIC frontend. Host GIC MMIO
+must remain trapped, and guest writes must never mutate host GICD/GICR state.
 
 ## CPU-local Register Ownership
 
@@ -95,6 +160,7 @@ execution and then fail only on traps or vCPU exits, so it is not a valid fallba
 ## Dynamic UEFI Platform Notes
 
 - Dynamic platform means the platform facts come from firmware/runtime discovery through `someboot`, `somehal`, and `axplat-dyn`. It does not remove the need for arch-specific page table, trap, timer, IRQ, and power code.
+- Keep page-table phases separate while debugging: `someboot` owns boot-table formats and the MMU handoff, `ax-cpu` owns runtime stage-1 PTE/TLB semantics, and virtualization components own stage-2 formats. All may use `page-table-generic` as an execution engine, but that crate must not select the active architecture.
 - Match the x86_64 dynamic UEFI path first: firmware disk layout, `to_bin` behavior, pflash/OVMF handling, and handoff expectations.
 - Keep dynamic platform features aligned across `ax-std`, `ax-hal`, `ax-driver`, `axvm`, and the OS package. A partial `plat-dyn` feature set often compiles but fails after device or memory init.
 - For std/musl targets, derive the initial JSON from a known Rust target where possible, then minimally adjust ABI, linker, relocation model, and soft-float. A `none-softfloat` target passing does not prove musl/std ABI correctness.
@@ -141,6 +207,10 @@ work even when the kernel image and CPU topology are correct.
   Cortex-A72 MPIDRs `0x100` through `0x103`. Keep these hardware IDs separate
   from dense logical CPU indices. Both the maintained single-core board test
   and an eight-core boot have been validated.
+- GICv2 CPU target bits are firmware/controller interface IDs, not dense
+  logical CPU indices. Record each CPU's banked `GICD_ITARGETSR0` mask during
+  per-CPU initialization and reuse that mask for SPI affinity, AxVM-assigned
+  physical SPIs, and SGIs.
 - The RK3576 CRU node must be `rockchip,rk3576-cru` at `0x2720_0000`, size
   `0x50000`. Early driver evidence should include
   `RK3576 CRU reg: addr=0x27200000, size=0x50000` followed by
@@ -209,6 +279,7 @@ device-specific drivers.
 
 ## LoongArch Lessons
 
+- On LS2K1000, repeated `failed to lock LS2K1000 LIOINTC when claiming LIOINTC IRQ` messages immediately after block hctx activation identify a hard-IRQ/controller-lock inversion, not a harmless spurious interrupt. Follow the AArch64 GIC pattern: keep the `rdif_intc` controller and its configuration registers task-owned, and publish a separate LIOINTC CPU interface containing only the ISR/domain/parent/atomic-enable state used by claim/complete. Looking up or locking the controller from hard IRQ lets a level interrupt continuously re-enter before the interrupted task releases its device guard.
 - For U-Boot FIT boot, keep the producer and handoff contracts aligned: use the canonical FIT architecture name `loongarch`, ensure U-Boot passes the DTB at a DTSpec-compliant 8-byte-aligned address, and hand a FIT-provided FDT to someboot through the UHI convention (`a0 = -2`, `a1 = fdt`). Vendor `CONFIG_LOONGSON_BOOT_FIXUP` paths that inspect `legacy_hdr_os` must not run for FIT images.
 - TLB refill entry and general exception entry use different registers and may require different address forms. Do not reuse a high-half virtual symbol where a physical TLB refill vector is required.
 - Relocated symbols must be resolved relative to the running image. In the LoongArch SMP path, the secondary exception vector had to use a runtime symbol helper such as `sym_running_addr!(__exception_vectors)`, while the TLB refill entry needed the corresponding physical address.
@@ -254,6 +325,7 @@ Important details:
 - Check `/opt/qemu-lvz/bin/qemu-system-loongarch64`, OVMF files under `/tmp/ostool/ovmf/loongarch64`, and the musl toolchain before assuming the kernel is at fault.
 - If output reaches `Exiting UEFI boot services...` and stops before the next someboot print, instrument immediately before and after `ExitBootServices`, memory map handoff, first post-exit console call, and MMU/trap setup.
 - Container success still needs host-independent documentation if the CI or developer flow depends on that image.
+- For guest-console failures, distinguish the host UART from the machine-owned guest UART. The host UART must never appear in a guest passthrough set. Check the fixed LoongArch guest resources (`ns16550a` at `0x1fe001e0`, PCH-PIC line 2), the generated FDT/SPCR/DSDT, the virtual PCH-PIC level state, and the Axvisor console mux before changing host IRQ routing.
 
 ## QEMU Debugging Patterns
 

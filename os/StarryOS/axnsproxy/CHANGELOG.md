@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.4](https://github.com/rcore-os/tgoskits/compare/axnsproxy-v0.3.3...axnsproxy-v0.3.4) - 2026-08-09
+
+### Fixed
+
+- *(starry-fs)* expose pidfd fdinfo metadata ([#1851](https://github.com/rcore-os/tgoskits/pull/1851))
+
+### Other
+
+- *(repo)* unify workspace dependencies ([#1860](https://github.com/rcore-os/tgoskits/pull/1860))
+
+## [0.3.3](https://github.com/rcore-os/tgoskits/compare/axnsproxy-v0.3.2...axnsproxy-v0.3.3) - 2026-08-03
+
+### Added
+
+- *(starry)* implement cgroup namespace ([#1642](https://github.com/rcore-os/tgoskits/pull/1642))
+
 ## [0.3.2](https://github.com/rcore-os/tgoskits/compare/axnsproxy-v0.3.1...axnsproxy-v0.3.2) - 2026-07-23
 
 ### Fixed

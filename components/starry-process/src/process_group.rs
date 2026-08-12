@@ -4,7 +4,7 @@ use alloc::{
 };
 use core::fmt;
 
-use ax_kspin::SpinNoIrq;
+use ax_runtime::sync::SpinLock;
 use weak_map::WeakMap;
 
 use crate::{Pid, Process, Session};
@@ -13,19 +13,28 @@ use crate::{Pid, Process, Session};
 pub struct ProcessGroup {
     pgid: Pid,
     pub(crate) session: Arc<Session>,
-    pub(crate) processes: SpinNoIrq<WeakMap<Pid, Weak<Process>>>,
+    pub(crate) processes: SpinLock<WeakMap<Pid, Weak<Process>>>,
 }
 
 impl ProcessGroup {
-    /// Create a new [`ProcessGroup`] within a [`Session`].
-    pub(crate) fn new(pgid: Pid, session: &Arc<Session>) -> Arc<Self> {
+    /// Returns the canonical live process group for `pgid` in `session`.
+    ///
+    /// The session registry serializes process-group creation so that racing
+    /// parent and child `setpgid()` calls converge on one group identity.
+    pub(crate) fn get_or_create(pgid: Pid, session: &Arc<Session>) -> Arc<Self> {
         let group = Arc::new(Self {
             pgid,
             session: session.clone(),
-            processes: SpinNoIrq::new(WeakMap::new()),
+            processes: SpinLock::new(WeakMap::new()),
         });
-        session.process_groups.lock().insert(pgid, &group);
-        group
+
+        let mut groups = session.process_groups.lock_irqsave();
+        if let Some(existing) = groups.get(&pgid) {
+            existing
+        } else {
+            groups.insert(pgid, &group);
+            group
+        }
     }
 }
 
@@ -42,7 +51,7 @@ impl ProcessGroup {
 
     /// The [`Process`]es that belong to this [`ProcessGroup`].
     pub fn processes(&self) -> Vec<Arc<Process>> {
-        self.processes.lock().values().collect()
+        self.processes.lock_irqsave().values().collect()
     }
 }
 
@@ -54,5 +63,38 @@ impl fmt::Debug for ProcessGroup {
             self.pgid,
             self.session.sid()
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    extern crate std;
+
+    use std::{sync::Barrier, thread};
+
+    use super::*;
+
+    #[test]
+    fn duplicate_live_group_identity_reuses_the_session_group() {
+        let session = Session::new(7);
+        let start = Arc::new(Barrier::new(2));
+
+        let first_session = session.clone();
+        let first_start = start.clone();
+        let first = thread::spawn(move || {
+            first_start.wait();
+            ProcessGroup::get_or_create(11, &first_session)
+        });
+        let second = thread::spawn(move || {
+            start.wait();
+            ProcessGroup::get_or_create(11, &session)
+        });
+
+        let first = first.join().unwrap();
+        let second = second.join().unwrap();
+        let session = first.session();
+
+        assert!(Arc::ptr_eq(&first, &second));
+        assert_eq!(session.process_groups().len(), 1);
     }
 }

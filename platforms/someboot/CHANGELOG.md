@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.8](https://github.com/rcore-os/tgoskits/compare/someboot-v0.3.7...someboot-v0.3.8) - 2026-08-09
+
+### Fixed
+
+- *(ax-plat)* add corrected scheduler clock source ([#1900](https://github.com/rcore-os/tgoskits/pull/1900))
+
+### Other
+
+- *(memory)* unify page-table execution on page-table-generic ([#1911](https://github.com/rcore-os/tgoskits/pull/1911))
+- *(repo)* unify workspace dependencies ([#1860](https://github.com/rcore-os/tgoskits/pull/1860))
+
+## [0.3.7](https://github.com/rcore-os/tgoskits/compare/someboot-v0.3.6...someboot-v0.3.7) - 2026-08-03
+
+### Fixed
+
+- *(someboot)* clamp x86 LAPIC timer delta ([#1794](https://github.com/rcore-os/tgoskits/pull/1794))
+- *(someboot)* repair AArch64 EFI handoff ([#1782](https://github.com/rcore-os/tgoskits/pull/1782))
+- *(someboot)* use 64-bit AArch64 timer deadlines ([#1720](https://github.com/rcore-os/tgoskits/pull/1720))
+- *(someboot)* establish runtime CPU topology mapping ([#1710](https://github.com/rcore-os/tgoskits/pull/1710))
+
+### Other
+
+- enhance axtest coverage for various starry-kernel contracts ([#1674](https://github.com/rcore-os/tgoskits/pull/1674))
+
 ## [0.3.6](https://github.com/rcore-os/tgoskits/compare/someboot-v0.3.5...someboot-v0.3.6) - 2026-07-23
 
 ### Other

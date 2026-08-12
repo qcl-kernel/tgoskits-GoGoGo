@@ -18,6 +18,7 @@ extern crate alloc;
 pub mod utils;
 
 mod imp;
+mod sync;
 
 /// Platform-specific constants and parameters.
 pub mod config {
@@ -32,11 +33,14 @@ pub mod ctypes_gen {
     include!(concat!(env!("OUT_DIR"), "/ctypes_gen.rs"));
 }
 
+#[cfg(feature = "eventfd")]
+pub use imp::eventfd::sys_eventfd;
 #[cfg(feature = "fd")]
 pub use imp::fd_ops::{sys_close, sys_dup, sys_dup2, sys_fcntl};
 #[cfg(feature = "fs")]
 pub use imp::fs::{
-    sys_fstat, sys_getcwd, sys_getdents64, sys_lseek, sys_lstat, sys_open, sys_rename, sys_stat,
+    sys_fstat, sys_futimens, sys_getcwd, sys_getdents64, sys_lseek, sys_lstat, sys_open,
+    sys_rename, sys_stat,
 };
 #[cfg(feature = "poll")]
 pub use imp::io_mpx::sys_poll;

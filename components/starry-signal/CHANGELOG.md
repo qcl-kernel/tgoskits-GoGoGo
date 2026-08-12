@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.13](https://github.com/rcore-os/tgoskits/compare/starry-signal-v0.8.12...starry-signal-v0.8.13) - 2026-08-09
+
+### Other
+
+- *(repo)* unify workspace dependencies ([#1860](https://github.com/rcore-os/tgoskits/pull/1860))
+
+## [0.8.12](https://github.com/rcore-os/tgoskits/compare/starry-signal-v0.8.11...starry-signal-v0.8.12) - 2026-08-03
+
+### Added
+
+- *(signal)* deliver synchronous fault signals before other pending signals ([#1700](https://github.com/rcore-os/tgoskits/pull/1700))
+
 ## [0.8.11](https://github.com/rcore-os/tgoskits/compare/starry-signal-v0.8.10...starry-signal-v0.8.11) - 2026-07-23
 
 ### Added

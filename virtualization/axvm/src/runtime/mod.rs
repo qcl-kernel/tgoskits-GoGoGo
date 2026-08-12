@@ -18,14 +18,14 @@ pub(crate) mod vcpus;
 
 mod dispatcher;
 mod queue;
-use core::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 // Re-exported for [`VmRuntimeHandle`](crate::vm::VmRuntimeHandle) which will
 // embed the dispatcher as a field and expose it to the vCPU run loop.
 #[allow(unused_imports)]
 pub(crate) use dispatcher::VcpuIrqDispatcher;
 
-use crate::{AxVmError, AxVmResult, StopReason, VmStatus, ax_err, config::HostTimerPolicy};
+use crate::{AxVmError, AxVmResult, StopReason, VmStatus, ax_err};
 
 /// The instantiated VM ref type (by `Arc`).
 pub type VMRef = crate::AxVMRef;
@@ -37,68 +37,6 @@ static VMM: crate::HostWaitQueueHandle = crate::HostWaitQueueHandle::new();
 /// The number of running VMs. This is used to determine when to exit the VMM.
 static RUNNING_VM_COUNT: AtomicUsize = AtomicUsize::new(0);
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum PeriodicTimerState {
-    Enabled,
-    Disabled,
-}
-
-trait CurrentCpuPeriodicTimer {
-    fn set_periodic_timer_state(&self, state: PeriodicTimerState);
-}
-
-struct CurrentCpuTimerControl;
-
-impl CurrentCpuPeriodicTimer for CurrentCpuTimerControl {
-    fn set_periodic_timer_state(&self, state: PeriodicTimerState) {
-        crate::host::task::set_current_cpu_periodic_timer_enabled(matches!(
-            state,
-            PeriodicTimerState::Enabled
-        ));
-    }
-}
-
-struct HostTimerPolicyScope<'a, T: CurrentCpuPeriodicTimer> {
-    timer: &'a T,
-    tickless: bool,
-}
-
-impl<'a, T: CurrentCpuPeriodicTimer> HostTimerPolicyScope<'a, T> {
-    fn enter(policy: HostTimerPolicy, timer: &'a T) -> Self {
-        let tickless = policy == HostTimerPolicy::Tickless;
-        if tickless {
-            timer.set_periodic_timer_state(PeriodicTimerState::Disabled);
-        }
-        Self { timer, tickless }
-    }
-}
-
-impl<T: CurrentCpuPeriodicTimer> Drop for HostTimerPolicyScope<'_, T> {
-    fn drop(&mut self) {
-        if self.tickless {
-            self.timer
-                .set_periodic_timer_state(PeriodicTimerState::Enabled);
-        }
-    }
-}
-
-fn with_vcpu_host_timer_policy<T, R>(
-    policy: HostTimerPolicy,
-    timer: &T,
-    guest_run: impl FnOnce() -> R,
-) -> R
-where
-    T: CurrentCpuPeriodicTimer,
-{
-    let _scope = HostTimerPolicyScope::enter(policy, timer);
-    guest_run()
-}
-
-pub(crate) fn run_vcpu_with_host_timer_policy<R>(vm: &VMRef, guest_run: impl FnOnce() -> R) -> R {
-    let policy = vm.with_config(|config| config.host_timer_policy());
-    with_vcpu_host_timer_policy(policy, &CurrentCpuTimerControl, guest_run)
-}
-
 /// Initialize runtime state for already registered VMs.
 pub fn init() {
     info!("Initializing VMM...");
@@ -106,18 +44,30 @@ pub fn init() {
 
 /// Start the VMM.
 pub fn start() {
+    launch_all();
+    wait_for_all();
+}
+
+/// Start all registered VMs and return the IDs that entered Running.
+pub fn launch_all() -> std::vec::Vec<usize> {
     info!("VMM starting, booting VMs...");
+    let mut started = std::vec::Vec::new();
     for vm in crate::get_vm_list() {
         match vm.start() {
             Ok(_) => {
                 RUNNING_VM_COUNT.fetch_add(1, Ordering::Release);
                 vcpus::notify_primary_vcpu(vm.id());
-                info!("VM[{}] boot success", vm.id())
+                started.push(vm.id());
+                info!("VM[{}] boot success", vm.id());
             }
             Err(err) => warn!("VM[{}] boot failed, error {:?}", vm.id(), err),
         }
     }
+    started
+}
 
+/// Wait until every counted VM runtime has stopped.
+pub fn wait_for_all() {
     // Do not exit until all VMs are stopped.
     crate::host::task::wait_queue_wait_until(&VMM, || {
         let vm_count = RUNNING_VM_COUNT.load(Ordering::Acquire);
@@ -156,6 +106,17 @@ pub fn start_vm(vm_id: usize) -> AxVmResult {
     add_running_vm_count(1);
     vcpus::notify_primary_vcpu(vm_id);
     Ok(())
+}
+
+/// Wake the primary vCPU of a VM.
+pub fn notify_vm(vm_id: usize) -> AxVmResult {
+    vm_by_id(vm_id)?;
+    notify_vm_with_wake(|| vcpus::notify_primary_vcpu(vm_id));
+    Ok(())
+}
+
+fn notify_vm_with_wake(wake_vcpu: impl FnOnce()) {
+    wake_vcpu();
 }
 
 pub fn stop_vm(vm_id: usize) -> AxVmResult {
@@ -202,72 +163,9 @@ const fn missing_vm_error(vm_id: usize) -> AxVmError {
 
 #[cfg(test)]
 mod tests {
-    use std::{
-        cell::RefCell,
-        panic::{AssertUnwindSafe, catch_unwind},
-        vec,
-        vec::Vec,
-    };
+    use std::{cell::RefCell, vec::Vec};
 
     use super::*;
-
-    #[derive(Default)]
-    struct RecordingTimerControl {
-        states: RefCell<Vec<PeriodicTimerState>>,
-    }
-
-    impl CurrentCpuPeriodicTimer for RecordingTimerControl {
-        fn set_periodic_timer_state(&self, state: PeriodicTimerState) {
-            self.states.borrow_mut().push(state);
-        }
-    }
-
-    #[test]
-    fn tickless_policy_is_scoped_to_a_successful_guest_run() {
-        let timer = RecordingTimerControl::default();
-
-        let result = with_vcpu_host_timer_policy(HostTimerPolicy::Tickless, &timer, || {
-            assert_eq!(*timer.states.borrow(), vec![PeriodicTimerState::Disabled]);
-            42
-        });
-
-        assert_eq!(result, 42);
-        assert_eq!(
-            *timer.states.borrow(),
-            vec![PeriodicTimerState::Disabled, PeriodicTimerState::Enabled]
-        );
-    }
-
-    #[test]
-    fn tickless_policy_is_restored_when_guest_run_returns_an_error() {
-        let timer = RecordingTimerControl::default();
-
-        let result: Result<(), &'static str> =
-            with_vcpu_host_timer_policy(HostTimerPolicy::Tickless, &timer, || Err("vm exit"));
-
-        assert_eq!(result, Err("vm exit"));
-        assert_eq!(
-            *timer.states.borrow(),
-            vec![PeriodicTimerState::Disabled, PeriodicTimerState::Enabled]
-        );
-    }
-
-    #[test]
-    fn tickless_policy_is_restored_when_guest_run_unwinds() {
-        let timer = RecordingTimerControl::default();
-
-        let result = catch_unwind(AssertUnwindSafe(|| {
-            with_vcpu_host_timer_policy(HostTimerPolicy::Tickless, &timer, || {
-                panic!("guest run panic")
-            });
-        }));
-
-        assert!(result.is_err());
-        assert_eq!(
-            *timer.states.borrow(),
-            vec![PeriodicTimerState::Disabled, PeriodicTimerState::Enabled]
-        );
-    }
 
     #[test]
     fn reset_counts_replacement_runtime_for_every_restartable_state() {
@@ -289,5 +187,15 @@ mod tests {
     fn missing_vm_is_reported_with_its_id() {
         let vm_id = usize::MAX;
         assert_eq!(missing_vm_error(vm_id), AxVmError::VmNotFound { vm_id });
+    }
+
+    #[test]
+    fn console_notification_does_not_poll_devices_from_the_host_input_task() {
+        let steps = RefCell::new(Vec::new());
+        notify_vm_with_wake(|| {
+            assert!(steps.borrow().is_empty());
+            steps.borrow_mut().push("wake");
+        });
+        assert_eq!(steps.into_inner(), ["wake"]);
     }
 }

@@ -7,6 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.3](https://github.com/rcore-os/tgoskits/compare/ax-driver-v0.12.2...ax-driver-v0.12.3) - 2026-08-09
+
+### Fixed
+
+- *(rknpu)* set RK3588 NPU clock to 800 MHz ([#1908](https://github.com/rcore-os/tgoskits/pull/1908))
+- *(dwmmc)* restore RK3588 SD card boot ([#1830](https://github.com/rcore-os/tgoskits/pull/1830))
+
+### Other
+
+- *(axvm)* unify guest devices and AArch64 timer ownership ([#1717](https://github.com/rcore-os/tgoskits/pull/1717))
+
+## [0.12.2](https://github.com/rcore-os/tgoskits/compare/ax-driver-v0.12.1...ax-driver-v0.12.2) - 2026-08-03
+
+### Added
+
+- *(ahci-driver)* add portable multi-disk AHCI support ([#1795](https://github.com/rcore-os/tgoskits/pull/1795))
+- *(rockchip)* add RK3576 ROCK 4D support ([#1704](https://github.com/rcore-os/tgoskits/pull/1704))
+- *(cpufreq)* RK3588 ondemand CPU DVFS with voltage calibration ([#1657](https://github.com/rcore-os/tgoskits/pull/1657))
+- *(axvisor)* support StarryOS guest on Orange Pi 5 Plus ([#1684](https://github.com/rcore-os/tgoskits/pull/1684))
+
+### Fixed
+
+- *(dma-api)* retire legacy axdma release paths ([#1796](https://github.com/rcore-os/tgoskits/pull/1796))
+
+### Other
+
+- *(block)* adopt IRQ-driven multi-queue runtime ([#1768](https://github.com/rcore-os/tgoskits/pull/1768))
+- enhance axtest coverage for various starry-kernel contracts ([#1674](https://github.com/rcore-os/tgoskits/pull/1674))
+
 ### Changed
 
 - Defer SD/eMMC protocol initialization to the block hctx and configure every

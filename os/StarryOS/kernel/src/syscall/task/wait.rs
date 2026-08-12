@@ -14,6 +14,7 @@ use starry_process::{Pid, Process};
 use starry_signal::{SignalInfo, Signo};
 use starry_vm::{VmMutPtr, VmPtr};
 
+use super::ptrace::PTRACE_EVENT_STOP;
 use crate::{
     file::{PidFd, get_file_like},
     task::{
@@ -114,7 +115,7 @@ fn waitid_pidfd_target(fd: i32) -> AxResult<WaitTarget> {
 }
 fn stopped_wait_signo(data: &ProcessData, signo: Signo) -> i32 {
     let event = data.ptrace_event().unwrap_or(0);
-    let mut wait_signo = if event != 0 {
+    let mut wait_signo = if event != 0 && event != PTRACE_EVENT_STOP {
         Signo::SIGTRAP as i32
     } else {
         signo as i32
@@ -257,19 +258,25 @@ pub fn sys_waitpid(pid: i32, exit_code: *mut i32, options: u32) -> AxResult<isiz
         WaitTarget::Pgid(-pid as _)
     };
 
-    let children = waitable_processes(
-        proc,
-        &target,
-        proc.pid(),
-        thr.tid(),
-        WaitChildFilter::from_waitpid_options(&options),
-    );
-    if children.is_empty() {
+    let scan_children = || {
+        waitable_processes(
+            proc,
+            &target,
+            proc.pid(),
+            thr.tid(),
+            WaitChildFilter::from_waitpid_options(&options),
+        )
+    };
+    if scan_children().is_empty() {
         return Err(AxError::from(LinuxError::ECHILD));
     }
 
     let proc_data = curr.as_thread().proc_data.clone();
     let check_children = || {
+        // Linux rescans the authoritative child and ptrace relationships after
+        // every wake; another thread can publish an eligible child while this
+        // waiter is blocked.
+        let children = scan_children();
         if let Some((child, data, stop_tid, signo)) = children.iter().find_map(|child| {
             get_process_data(child.pid()).ok().and_then(|data| {
                 let preferred_tid = target.ptrace_preferred_stop_tid(child);
@@ -387,19 +394,22 @@ pub fn sys_waitid(
 
     info!("sys_waitid <= idtype: {idtype}, id: {id}, options: {options:?}");
 
-    let children = waitable_processes(
-        proc,
-        &target,
-        proc.pid(),
-        thr.tid(),
-        WaitChildFilter::from_waitid_options(&options),
-    );
-    if children.is_empty() {
+    let scan_children = || {
+        waitable_processes(
+            proc,
+            &target,
+            proc.pid(),
+            thr.tid(),
+            WaitChildFilter::from_waitid_options(&options),
+        )
+    };
+    if scan_children().is_empty() {
         return Err(AxError::from(LinuxError::ECHILD));
     }
 
     let proc_data = curr.as_thread().proc_data.clone();
     let check_children = || {
+        let children = scan_children();
         if options.contains(WaitIdOptions::WUNTRACED)
             && let Some((child, data, stop_tid, signo)) = children.iter().find_map(|child| {
                 get_process_data(child.pid()).ok().and_then(|data| {

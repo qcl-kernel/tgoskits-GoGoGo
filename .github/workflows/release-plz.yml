@@ -11,6 +11,7 @@ permissions:
 
 env:
   CARGO_TERM_COLOR: always
+  RUSTUP_TOOLCHAIN: stable
 
 concurrency:
   group: release-plz-${{ github.ref }}
@@ -35,6 +36,9 @@ jobs:
       - &install-rust
         name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
+
+      - name: Preflight workspace packages
+        run: cargo publish --workspace --dry-run --no-verify
 
       - name: Run release-plz
         uses: release-plz/action@v0.5

@@ -24,12 +24,34 @@ pub use self::{
 use crate::task::{AsThread, SeccompDecision, do_exit, seccomp_errno};
 
 pub fn syscall_allows_signal_restart(sysno: usize) -> bool {
-    // Per signal(7), only the System V message-queue blocking calls (msgsnd /
-    // msgrcv) are never restarted even with SA_RESTART. The POSIX message-queue
-    // calls (mq_send / mq_receive / mq_timedsend / mq_timedreceive) ARE in the
-    // SA_RESTART-restartable set, so they must not be listed here or a handler
-    // installed with SA_RESTART would wrongly see EINTR.
-    !matches!(Sysno::new(sysno), Some(Sysno::msgsnd | Sysno::msgrcv))
+    // Linux never restarts fd-multiplexing waits or System V message-queue
+    // blocking calls, even when the delivered handler uses SA_RESTART. Keep
+    // the classification here because signal delivery only sees the syscall
+    // number and the interrupted -EINTR result.
+    let Some(sysno) = Sysno::new(sysno) else {
+        return true;
+    };
+
+    if matches!(
+        sysno,
+        Sysno::ppoll
+            | Sysno::pselect6
+            | Sysno::epoll_pwait
+            | Sysno::epoll_pwait2
+            | Sysno::msgsnd
+            | Sysno::msgrcv
+    ) {
+        return false;
+    }
+
+    // The legacy multiplexing entry points exist in the x86_64 syscall table
+    // but not in the generic tables used by riscv64, aarch64, and loongarch64.
+    #[cfg(target_arch = "x86_64")]
+    if matches!(sysno, Sysno::poll | Sysno::select | Sysno::epoll_wait) {
+        return false;
+    }
+
+    true
 }
 
 // `#[inline(never)]` keeps `sysno` reachable as a real call target so a kprobe
@@ -470,6 +492,29 @@ pub fn handle_syscall(uctx: &mut UserContext) {
         ) as _,
         Sysno::umount2 => sys_umount2(uctx.arg0() as _, uctx.arg1() as _) as _,
         Sysno::pivot_root => sys_pivot_root(uctx.arg0() as _, uctx.arg1() as _) as _,
+        Sysno::fsopen => sys_fsopen(uctx.arg0() as _, uctx.arg1() as _),
+        Sysno::fsconfig => sys_fsconfig(
+            uctx.arg0() as _,
+            uctx.arg1() as _,
+            uctx.arg2() as _,
+            uctx.arg3() as _,
+            uctx.arg4() as _,
+        ),
+        Sysno::fsmount => sys_fsmount(uctx.arg0() as _, uctx.arg1() as _, uctx.arg2() as _),
+        Sysno::move_mount => sys_move_mount(
+            uctx.arg0() as _,
+            uctx.arg1() as _,
+            uctx.arg2() as _,
+            uctx.arg3() as _,
+            uctx.arg4() as _,
+        ),
+        Sysno::mount_setattr => sys_mount_setattr(
+            uctx.arg0() as _,
+            uctx.arg1() as _,
+            uctx.arg2() as _,
+            uctx.arg3() as _,
+            uctx.arg4() as _,
+        ),
 
         // pipe
         Sysno::pipe2 => sys_pipe2(uctx.arg0() as _, uctx.arg1() as _),
@@ -953,13 +998,9 @@ pub fn handle_syscall(uctx: &mut UserContext) {
             uctx.arg3() as _,
         ),
 
-        // The new mount API (fsopen/fsconfig/fsmount/move_mount, plus
-        // fspick/open_tree) is not implemented. Report ENOSYS instead of
-        // handing back a dummy fd: systemd probes this API and only falls back
-        // to the classic mount(2) — which we do support — when the entry point
-        // reports "not supported". A fake fd traps it into the new path, where
-        // the follow-up fsconfig then hard-fails and aborts the mount.
-        Sysno::fsopen | Sysno::fspick | Sysno::open_tree => Err(AxError::Unsupported),
+        // fspick/open_tree remain unsupported. Report ENOSYS instead of a
+        // dummy fd so callers can select their classic-mount fallback.
+        Sysno::fspick | Sysno::open_tree => Err(AxError::Unsupported),
 
         // dummy fds
         Sysno::userfaultfd | Sysno::memfd_secret => sys_dummy_fd(sysno),
@@ -1032,13 +1073,24 @@ pub(crate) fn membarrier_validation_rules_hold_for_test() -> bool {
 
 #[cfg(axtest)]
 pub(crate) fn syscall_signal_restart_rules_hold_for_test() -> bool {
-    // syscall_allows_signal_restart: returns false only for msgsnd and msgrcv.
     use syscalls::Sysno;
-    assert!(syscall_allows_signal_restart(0)); // invalid syscall → true
-    assert!(syscall_allows_signal_restart(Sysno::read as usize)); // read → true
-    assert!(syscall_allows_signal_restart(Sysno::write as usize)); // write → true
-    assert!(!syscall_allows_signal_restart(Sysno::msgsnd as usize)); // msgsnd → false
-    assert!(!syscall_allows_signal_restart(Sysno::msgrcv as usize)); // msgrcv → false
+
+    assert!(syscall_allows_signal_restart(Sysno::read as usize));
+    assert!(syscall_allows_signal_restart(Sysno::write as usize));
+    for sysno in [
+        Sysno::ppoll,
+        Sysno::pselect6,
+        Sysno::epoll_pwait,
+        Sysno::epoll_pwait2,
+        Sysno::msgsnd,
+        Sysno::msgrcv,
+    ] {
+        assert!(!syscall_allows_signal_restart(sysno as usize));
+    }
+    #[cfg(target_arch = "x86_64")]
+    for sysno in [Sysno::poll, Sysno::select, Sysno::epoll_wait] {
+        assert!(!syscall_allows_signal_restart(sysno as usize));
+    }
     true
 }
 

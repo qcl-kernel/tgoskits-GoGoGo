@@ -2,15 +2,18 @@ use alloc::sync::Arc;
 use core::{
     ffi::{c_char, c_int},
     mem::size_of,
+    time::Duration,
 };
 
 use ax_errno::{LinuxError, LinuxResult};
-use ax_fs_ng::fops::{FileAttrExt, OpenOptions};
+use ax_fs_ng::fops::OpenOptions;
 use ax_io::{PollState, SeekFrom};
-use ax_sync::Mutex;
 
 use super::fd_ops::{FileLike, get_file_like};
-use crate::{ctypes, utils::char_ptr_to_str};
+use crate::{ctypes, sync::Mutex, utils::char_ptr_to_str};
+
+const UTIME_NOW: i64 = (1 << 30) - 1;
+const UTIME_OMIT: i64 = (1 << 30) - 2;
 
 pub struct File {
     inner: Mutex<ax_fs_ng::fops::File>,
@@ -85,6 +88,32 @@ fn file_type_to_d_type(ty: ax_fs_ng::fops::FileType) -> u8 {
     }
 }
 
+fn metadata_to_stat(metadata: ax_fs_ng::fops::FileAttr) -> ctypes::stat {
+    let st_mode = ((metadata.node_type as u32) << 12) | metadata.mode.bits() as u32;
+    ctypes::stat {
+        st_dev: metadata.device as _,
+        st_ino: metadata.inode as _,
+        st_nlink: metadata.nlink as _,
+        st_mode,
+        st_uid: metadata.uid as _,
+        st_gid: metadata.gid as _,
+        st_rdev: metadata.rdev.0 as _,
+        st_size: metadata.size as _,
+        st_blksize: metadata.block_size as _,
+        st_blocks: metadata.blocks as _,
+        st_atime: duration_to_timespec(metadata.atime),
+        st_mtime: duration_to_timespec(metadata.mtime),
+        st_ctime: duration_to_timespec(metadata.ctime),
+    }
+}
+
+fn duration_to_timespec(duration: Duration) -> ctypes::timespec {
+    ctypes::timespec {
+        tv_sec: duration.as_secs() as _,
+        tv_nsec: duration.subsec_nanos() as _,
+    }
+}
+
 impl File {
     fn new(inner: ax_fs_ng::fops::File) -> Self {
         Self {
@@ -134,20 +163,7 @@ impl FileLike for File {
 
     fn stat(&self) -> LinuxResult<ctypes::stat> {
         let metadata = self.inner.lock().get_attr()?;
-        let ty = metadata.file_type() as u8;
-        let perm = metadata.perm().bits() as u32;
-        let st_mode = ((ty as u32) << 12) | perm;
-        Ok(ctypes::stat {
-            st_ino: 1,
-            st_nlink: 1,
-            st_mode,
-            st_uid: 1000,
-            st_gid: 1000,
-            st_size: metadata.size() as _,
-            st_blocks: metadata.blocks() as _,
-            st_blksize: 512,
-            ..Default::default()
-        })
+        Ok(metadata_to_stat(metadata))
     }
 
     fn into_any(self: Arc<Self>) -> Arc<dyn core::any::Any + Send + Sync> {
@@ -229,7 +245,7 @@ fn flags_to_options(flags: c_int, _mode: ctypes::mode_t) -> OpenOptions {
     if flags & ctypes::O_CREAT != 0 {
         options.create(true);
     }
-    if flags & ctypes::O_EXEC != 0 {
+    if flags & ctypes::O_EXCL != 0 {
         options.create_new(true);
     }
     options
@@ -320,10 +336,7 @@ pub unsafe fn sys_stat(path: *const c_char, buf: *mut ctypes::stat) -> c_int {
         if buf.is_null() {
             return Err(LinuxError::EFAULT);
         }
-        let mut options = OpenOptions::new();
-        options.read(true);
-        let file = ax_fs_ng::fops::File::open(path?, &options)?;
-        let st = File::new(file).stat()?;
+        let st = metadata_to_stat(ax_fs_ng::api::metadata(path?)?);
         unsafe { *buf = st };
         Ok(0)
     })
@@ -344,6 +357,64 @@ pub unsafe fn sys_fstat(fd: c_int, buf: *mut ctypes::stat) -> c_int {
     })
 }
 
+/// Update the access and modification times of an open file descriptor.
+///
+/// A null `times` pointer sets both timestamps to the current wall-clock time.
+/// Individual timestamps also support the Linux `UTIME_NOW` and `UTIME_OMIT`
+/// values in `tv_nsec`.
+///
+/// # Safety
+///
+/// When non-null, `times` must point to two readable [`ctypes::timespec`]
+/// values for the duration of this call.
+pub unsafe fn sys_futimens(fd: c_int, times: *const ctypes::timespec) -> c_int {
+    debug!("sys_futimens <= {fd} {:#x}", times as usize);
+    syscall_body!(sys_futimens, {
+        let file = File::from_fd(fd)?;
+        let (atime, mtime) = unsafe { futimens_times(times)? };
+        if atime.is_none() && mtime.is_none() {
+            return Ok(0);
+        }
+        file.inner.lock().set_times(atime, mtime)?;
+        Ok(0)
+    })
+}
+
+unsafe fn futimens_times(
+    times: *const ctypes::timespec,
+) -> LinuxResult<(Option<Duration>, Option<Duration>)> {
+    let now = ax_hal::time::wall_time();
+    if times.is_null() {
+        return Ok((Some(now), Some(now)));
+    }
+
+    let times = unsafe { core::slice::from_raw_parts(times, 2) };
+    Ok((
+        file_time_from_timespec(times[0], now)?,
+        file_time_from_timespec(times[1], now)?,
+    ))
+}
+
+fn file_time_from_timespec(
+    timespec: ctypes::timespec,
+    now: Duration,
+) -> LinuxResult<Option<Duration>> {
+    match timespec.tv_nsec {
+        UTIME_NOW => Ok(Some(now)),
+        UTIME_OMIT => Ok(None),
+        nanoseconds
+            if (0..=u32::MAX as i64).contains(&timespec.tv_sec)
+                && (0..1_000_000_000).contains(&nanoseconds) =>
+        {
+            Ok(Some(Duration::new(
+                timespec.tv_sec as u64,
+                nanoseconds as u32,
+            )))
+        }
+        _ => Err(LinuxError::EINVAL),
+    }
+}
+
 /// Get the metadata of the symbolic link and write into `buf`.
 ///
 /// Return 0 if success.
@@ -354,11 +425,7 @@ pub unsafe fn sys_lstat(path: *const c_char, buf: *mut ctypes::stat) -> ctypes::
         if buf.is_null() {
             return Err(LinuxError::EFAULT);
         }
-        // ArceOS currently doesn't support symbolic links, so lstat behaves the same as stat
-        let mut options = OpenOptions::new();
-        options.read(true);
-        let file = ax_fs_ng::fops::File::open(path?, &options)?;
-        let st = File::new(file).stat()?;
+        let st = metadata_to_stat(ax_fs_ng::api::symlink_metadata(path?)?);
         unsafe { *buf = st };
         Ok(0)
     })
@@ -397,4 +464,111 @@ pub fn sys_rename(old: *const c_char, new: *const c_char) -> c_int {
         ax_fs_ng::api::rename(old_path, new_path)?;
         Ok(0)
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use ax_fs_ng::fops::{FileAttr, FilePerm, FileType};
+
+    use super::*;
+
+    #[test]
+    fn metadata_to_stat_preserves_filesystem_attributes() {
+        let metadata = FileAttr {
+            device: 3,
+            inode: 17,
+            nlink: 2,
+            mode: FilePerm::from_bits_retain(0o640),
+            node_type: FileType::RegularFile,
+            uid: 1001,
+            gid: 1002,
+            size: 4097,
+            block_size: 4096,
+            blocks: 16,
+            rdev: Default::default(),
+            atime: Duration::new(10, 11),
+            mtime: Duration::new(12, 13),
+            ctime: Duration::new(14, 15),
+        };
+
+        let stat = metadata_to_stat(metadata);
+
+        assert_eq!(stat.st_dev, 3);
+        assert_eq!(stat.st_ino, 17);
+        assert_eq!(stat.st_nlink, 2);
+        assert_eq!(stat.st_mode, 0o100640);
+        assert_eq!(stat.st_uid, 1001);
+        assert_eq!(stat.st_gid, 1002);
+        assert_eq!(stat.st_size, 4097);
+        assert_eq!(stat.st_blksize, 4096);
+        assert_eq!(stat.st_blocks, 16);
+        assert_eq!(stat.st_atime.tv_sec, 10);
+        assert_eq!(stat.st_atime.tv_nsec, 11);
+        assert_eq!(stat.st_mtime.tv_sec, 12);
+        assert_eq!(stat.st_mtime.tv_nsec, 13);
+        assert_eq!(stat.st_ctime.tv_sec, 14);
+        assert_eq!(stat.st_ctime.tv_nsec, 15);
+    }
+
+    #[test]
+    fn file_time_from_timespec_handles_linux_special_values() {
+        let now = Duration::new(30, 40);
+
+        assert_eq!(
+            file_time_from_timespec(
+                ctypes::timespec {
+                    tv_sec: 0,
+                    tv_nsec: UTIME_NOW as _,
+                },
+                now,
+            ),
+            Ok(Some(now))
+        );
+        assert_eq!(
+            file_time_from_timespec(
+                ctypes::timespec {
+                    tv_sec: 0,
+                    tv_nsec: UTIME_OMIT as _,
+                },
+                now,
+            ),
+            Ok(None)
+        );
+    }
+
+    #[test]
+    fn file_time_from_timespec_rejects_invalid_values() {
+        let now = Duration::ZERO;
+
+        assert_eq!(
+            file_time_from_timespec(
+                ctypes::timespec {
+                    tv_sec: -1,
+                    tv_nsec: 0,
+                },
+                now,
+            ),
+            Err(LinuxError::EINVAL)
+        );
+        assert_eq!(
+            file_time_from_timespec(
+                ctypes::timespec {
+                    tv_sec: 0,
+                    tv_nsec: 1_000_000_000,
+                },
+                now,
+            ),
+            Err(LinuxError::EINVAL)
+        );
+        assert_eq!(
+            file_time_from_timespec(
+                ctypes::timespec {
+                    tv_sec: u32::MAX as i64 + 1,
+                    tv_nsec: 0,
+                },
+                now,
+            ),
+            Err(LinuxError::EINVAL)
+        );
+    }
 }

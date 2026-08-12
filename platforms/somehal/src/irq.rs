@@ -1,17 +1,13 @@
 use alloc::vec::Vec;
 use core::sync::atomic::{AtomicU16, Ordering};
 
-#[cfg(not(test))]
-use ax_kspin::SpinNoIrq as IrqRouteMutex;
-use ax_kspin::SpinRaw as Mutex;
-#[cfg(test)]
-use ax_kspin::SpinRaw as IrqRouteMutex;
+use ax_sync::{RawSpinLockGuard, SpinLock, SpinLockIrqSaveGuard};
 pub use rdif_intc;
 use rdif_intc::Intc;
 pub type ControllerIrqId = irq_framework::IrqId;
 pub use irq_framework::{
-    AcpiGsiController, AcpiGsiRoute, AcpiIrqPolarity, AcpiIrqTrigger, HwIrq, IrqDomainId, IrqError,
-    IrqId, IrqSource,
+    AcpiGsiController, AcpiGsiRoute, AcpiIrqPolarity, AcpiIrqTrigger, CpuId, HwIrq, IrqDomainId,
+    IrqError, IrqId, IrqSource, IrqTrigger,
 };
 use rdrive::{Device, DeviceId};
 
@@ -68,13 +64,18 @@ struct IrqRoute {
     leaf: IrqId,
 }
 
-static IRQ_DOMAINS: Mutex<Vec<IrqDomain>> = Mutex::new(Vec::new());
-static IRQ_ROUTES: IrqRouteMutex<Vec<IrqRoute>> = IrqRouteMutex::new(Vec::new());
+static IRQ_DOMAINS: SpinLock<Vec<IrqDomain>> = SpinLock::new(Vec::new());
+static IRQ_ROUTES: SpinLock<Vec<IrqRoute>> = SpinLock::new(Vec::new());
 
-#[cfg(not(test))]
-const _: fn(&IrqRouteMutex<Vec<IrqRoute>>) = |lock| {
-    let _: &ax_kspin::SpinNoIrq<Vec<IrqRoute>> = lock;
-};
+fn irq_domains() -> RawSpinLockGuard<'static, Vec<IrqDomain>> {
+    // SAFETY: callers preserve the legacy raw-lock contract and exclude local
+    // re-entry while mutating the global domain registry.
+    unsafe { IRQ_DOMAINS.lock_raw() }
+}
+
+fn irq_routes() -> SpinLockIrqSaveGuard<'static, Vec<IrqRoute>> {
+    IRQ_ROUTES.lock_irqsave()
+}
 static X86_IOAPIC_DOMAIN_SLOT: AtomicU16 = AtomicU16::new(INVALID_IRQ_DOMAIN);
 static X86_MSI_DOMAIN_SLOT: AtomicU16 = AtomicU16::new(INVALID_IRQ_DOMAIN);
 static AARCH64_GIC_DOMAIN_SLOT: AtomicU16 = AtomicU16::new(INVALID_IRQ_DOMAIN);
@@ -118,7 +119,7 @@ fn register_domain(
     parent: Option<IrqDomainId>,
     kind: IrqDomainKind,
 ) -> Result<IrqDomainId, IrqError> {
-    let mut domains = IRQ_DOMAINS.lock();
+    let mut domains = irq_domains();
 
     match parent {
         Some(parent) => {
@@ -220,7 +221,7 @@ pub fn domain_by_id(id: IrqDomainId) -> Option<IrqDomain> {
 }
 
 pub fn domain_by_owner(owner: DeviceId) -> Option<IrqDomain> {
-    let domains = IRQ_DOMAINS.lock();
+    let domains = irq_domains();
     domains
         .iter()
         .find(|domain| domain.owner == owner && domain.parent.is_none())
@@ -268,9 +269,47 @@ impl ActiveIrq {
         resolve_irq_route(Plat::active_irq_id(&self.inner))
     }
 
-    /// Leaves the physical interrupt active for a guest hardware-backed LR.
-    pub fn defer_deactivation_to_guest(&mut self) -> Result<(), IrqError> {
-        Plat::defer_irq_deactivation(&mut self.inner)
+    /// Detaches one RISC-V PLIC completion from this trap transaction.
+    ///
+    /// The returned claim captures the PLIC context that performed the claim;
+    /// callers must eventually pass its parts to
+    /// [`complete_deferred_riscv_plic_claim`].
+    #[cfg(target_arch = "riscv64")]
+    pub fn defer_riscv_plic_completion(&mut self) -> Option<RiscvPlicClaim> {
+        crate::arch::take_plic_claim(&mut self.inner)
+            .map(|(context, source)| RiscvPlicClaim { context, source })
+    }
+}
+
+/// A detached RISC-V PLIC claim whose completion may run on another CPU.
+#[cfg(target_arch = "riscv64")]
+#[derive(Debug, Eq, PartialEq)]
+pub struct RiscvPlicClaim {
+    context: usize,
+    source: core::num::NonZeroU32,
+}
+
+#[cfg(target_arch = "riscv64")]
+impl RiscvPlicClaim {
+    /// Returns the claimed physical PLIC source.
+    pub const fn source(&self) -> u32 {
+        self.source.get()
+    }
+
+    /// Consumes the claim into the captured PLIC context and source.
+    pub const fn into_parts(self) -> (usize, u32) {
+        (self.context, self.source.get())
+    }
+}
+
+/// Completes a detached RISC-V PLIC claim in its original context.
+#[cfg(target_arch = "riscv64")]
+pub fn complete_deferred_riscv_plic_claim(context: usize, source: u32) -> Result<(), IrqError> {
+    let source = core::num::NonZeroU32::new(source).ok_or(IrqError::InvalidIrq)?;
+    if crate::arch::complete_deferred_plic_claim(context, source) {
+        Ok(())
+    } else {
+        Err(IrqError::Controller)
     }
 }
 
@@ -279,7 +318,7 @@ pub fn map_irq_route(parent: IrqId, leaf: IrqId) -> Result<(), IrqError> {
         return Err(IrqError::InvalidIrq);
     }
 
-    let domains = IRQ_DOMAINS.lock();
+    let domains = irq_domains();
     if !domains.iter().any(|domain| domain.id == parent.domain)
         || !domain_has_strict_ancestor(&domains, leaf.domain, parent.domain)
     {
@@ -287,7 +326,7 @@ pub fn map_irq_route(parent: IrqId, leaf: IrqId) -> Result<(), IrqError> {
     }
     drop(domains);
 
-    let mut routes = IRQ_ROUTES.lock();
+    let mut routes = irq_routes();
     if let Some(route) = routes.iter().find(|route| route.parent == parent) {
         return if route.leaf == leaf {
             Ok(())
@@ -327,7 +366,7 @@ fn domain_has_strict_ancestor(
 }
 
 pub fn unmap_irq_route(parent: IrqId, leaf: IrqId) -> Result<(), IrqError> {
-    let mut routes = IRQ_ROUTES.lock();
+    let mut routes = irq_routes();
     let Some(index) = routes
         .iter()
         .position(|route| route.parent == parent && route.leaf == leaf)
@@ -359,26 +398,13 @@ pub fn parent_irq_for_leaf(leaf: IrqId) -> Option<IrqId> {
         .map(|route| route.parent)
 }
 
-/// Target specification for inter-processor interrupts.
-#[derive(Clone, Copy, Debug)]
+/// Target specification for one inter-processor interrupt delivery.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum IpiTarget {
     /// Send to the current CPU.
-    Current {
-        /// The logical CPU ID of the current CPU.
-        cpu_id: usize,
-    },
+    Current,
     /// Send to a specific CPU.
-    Other {
-        /// The logical CPU ID of the target CPU.
-        cpu_id: usize,
-    },
-    /// Send to all other CPUs.
-    AllExceptCurrent {
-        /// The logical CPU ID of the current CPU.
-        cpu_id: usize,
-        /// The total number of CPUs.
-        cpu_num: usize,
-    },
+    Cpu(CpuId),
 }
 
 /// Hardware routing preference for a global IRQ line.
@@ -434,8 +460,8 @@ pub fn irq_set_affinity(irq: IrqId, affinity: IrqAffinity) -> Result<(), IrqErro
     Plat::irq_set_affinity(parent_irq_for_leaf(irq).unwrap_or(irq), affinity)
 }
 
-pub fn send_ipi(irq: IrqId, target: IpiTarget) {
-    Plat::send_ipi(irq, target);
+pub fn send_ipi(irq: IrqId, target: IpiTarget) -> Result<(), IrqError> {
+    Plat::send_ipi(irq, target)
 }
 
 pub fn ipi_irq() -> IrqId {
@@ -519,8 +545,8 @@ pub fn resolve_irq_source(source: IrqSource) -> Result<IrqId, IrqError> {
     Plat::resolve_irq_source(source)
 }
 
-pub fn send_ipi_to_cpu(cpu_id: usize) {
-    Plat::send_ipi_to_cpu(cpu_id);
+pub fn send_ipi_to_cpu(cpu_id: usize) -> Result<(), IrqError> {
+    Plat::send_ipi_to_cpu(cpu_id)
 }
 
 #[cfg(test)]
@@ -530,8 +556,8 @@ mod tests {
     static TEST_LOCK: Mutex<()> = Mutex::new(());
 
     fn reset_domains() {
-        IRQ_DOMAINS.lock().clear();
-        IRQ_ROUTES.lock().clear();
+        irq_domains().clear();
+        irq_routes().clear();
         for kind in [
             IrqDomainKind::X86IoApic,
             IrqDomainKind::X86Msi,

@@ -18,6 +18,10 @@ pub(crate) fn spawn_task(task: TaskInner) -> AxTaskRef {
     arceos::spawn_task(task)
 }
 
+pub(crate) fn spawn_task_with(task: TaskInner, initialize: impl FnOnce(&AxTaskRef)) -> AxTaskRef {
+    arceos::spawn_task_with(task, initialize)
+}
+
 pub(crate) fn yield_now() {
     arceos::yield_now();
 }
@@ -40,10 +44,6 @@ pub(crate) fn run_on_cpu_sync(
     arg: *mut (),
 ) -> Result<(), arceos::ArceOsIrqError> {
     arceos::run_on_cpu_sync(cpu_id, f, arg)
-}
-
-pub(crate) fn set_current_cpu_periodic_timer_enabled(enabled: bool) {
-    arceos::set_current_cpu_periodic_timer_enabled(enabled);
 }
 
 pub(crate) fn send_ipi(cpu_id: usize) {

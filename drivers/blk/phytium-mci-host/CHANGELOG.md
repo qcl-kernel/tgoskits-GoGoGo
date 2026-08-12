@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.5](https://github.com/rcore-os/tgoskits/compare/phytium-mci-host-v0.3.4...phytium-mci-host-v0.3.5) - 2026-08-09
+
+### Other
+
+- updated the following local packages: sdmmc-protocol, dma-api, mmio-api, sdio-host2
+
+## [0.3.4](https://github.com/rcore-os/tgoskits/compare/phytium-mci-host-v0.3.3...phytium-mci-host-v0.3.4) - 2026-08-03
+
+### Fixed
+
+- *(dma-api)* retire legacy axdma release paths ([#1796](https://github.com/rcore-os/tgoskits/pull/1796))
+
+### Other
+
+- *(block)* adopt IRQ-driven multi-queue runtime ([#1768](https://github.com/rcore-os/tgoskits/pull/1768))
+
 ### Changed
 
 - Move block I/O to owned DMA and acknowledged-IRQ progression with a

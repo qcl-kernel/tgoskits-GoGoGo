@@ -2,7 +2,6 @@ use alloc::sync::Arc;
 
 use ax_errno::{AxError, AxResult};
 use ax_fs_ng::vfs::FS_CONTEXT;
-use ax_kspin::SpinNoIrq;
 use ax_runtime::hal::cpu::uspace::UserContext;
 use ax_task::{AxTaskExt, current, spawn_task_with};
 use bitflags::bitflags;
@@ -15,6 +14,7 @@ use starry_vm::VmMutPtr;
 use crate::{
     file::{FD_TABLE, FileLike, PidFd, close_file_like},
     mm::copy_from_kernel,
+    sync::SpinLock,
     task::{AsThread, ProcessData, ProcessImage, Thread, add_task_to_table, new_user_task},
 };
 
@@ -147,6 +147,13 @@ impl CloneArgs {
         if flags.contains(CloneFlags::NEWNS | CloneFlags::FS) {
             return Err(AxError::InvalidInput);
         }
+        // A thread must remain in the PID namespace of its thread group.
+        // CLONE_PARENT only changes parentage, so Linux permits it with
+        // CLONE_NEWPID. clone3 separately requires a zero exit signal when
+        // CLONE_PARENT is present.
+        if flags.contains(CloneFlags::NEWPID | CloneFlags::THREAD) {
+            return Err(AxError::InvalidInput);
+        }
 
         Ok(())
     }
@@ -253,23 +260,28 @@ impl CloneArgs {
             let signal_actions = if flags.contains(CloneFlags::SIGHAND) {
                 old_proc_data.signal.actions()
             } else if flags.contains(CloneFlags::CLEAR_SIGHAND) {
-                Arc::new(SpinNoIrq::new(Default::default()))
+                Arc::new(SpinLock::new(Default::default()))
             } else {
-                Arc::new(SpinNoIrq::new(
-                    old_proc_data.signal.actions().lock().clone(),
+                Arc::new(SpinLock::new(
+                    old_proc_data.signal.actions().lock_irqsave().clone(),
                 ))
             };
 
+            // RwLock read guards used as nested call arguments live until the
+            // outer statement ends. Build the plain image first so all six
+            // preemption guards are gone before `ProcessData::new` acquires
+            // the sleepable address-space mutex.
+            let process_image = ProcessImage::new(
+                old_proc_data.exe_path.read().clone(),
+                old_proc_data.cmdline.read().clone(),
+                old_proc_data.envp.read().clone(),
+                old_proc_data.auxv.read().clone(),
+                old_proc_data.root_path.read().clone(),
+                old_proc_data.cwd_path.read().clone(),
+            );
             let proc_data = ProcessData::new(
                 proc,
-                ProcessImage::new(
-                    old_proc_data.exe_path.read().clone(),
-                    old_proc_data.cmdline.read().clone(),
-                    old_proc_data.envp.read().clone(),
-                    old_proc_data.auxv.read().clone(),
-                    old_proc_data.root_path.read().clone(),
-                    old_proc_data.cwd_path.read().clone(),
-                ),
+                process_image,
                 aspace,
                 signal_actions,
                 exit_signal,
@@ -303,10 +315,10 @@ impl CloneArgs {
             if flags.contains(CloneFlags::NEWNS) {
                 new_nsproxy.unshare_mnt();
             }
+            let mut is_pid_namespace_init = false;
             if flags.contains(CloneFlags::NEWPID) {
                 new_nsproxy.unshare_pid();
-                new_nsproxy.pid_ns.lock().alloc_local_pid(tid as u64);
-                new_nsproxy.pid_ns.lock().set_init_global_tid(tid as u64);
+                is_pid_namespace_init = true;
             }
             if flags.contains(CloneFlags::NEWNET) {
                 new_nsproxy.unshare_net();
@@ -325,18 +337,23 @@ impl CloneArgs {
                 let mut parent_ns = old_proc_data.nsproxy.lock();
                 if let Some(child_pid_ns) = parent_ns.child_pid_ns.take() {
                     new_nsproxy.pid_ns = child_pid_ns;
-                    {
-                        let mut pid_ns = new_nsproxy.pid_ns.lock();
-                        pid_ns.alloc_local_pid(tid as u64);
-                        pid_ns.set_init_global_tid(tid as u64);
-                    }
+                    is_pid_namespace_init = true;
                 }
+            }
+            axnsproxy::PidNamespace::alloc_pid_chain(&new_nsproxy.pid_ns, tid as u64);
+            if is_pid_namespace_init {
+                new_nsproxy.pid_ns.lock().set_init_global_tid(tid as u64);
             }
 
             *proc_data.nsproxy.lock() = new_nsproxy;
 
             proc_data
         };
+
+        if flags.contains(CloneFlags::THREAD) {
+            let pid_ns = new_proc_data.nsproxy.lock().pid_ns.clone();
+            axnsproxy::PidNamespace::alloc_pid_chain(&pid_ns, tid as u64);
+        }
 
         let mut scope = Scope::new();
         let current_fd_table = crate::file::current_fd_table();
@@ -431,7 +448,12 @@ impl CloneArgs {
         if trace_clone && let Some(tracer_pid) = curr.as_thread().proc_data.ptrace_tracer_pid() {
             if !flags.contains(CloneFlags::THREAD) {
                 new_proc_data.set_ptrace_tracer_pid(tracer_pid);
-                new_proc_data.set_ptrace_attached();
+                let attach_mode = if curr.as_thread().proc_data.is_ptrace_seized() {
+                    crate::task::PtraceAttachMode::Seize
+                } else {
+                    crate::task::PtraceAttachMode::Attach
+                };
+                new_proc_data.set_ptrace_attach_mode(attach_mode);
             }
             new_proc_data.set_ptrace_stop(tid, starry_signal::Signo::SIGSTOP, &new_uctx);
         }
@@ -584,6 +606,19 @@ pub(crate) fn clone_validation_rules_hold_for_test() -> bool {
     }
     .validate()
     .is_err();
+    let thread_with_newpid_rejected = CloneArgs {
+        flags: CloneFlags::THREAD | CloneFlags::VM | CloneFlags::SIGHAND | CloneFlags::NEWPID,
+        ..Default::default()
+    }
+    .validate()
+    .is_err();
+    let legacy_parent_newpid_allowed = CloneArgs {
+        flags: CloneFlags::PARENT | CloneFlags::NEWPID,
+        exit_signal: SIGCHLD as u64,
+        ..Default::default()
+    }
+    .validate()
+    .is_ok();
     // Cover the remaining validation arms to keep the full state machine under
     // axtest coverage (the host `#[cfg(test)]` mod below mirrors these but does
     // not execute during the kernel coverage run).
@@ -633,6 +668,8 @@ pub(crate) fn clone_validation_rules_hold_for_test() -> bool {
         && thread_signal_rejected
         && sighand_without_vm_rejected
         && newns_with_fs_rejected
+        && thread_with_newpid_rejected
+        && legacy_parent_newpid_allowed
         && thread_without_vm_sighand_rejected
         && vfork_with_thread_rejected
         && pidfd_with_detached_rejected
@@ -667,5 +704,26 @@ mod tests {
         };
 
         assert!(args.validate().is_err());
+    }
+
+    #[test]
+    fn clone_thread_rejects_new_pid_namespace() {
+        let args = CloneArgs {
+            flags: CloneFlags::THREAD | CloneFlags::VM | CloneFlags::SIGHAND | CloneFlags::NEWPID,
+            ..Default::default()
+        };
+
+        assert!(args.validate().is_err());
+    }
+
+    #[test]
+    fn legacy_clone_parent_allows_new_pid_namespace() {
+        let args = CloneArgs {
+            flags: CloneFlags::PARENT | CloneFlags::NEWPID,
+            exit_signal: SIGCHLD as u64,
+            ..Default::default()
+        };
+
+        assert!(args.validate().is_ok());
     }
 }

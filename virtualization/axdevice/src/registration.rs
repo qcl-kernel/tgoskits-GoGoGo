@@ -16,14 +16,29 @@
 
 use alloc::{sync::Arc, vec::Vec};
 
-use axdevice_base::{Device, DmaGrant, StopGrant, TimerGrant, WakeGrant};
+use axdevice_base::*;
 
-use crate::{DeviceManagerResult, DeviceServices, ServiceKey};
+use crate::{interrupt::*, *};
 
 /// A device capability that can be polled by the VM runtime.
 pub trait PollableDeviceOps: Send + Sync {
     /// Advances the device using the current monotonic time in nanoseconds.
     fn poll(&self, now_ns: u64) -> DeviceManagerResult;
+}
+
+/// A device capability that advances asynchronous DMA work with scoped guest
+/// memory access.
+///
+/// The runtime supplies the access port only for this call. Implementations
+/// must not retain it after [`poll_dma`](Self::poll_dma) returns.
+pub trait DmaPollableDeviceOps: Send + Sync {
+    /// Advances pending DMA work using the current monotonic time.
+    fn poll_dma(
+        &self,
+        now_ns: u64,
+        access: &mut dyn DeviceAccess,
+        grant: &DmaGrant,
+    ) -> DeviceManagerResult;
 }
 
 /// Optional lifecycle operations contributed by a device.
@@ -49,6 +64,8 @@ pub enum DeviceRegistration {
     Device(Arc<dyn Device>),
     /// A capability that requires periodic polling.
     Pollable(Arc<dyn PollableDeviceOps>),
+    /// A VM-local virtual interrupt controller capability.
+    InterruptController(ControllerRegistration),
 }
 
 /// A set of device capabilities that must be registered atomically.
@@ -67,8 +84,11 @@ pub struct DeviceBundle {
     /// Indices and tokens of devices that require VM stop-request capability.
     pub(crate) stop_devices: Vec<(usize, StopGrant)>,
     pub(crate) pollable: Vec<Arc<dyn PollableDeviceOps>>,
+    /// DMA pollers paired with their bundle-local device and grant.
+    pub(crate) dma_pollable: Vec<(usize, Arc<dyn DmaPollableDeviceOps>, DmaGrant)>,
     pub(crate) lifecycle: Vec<Arc<dyn DeviceLifecycle>>,
     pub(crate) services: DeviceServices,
+    pub(crate) planned: PlannedBundleResources,
 }
 
 impl DeviceBundle {
@@ -81,8 +101,10 @@ impl DeviceBundle {
             wake_devices: Vec::new(),
             stop_devices: Vec::new(),
             pollable: Vec::new(),
+            dma_pollable: Vec::new(),
             lifecycle: Vec::new(),
             services: DeviceServices::new(),
+            planned: PlannedBundleResources::new(),
         }
     }
 
@@ -98,6 +120,9 @@ impl DeviceBundle {
         match registration {
             DeviceRegistration::Device(device) => self.devices.push(device),
             DeviceRegistration::Pollable(device) => self.pollable.push(device),
+            DeviceRegistration::InterruptController(controller) => {
+                self.planned.controllers.push(controller);
+            }
         }
     }
 
@@ -142,6 +167,19 @@ impl DeviceBundle {
     pub fn add_guest_memory_device_with_grant(&mut self, device: Arc<dyn Device>, grant: DmaGrant) {
         let device_index = self.add_device(device);
         self.grant_guest_memory_to_device(device_index, grant);
+    }
+
+    /// Adds one device whose asynchronous progress requires scoped guest
+    /// memory access.
+    pub fn add_dma_pollable_device(
+        &mut self,
+        device: Arc<dyn Device>,
+        pollable: Arc<dyn DmaPollableDeviceOps>,
+        grant: DmaGrant,
+    ) {
+        let device_index = self.add_device(device);
+        self.grant_guest_memory_to_device(device_index, grant.clone());
+        self.dma_pollable.push((device_index, pollable, grant));
     }
 
     /// Adds a timer-capable device with an explicit grant token.
@@ -248,8 +286,10 @@ impl DeviceBundle {
             && self.wake_devices.is_empty()
             && self.stop_devices.is_empty()
             && self.pollable.is_empty()
+            && self.dma_pollable.is_empty()
             && self.lifecycle.is_empty()
             && self.services.is_empty()
+            && self.planned.is_empty()
     }
 }
 
