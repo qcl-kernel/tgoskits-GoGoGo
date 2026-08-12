@@ -85,7 +85,6 @@ pub fn console_init() {
             let current_content = std::str::from_utf8(&buf[..line_len]).unwrap_or("");
             clear_line_and_redraw(&mut stdout, &prompt_string(), current_content, cursor);
         }
-
         let ch = match pending_shell_byte.take() {
             Some(ch) => ch,
             None => {

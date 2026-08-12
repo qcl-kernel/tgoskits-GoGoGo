@@ -1,19 +1,23 @@
 use core::mem::align_of;
 
 use ax_errno::{AxError, AxResult};
-use ax_runtime::hal::time::{TimeValue, monotonic_time, wall_time};
-use ax_task::current;
+use ax_runtime::hal::{
+    cpu::{UserAccessError, UserAtomicError, UserAtomicU32Op},
+    time::{TimeValue, monotonic_time, wall_time},
+};
 use linux_raw_sys::general::{
     FUTEX_CLOCK_REALTIME, FUTEX_CMP_REQUEUE, FUTEX_OP_ADD, FUTEX_OP_ANDN, FUTEX_OP_CMP_EQ,
     FUTEX_OP_CMP_GE, FUTEX_OP_CMP_GT, FUTEX_OP_CMP_LE, FUTEX_OP_CMP_LT, FUTEX_OP_CMP_NE,
     FUTEX_OP_OPARG_SHIFT, FUTEX_OP_OR, FUTEX_OP_SET, FUTEX_OP_XOR, FUTEX_REQUEUE, FUTEX_WAIT,
     FUTEX_WAIT_BITSET, FUTEX_WAKE, FUTEX_WAKE_BITSET, FUTEX_WAKE_OP, robust_list_head, timespec,
 };
-use starry_vm::{VmMutPtr, VmPtr};
 
 use crate::{
-    mm::atomic_update_user_u32,
-    task::{AsThread, FutexKey, FutexKeyMode, futex_table_for, get_task},
+    mm::{
+        VmMutPtr, VmPtr, atomic_update_user_u32_nofault, fault_in_user_u32_read,
+        fault_in_user_u32_write, read_user_u32_nofault,
+    },
+    task::{FutexAccessError, FutexContext, FutexKeyMode, FutexWaitError, UserTaskRef, get_task},
     time::TimeValueLike,
 };
 
@@ -38,6 +42,14 @@ struct ParsedFutexOp {
     clock_realtime: bool,
 }
 
+#[derive(Clone, Copy)]
+struct ParsedFutexWakeOp {
+    operation: UserAtomicU32Op,
+    argument: u32,
+    comparison: u32,
+    comparison_argument: i32,
+}
+
 fn assert_non_negative_i32(value: u32) -> AxResult<u32> {
     if (value as i32) < 0 {
         Err(AxError::InvalidInput)
@@ -46,12 +58,21 @@ fn assert_non_negative_i32(value: u32) -> AxResult<u32> {
     }
 }
 
-fn validate_futex_word(uaddr: *const u32) -> AxResult<()> {
+fn validate_futex_word(current: &UserTaskRef, uaddr: *const u32) -> AxResult<()> {
     if !uaddr.addr().is_multiple_of(align_of::<u32>()) {
         return Err(AxError::InvalidInput);
     }
-    uaddr.vm_read()?;
-    Ok(())
+    loop {
+        match futex_read_user_nofault(uaddr) {
+            Ok(_) => return Ok(()),
+            Err(FutexAccessError::UserFault) => {
+                fault_in_user_u32_read(current, uaddr)?;
+                crate::task::yield_now();
+            }
+            Err(FutexAccessError::Retry) => crate::task::yield_now(),
+            Err(FutexAccessError::Operation(error)) => return Err(error),
+        }
+    }
 }
 
 fn sign_extend_12(value: u32) -> i32 {
@@ -66,6 +87,7 @@ fn futex_wake_op_arg(raw_op: u32, encoded_op: u32) -> i32 {
     oparg
 }
 
+#[cfg(axtest)]
 fn apply_futex_wake_op(old_value: u32, raw_op: u32, oparg: i32) -> AxResult<u32> {
     let op = raw_op & !FUTEX_OP_OPARG_SHIFT;
     let new_value = match op {
@@ -93,20 +115,72 @@ fn compare_futex_wake_op(old_value: u32, raw_cmp: u32, cmparg: i32) -> AxResult<
     Ok(matched)
 }
 
-fn futex_atomic_op_in_user(uaddr: *mut u32, encoded_op: u32) -> AxResult<bool> {
-    if !uaddr.addr().is_multiple_of(align_of::<u32>()) {
-        return Err(AxError::InvalidInput);
-    }
-
+fn parse_futex_wake_op(encoded_op: u32) -> AxResult<ParsedFutexWakeOp> {
     let raw_op = (encoded_op >> 28) & 0xf;
     let raw_cmp = (encoded_op >> 24) & 0xf;
     let oparg = futex_wake_op_arg(raw_op, encoded_op);
     let cmparg = sign_extend_12(encoded_op & 0xfff);
 
-    let old_value = atomic_update_user_u32(uaddr, |old_value| {
-        apply_futex_wake_op(old_value, raw_op, oparg)
-    })?;
-    compare_futex_wake_op(old_value, raw_cmp, cmparg)
+    let operation = match raw_op & !FUTEX_OP_OPARG_SHIFT {
+        FUTEX_OP_SET => UserAtomicU32Op::Set,
+        FUTEX_OP_ADD => UserAtomicU32Op::Add,
+        FUTEX_OP_OR => UserAtomicU32Op::Or,
+        FUTEX_OP_ANDN => UserAtomicU32Op::AndNot,
+        FUTEX_OP_XOR => UserAtomicU32Op::Xor,
+        _ => return Err(AxError::Unsupported),
+    };
+    match raw_cmp {
+        FUTEX_OP_CMP_EQ | FUTEX_OP_CMP_NE | FUTEX_OP_CMP_LT | FUTEX_OP_CMP_LE | FUTEX_OP_CMP_GT
+        | FUTEX_OP_CMP_GE => {}
+        _ => return Err(AxError::Unsupported),
+    }
+    Ok(ParsedFutexWakeOp {
+        operation,
+        argument: oparg as u32,
+        comparison: raw_cmp,
+        comparison_argument: cmparg,
+    })
+}
+
+fn futex_atomic_op_in_user_nofault(
+    uaddr: *mut u32,
+    operation: ParsedFutexWakeOp,
+) -> Result<bool, FutexAccessError> {
+    let old_value = atomic_update_user_u32_nofault(uaddr, operation.operation, operation.argument)
+        .map_err(|error| match error {
+            UserAtomicError::Fault => FutexAccessError::UserFault,
+            UserAtomicError::Retry => FutexAccessError::Retry,
+        })?;
+    compare_futex_wake_op(
+        old_value,
+        operation.comparison,
+        operation.comparison_argument,
+    )
+    .map_err(Into::into)
+}
+
+fn futex_read_user_nofault(uaddr: *const u32) -> Result<u32, FutexAccessError> {
+    read_user_u32_nofault(uaddr).map_err(|error| match error {
+        UserAccessError::Fault => FutexAccessError::UserFault,
+    })
+}
+
+fn apply_wake_op_without_waiters(
+    current: &UserTaskRef,
+    uaddr: *mut u32,
+    operation: ParsedFutexWakeOp,
+) -> AxResult<()> {
+    loop {
+        match futex_atomic_op_in_user_nofault(uaddr, operation) {
+            Ok(_) => return Ok(()),
+            Err(FutexAccessError::UserFault) => {
+                fault_in_user_u32_write(current, uaddr)?;
+                crate::task::yield_now();
+            }
+            Err(FutexAccessError::Retry) => crate::task::yield_now(),
+            Err(FutexAccessError::Operation(error)) => return Err(error),
+        }
+    }
 }
 
 fn parse_futex_op(futex_op: u32) -> AxResult<ParsedFutexOp> {
@@ -147,12 +221,16 @@ fn parse_futex_op(futex_op: u32) -> AxResult<ParsedFutexOp> {
     })
 }
 
-fn futex_wait_timeout(op: &ParsedFutexOp, timeout: *const timespec) -> AxResult<Option<TimeValue>> {
+fn futex_wait_timeout(
+    current: &UserTaskRef,
+    op: &ParsedFutexOp,
+    timeout: *const timespec,
+) -> AxResult<Option<TimeValue>> {
     let Some(ts) = timeout.nullable() else {
         return Ok(None);
     };
 
-    let timeout = unsafe { ts.vm_read_uninit()?.assume_init() }.try_into_time_value()?;
+    let timeout = unsafe { ts.vm_read_uninit(current)?.assume_init() }.try_into_time_value()?;
     // FUTEX_WAIT keeps the traditional relative timeout. FUTEX_WAIT_BITSET
     // uses an absolute deadline on the selected clock.
     if op.command == FutexCommand::Wait {
@@ -168,7 +246,15 @@ fn futex_wait_timeout(op: &ParsedFutexOp, timeout: *const timespec) -> AxResult<
     Ok(Some(timeout.saturating_sub(now)))
 }
 
+fn complete_futex_wake(count: usize) -> AxResult<isize> {
+    // Waker publication makes the target runnable and lets ax-task set the
+    // owner CPU's sticky preemption state. Mirroring Linux wake_q completion,
+    // the futex syscall must not add a second, unconditional scheduling point.
+    Ok(count as isize)
+}
+
 pub fn sys_futex(
+    current: &UserTaskRef,
     uaddr: *const u32,
     futex_op: u32,
     value: u32,
@@ -193,139 +279,159 @@ pub fn sys_futex(
         return Err(AxError::InvalidInput);
     }
 
-    let key = FutexKey::new_current(uaddr.addr(), op.key_mode);
-
-    let futex_table = futex_table_for(&key);
-
     match op.command {
         FutexCommand::Wait | FutexCommand::WaitBitset => {
             // Fast path
-            if uaddr.vm_read()? != value {
+            if uaddr.vm_read(current)? != value {
                 return Err(AxError::WouldBlock);
             }
 
-            let timeout = futex_wait_timeout(&op, timeout)?;
-
-            let futex = futex_table.get_or_insert(&key);
-            let cleanup = futex_table.cleanup_for(&key);
+            let timeout = futex_wait_timeout(current, &op, timeout)?;
 
             let bitset = if op.command == FutexCommand::WaitBitset {
                 value3
             } else {
                 u32::MAX
             };
+            let context = FutexContext::new(current);
 
-            if !futex
-                .wq
-                .wait_if_with_cleanup(bitset, timeout, Some(cleanup), || {
-                    uaddr.vm_read() == Ok(value)
-                })?
-            {
-                return Err(AxError::WouldBlock);
+            loop {
+                let futex = context.resolve(uaddr.addr(), op.key_mode);
+                match futex.wait_nofault_for(context.task(), bitset, timeout, || {
+                    futex_read_user_nofault(uaddr).map(|observed| observed == value)
+                }) {
+                    Ok(true) => break,
+                    Ok(false) => return Err(AxError::WouldBlock),
+                    Err(FutexWaitError::SchedulerNotification) => continue,
+                    Err(FutexWaitError::Access(FutexAccessError::UserFault)) => {
+                        fault_in_user_u32_read(current, uaddr)?;
+                        crate::task::yield_now();
+                    }
+                    Err(FutexWaitError::Access(FutexAccessError::Retry)) => {
+                        crate::task::yield_now()
+                    }
+                    Err(FutexWaitError::Access(FutexAccessError::Operation(error))) => {
+                        return Err(error);
+                    }
+                }
             }
 
             Ok(0)
         }
         FutexCommand::Wake | FutexCommand::WakeBitset => {
             let wake_count = assert_non_negative_i32(value)? as usize;
-            validate_futex_word(uaddr)?;
+            validate_futex_word(current, uaddr)?;
 
-            let futex = futex_table.get(&key);
-            let mut count = 0;
-            if let Some(futex) = futex {
-                let bitset = if op.command == FutexCommand::WakeBitset {
-                    value3
-                } else {
-                    u32::MAX
-                };
-                count = futex.wq.wake(wake_count, bitset);
-            }
-            ax_task::yield_now();
-            Ok(count as _)
+            let futex = FutexContext::new(current).resolve(uaddr.addr(), op.key_mode);
+            let bitset = if op.command == FutexCommand::WakeBitset {
+                value3
+            } else {
+                u32::MAX
+            };
+            let count = futex.wake(wake_count, bitset);
+            complete_futex_wake(count)
         }
         FutexCommand::Requeue | FutexCommand::CmpRequeue => {
             let wake_count = assert_non_negative_i32(value)? as usize;
             let requeue_count = assert_non_negative_i32(timeout.addr() as u32)? as usize;
             if op.command == FutexCommand::Requeue {
-                validate_futex_word(uaddr)?;
+                validate_futex_word(current, uaddr)?;
             }
-            validate_futex_word(uaddr2)?;
+            validate_futex_word(current, uaddr2)?;
+            let context = FutexContext::new(current);
 
-            let key2 = FutexKey::new_current(uaddr2.addr(), op.key_mode);
-            let table2 = futex_table_for(&key2);
-            let target = table2.get_or_insert(&key2);
-            let target_cleanup = table2.cleanup_for(&key2);
-
-            let Some(source) = futex_table.get(&key) else {
-                if op.command == FutexCommand::CmpRequeue && uaddr.vm_read()? != value3 {
-                    return Err(AxError::WouldBlock);
-                }
-                return Ok(0);
-            };
-
-            let count = source.wq.wake_requeue_if(
-                wake_count,
-                u32::MAX,
-                requeue_count,
-                target_cleanup,
-                &target.wq,
-                || {
-                    if op.command == FutexCommand::CmpRequeue {
-                        Ok(uaddr.vm_read()? == value3)
-                    } else {
-                        Ok(true)
+            let count = loop {
+                let (source_futex, target_futex) =
+                    context.resolve_pair(uaddr.addr(), uaddr2.addr(), op.key_mode);
+                match source_futex.requeue_to(
+                    &target_futex,
+                    wake_count,
+                    u32::MAX,
+                    requeue_count,
+                    || {
+                        if op.command == FutexCommand::CmpRequeue {
+                            futex_read_user_nofault(uaddr).map(|observed| observed == value3)
+                        } else {
+                            Ok(true)
+                        }
+                    },
+                ) {
+                    Ok(Some(count)) => break count,
+                    Ok(None) => return Err(AxError::WouldBlock),
+                    Err(FutexAccessError::UserFault) => {
+                        fault_in_user_u32_read(current, uaddr)?;
+                        crate::task::yield_now();
                     }
-                },
-            )?;
-
-            let Some(count) = count else {
-                return Err(AxError::WouldBlock);
+                    Err(FutexAccessError::Retry) => crate::task::yield_now(),
+                    Err(FutexAccessError::Operation(error)) => return Err(error),
+                }
             };
 
-            if count > 0 {
-                ax_task::yield_now();
-            }
-            Ok(count as _)
+            complete_futex_wake(count)
         }
         FutexCommand::WakeOp => {
             let wake_count = value as usize;
             let wake2_count = timeout.addr();
-            validate_futex_word(uaddr)?;
-
-            let key2 = FutexKey::new_current(uaddr2.addr(), op.key_mode);
-            let table2 = futex_table_for(&key2);
-
-            let source = futex_table.get_or_insert(&key);
-            let target = table2.get_or_insert(&key2);
-            let count = source.wq.wake_op(wake_count, &target.wq, wake2_count, || {
-                futex_atomic_op_in_user(uaddr2, value3)
-            })?;
-
-            if count > 0 {
-                ax_task::yield_now();
+            validate_futex_word(current, uaddr)?;
+            if !uaddr2.addr().is_multiple_of(align_of::<u32>()) {
+                return Err(AxError::InvalidInput);
             }
-            Ok(count as _)
+            let wake_operation = parse_futex_wake_op(value3)?;
+
+            let count = if wake_count == 0 && wake2_count == 0 {
+                // No waiter state can change when both wake limits are zero.
+                // The user RMW is already atomic, so taking futex table locks
+                // would add PI contention without protecting any kernel data.
+                apply_wake_op_without_waiters(current, uaddr2, wake_operation)?;
+                0
+            } else {
+                let context = FutexContext::new(current);
+                loop {
+                    // Shared keys depend on the current VMA backing and must be
+                    // recomputed after fault-in, matching Linux futex retry.
+                    let (source, target) =
+                        context.resolve_pair(uaddr.addr(), uaddr2.addr(), op.key_mode);
+                    match source.wake_op(wake_count, &target, wake2_count, || {
+                        futex_atomic_op_in_user_nofault(uaddr2, wake_operation)
+                    }) {
+                        Ok(count) => break count,
+                        Err(FutexAccessError::UserFault) => {
+                            fault_in_user_u32_write(current, uaddr2)?;
+                            crate::task::yield_now();
+                        }
+                        Err(FutexAccessError::Retry) => crate::task::yield_now(),
+                        Err(FutexAccessError::Operation(error)) => return Err(error),
+                    }
+                }
+            };
+
+            complete_futex_wake(count)
         }
     }
 }
 
 pub fn sys_get_robust_list(
+    current: &UserTaskRef,
     tid: u32,
     head: *mut *const robust_list_head,
     size: *mut usize,
 ) -> AxResult<isize> {
     let task = get_task(tid)?;
-    head.vm_write(task.as_thread().robust_list_head() as _)?;
-    size.vm_write(size_of::<robust_list_head>())?;
+    head.vm_write(current, task.as_thread().robust_list_head() as _)?;
+    size.vm_write(current, size_of::<robust_list_head>())?;
 
     Ok(0)
 }
 
-pub fn sys_set_robust_list(head: *const robust_list_head, size: usize) -> AxResult<isize> {
+pub fn sys_set_robust_list(
+    current: &crate::task::UserTaskRef,
+    head: *const robust_list_head,
+    size: usize,
+) -> AxResult<isize> {
     if size != size_of::<robust_list_head>() {
         return Err(AxError::InvalidInput);
     }
-    current().as_thread().set_robust_list_head(head.addr());
+    current.as_thread().set_robust_list_head(head.addr());
 
     Ok(0)
 }
@@ -366,4 +472,11 @@ pub(crate) fn futex_op_and_compare_rules_hold_for_test() -> bool {
     assert!(compare_futex_wake_op(0, 0xFFFF, 0).is_err()); // unsupported cmp
 
     true
+}
+
+#[cfg(axtest)]
+pub(crate) fn futex_wake_completion_is_scheduler_driven_for_test() -> bool {
+    crate::task::reset_yield_now_calls_for_test();
+    let result = complete_futex_wake(1);
+    result == Ok(1) && crate::task::yield_now_calls_for_test() == 0
 }

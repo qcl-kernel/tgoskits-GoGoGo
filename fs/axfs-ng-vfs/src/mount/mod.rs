@@ -963,7 +963,7 @@ impl Location {
     /// Mounts a filesystem with the source name exposed through mount metadata.
     pub fn mount_with_source(&self, fs: &Filesystem, source: &str) -> VfsResult<Arc<Mountpoint>> {
         // Filesystem callbacks may acquire sleepable locks. Prepare the
-        // unpublished mount before entering the non-preemptible topology
+        // unpublished mount before entering the serialized topology
         // transaction; only topology validation and publication belong inside
         // the global guard.
         let result = Mountpoint::new_with_source(fs, Some(self.clone()), source);
@@ -1129,9 +1129,8 @@ mod tests {
         }
 
         fn root_dir(&self) -> DirEntry {
-            assert_eq!(
-                ax_sync::host_preempt_depth(),
-                0,
+            assert!(
+                !MOUNT_TOPOLOGY_MUTATION.is_locked(),
                 "filesystem callbacks must run outside the mount topology guard"
             );
             make_dir_entry("mounted-root")

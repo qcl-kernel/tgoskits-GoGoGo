@@ -327,7 +327,6 @@ dependencies = [
  "ax-hal",
  "ax-runtime",
  "ax-std",
- "ax-task",
  "axplat-dyn",
  "axtest",
  "crab-usb",
@@ -692,6 +691,7 @@ name = "ax-api"
 version = "0.7.7"
 dependencies = [
  "ax-alloc",
+ "ax-cpumask",
  "ax-display",
  "ax-errno",
  "ax-fs-ng",
@@ -734,6 +734,7 @@ dependencies = [
  "ax-percpu",
  "axbacktrace",
  "bitflags 2.13.1",
+ "bytemuck",
  "cfg-if",
  "cpu-local",
  "log",
@@ -1017,6 +1018,7 @@ version = "0.12.7"
 dependencies = [
  "async-channel",
  "async-trait",
+ "ax-crate-interface",
  "ax-errno",
  "ax-hal",
  "ax-io",
@@ -1030,6 +1032,7 @@ dependencies = [
  "enum_dispatch",
  "event-listener",
  "hashbrown 0.16.1",
+ "heapless",
  "irq-framework",
  "log",
  "rd-net",
@@ -1142,6 +1145,7 @@ dependencies = [
  "axpoll",
  "cfg-if",
  "chrono",
+ "cpu-local",
  "dma-api",
  "indoc",
  "irq-framework",
@@ -1152,6 +1156,7 @@ dependencies = [
  "rdif-serial",
  "rdrive",
  "sdhci-cv1800",
+ "thiserror 2.0.20",
 ]
 
 [[package]]
@@ -1175,7 +1180,6 @@ dependencies = [
  "ax-percpu",
  "ax-posix-api",
  "ax-runtime",
- "ax-task",
  "axbacktrace",
  "libc",
 ]
@@ -1191,30 +1195,15 @@ dependencies = [
 
 [[package]]
 name = "ax-task"
-version = "0.6.7"
+version = "0.7.0"
 dependencies = [
- "ax-alloc",
- "ax-cpumask",
- "ax-crate-interface",
- "ax-errno",
- "ax-hal",
- "ax-ipi",
- "ax-lazyinit",
- "ax-memory-addr",
- "ax-mm",
- "ax-percpu",
- "ax-sched",
- "ax-timer-list",
  "axpanic",
- "axpoll",
- "axtest",
  "cfg-if",
- "extern-trait",
- "futures-util",
  "lock_api",
- "log",
- "quote",
+ "loom",
  "sbi-rt",
+ "thiserror 2.0.20",
+ "trait-ffi",
 ]
 
 [[package]]
@@ -1544,6 +1533,7 @@ dependencies = [
  "axvm-types",
  "axvmconfig",
  "clap",
+ "heapless",
  "log",
  "prettyplease 0.3.0",
  "proc-macro2",
@@ -1568,9 +1558,9 @@ dependencies = [
  "ax-driver",
  "ax-memory-addr",
  "ax-memory-set",
+ "ax-percpu",
  "ax-plat",
  "ax-std",
- "ax-timer-list",
  "axaddrspace",
  "axdevice",
  "axdevice_base",
@@ -3679,6 +3669,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "generator"
+version = "0.8.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b3b854b0e584ead1a33f18b2fcad7cf7be18b3875c78816b753639aa501513ae"
+dependencies = [
+ "cc",
+ "cfg-if",
+ "libc",
+ "log",
+ "rustversion",
+ "windows-link",
+ "windows-result",
+]
+
+[[package]]
 name = "generic-array"
 version = "0.14.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4745,13 +4750,11 @@ dependencies = [
 [[package]]
 name = "ktracepoint"
 version = "0.6.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "30aa94490986294aa3a19dc3fbc6b7eefe3fbbac18c323c4153a0cfd1a7a0b74"
 dependencies = [
+ "env_logger",
  "log",
  "lru 0.18.2",
  "paste",
- "static-keys",
  "tp-lexer",
 ]
 
@@ -4916,6 +4919,19 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0ceec5bc11778974d1bcb055b18002eba7f4b3518b6a0081b3af5f21666da9ad"
 
 [[package]]
+name = "loom"
+version = "0.7.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "419e0dc8046cb947daa77eb95ae174acfbddb7673b4151f56d1eed8e93fbfaca"
+dependencies = [
+ "cfg-if",
+ "generator",
+ "scoped-tls",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "loongArch64"
 version = "0.2.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5023,6 +5039,15 @@ name = "managed"
 version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0ca88d725a0a943b096803bd34e73a4437208b6077654cc4ecb2947a5f91618d"
+
+[[package]]
+name = "matchers"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d1525a2a28c7f4fa0fc98bb91ae755d1e2d1505079e05539e35bc876b5d65ae9"
+dependencies = [
+ "regex-automata",
+]
 
 [[package]]
 name = "matchit"
@@ -5842,9 +5867,9 @@ dependencies = [
 
 [[package]]
 name = "portable-atomic"
-version = "1.14.0"
+version = "1.15.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3d20d5497ef88037a52ff98267d066e7f11fcc5e99bbfbd58a42336193aacec3"
+checksum = "05c8b63e8d9609db387f0324918f81d68fe27748f084ef092fb35954d0539a85"
 
 [[package]]
 name = "portable-atomic-util"
@@ -6912,6 +6937,7 @@ version = "0.2.13"
 dependencies = [
  "aarch64-cpu-ext",
  "bitflags 2.13.1",
+ "bytemuck",
  "dma-api",
  "log",
  "mbarrier",
@@ -6943,6 +6969,7 @@ dependencies = [
 name = "rockchip-rga"
 version = "0.1.8"
 dependencies = [
+ "bytemuck",
  "dma-api",
  "rdif-base",
 ]
@@ -7248,6 +7275,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "scoped-tls"
+version = "1.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e1cf6437eb19a8f4a6cc0f7dca544973b0b78843adbfeb3683d1a94a0024a294"
+
+[[package]]
 name = "scopeguard"
 version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7499,6 +7532,7 @@ dependencies = [
  "ax-memory-addr",
  "ax-sync",
  "axklib",
+ "bytemuck",
  "dma-api",
  "log",
 ]
@@ -7844,7 +7878,6 @@ dependencies = [
  "ax-cgroup",
  "ax-cpu",
  "ax-cpumask",
- "ax-crate-interface",
  "ax-display",
  "ax-driver",
  "ax-errno",
@@ -7852,7 +7885,6 @@ dependencies = [
  "ax-hal",
  "ax-input",
  "ax-io",
- "ax-ipi",
  "ax-lazyinit",
  "ax-log",
  "ax-memory-addr",
@@ -7862,7 +7894,6 @@ dependencies = [
  "ax-percpu",
  "ax-runtime",
  "ax-std",
- "ax-task",
  "axbacktrace",
  "axfs-ng-vfs",
  "axklib",
@@ -7883,9 +7914,9 @@ dependencies = [
  "downcast-rs",
  "enum_dispatch",
  "event-listener",
- "extern-trait",
  "flatten_objects",
  "hashbrown 0.16.1",
+ "heapless",
  "indoc",
  "inherit-methods-macro",
  "irq-framework",
@@ -7900,6 +7931,7 @@ dependencies = [
  "ktracepoint",
  "linux-raw-sys 0.12.1",
  "lock_api",
+ "loom",
  "lwprintf-rs",
  "mmio-api",
  "num_enum",
@@ -7967,6 +7999,7 @@ dependencies = [
  "ax-errno",
  "ax-runtime",
  "bitflags 2.13.1",
+ "bytemuck",
  "cfg-if",
  "derive_more",
  "event-listener",
@@ -7983,7 +8016,6 @@ version = "0.5.13"
 dependencies = [
  "ax-errno",
  "bytemuck",
- "extern-trait",
 ]
 
 [[package]]
@@ -8772,11 +8804,15 @@ version = "0.3.23"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cb7f578e5945fb242538965c2d0b04418d38ec25c79d160cd279bf0731c8d319"
 dependencies = [
+ "matchers",
  "nu-ansi-term",
+ "once_cell",
+ "regex-automata",
  "sharded-slab",
  "smallvec",
  "thread_local",
  "time",
+ "tracing",
  "tracing-core",
  "tracing-log",
 ]
@@ -9928,9 +9964,9 @@ dependencies = [
 
 [[package]]
 name = "zbus"
-version = "5.18.0"
+version = "5.19.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fe18fb60dc696039e738717b76eaea21e7a4489bbb1885020b43c94236d7e98a"
+checksum = "5db4be7c075cb421e4b7ee645541604239bd243ba7c357511f4ff3a74b555907"
 dependencies = [
  "async-broadcast",
  "async-executor",
@@ -9974,14 +10010,14 @@ dependencies = [
 
 [[package]]
 name = "zbus_macros"
-version = "5.18.0"
+version = "5.19.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fe96480bed92df2b442a1a30df364e12d08eed03aeb061f2b8dc6afb2be91119"
+checksum = "2990635d09ade6df1868f72f8cac69a876a90981e8bd3c40b1be413f8dc88f40"
 dependencies = [
  "proc-macro-crate",
  "proc-macro2",
  "quote",
- "syn 2.0.119",
+ "syn 3.0.3",
  "zbus_names",
  "zvariant",
  "zvariant_utils",
@@ -9996,6 +10032,15 @@ dependencies = [
  "serde",
  "winnow 1.0.4",
  "zvariant",
+]
+
+[[package]]
+name = "zcheapstr"
+version = "1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d1afec51604565183aeb5c54c20aeab286120d4e4460f7f76e3e8bb8c0d99473"
+dependencies = [
+ "serde",
 ]
 
 [[package]]
@@ -10101,40 +10146,41 @@ dependencies = [
 
 [[package]]
 name = "zvariant"
-version = "5.13.1"
+version = "5.14.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bee2a0bcd2a907786a456fff45aaaaf54c9ba5f50b71ae9ec1a4edd200c94911"
+checksum = "b5e28c25bd8bb8da5a1f3e7065d0c156b9ee9a7973adf78b0e35eaefdf3b1b5c"
 dependencies = [
  "endi",
  "enumflags2",
  "serde",
  "winnow 1.0.4",
+ "zcheapstr",
  "zvariant_derive",
  "zvariant_utils",
 ]
 
 [[package]]
 name = "zvariant_derive"
-version = "5.13.1"
+version = "5.14.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "38a708216a18780796770bfe3f4739c7c83a3e8f789b755534bbbc06e4e23e12"
+checksum = "d496a145685283b67e232bd9e47377f6b60ad9d51e3601b23867f77c42477f96"
 dependencies = [
  "proc-macro-crate",
  "proc-macro2",
  "quote",
- "syn 2.0.119",
+ "syn 3.0.3",
  "zvariant_utils",
 ]
 
 [[package]]
 name = "zvariant_utils"
-version = "3.5.0"
+version = "4.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "90cb9383f9b45290407a1258b202d3f8f01db719eb60b4e4055c6375af4fc7c7"
+checksum = "629d80ece222cad20fe0e8741be493c4ab166acf3b85341bdc2cdbcfd8f3c2d6"
 dependencies = [
  "proc-macro2",
  "quote",
  "serde",
- "syn 2.0.119",
+ "syn 3.0.3",
  "winnow 1.0.4",
 ]

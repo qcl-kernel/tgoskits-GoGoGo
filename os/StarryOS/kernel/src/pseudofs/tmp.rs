@@ -22,7 +22,7 @@ use axpoll::{IoEvents, Pollable};
 use hashbrown::HashMap;
 use slab::Slab;
 
-use crate::sync::{IrqMutex, Mutex};
+use crate::sync::{IrqMutex, PiMutex};
 
 const TMPFS_MAGIC: u32 = 0x0102_1994;
 const RAMFS_MAGIC: u32 = 0x8584_58f6;
@@ -258,7 +258,7 @@ struct FileContent {
     /// We only need to store the length here because we delegate the actual
     /// content management to page cache.
     length: AtomicU64,
-    symlink: Mutex<Option<String>>,
+    symlink: PiMutex<Option<String>>,
 }
 
 struct DirContent {

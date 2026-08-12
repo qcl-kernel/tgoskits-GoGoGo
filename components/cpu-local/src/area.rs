@@ -4,14 +4,19 @@ use core::{
     sync::atomic::{AtomicUsize, Ordering},
 };
 
-use crate::{CpuIndex, CpuLocalError, CurrentThreadHeader};
+use crate::{CpuIndex, CpuLocalError, CurrentThreadHeader, preempt::PreemptState};
+
+const fn runtime_anchor_reserved_size() -> usize {
+    64 - 5 * size_of::<usize>() - size_of::<PreemptState>()
+}
 
 /// CPU-local scalar state shared by trap entry and scheduler publication.
 #[repr(C, align(64))]
 pub struct CpuRuntimeAnchor {
     current_thread: AtomicUsize,
     architecture_state: [AtomicUsize; 4],
-    reserved: [u8; 64 - 5 * size_of::<usize>()],
+    preempt_state: PreemptState,
+    reserved: [u8; runtime_anchor_reserved_size()],
 }
 
 impl CpuRuntimeAnchor {
@@ -19,7 +24,8 @@ impl CpuRuntimeAnchor {
         Self {
             current_thread: AtomicUsize::new(boot_thread),
             architecture_state: [const { AtomicUsize::new(0) }; 4],
-            reserved: [0; 64 - 5 * size_of::<usize>()],
+            preempt_state: PreemptState::bootstrap_disabled(),
+            reserved: [0; runtime_anchor_reserved_size()],
         }
     }
 
@@ -152,6 +158,8 @@ impl CpuAreaRef {
     /// remains mapped until shutdown. No caller may mutate its identity fields.
     #[doc(hidden)]
     pub unsafe fn from_initialized_base(area_base: usize) -> Result<Self, CpuLocalError> {
+        #[cfg(feature = "host-test")]
+        crate::register::host_test::record_initialized_area_validation();
         validate_area_base(area_base)?;
         let prefix = NonNull::new(area_base as *mut CpuAreaPrefix)
             .ok_or(CpuLocalError::InvalidAreaBase { base: area_base })?;
@@ -231,6 +239,10 @@ pub const CPU_AREA_ARCH_STATE_OFFSET: usize =
     CPU_AREA_RUNTIME_ANCHOR_OFFSET + offset_of!(CpuRuntimeAnchor, architecture_state);
 /// Reserved bytes available to the architecture-owned CPU trap state.
 pub const CPU_AREA_ARCH_STATE_SIZE: usize = 4 * size_of::<usize>();
+/// Byte offset of the x86_64 per-CPU preemption word.
+#[doc(hidden)]
+pub const CPU_AREA_PREEMPT_STATE_OFFSET: usize =
+    CPU_AREA_RUNTIME_ANCHOR_OFFSET + offset_of!(CpuRuntimeAnchor, preempt_state);
 
 const _: () = {
     assert!(size_of::<CpuAreaHeader>() == 64);

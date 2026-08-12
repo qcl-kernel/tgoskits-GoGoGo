@@ -98,7 +98,7 @@ impl ArchOps for LoongArch64Arch {
         drain_loongarch_pch_pic_events(vm);
     }
 
-    fn handle_vcpu_exit_bound(
+    fn handle_vcpu_exit_unbound(
         vm: &crate::AxVMRef,
         vcpu: &crate::vm::AxVCpuRef<Self::VCpu>,
         exit: <Self::VCpu as VmArchVcpuOps>::Exit,
@@ -129,6 +129,7 @@ impl ArchOps for LoongArch64Arch {
             ),
             LoongArchVmExit::MmioWrite { addr, width, data } => super::handle_mmio_write::<Self>(
                 vm,
+                vcpu,
                 MmioWriteExit {
                     addr: loong_guest_phys_addr_to_ax(addr),
                     width: loong_access_width_to_ax(width),
@@ -228,6 +229,7 @@ fn handle_loongarch_nested_page_fault(
             LoongArchVmExit::MmioWrite { addr, width, data } => {
                 super::try_handle_mmio_write::<LoongArch64Arch>(
                     vm,
+                    vcpu,
                     MmioWriteExit {
                         addr: loong_guest_phys_addr_to_ax(addr),
                         width: loong_access_width_to_ax(width),
@@ -309,7 +311,7 @@ fn drain_loongarch_pch_pic_events(vm: &crate::AxVMRef) {
 fn inject_vm_vcpu_interrupt(vm_id: usize, vcpu_id: usize, vector: usize) -> AxVmResult {
     use crate::AsVCpuTask;
 
-    let current = crate::host::task::current_task();
+    let current = crate::host::task::current_thread();
     if let Some(task) = current.try_as_vcpu_task()
         && task.vm().id() == vm_id
         && task.vcpu.id() == vcpu_id

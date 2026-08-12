@@ -669,7 +669,7 @@ impl Dwc {
 
         self.dwc3_init().await?;
 
-        self.xhci.init().await?;
+        self.xhci.prepare_controller().await?;
 
         // 输出关键寄存器状态用于调试
         self.dump_registers();
@@ -705,7 +705,7 @@ impl Dwc {
 // }
 
 impl CoreOp for Dwc {
-    fn init(&mut self) -> BoxFuture<'_, Result<()>> {
+    fn prepare_controller(&mut self) -> BoxFuture<'_, Result<()>> {
         self._init().boxed()
     }
 
@@ -761,11 +761,15 @@ pub struct DwcEventHandler {
     _dwc: Dwc3Regs,
 }
 impl EventHandlerOp for DwcEventHandler {
-    fn handle_event(&self) -> Event {
-        // let cnt = self.dwc.globals().gevnt[0].count.get();
-        // debug!("DWC3 Event Handler: GEVNT[0] COUNT = {}", cnt);
-        // self.dwc.globals().gevnt[0].count.set(0);
+    fn acknowledge_irq(&self) -> bool {
+        self.xhci.acknowledge_irq()
+    }
 
-        self.xhci.handle_event()
+    fn drain_event(&self) -> Event {
+        self.xhci.drain_event()
+    }
+
+    fn rearm_irq(&self) {
+        self.xhci.rearm_irq()
     }
 }

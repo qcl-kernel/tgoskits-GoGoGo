@@ -25,7 +25,7 @@ pub(super) fn epoll_add_test_barrier() {
 
     EPOLL_ADD_TEST_BARRIER_ARRIVALS.fetch_add(1, Ordering::AcqRel);
     while EPOLL_ADD_TEST_BARRIER_ARRIVALS.load(Ordering::Acquire) < 2 {
-        ax_task::yield_now();
+        crate::task::yield_now();
     }
 }
 
@@ -41,21 +41,27 @@ pub(crate) fn concurrent_reverse_add_is_serialized_for_test() -> bool {
         let left = Arc::clone(&left);
         let right = Arc::clone(&right);
         let results = Arc::clone(&results);
-        ax_task::spawn(move || {
-            results.lock()[0] = left.add_nested_for_test(1, right).err();
-        })
+        crate::task::spawn_kernel_thread(
+            move || {
+                results.lock()[0] = left.add_nested_for_test(1, right).err();
+            },
+            "epoll-axtest-left".into(),
+        )
     };
     let right_task = {
         let left = Arc::clone(&left);
         let right = Arc::clone(&right);
         let results = Arc::clone(&results);
-        ax_task::spawn(move || {
-            results.lock()[1] = right.add_nested_for_test(2, left).err();
-        })
+        crate::task::spawn_kernel_thread(
+            move || {
+                results.lock()[1] = right.add_nested_for_test(2, left).err();
+            },
+            "epoll-axtest-right".into(),
+        )
     };
 
-    left_task.join();
-    right_task.join();
+    crate::task::join_kernel_thread(left_task);
+    crate::task::join_kernel_thread(right_task);
     EPOLL_ADD_TEST_BARRIER_ENABLED.store(false, Ordering::Release);
 
     let results = results.lock();

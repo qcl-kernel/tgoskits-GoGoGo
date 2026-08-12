@@ -1,8 +1,12 @@
 use alloc::{sync::Arc, vec, vec::Vec};
-use core::{ffi::c_char, mem::MaybeUninit};
+use core::{
+    ffi::c_char,
+    mem::{MaybeUninit, offset_of},
+};
 
 use ax_errno::{AxError, AxResult, LinuxError};
-use ax_task::current;
+use ax_fs_ng::vfs::current_fs_context;
+use ax_lazyinit::LazyLock;
 use linux_raw_sys::{
     general::{GRND_INSECURE, GRND_NONBLOCK, GRND_RANDOM},
     system::{new_utsname, sysinfo},
@@ -11,13 +15,11 @@ use ringbuf::{
     HeapRb,
     traits::{Consumer, Observer, Producer},
 };
-use starry_vm::{VmMutPtr, VmPtr, vm_read_slice, vm_write_slice};
 
-#[cfg(target_arch = "riscv64")]
-use crate::mm::UserPtr;
 use crate::{
-    sync::Mutex,
-    task::{AsThread, SockFilter, SockFprog, get_task, processes},
+    mm::{UserPtr, VmMutPtr, VmPtr, vm_read_slice, vm_write_slice},
+    sync::PiMutex,
+    task::{SockFilter, SockFprog, get_task, processes},
 };
 
 /// Sentinel value meaning "don't change this ID" (userspace passes -1 as signed,
@@ -124,11 +126,17 @@ impl SyslogState {
     }
 }
 
-static SYSLOG_STATE: ax_lazyinit::LazyLock<Mutex<SyslogState>> =
-    ax_lazyinit::LazyLock::new(|| Mutex::new(SyslogState::new()));
+static SYSLOG_STATE: LazyLock<PiMutex<SyslogState>> =
+    LazyLock::new(|| PiMutex::new(SyslogState::new()));
 
-pub fn sys_reboot(magic: u32, magic2: u32, cmd: u32, _arg: usize) -> AxResult<isize> {
-    if !current().as_thread().cred().has_cap_sys_boot() {
+pub fn sys_reboot(
+    current: &crate::task::UserTaskRef,
+    magic: u32,
+    magic2: u32,
+    cmd: u32,
+    _arg: usize,
+) -> AxResult<isize> {
+    if !current.as_thread().cred().has_cap_sys_boot() {
         return Err(AxError::from(LinuxError::EPERM));
     }
 
@@ -193,9 +201,9 @@ fn commit_cred_with_id_rules(thread: &crate::task::Thread, new: crate::task::Cre
     });
 }
 
-fn user_ns_overflow_uid() -> u32 {
-    let curr = current();
-    let nsproxy = curr.as_thread().proc_data.nsproxy.lock();
+fn user_ns_overflow_uid(current: &crate::task::UserTaskRef) -> u32 {
+    let curr = current;
+    let nsproxy = curr.as_thread().proc_data.namespace_snapshot();
     let ns = nsproxy.user_ns.lock();
     if ns.is_root || ns.uid_mapped {
         return 0;
@@ -203,9 +211,9 @@ fn user_ns_overflow_uid() -> u32 {
     65534
 }
 
-fn user_ns_overflow_gid() -> u32 {
-    let curr = current();
-    let nsproxy = curr.as_thread().proc_data.nsproxy.lock();
+fn user_ns_overflow_gid(current: &crate::task::UserTaskRef) -> u32 {
+    let curr = current;
+    let nsproxy = curr.as_thread().proc_data.namespace_snapshot();
     let ns = nsproxy.user_ns.lock();
     if ns.is_root || ns.gid_mapped {
         return 0;
@@ -213,77 +221,92 @@ fn user_ns_overflow_gid() -> u32 {
     65534
 }
 
-pub fn sys_getuid() -> AxResult<isize> {
-    let overflow = user_ns_overflow_uid();
+pub fn sys_getuid(current: &crate::task::UserTaskRef) -> AxResult<isize> {
+    let overflow = user_ns_overflow_uid(current);
     if overflow != 0 {
         return Ok(overflow as isize);
     }
-    let cred = current().as_thread().cred();
+    let cred = current.as_thread().cred();
     Ok(cred.uid as isize)
 }
 
-pub fn sys_geteuid() -> AxResult<isize> {
-    let overflow = user_ns_overflow_uid();
+pub fn sys_geteuid(current: &crate::task::UserTaskRef) -> AxResult<isize> {
+    let overflow = user_ns_overflow_uid(current);
     if overflow != 0 {
         return Ok(overflow as isize);
     }
-    let cred = current().as_thread().cred();
+    let cred = current.as_thread().cred();
     Ok(cred.euid as isize)
 }
 
-pub fn sys_getgid() -> AxResult<isize> {
-    let overflow = user_ns_overflow_gid();
+pub fn sys_getgid(current: &crate::task::UserTaskRef) -> AxResult<isize> {
+    let overflow = user_ns_overflow_gid(current);
     if overflow != 0 {
         return Ok(overflow as isize);
     }
-    let cred = current().as_thread().cred();
+    let cred = current.as_thread().cred();
     Ok(cred.gid as isize)
 }
 
-pub fn sys_getegid() -> AxResult<isize> {
-    let overflow = user_ns_overflow_gid();
+pub fn sys_getegid(current: &crate::task::UserTaskRef) -> AxResult<isize> {
+    let overflow = user_ns_overflow_gid(current);
     if overflow != 0 {
         return Ok(overflow as isize);
     }
-    let cred = current().as_thread().cred();
+    let cred = current.as_thread().cred();
     Ok(cred.egid as isize)
 }
 
-pub fn sys_getresuid(ruid: *mut u32, euid: *mut u32, suid: *mut u32) -> AxResult<isize> {
-    let overflow = user_ns_overflow_uid();
+pub fn sys_getresuid(
+    current: &crate::task::UserTaskRef,
+    ruid: *mut u32,
+    euid: *mut u32,
+    suid: *mut u32,
+) -> AxResult<isize> {
+    let overflow = user_ns_overflow_uid(current);
     if overflow != 0 {
-        ruid.vm_write(overflow)?;
-        euid.vm_write(overflow)?;
-        suid.vm_write(overflow)?;
+        ruid.vm_write(current, overflow)?;
+        euid.vm_write(current, overflow)?;
+        suid.vm_write(current, overflow)?;
         return Ok(0);
     }
-    let cred = current().as_thread().cred();
-    ruid.vm_write(cred.uid)?;
-    euid.vm_write(cred.euid)?;
-    suid.vm_write(cred.suid)?;
+    let cred = current.as_thread().cred();
+    ruid.vm_write(current, cred.uid)?;
+    euid.vm_write(current, cred.euid)?;
+    suid.vm_write(current, cred.suid)?;
     Ok(0)
 }
 
-pub fn sys_getresgid(rgid: *mut u32, egid: *mut u32, sgid: *mut u32) -> AxResult<isize> {
-    let overflow = user_ns_overflow_gid();
+pub fn sys_getresgid(
+    current: &crate::task::UserTaskRef,
+    rgid: *mut u32,
+    egid: *mut u32,
+    sgid: *mut u32,
+) -> AxResult<isize> {
+    let overflow = user_ns_overflow_gid(current);
     if overflow != 0 {
-        rgid.vm_write(overflow)?;
-        egid.vm_write(overflow)?;
-        sgid.vm_write(overflow)?;
+        rgid.vm_write(current, overflow)?;
+        egid.vm_write(current, overflow)?;
+        sgid.vm_write(current, overflow)?;
         return Ok(0);
     }
-    let cred = current().as_thread().cred();
-    rgid.vm_write(cred.gid)?;
-    egid.vm_write(cred.egid)?;
-    sgid.vm_write(cred.sgid)?;
+    let cred = current.as_thread().cred();
+    rgid.vm_write(current, cred.gid)?;
+    egid.vm_write(current, cred.egid)?;
+    sgid.vm_write(current, cred.sgid)?;
     Ok(0)
 }
 
 // ── setresuid / setresgid ────────────────────────────────────────────
 
-pub fn sys_setresuid(ruid: u32, euid: u32, suid: u32) -> AxResult<isize> {
+pub fn sys_setresuid(
+    current: &crate::task::UserTaskRef,
+    ruid: u32,
+    euid: u32,
+    suid: u32,
+) -> AxResult<isize> {
     debug!("sys_setresuid <= ruid: {ruid}, euid: {euid}, suid: {suid}");
-    let thread = current();
+    let thread = current;
     let thread = thread.as_thread();
     let old = thread.cred();
     let mut new = (*old).clone();
@@ -332,9 +355,14 @@ pub fn sys_setresuid(ruid: u32, euid: u32, suid: u32) -> AxResult<isize> {
     Ok(0)
 }
 
-pub fn sys_setresgid(rgid: u32, egid: u32, sgid: u32) -> AxResult<isize> {
+pub fn sys_setresgid(
+    current: &crate::task::UserTaskRef,
+    rgid: u32,
+    egid: u32,
+    sgid: u32,
+) -> AxResult<isize> {
     debug!("sys_setresgid <= rgid: {rgid}, egid: {egid}, sgid: {sgid}");
-    let thread = current();
+    let thread = current;
     let thread = thread.as_thread();
     let old = thread.cred();
     let mut new = (*old).clone();
@@ -382,14 +410,14 @@ pub fn sys_setresgid(rgid: u32, egid: u32, sgid: u32) -> AxResult<isize> {
 
 // ── setuid / setgid ─────────────────────────────────────────────────
 
-pub fn sys_setuid(uid: u32) -> AxResult<isize> {
+pub fn sys_setuid(current: &crate::task::UserTaskRef, uid: u32) -> AxResult<isize> {
     debug!("sys_setuid <= uid: {uid}");
     // Linux setuid(2) §ERRORS: "EINVAL — uid is not valid in this user namespace."
     // Single-arg setuid has no NOCHG sentinel; (uid_t)-1 must be rejected.
     if !uid_valid(uid) {
         return Err(AxError::InvalidInput);
     }
-    let thread = current();
+    let thread = current;
     let thread = thread.as_thread();
     let old = thread.cred();
     let mut new = (*old).clone();
@@ -416,13 +444,13 @@ pub fn sys_setuid(uid: u32) -> AxResult<isize> {
     Ok(0)
 }
 
-pub fn sys_setgid(gid: u32) -> AxResult<isize> {
+pub fn sys_setgid(current: &crate::task::UserTaskRef, gid: u32) -> AxResult<isize> {
     debug!("sys_setgid <= gid: {gid}");
     // Linux setgid(2) §ERRORS: "EINVAL — gid is not valid in this user namespace."
     if !uid_valid(gid) {
         return Err(AxError::InvalidInput);
     }
-    let thread = current();
+    let thread = current;
     let thread = thread.as_thread();
     let old = thread.cred();
     let mut new = (*old).clone();
@@ -449,9 +477,9 @@ pub fn sys_setgid(gid: u32) -> AxResult<isize> {
 
 // ── setreuid / setregid ─────────────────────────────────────────────
 
-pub fn sys_setreuid(ruid: u32, euid: u32) -> AxResult<isize> {
+pub fn sys_setreuid(current: &crate::task::UserTaskRef, ruid: u32, euid: u32) -> AxResult<isize> {
     debug!("sys_setreuid <= ruid: {ruid}, euid: {euid}");
-    let thread = current();
+    let thread = current;
     let thread = thread.as_thread();
     let old = thread.cred();
     let mut new = (*old).clone();
@@ -497,9 +525,9 @@ pub fn sys_setreuid(ruid: u32, euid: u32) -> AxResult<isize> {
     Ok(0)
 }
 
-pub fn sys_setregid(rgid: u32, egid: u32) -> AxResult<isize> {
+pub fn sys_setregid(current: &crate::task::UserTaskRef, rgid: u32, egid: u32) -> AxResult<isize> {
     debug!("sys_setregid <= rgid: {rgid}, egid: {egid}");
-    let thread = current();
+    let thread = current;
     let thread = thread.as_thread();
     let old = thread.cred();
     let mut new = (*old).clone();
@@ -551,9 +579,9 @@ pub fn sys_setregid(rgid: u32, egid: u32) -> AxResult<isize> {
 //   Query trick: passing `(uid_t)-1` leaves the fsuid unchanged but still
 //   returns the previous value — used by libc to read the current fsuid.
 
-pub fn sys_setfsuid(fsuid: u32) -> AxResult<isize> {
+pub fn sys_setfsuid(current: &crate::task::UserTaskRef, fsuid: u32) -> AxResult<isize> {
     debug!("sys_setfsuid <= fsuid: {fsuid}");
-    let thread = current();
+    let thread = current;
     let thread = thread.as_thread();
     let old = thread.cred();
     let prev_fsuid = old.fsuid;
@@ -585,9 +613,9 @@ pub fn sys_setfsuid(fsuid: u32) -> AxResult<isize> {
     Ok(prev_fsuid as isize)
 }
 
-pub fn sys_setfsgid(fsgid: u32) -> AxResult<isize> {
+pub fn sys_setfsgid(current: &crate::task::UserTaskRef, fsgid: u32) -> AxResult<isize> {
     debug!("sys_setfsgid <= fsgid: {fsgid}");
-    let thread = current();
+    let thread = current;
     let thread = thread.as_thread();
     let old = thread.cred();
     let prev_fsgid = old.fsgid;
@@ -614,9 +642,13 @@ pub fn sys_setfsgid(fsgid: u32) -> AxResult<isize> {
     Ok(prev_fsgid as isize)
 }
 
-pub fn sys_getgroups(size: usize, list: *mut u32) -> AxResult<isize> {
+pub fn sys_getgroups(
+    current: &crate::task::UserTaskRef,
+    size: usize,
+    list: *mut u32,
+) -> AxResult<isize> {
     debug!("sys_getgroups <= size: {size}");
-    let cred = current().as_thread().cred();
+    let cred = current.as_thread().cred();
     let ngroups = cred.groups.len();
     if size == 0 {
         return Ok(ngroups as isize);
@@ -625,7 +657,7 @@ pub fn sys_getgroups(size: usize, list: *mut u32) -> AxResult<isize> {
         return Err(AxError::InvalidInput);
     }
     if ngroups > 0 {
-        vm_write_slice(list, &cred.groups)?;
+        vm_write_slice(current, list, &cred.groups)?;
     }
     Ok(ngroups as isize)
 }
@@ -633,9 +665,13 @@ pub fn sys_getgroups(size: usize, list: *mut u32) -> AxResult<isize> {
 /// Linux limits supplementary groups to 65536 (`NGROUPS_MAX`).
 const NGROUPS_MAX: usize = 65536;
 
-pub fn sys_setgroups(size: usize, list: *const u32) -> AxResult<isize> {
+pub fn sys_setgroups(
+    current: &crate::task::UserTaskRef,
+    size: usize,
+    list: *const u32,
+) -> AxResult<isize> {
     debug!("sys_setgroups <= size: {size}");
-    let thread = current();
+    let thread = current;
     let thread = thread.as_thread();
     let old = thread.cred();
 
@@ -652,7 +688,7 @@ pub fn sys_setgroups(size: usize, list: *const u32) -> AxResult<isize> {
 
     let groups = if size > 0 {
         let mut buf: Vec<MaybeUninit<u32>> = vec![MaybeUninit::uninit(); size];
-        vm_read_slice(list, &mut buf)?;
+        vm_read_slice(current, list, &mut buf)?;
         // SAFETY: vm_read_slice filled all elements with data from user space.
         buf.into_iter()
             .map(|v| unsafe { v.assume_init() })
@@ -670,50 +706,77 @@ pub fn sys_setgroups(size: usize, list: *const u32) -> AxResult<isize> {
     Ok(0)
 }
 
-pub fn sys_uname(name: *mut new_utsname) -> AxResult<isize> {
-    let curr = current();
-    // Build the utsname inside a block so the SpinNoIrq guard is dropped
+pub fn sys_uname(current: &crate::task::UserTaskRef, name: *mut new_utsname) -> AxResult<isize> {
+    let curr = current;
+    // Build the utsname inside a block so the IRQ-save guard is dropped
     // before we touch user memory via vm_write (access_user_memory requires
-    // IRQs enabled, but SpinNoIrq disables them).
+    // IRQs enabled, but the namespace lock disables them).
     let uts = {
-        let nsproxy = curr.as_thread().proc_data.nsproxy.lock();
+        let nsproxy = curr.as_thread().proc_data.namespace_snapshot();
         let ns = nsproxy.uts_ns.lock();
         axnsproxy::build_utsname(&ns)
     };
-    name.vm_write(uts)?;
+    write_utsname(current, name, uts)?;
     Ok(0)
 }
 
-pub fn sys_sethostname(name: *const c_char, len: usize) -> AxResult<isize> {
+fn write_utsname(
+    current: &crate::task::UserTaskRef,
+    user: *mut new_utsname,
+    value: new_utsname,
+) -> AxResult<()> {
+    let user = UserPtr::from(user);
+    user.write_field_slice(current, offset_of!(new_utsname, sysname), &value.sysname)?;
+    user.write_field_slice(current, offset_of!(new_utsname, nodename), &value.nodename)?;
+    user.write_field_slice(current, offset_of!(new_utsname, release), &value.release)?;
+    user.write_field_slice(current, offset_of!(new_utsname, version), &value.version)?;
+    user.write_field_slice(current, offset_of!(new_utsname, machine), &value.machine)?;
+    user.write_field_slice(
+        current,
+        offset_of!(new_utsname, domainname),
+        &value.domainname,
+    )
+}
+
+pub fn sys_sethostname(
+    current: &crate::task::UserTaskRef,
+    name: *const c_char,
+    len: usize,
+) -> AxResult<isize> {
     if len > 64 {
         return Err(AxError::InvalidInput);
     }
-    let curr = current();
+    let curr = current;
     if curr.as_thread().cred().euid != 0 {
         return Err(AxError::OperationNotPermitted);
     }
     let mut buf: Vec<MaybeUninit<u8>> = vec![MaybeUninit::uninit(); len];
-    vm_read_slice(name.cast::<u8>(), &mut buf)?;
+    vm_read_slice(current, name.cast::<u8>(), &mut buf)?;
     let bytes: Vec<u8> = unsafe { buf.into_iter().map(|v| v.assume_init()).collect() };
     let mut nodename: [c_char; 65] = [0; 65];
     unsafe {
         core::ptr::copy_nonoverlapping(bytes.as_ptr().cast::<c_char>(), nodename.as_mut_ptr(), len);
     }
     let proc_data = &curr.as_thread().proc_data;
-    proc_data.nsproxy.lock().uts_ns.lock().nodename = nodename;
+    let update = proc_data.namespace_update();
+    update.snapshot().uts_ns.lock().nodename = nodename;
     Ok(0)
 }
 
-pub fn sys_setdomainname(name: *const c_char, len: usize) -> AxResult<isize> {
+pub fn sys_setdomainname(
+    current: &crate::task::UserTaskRef,
+    name: *const c_char,
+    len: usize,
+) -> AxResult<isize> {
     if len > 64 {
         return Err(AxError::InvalidInput);
     }
-    let curr = current();
+    let curr = current;
     if curr.as_thread().cred().euid != 0 {
         return Err(AxError::OperationNotPermitted);
     }
     let mut buf: Vec<MaybeUninit<u8>> = vec![MaybeUninit::uninit(); len];
-    vm_read_slice(name.cast::<u8>(), &mut buf)?;
+    vm_read_slice(current, name.cast::<u8>(), &mut buf)?;
     let bytes: Vec<u8> = unsafe { buf.into_iter().map(|v| v.assume_init()).collect() };
     let mut domainname: [c_char; 65] = [0; 65];
     unsafe {
@@ -724,11 +787,12 @@ pub fn sys_setdomainname(name: *const c_char, len: usize) -> AxResult<isize> {
         );
     }
     let proc_data = &curr.as_thread().proc_data;
-    proc_data.nsproxy.lock().uts_ns.lock().domainname = domainname;
+    let update = proc_data.namespace_update();
+    update.snapshot().uts_ns.lock().domainname = domainname;
     Ok(0)
 }
 
-pub fn sys_sysinfo(info: *mut sysinfo) -> AxResult<isize> {
+pub fn sys_sysinfo(current: &crate::task::UserTaskRef, info: *mut sysinfo) -> AxResult<isize> {
     let mut kinfo: sysinfo = unsafe { core::mem::zeroed() };
 
     let total = ax_runtime::hal::mem::total_ram_size();
@@ -748,12 +812,33 @@ pub fn sys_sysinfo(info: *mut sysinfo) -> AxResult<isize> {
     kinfo.procs = processes().len() as _;
     kinfo.mem_unit = 1;
 
-    info.vm_write(kinfo)?;
+    write_sysinfo(current, info, kinfo)?;
     Ok(0)
 }
 
-fn require_syslog_privilege() -> AxResult<()> {
-    if current().as_thread().cred().euid == 0 {
+fn write_sysinfo(
+    current: &crate::task::UserTaskRef,
+    user: *mut sysinfo,
+    value: sysinfo,
+) -> AxResult<()> {
+    let user = UserPtr::from(user);
+    user.write_field(current, offset_of!(sysinfo, uptime), value.uptime)?;
+    user.write_field(current, offset_of!(sysinfo, loads), value.loads)?;
+    user.write_field(current, offset_of!(sysinfo, totalram), value.totalram)?;
+    user.write_field(current, offset_of!(sysinfo, freeram), value.freeram)?;
+    user.write_field(current, offset_of!(sysinfo, sharedram), value.sharedram)?;
+    user.write_field(current, offset_of!(sysinfo, bufferram), value.bufferram)?;
+    user.write_field(current, offset_of!(sysinfo, totalswap), value.totalswap)?;
+    user.write_field(current, offset_of!(sysinfo, freeswap), value.freeswap)?;
+    user.write_field(current, offset_of!(sysinfo, procs), value.procs)?;
+    user.write_field(current, offset_of!(sysinfo, pad), value.pad)?;
+    user.write_field(current, offset_of!(sysinfo, totalhigh), value.totalhigh)?;
+    user.write_field(current, offset_of!(sysinfo, freehigh), value.freehigh)?;
+    user.write_field(current, offset_of!(sysinfo, mem_unit), value.mem_unit)
+}
+
+fn require_syslog_privilege(current: &crate::task::UserTaskRef) -> AxResult<()> {
+    if current.as_thread().cred().euid == 0 {
         Ok(())
     } else {
         Err(AxError::OperationNotPermitted)
@@ -768,35 +853,40 @@ fn validate_syslog_read_args(buf: *mut c_char, len: usize) -> AxResult<()> {
     }
 }
 
-pub fn sys_syslog(ty: i32, buf: *mut c_char, len: usize) -> AxResult<isize> {
+pub fn sys_syslog(
+    current: &crate::task::UserTaskRef,
+    ty: i32,
+    buf: *mut c_char,
+    len: usize,
+) -> AxResult<isize> {
     match ty {
         SYSLOG_ACTION_CLOSE | SYSLOG_ACTION_OPEN => Ok(0),
         SYSLOG_ACTION_READ => {
-            require_syslog_privilege()?;
+            require_syslog_privilege(current)?;
             validate_syslog_read_args(buf, len)?;
             let data = {
                 let mut state = SYSLOG_STATE.lock();
                 state.read(len)
             };
             if !data.is_empty() {
-                vm_write_slice(buf.cast::<u8>(), &data)?;
+                vm_write_slice(current, buf.cast::<u8>(), &data)?;
             }
             Ok(data.len() as isize)
         }
         SYSLOG_ACTION_READ_ALL => {
-            require_syslog_privilege()?;
+            require_syslog_privilege(current)?;
             validate_syslog_read_args(buf, len)?;
             let data = {
                 let state = SYSLOG_STATE.lock();
                 state.read_all(len)
             };
             if !data.is_empty() {
-                vm_write_slice(buf.cast::<u8>(), &data)?;
+                vm_write_slice(current, buf.cast::<u8>(), &data)?;
             }
             Ok(data.len() as isize)
         }
         SYSLOG_ACTION_READ_CLEAR => {
-            require_syslog_privilege()?;
+            require_syslog_privilege(current)?;
             validate_syslog_read_args(buf, len)?;
             let data = {
                 let mut state = SYSLOG_STATE.lock();
@@ -805,30 +895,30 @@ pub fn sys_syslog(ty: i32, buf: *mut c_char, len: usize) -> AxResult<isize> {
                 data
             };
             if !data.is_empty() {
-                vm_write_slice(buf.cast::<u8>(), &data)?;
+                vm_write_slice(current, buf.cast::<u8>(), &data)?;
             }
             Ok(data.len() as isize)
         }
         SYSLOG_ACTION_CLEAR => {
-            require_syslog_privilege()?;
+            require_syslog_privilege(current)?;
             let mut state = SYSLOG_STATE.lock();
             state.clear();
             Ok(0)
         }
         SYSLOG_ACTION_CONSOLE_OFF => {
-            require_syslog_privilege()?;
+            require_syslog_privilege(current)?;
             let mut state = SYSLOG_STATE.lock();
             state.console_enabled = false;
             Ok(0)
         }
         SYSLOG_ACTION_CONSOLE_ON => {
-            require_syslog_privilege()?;
+            require_syslog_privilege(current)?;
             let mut state = SYSLOG_STATE.lock();
             state.console_enabled = true;
             Ok(0)
         }
         SYSLOG_ACTION_CONSOLE_LEVEL => {
-            require_syslog_privilege()?;
+            require_syslog_privilege(current)?;
             if !(1..=8).contains(&len) {
                 return Err(AxError::InvalidInput);
             }
@@ -838,7 +928,7 @@ pub fn sys_syslog(ty: i32, buf: *mut c_char, len: usize) -> AxResult<isize> {
             Ok(old_level as isize)
         }
         SYSLOG_ACTION_SIZE_UNREAD => {
-            require_syslog_privilege()?;
+            require_syslog_privilege(current)?;
             let state = SYSLOG_STATE.lock();
             Ok(state.unread_len() as isize)
         }
@@ -859,7 +949,12 @@ bitflags::bitflags! {
     }
 }
 
-pub fn sys_getrandom(buf: *mut u8, len: usize, flags: u32) -> AxResult<isize> {
+pub fn sys_getrandom(
+    current: &crate::task::UserTaskRef,
+    buf: *mut u8,
+    len: usize,
+    flags: u32,
+) -> AxResult<isize> {
     if len == 0 {
         return Ok(0);
     }
@@ -876,17 +971,17 @@ pub fn sys_getrandom(buf: *mut u8, len: usize, flags: u32) -> AxResult<isize> {
         "/dev/urandom"
     };
 
-    let f = ax_fs_ng::vfs::current_fs_context().lock().resolve(path)?;
+    let f = current_fs_context().lock().resolve(path)?;
     let mut kbuf = vec![0; len];
     let len = f.entry().as_file()?.read_at(&mut kbuf, 0)?;
 
-    vm_write_slice(buf, &kbuf)?;
+    vm_write_slice(current, buf, &kbuf)?;
 
     Ok(len as _)
 }
 
-fn check_seccomp_install_permission() -> AxResult<()> {
-    let curr = current();
+fn check_seccomp_install_permission(current: &crate::task::UserTaskRef) -> AxResult<()> {
+    let curr = current;
     let thread = curr.as_thread();
     if thread.no_new_privs() || thread.cred().has_cap_sys_admin() {
         Ok(())
@@ -895,27 +990,37 @@ fn check_seccomp_install_permission() -> AxResult<()> {
     }
 }
 
-fn read_seccomp_filter(args: *const ()) -> AxResult<Vec<SockFilter>> {
+fn read_seccomp_filter(
+    current: &crate::task::UserTaskRef,
+    args: *const (),
+) -> AxResult<Vec<SockFilter>> {
     if args.is_null() {
         return Err(AxError::BadAddress);
     }
-    let prog = unsafe { (args as *const SockFprog).vm_read_uninit()?.assume_init() };
+    let prog = unsafe {
+        (args as *const SockFprog)
+            .vm_read_uninit(current)?
+            .assume_init()
+    };
     if prog.len == 0 || prog.filter.is_null() {
         return Err(AxError::InvalidInput);
     }
     let mut raw = vec![MaybeUninit::<SockFilter>::uninit(); prog.len as usize];
-    vm_read_slice(prog.filter, &mut raw)?;
+    vm_read_slice(current, prog.filter, &mut raw)?;
     Ok(raw
         .into_iter()
         .map(|insn| unsafe { insn.assume_init() })
         .collect())
 }
 
-fn seccomp_action_available(args: *const ()) -> AxResult<isize> {
+fn seccomp_action_available(
+    current: &crate::task::UserTaskRef,
+    args: *const (),
+) -> AxResult<isize> {
     if args.is_null() {
         return Err(AxError::BadAddress);
     }
-    let action = unsafe { (args as *const u32).vm_read_uninit()?.assume_init() };
+    let action = unsafe { (args as *const u32).vm_read_uninit(current)?.assume_init() };
     match action {
         SECCOMP_RET_ALLOW
         | SECCOMP_RET_LOG
@@ -926,23 +1031,26 @@ fn seccomp_action_available(args: *const ()) -> AxResult<isize> {
     }
 }
 
-fn sync_seccomp_to_thread_group() {
-    let curr = current();
+fn sync_seccomp_to_thread_group(current: &crate::task::UserTaskRef) {
+    let curr = current;
     let thread = curr.as_thread();
     let state = thread.seccomp_state();
     for tid in thread.proc_data.proc.threads() {
         if tid == thread.tid() {
             continue;
         }
-        if let Ok(task) = get_task(tid)
-            && let Some(peer) = task.try_as_thread()
-        {
-            peer.set_seccomp_state(state.clone());
+        if let Ok(task) = get_task(tid) {
+            task.as_thread().set_seccomp_state(state.clone());
         }
     }
 }
 
-pub fn sys_seccomp(op: u32, flags: u32, args: *const ()) -> AxResult<isize> {
+pub fn sys_seccomp(
+    current: &crate::task::UserTaskRef,
+    op: u32,
+    flags: u32,
+    args: *const (),
+) -> AxResult<isize> {
     if flags & !SECCOMP_ALLOWED_FLAGS != 0 {
         return Err(AxError::InvalidInput);
     }
@@ -952,23 +1060,23 @@ pub fn sys_seccomp(op: u32, flags: u32, args: *const ()) -> AxResult<isize> {
             if flags != 0 || !args.is_null() {
                 return Err(AxError::InvalidInput);
             }
-            current().as_thread().install_seccomp_strict()?;
+            current.as_thread().install_seccomp_strict()?;
         }
         SECCOMP_SET_MODE_FILTER => {
-            check_seccomp_install_permission()?;
-            let filter = read_seccomp_filter(args)?;
-            let curr = current();
+            check_seccomp_install_permission(current)?;
+            let filter = read_seccomp_filter(current, args)?;
+            let curr = current;
             let thread = curr.as_thread();
             thread.append_seccomp_filter(filter)?;
             if flags & SECCOMP_FILTER_FLAG_TSYNC != 0 {
-                sync_seccomp_to_thread_group();
+                sync_seccomp_to_thread_group(current);
             }
         }
         SECCOMP_GET_ACTION_AVAIL => {
             if flags != 0 {
                 return Err(AxError::InvalidInput);
             }
-            return seccomp_action_available(args);
+            return seccomp_action_available(current, args);
         }
         _ => return Err(AxError::InvalidInput),
     }
@@ -998,7 +1106,7 @@ pub fn sys_riscv_flush_icache(start: usize, end: usize, flags: usize) -> AxResul
 
 #[cfg(target_arch = "riscv64")]
 #[repr(C)]
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, bytemuck::AnyBitPattern, bytemuck::NoUninit)]
 struct RiscvHwprobe {
     key: i64,
     value: u64,
@@ -1006,6 +1114,7 @@ struct RiscvHwprobe {
 
 #[cfg(target_arch = "riscv64")]
 pub fn sys_riscv_hwprobe(
+    current: &crate::task::UserTaskRef,
     pairs: *mut u8,
     pair_count: usize,
     cpu_count: usize,
@@ -1022,8 +1131,10 @@ pub fn sys_riscv_hwprobe(
         return Err(AxError::InvalidInput);
     }
 
-    let pairs = UserPtr::<RiscvHwprobe>::from(pairs.cast()).get_as_mut_slice(pair_count)?;
-    for pair in pairs {
+    let input_pairs = crate::mm::UserConstPtr::<RiscvHwprobe>::from(pairs.cast_const().cast());
+    let output_pairs = UserPtr::<RiscvHwprobe>::from(pairs.cast());
+    let mut pairs = input_pairs.read_slice(current, pair_count)?;
+    for pair in &mut pairs {
         if let Some(value) = ax_runtime::hal::cpu::cap::riscv_hwprobe(pair.key) {
             pair.value = value;
         } else {
@@ -1031,6 +1142,7 @@ pub fn sys_riscv_hwprobe(
             pair.value = 0;
         }
     }
+    output_pairs.write_slice(current, &pairs)?;
 
     Ok(0)
 }

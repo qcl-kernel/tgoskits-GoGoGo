@@ -2,24 +2,23 @@ use alloc::{collections::BTreeMap, sync::Arc, vec::Vec};
 
 use ax_errno::{AxError, AxResult, LinuxError};
 use ax_runtime::hal::time::monotonic_time_nanos;
-use ax_task::current;
 use bytemuck::AnyBitPattern;
 use linux_raw_sys::general::*;
 use starry_process::Pid;
-use starry_vm::{VmMutPtr, VmPtr, vm_load, vm_write_slice};
 
 use super::{
     IPC_CREAT, IPC_EXCL, IPC_INFO, IPC_PRIVATE, IPC_RMID, IPC_SET, IPC_STAT, IpcPerm, MSG_INFO,
     MSG_STAT, has_ipc_permission, next_ipc_id,
 };
 use crate::{
-    sync::Mutex,
-    task::{AsThread, WaitQueue as MsgWaitQueue},
+    mm::{VmMutPtr, VmPtr, vm_load, vm_write_slice},
+    sync::PiMutex,
+    task::WaitQueue as MsgWaitQueue,
 };
 
 /// Data structure describing a message queue.
 #[repr(C)]
-#[derive(Clone, Copy, AnyBitPattern)]
+#[derive(Clone, Copy, AnyBitPattern, bytemuck::NoUninit)]
 #[allow(non_camel_case_types)]
 pub struct msqid_ds {
     /// operation permission struct
@@ -54,6 +53,7 @@ impl msqid_ds {
                 mode,
                 seq: 0,
                 pad: 0,
+                alignment_pad: 0,
                 unused0: 0,
                 unused1: 0,
             },
@@ -287,7 +287,7 @@ pub struct MsgManager {
     /// (key, ns_id) -> msqid mapping
     key_msqid: BTreeMap<(i32, u64), i32>,
     /// msqid -> message queue structure
-    msqid_queues: BTreeMap<i32, Arc<Mutex<MessageQueue>>>,
+    msqid_queues: BTreeMap<i32, Arc<PiMutex<MessageQueue>>>,
 }
 
 impl MsgManager {
@@ -299,12 +299,12 @@ impl MsgManager {
     }
 
     /// Returns an iterator over all message queues
-    pub fn iter_msg_queues(&self) -> impl Iterator<Item = (i32, &Arc<Mutex<MessageQueue>>)> {
+    pub fn iter_msg_queues(&self) -> impl Iterator<Item = (i32, &Arc<PiMutex<MessageQueue>>)> {
         self.msqid_queues.iter().map(|(&k, v)| (k, v))
     }
 
     /// Returns an iterator over all message queues, filtering out removed ones
-    pub fn iter_active_queues(&self) -> impl Iterator<Item = (i32, &Arc<Mutex<MessageQueue>>)> {
+    pub fn iter_active_queues(&self) -> impl Iterator<Item = (i32, &Arc<PiMutex<MessageQueue>>)> {
         self.iter_msg_queues().filter(|(_, queue)| {
             let guard = queue.lock();
             !guard.mark_removed
@@ -318,7 +318,7 @@ impl MsgManager {
 
     /// Returns the message queue associated with the given ID, validating
     /// that it belongs to the specified IPC namespace.
-    pub fn get_queue_by_msqid(&self, msqid: i32, ns_id: u64) -> Option<Arc<Mutex<MessageQueue>>> {
+    pub fn get_queue_by_msqid(&self, msqid: i32, ns_id: u64) -> Option<Arc<PiMutex<MessageQueue>>> {
         self.msqid_queues
             .get(&msqid)
             .filter(|q| q.lock().ns_id == ns_id)
@@ -331,7 +331,7 @@ impl MsgManager {
     }
 
     /// Inserts a mapping from a message queue ID to its queue.
-    pub fn insert_msqid_queues(&mut self, msqid: i32, msg_queue: Arc<Mutex<MessageQueue>>) {
+    pub fn insert_msqid_queues(&mut self, msqid: i32, msg_queue: Arc<PiMutex<MessageQueue>>) {
         self.msqid_queues.insert(msqid, msg_queue);
     }
 
@@ -356,7 +356,7 @@ pub const MSGMNB: usize = 16384;
 pub const MSGMAX: usize = 8192;
 
 /// Global message queue manager
-pub static MSG_MANAGER: Mutex<MsgManager> = Mutex::new(MsgManager::new());
+pub static MSG_MANAGER: PiMutex<MsgManager> = PiMutex::new(MsgManager::new());
 
 bitflags::bitflags! {
     /// Flags for msgrcv
@@ -389,15 +389,14 @@ pub struct UserMsgbuf {
     pub mtext: [u8; 0], // actual data, use zero-sized array to simulate flexible array
 }
 
-pub fn sys_msgget(key: i32, msgflg: i32) -> AxResult<isize> {
-    let current = current();
+pub fn sys_msgget(current: &crate::task::UserTaskRef, key: i32, msgflg: i32) -> AxResult<isize> {
     let thread = current.as_thread();
     let proc_data = &thread.proc_data;
     let cred = thread.cred();
     let current_uid = cred.euid;
     let current_gid = cred.egid;
     let current_pid = proc_data.proc.pid();
-    let ns_id = proc_data.nsproxy.lock().ipc_ns.lock().ns_id;
+    let ns_id = proc_data.namespace_snapshot().ipc_ns.lock().ns_id;
 
     let mut msg_manager = MSG_MANAGER.lock();
 
@@ -409,7 +408,7 @@ pub fn sys_msgget(key: i32, msgflg: i32) -> AxResult<isize> {
     // Handle IPC_PRIVATE (always create new queue)
     if key == IPC_PRIVATE {
         let msqid = next_ipc_id();
-        let msg_queue = Arc::new(Mutex::new(MessageQueue::new(
+        let msg_queue = Arc::new(PiMutex::new(MessageQueue::new(
             key,
             (msgflg & 0o777) as _,
             current_pid,
@@ -459,7 +458,7 @@ pub fn sys_msgget(key: i32, msgflg: i32) -> AxResult<isize> {
     }
 
     let msqid = next_ipc_id();
-    let msg_queue = Arc::new(Mutex::new(MessageQueue::new(
+    let msg_queue = Arc::new(PiMutex::new(MessageQueue::new(
         key,
         (msgflg & 0o777) as _,
         current_pid,
@@ -475,6 +474,7 @@ pub fn sys_msgget(key: i32, msgflg: i32) -> AxResult<isize> {
 }
 
 pub fn sys_msgsnd(
+    current: &crate::task::UserTaskRef,
     msqid: i32,
     msgp: *const UserMsgbuf,
     msgsz: usize,
@@ -484,7 +484,6 @@ pub fn sys_msgsnd(
     if msgsz > MSGMAX {
         return Err(AxError::from(LinuxError::EINVAL)); // EINVAL
     }
-    let current = current();
     let thread = current.as_thread();
     let proc_data = &thread.proc_data;
     let cred = thread.cred();
@@ -495,7 +494,7 @@ pub fn sys_msgsnd(
 
     let msg_queue_ref = {
         let msg_manager = MSG_MANAGER.lock();
-        let ns_id = proc_data.nsproxy.lock().ipc_ns.lock().ns_id;
+        let ns_id = proc_data.namespace_snapshot().ipc_ns.lock().ns_id;
         msg_manager
             .get_queue_by_msqid(msqid, ns_id)
             .ok_or(AxError::from(LinuxError::EINVAL))? // EINVAL - queue does not exist
@@ -518,7 +517,7 @@ pub fn sys_msgsnd(
 
     // read message from user space
     let mtype_ptr = unsafe { core::ptr::addr_of!((*msgp).mtype) };
-    let mtype: i64 = mtype_ptr.vm_read()?;
+    let mtype: i64 = mtype_ptr.vm_read(current)?;
 
     if mtype <= 0 {
         return Err(AxError::from(LinuxError::EINVAL)); // EINVAL - invalid message type
@@ -526,7 +525,7 @@ pub fn sys_msgsnd(
 
     // read data part
     let mtext_ptr = unsafe { core::ptr::addr_of!((*msgp).mtext) };
-    let data_vec = vm_load(mtext_ptr.cast::<u8>(), msgsz)?;
+    let data_vec = vm_load(current, mtext_ptr.cast::<u8>(), msgsz)?;
     let data_len = data_vec.len();
 
     loop {
@@ -552,7 +551,7 @@ pub fn sys_msgsnd(
 
         let send_wait_queue = msg_queue.send_wait_queue.clone();
         drop(msg_queue);
-        let _ = send_wait_queue.wait_if(u32::MAX, None, || {
+        let _ = send_wait_queue.wait_if(current, u32::MAX, None, || {
             let msg_queue = msg_queue_ref.lock();
             !msg_queue.mark_removed && queue_would_exceed(&msg_queue, data_len)
         })?;
@@ -560,6 +559,7 @@ pub fn sys_msgsnd(
 }
 
 pub fn sys_msgrcv(
+    current: &crate::task::UserTaskRef,
     msqid: i32,
     msgp: *mut UserMsgbuf,
     msgsz: usize,
@@ -582,7 +582,6 @@ pub fn sys_msgrcv(
     } else {
         flags.remove(MsgRcvFlags::MSG_EXCEPT);
     }
-    let current = current();
     let thread = current.as_thread();
     let proc_data = &thread.proc_data;
     let cred = thread.cred();
@@ -605,7 +604,7 @@ pub fn sys_msgrcv(
     // Get the message queue
     let msg_queue_ref = {
         let msg_manager = MSG_MANAGER.lock();
-        let ns_id = proc_data.nsproxy.lock().ipc_ns.lock().ns_id;
+        let ns_id = proc_data.namespace_snapshot().ipc_ns.lock().ns_id;
         msg_manager
             .get_queue_by_msqid(msqid, ns_id)
             .ok_or(AxError::from(LinuxError::EINVAL))? // EINVAL
@@ -665,7 +664,7 @@ pub fn sys_msgrcv(
 
             let recv_wait_queue = msg_queue.recv_wait_queue.clone();
             drop(msg_queue);
-            let _ = recv_wait_queue.wait_if(u32::MAX, None, || {
+            let _ = recv_wait_queue.wait_if(current, u32::MAX, None, || {
                 let msg_queue = msg_queue_ref.lock();
                 !msg_queue.mark_removed
                     && find_matching_message(&msg_queue, msgtyp, &flags).is_none()
@@ -688,12 +687,12 @@ pub fn sys_msgrcv(
 
     // Write mtype
     let mtype_ptr = unsafe { core::ptr::addr_of_mut!((*msgp).mtype) };
-    mtype_ptr.vm_write(mtype)?;
+    mtype_ptr.vm_write(current, mtype)?;
 
     // Write data part
     let data_ptr = unsafe { core::ptr::addr_of_mut!((*msgp).mtext) };
     let copy_len = data_slice.len().min(msgsz);
-    vm_write_slice(data_ptr.cast::<u8>(), &data_slice[..copy_len])?;
+    vm_write_slice(current, data_ptr.cast::<u8>(), &data_slice[..copy_len])?;
 
     // Remove the message from the queue (normal mode only)
     if should_remove {
@@ -723,15 +722,19 @@ pub fn sys_msgrcv(
     Ok(copy_len as isize)
 }
 
-pub fn sys_msgctl(msqid: i32, cmd: i32, buf: usize) -> AxResult<isize> {
+pub fn sys_msgctl(
+    current: &crate::task::UserTaskRef,
+    msqid: i32,
+    cmd: i32,
+    buf: usize,
+) -> AxResult<isize> {
     //  Get current process information
-    let current = current();
     let thread = current.as_thread();
     let cred = thread.cred();
     let current_uid = cred.euid;
     let current_gid = cred.egid;
     let is_privileged = current_uid == 0; // root user check
-    let ns_id = thread.proc_data.nsproxy.lock().ipc_ns.lock().ns_id;
+    let ns_id = thread.proc_data.namespace_snapshot().ipc_ns.lock().ns_id;
 
     // Validate command code
     if cmd != IPC_STAT
@@ -750,6 +753,7 @@ pub fn sys_msgctl(msqid: i32, cmd: i32, buf: usize) -> AxResult<isize> {
         // IPC_INFO uses msqid=0, no actual queue needed
         // Return system-level information
         #[repr(C)]
+        #[derive(Clone, Copy, bytemuck::AnyBitPattern, bytemuck::NoUninit)]
         struct MsgInfo {
             msgpool: i32,
             msgmap: i32,
@@ -759,6 +763,7 @@ pub fn sys_msgctl(msqid: i32, cmd: i32, buf: usize) -> AxResult<isize> {
             msgssz: i32,
             msgtql: i32,
             msgseg: u16,
+            _padding: u16,
         }
 
         let info = MsgInfo {
@@ -770,11 +775,12 @@ pub fn sys_msgctl(msqid: i32, cmd: i32, buf: usize) -> AxResult<isize> {
             msgssz: 0,
             msgtql: 0,
             msgseg: 0,
+            _padding: 0,
         };
 
         // Copy to user space
         let ptr = buf as *mut MsgInfo;
-        ptr.vm_write(info)?;
+        ptr.vm_write(current, info)?;
         return Ok(0);
     }
 
@@ -800,6 +806,7 @@ pub fn sys_msgctl(msqid: i32, cmd: i32, buf: usize) -> AxResult<isize> {
             mode: 0o600,
             pad: 0,
             seq: 0,
+            alignment_pad: 0,
             unused0: 0,
             unused1: 0,
         };
@@ -817,7 +824,7 @@ pub fn sys_msgctl(msqid: i32, cmd: i32, buf: usize) -> AxResult<isize> {
         };
 
         let ptr = buf as *mut msqid_ds;
-        ptr.vm_write(info_ds)?;
+        ptr.vm_write(current, info_ds)?;
 
         return Ok(ns_queues_count as isize);
     }
@@ -838,7 +845,7 @@ pub fn sys_msgctl(msqid: i32, cmd: i32, buf: usize) -> AxResult<isize> {
                 }
 
                 let ptr = buf as *mut msqid_ds;
-                ptr.vm_write(guard.msqid_ds)?;
+                ptr.vm_write(current, guard.msqid_ds)?;
                 Ok(actual_msqid as isize)
             });
 
@@ -872,7 +879,7 @@ pub fn sys_msgctl(msqid: i32, cmd: i32, buf: usize) -> AxResult<isize> {
 
         // Copy queue status to user space
         let ptr = buf as *mut msqid_ds;
-        ptr.vm_write(msg_queue.msqid_ds)?;
+        ptr.vm_write(current, msg_queue.msqid_ds)?;
 
         return Ok(0);
     }
@@ -888,7 +895,7 @@ pub fn sys_msgctl(msqid: i32, cmd: i32, buf: usize) -> AxResult<isize> {
     if cmd == IPC_SET {
         // Read new settings from user space
         let ptr = buf as *const msqid_ds;
-        let user_buf = ptr.vm_read()?;
+        let user_buf = ptr.vm_read(current)?;
 
         // Update permission information (fields allowed by man-page)
         msg_queue.msqid_ds.msg_perm.uid = user_buf.msg_perm.uid;

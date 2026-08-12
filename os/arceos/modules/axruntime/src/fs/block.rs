@@ -12,6 +12,13 @@ use ax_fs_ng::{
         BlockRuntimeOps, BlockThread, BlockTimeProvider, FsPage, FsPageProvider,
     },
 };
+use ax_lazyinit::LazyInit;
+use ax_task::runtime::RuntimeStatus;
+
+use crate::{
+    sync::SpinLock,
+    task::{CpuId, CpuSet, IrqWaitCell, IrqWorkerWaiter, TaskError, ThreadHandle, ThreadId},
+};
 
 struct RuntimeTimeProvider;
 
@@ -41,44 +48,95 @@ impl FsPageProvider for RuntimePageProvider {
 }
 
 struct RuntimeNotification {
-    inner: ax_task::IrqNotify,
+    event: IrqWaitCell,
+    waiter: LazyInit<RuntimeNotificationWaiter>,
+}
+
+struct RuntimeNotificationWaiter {
+    owner: ThreadId,
+    irq: IrqWorkerWaiter,
 }
 
 impl RuntimeNotification {
     const fn new() -> Self {
         Self {
-            inner: ax_task::IrqNotify::new(),
+            event: IrqWaitCell::new(),
+            waiter: LazyInit::new(),
+        }
+    }
+
+    fn publish_from_task(&self) {
+        let _result = self.event.notify_from_task();
+    }
+
+    fn publish_from_irq(&self) {
+        let _result = self.event.notify();
+    }
+
+    fn wait_inner(&self, timeout: Option<Duration>) -> bool {
+        let current = crate::task::current_thread_handle()
+            .unwrap_or_else(|error| panic!("block notification has no scheduler thread: {error}"));
+        let waiter = self.waiter.get_or_init(|| RuntimeNotificationWaiter {
+            owner: current.id(),
+            irq: IrqWorkerWaiter::new(current.wake_handle()),
+        });
+        assert_eq!(
+            waiter.owner,
+            current.id(),
+            "one block notification must be consumed by one fixed service thread"
+        );
+
+        match timeout {
+            Some(timeout) => waiter
+                .irq
+                .wait_timeout(&self.event, timeout)
+                .unwrap_or_else(|error| panic!("block notification wait failed: {error}")),
+            None => {
+                waiter
+                    .irq
+                    .wait(&self.event)
+                    .unwrap_or_else(|error| panic!("block notification wait failed: {error}"));
+                false
+            }
         }
     }
 }
 
 impl BlockNotification for RuntimeNotification {
     fn notify(&self) {
-        self.inner.notify();
+        self.publish_from_task();
     }
 
     fn notify_from_irq(&self) {
-        self.inner.notify_irq();
+        self.publish_from_irq();
     }
 
     #[track_caller]
     fn wait(&self) {
-        self.inner.wait();
+        let _timed_out = self.wait_inner(None);
     }
 
     #[track_caller]
     fn wait_timeout(&self, duration: Duration) -> bool {
-        self.inner.wait_timeout(duration)
+        self.wait_inner(Some(duration))
     }
 }
 
 struct RuntimeBlockThread {
-    task: ax_task::AxTaskRef,
+    // Joining consumes the scheduler handle. This gate protects only the
+    // move-out and is always released before the potentially blocking join.
+    // No IRQ path observes this state, so masking local IRQs would only widen
+    // interrupt latency without adding serialization.
+    task: SpinLock<Option<ThreadHandle>>,
 }
 
 impl BlockThread for RuntimeBlockThread {
     fn join(&self) {
-        self.task.join();
+        let Some(task) = self.task.lock().take() else {
+            return;
+        };
+        crate::task::join_thread(task)
+            .unwrap_or_else(|error| panic!("failed to join block maintenance thread: {error}"));
     }
 }
 
@@ -96,7 +154,7 @@ impl BlockRuntimeOps for RuntimeTaskOps {
     }
 
     fn can_block(&self) -> bool {
-        ax_task::current_may_uninit().is_some() && !ax_task::in_atomic_context()
+        crate::task::current_thread_id().is_ok() && !crate::guard::in_atomic_context()
     }
 
     fn notification(&self) -> Arc<dyn BlockNotification> {
@@ -112,19 +170,65 @@ impl BlockRuntimeOps for RuntimeTaskOps {
         if cpu >= ax_hal::cpu_num() {
             return Err(ax_errno::AxError::InvalidInput);
         }
-        let task = ax_task::spawn_raw(
-            move || {
-                let affinity = ax_task::AxCpuMask::one_shot(cpu);
-                if !ax_task::set_current_affinity(affinity) {
-                    error!("failed to bind block maintenance task to CPU {cpu}");
-                    return;
-                }
-                entry();
-            },
+        let cpu = u32::try_from(cpu).map_err(|_| ax_errno::AxError::InvalidInput)?;
+        let mut affinity = CpuSet::empty(ax_hal::cpu_num());
+        if !affinity.insert(CpuId::new(cpu)) {
+            return Err(ax_errno::AxError::InvalidInput);
+        }
+        let task = crate::task::spawn_raw_with_affinity(
+            entry,
             name,
             crate::runtime_default_task_stack_size(),
-        );
-        Ok(Box::new(RuntimeBlockThread { task }))
+            affinity,
+        )
+        .map_err(map_task_error)?;
+        Ok(Box::new(RuntimeBlockThread {
+            task: SpinLock::new(Some(task)),
+        }))
+    }
+}
+
+fn map_task_error(error: TaskError) -> ax_errno::AxError {
+    match error {
+        TaskError::InvalidConfiguration
+        | TaskError::InvalidCpuCount(_)
+        | TaskError::InvalidCpu(_)
+        | TaskError::InvalidNice(_)
+        | TaskError::InvalidRtPriority(_)
+        | TaskError::InvalidRoundRobinQuantum
+        | TaskError::InvalidDeadline { .. }
+        | TaskError::UnsupportedDeadlineFlags(_) => ax_errno::AxError::InvalidInput,
+        // Linux kthread_create_on_node() reports task-object allocation and
+        // kernel-thread capacity failures as ENOMEM to kernel worker callers.
+        TaskError::TimerCapacity | TaskError::ThreadCapacity => ax_errno::AxError::NoMemory,
+        TaskError::RuntimeFailure(status) if status == RuntimeStatus::NoMemory as u32 => {
+            ax_errno::AxError::NoMemory
+        }
+        TaskError::CpuOffline(_)
+        | TaskError::CpuNotQuiescent(_)
+        | TaskError::LastOnlineCpu(_)
+        | TaskError::DeadlineAdmission
+        | TaskError::DeadlineAffinity
+        | TaskError::ActiveTimerAffinity
+        | TaskError::ThreadBusy => ax_errno::AxError::ResourceBusy,
+        TaskError::UnsafeContext => ax_errno::AxError::OperationNotPermitted,
+        TaskError::StaleThreadId => ax_errno::AxError::NotFound,
+        TaskError::NotInitialized
+        | TaskError::InvalidRuntimeHandle
+        | TaskError::CpuOwnerBorrowed
+        | TaskError::CpuOwnerMismatch { .. }
+        | TaskError::ExecutorOwnerMismatch { .. }
+        | TaskError::CpuAlreadyOnline(_)
+        | TaskError::InvalidTransition { .. }
+        | TaskError::AlreadyQueued
+        | TaskError::NotReady
+        | TaskError::NotExited
+        | TaskError::NoRunnableThread
+        | TaskError::InvalidPiState
+        | TaskError::InvalidPiWaitState(_)
+        | TaskError::PiCycle
+        | TaskError::PiChainLimit { .. }
+        | TaskError::RuntimeFailure(_) => ax_errno::AxError::BadState,
     }
 }
 
@@ -306,5 +410,13 @@ mod tests {
     #[test]
     fn runtime_task_ops_is_available() {
         let _ = &TASK_OPS;
+    }
+
+    #[test]
+    fn block_worker_thread_capacity_matches_linux_kthread_enomem() {
+        assert_eq!(
+            map_task_error(TaskError::ThreadCapacity),
+            ax_errno::AxError::NoMemory
+        );
     }
 }

@@ -12,7 +12,7 @@ use super::{
     cache::CachedFile,
     open::{FileFlags, OpenOptions, OpenResult},
 };
-use crate::{fs_core::FsContext, os::sync::SleepMutex as Mutex};
+use crate::{fs_core::FsContext, os::sync::Mutex};
 
 /// Low-level interface for file operations.
 #[derive(Clone)]

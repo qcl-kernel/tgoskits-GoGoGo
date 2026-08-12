@@ -46,7 +46,34 @@ pub(crate) trait ArchOps {
         Ok(())
     }
 
+    /// Prepares task-owned architecture state for one vCPU run slice.
+    ///
+    /// This hook runs before the backend is loaded on a host CPU and may use
+    /// sleepable task-context services. CPU-local state belongs in
+    /// [`Self::before_vcpu_run`] instead.
+    fn prepare_vcpu_run_slice(
+        _vm: &crate::AxVMRef,
+        _vcpu: &crate::vm::AxVCpuRef<Self::VCpu>,
+    ) -> AxVmResult {
+        Ok(())
+    }
+
+    /// Prepares architecture state before each guest entry in a run slice.
     fn before_vcpu_run(
+        _vm: &crate::AxVMRef,
+        _vcpu: &crate::vm::AxVCpuRef<Self::VCpu>,
+    ) -> AxVmResult {
+        Ok(())
+    }
+
+    /// Commits backend state staged by the preceding unbound exit handler.
+    ///
+    /// The hook runs immediately after the backend is loaded and before new
+    /// interrupts are injected. It is the in-kernel equivalent of Linux KVM's
+    /// `complete_userspace_io`: sleepable device work remains outside
+    /// `vcpu_load()`/`vcpu_put()`, while the resulting RIP/register update is
+    /// committed after the next `vcpu_load()`.
+    fn complete_pending_vcpu_exit(
         _vm: &crate::AxVMRef,
         _vcpu: &crate::vm::AxVCpuRef<Self::VCpu>,
     ) -> AxVmResult {
@@ -116,7 +143,6 @@ pub(crate) trait ArchOps {
         vector: usize,
     ) {
         crate::host::arceos::dispatch_host_irq(vector);
-        crate::check_timer_events();
     }
 
     /// Releases architecture runtime state after the VM's last vCPU exits.
@@ -129,7 +155,12 @@ pub(crate) trait ArchOps {
 
     fn after_mmio_write(_vm: &crate::AxVMRef) {}
 
-    fn handle_vcpu_exit_bound(
+    /// Handles a VM exit after the architecture backend has been unloaded.
+    ///
+    /// This hook may invoke sleepable runtime and device services. Any state
+    /// update that requires a loaded backend must be staged here and committed
+    /// by [`Self::complete_pending_vcpu_exit`] on the next bound entry.
+    fn handle_vcpu_exit_unbound(
         vm: &crate::AxVMRef,
         vcpu: &crate::vm::AxVCpuRef<Self::VCpu>,
         exit: <Self::VCpu as VmArchVcpuOps>::Exit,
@@ -163,23 +194,31 @@ pub(crate) trait ArchOps {
             }
         }
 
-        let run_result = vcpu.with_current_cpu_set(|| -> AxVmResult<_> {
-            loop {
-                crate::runtime::vcpus::inject_pending_interrupts::<Self>(vm.id(), vcpu_id, vcpu);
+        let run_result = run_vcpu_slice(
+            || Self::prepare_vcpu_run_slice(vm, vcpu),
+            || {
+                vcpu.with_backend_bound_current_cpu(|| {
+                    Self::complete_pending_vcpu_exit(vm, vcpu)?;
 
-                drain_and_inject_dispatched_interrupts::<Self>(vm, vcpu_id, vcpu);
+                    crate::runtime::vcpus::inject_pending_interrupts::<Self>(
+                        vm.id(),
+                        vcpu_id,
+                        vcpu,
+                    );
 
-                Self::before_vcpu_run(vm, vcpu)?;
-                let exit = vcpu.run();
-                Self::after_vcpu_run(vm, vcpu);
-                let exit = exit?;
+                    drain_and_inject_dispatched_interrupts::<Self>(vm, vcpu_id, vcpu);
+
+                    Self::before_vcpu_run(vm, vcpu)?;
+                    let exit = vcpu.run_loaded();
+                    Self::after_vcpu_run(vm, vcpu);
+                    exit
+                })
+            },
+            |exit| {
                 trace!("{exit:#x?}");
-                match Self::handle_vcpu_exit_bound(vm, vcpu, exit)? {
-                    BoundVcpuExit::Continue => continue,
-                    action => break Ok(action),
-                }
-            }
-        });
+                Self::handle_vcpu_exit_unbound(vm, vcpu, exit)
+            },
+        );
 
         let unbind_result = vcpu.unbind();
         match run_result {
@@ -191,6 +230,17 @@ pub(crate) trait ArchOps {
                 unbind_result?;
                 Self::finish_deferred_run_work(vm, vcpu, work)
             }
+            Ok(BoundVcpuExit::DeferHypercall(work)) => {
+                unbind_result?;
+                let return_value = crate::runtime::hvc::finish_deferred_hypercall(vm.clone(), work);
+                vcpu.set_return_value(return_value);
+                Ok(VcpuRunAction {
+                    waits_for_event: false,
+                    stop_reason: None,
+                    resets_vm: false,
+                    exits_vcpu: false,
+                })
+            }
             Ok(BoundVcpuExit::Continue) => unreachable!("continued exits do not leave run loop"),
             Err(err) => {
                 if let Err(unbind_err) = unbind_result {
@@ -200,6 +250,20 @@ pub(crate) trait ArchOps {
                 }
                 Err(err)
             }
+        }
+    }
+}
+
+fn run_vcpu_slice<E, T>(
+    prepare: impl FnOnce() -> AxVmResult,
+    mut run_entry: impl FnMut() -> AxVmResult<E>,
+    mut handle_exit: impl FnMut(E) -> AxVmResult<BoundVcpuExit<T>>,
+) -> AxVmResult<BoundVcpuExit<T>> {
+    prepare()?;
+    loop {
+        match handle_exit(run_entry()?)? {
+            BoundVcpuExit::Continue => continue,
+            action => return Ok(action),
         }
     }
 }
@@ -284,7 +348,7 @@ pub(crate) fn default_vcpu_affinities(
 
 #[cfg(all(test, feature = "host-test"))]
 mod tests {
-    use std::{sync::Arc, vec};
+    use std::{cell::Cell, sync::Arc, vec};
 
     use ax_std::os::arceos::sync::IrqSafeMutex;
     use axvm_types::{
@@ -407,7 +471,7 @@ mod tests {
             true
         }
 
-        fn handle_vcpu_exit_bound(
+        fn handle_vcpu_exit_unbound(
             _vm: &crate::AxVMRef,
             _vcpu: &crate::vm::AxVCpuRef<Self::VCpu>,
             _exit: <Self::VCpu as VmArchVcpuOps>::Exit,
@@ -425,6 +489,59 @@ mod tests {
     }
 
     #[test]
+    fn run_slice_preparation_occurs_once_across_continued_exits() {
+        let preparations = Cell::new(0);
+        let entries = Cell::new(0);
+
+        let exit = run_vcpu_slice(
+            || {
+                preparations.set(preparations.get() + 1);
+                Ok(())
+            },
+            || {
+                entries.set(entries.get() + 1);
+                Ok(entries.get())
+            },
+            |entry| {
+                Ok(if entry < 3 {
+                    BoundVcpuExit::Continue
+                } else {
+                    BoundVcpuExit::Defer(())
+                })
+            },
+        )
+        .unwrap();
+
+        assert!(matches!(exit, BoundVcpuExit::Defer(())));
+        assert_eq!(entries.get(), 3);
+        assert_eq!(preparations.get(), 1);
+    }
+
+    #[test]
+    fn exit_handling_runs_after_the_cpu_bound_entry_scope() {
+        let cpu_bound = Cell::new(false);
+        let handled = Cell::new(false);
+
+        let exit = run_vcpu_slice(
+            || Ok(()),
+            || {
+                assert!(!cpu_bound.replace(true));
+                cpu_bound.set(false);
+                Ok(())
+            },
+            |()| {
+                assert!(!cpu_bound.get());
+                handled.set(true);
+                Ok(BoundVcpuExit::Defer(()))
+            },
+        )
+        .unwrap();
+
+        assert!(matches!(exit, BoundVcpuExit::Defer(())));
+        assert!(handled.get());
+    }
+
+    #[test]
     fn inject_vcpu_interrupt_preserves_level_trigger_at_backend_boundary() {
         let injections = Arc::new(IrqSafeMutex::new(InjectionLog::default()));
         let vcpu = Arc::new(AxVCpu::<RecordingVcpu>::new(1, 0, None, injections.clone()).unwrap());
@@ -433,8 +550,7 @@ mod tests {
             trigger: InterruptTriggerMode::LevelTriggered,
         };
         let dispatcher = crate::runtime::VcpuIrqDispatcher::new();
-        dispatcher.register_test_vcpu(0, 2);
-        dispatcher.enqueue(0, interrupt).unwrap();
+        dispatcher.enqueue(0, interrupt);
 
         inject_drained_interrupts::<RecordingArch>(&dispatcher, 1, 0, &vcpu);
 
@@ -452,7 +568,6 @@ mod tests {
         }));
         let vcpu = Arc::new(AxVCpu::<RecordingVcpu>::new(1, 0, None, injections.clone()).unwrap());
         let dispatcher = crate::runtime::VcpuIrqDispatcher::new();
-        dispatcher.register_test_vcpu(0, 2);
         for interrupt in [
             PendingVcpuInterrupt {
                 id: VirtualInterruptId(0x41),
@@ -467,7 +582,7 @@ mod tests {
                 trigger: InterruptTriggerMode::EdgeTriggered,
             },
         ] {
-            dispatcher.enqueue(0, interrupt).unwrap();
+            dispatcher.enqueue(0, interrupt);
         }
 
         inject_drained_interrupts::<RecordingArch>(&dispatcher, 1, 0, &vcpu);

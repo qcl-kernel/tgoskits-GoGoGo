@@ -4,14 +4,16 @@ use ax_errno::AxError;
 use ax_memory_addr::{PhysAddrRange, VirtAddr};
 use ax_runtime::hal::mem::virt_to_phys;
 use axfs_ng_vfs::{NodeFlags, VfsError, VfsResult};
-use starry_vm::VmMutPtr;
 
-use crate::pseudofs::{DeviceMmap, DeviceOps};
+use crate::{
+    mm::VmMutPtr,
+    pseudofs::{DeviceMmap, DeviceOps},
+};
 
 // Types from https://github.com/Tangzh33/asterinas
 
 #[repr(C)]
-#[derive(Default, Debug, Clone, Copy)]
+#[derive(Default, Debug, Clone, Copy, bytemuck::AnyBitPattern, bytemuck::NoUninit)]
 pub struct FrameBufferBitfield {
     /// The beginning of bitfield.
     offset: u32,
@@ -22,7 +24,7 @@ pub struct FrameBufferBitfield {
 }
 
 #[repr(C)]
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, bytemuck::AnyBitPattern, bytemuck::NoUninit)]
 struct VarScreenInfo {
     pub xres: u32, // Visible resolution
     pub yres: u32,
@@ -57,7 +59,7 @@ struct VarScreenInfo {
 }
 
 #[repr(C)]
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, bytemuck::AnyBitPattern, bytemuck::NoUninit)]
 struct FixScreenInfo {
     pub id: [u8; 16],       // Identification string, e.g., "TT Builtin"
     pub smem_start: u64,    // Start of framebuffer memory (physical address)
@@ -68,12 +70,15 @@ struct FixScreenInfo {
     pub xpanstep: u16,      // Zero if no hardware panning
     pub ypanstep: u16,      // Zero if no hardware panning
     pub ywrapstep: u16,     // Zero if no hardware ywrap
+    pub _padding0: u16,     // Explicit ABI alignment before line_length
     pub line_length: u32,   // Length of a line in bytes
+    pub _padding1: u32,     // Explicit ABI alignment before mmio_start
     pub mmio_start: u64,    // Start of Memory Mapped I/O (physical address)
     pub mmio_len: u32,      // Length of Memory Mapped I/O
     pub accel: u32,         // Indicate to driver which specific chip/card we have
     pub capabilities: u16,  // See FB_CAP_*
     pub reserved: [u16; 2], // Reserved for future compatibility
+    pub _padding2: u16,     // Explicit tail bytes in the 64-bit ABI
 }
 
 async fn refresh_task() {
@@ -82,7 +87,7 @@ async fn refresh_task() {
         if !ax_display::framebuffer_flush() {
             warn!("Failed to refresh framebuffer");
         }
-        ax_task::future::sleep(delay).await;
+        crate::task::future::sleep(delay).await;
     }
 }
 
@@ -92,8 +97,8 @@ pub struct FrameBuffer {
 }
 impl FrameBuffer {
     pub fn new() -> Self {
-        ax_task::spawn_with_name(
-            || ax_task::future::block_on(refresh_task()),
+        crate::task::spawn_kernel_thread(
+            || crate::task::future::block_on(refresh_task()),
             "fb-refresh".into(),
         );
         let info = ax_display::framebuffer_info();
@@ -128,60 +133,63 @@ impl DeviceOps for FrameBuffer {
         Ok(len)
     }
 
-    fn ioctl(&self, cmd: u32, arg: usize) -> VfsResult<usize> {
+    fn ioctl(&self, current: &crate::task::UserTaskRef, cmd: u32, arg: usize) -> VfsResult<usize> {
         match cmd {
             // FBIOGET_VSCREENINFO
             0x4600 => {
                 let info = ax_display::framebuffer_info();
                 let line_length = (info.fb_size / info.height as usize) as u32;
                 let bpp = line_length / info.width;
-                (arg as *mut VarScreenInfo).vm_write(VarScreenInfo {
-                    xres: info.width,
-                    yres: info.height,
-                    xres_virtual: info.width,
-                    yres_virtual: info.height,
-                    xoffset: 0,
-                    yoffset: 0,
-                    bits_per_pixel: bpp * 8,
-                    grayscale: 0,
-                    red: FrameBufferBitfield {
-                        offset: 16,
-                        length: 8,
-                        msb_right: 0,
+                (arg as *mut VarScreenInfo).vm_write(
+                    current,
+                    VarScreenInfo {
+                        xres: info.width,
+                        yres: info.height,
+                        xres_virtual: info.width,
+                        yres_virtual: info.height,
+                        xoffset: 0,
+                        yoffset: 0,
+                        bits_per_pixel: bpp * 8,
+                        grayscale: 0,
+                        red: FrameBufferBitfield {
+                            offset: 16,
+                            length: 8,
+                            msb_right: 0,
+                        },
+                        green: FrameBufferBitfield {
+                            offset: 8,
+                            length: 8,
+                            msb_right: 0,
+                        },
+                        blue: FrameBufferBitfield {
+                            offset: 0,
+                            length: 8,
+                            msb_right: 0,
+                        },
+                        transp: FrameBufferBitfield {
+                            offset: 24,
+                            length: 8,
+                            msb_right: 0,
+                        },
+                        nonstd: 0,
+                        activate: 0,
+                        height: 0,
+                        width: 0,
+                        accel_flags: 0,
+                        pixclock: 10000000 / info.width * 1000 / info.height,
+                        left_margin: (info.width / 8) & 0xf8,
+                        right_margin: 32,
+                        upper_margin: 16,
+                        lower_margin: 4,
+                        hsync_len: (info.width / 8) & 0xf8,
+                        vsync_len: 4,
+                        sync: 0,
+                        vmode: 0,
+                        rotate: 0,
+                        colorspace: 0,
+                        reserved: [0; 4],
                     },
-                    green: FrameBufferBitfield {
-                        offset: 8,
-                        length: 8,
-                        msb_right: 0,
-                    },
-                    blue: FrameBufferBitfield {
-                        offset: 0,
-                        length: 8,
-                        msb_right: 0,
-                    },
-                    transp: FrameBufferBitfield {
-                        offset: 24,
-                        length: 8,
-                        msb_right: 0,
-                    },
-                    nonstd: 0,
-                    activate: 0,
-                    height: 0,
-                    width: 0,
-                    accel_flags: 0,
-                    pixclock: 10000000 / info.width * 1000 / info.height,
-                    left_margin: (info.width / 8) & 0xf8,
-                    right_margin: 32,
-                    upper_margin: 16,
-                    lower_margin: 4,
-                    hsync_len: (info.width / 8) & 0xf8,
-                    vsync_len: 4,
-                    sync: 0,
-                    vmode: 0,
-                    rotate: 0,
-                    colorspace: 0,
-                    reserved: [0; 4],
-                })?;
+                )?;
                 Ok(0)
             }
             // FBIOPUT_VSCREENINFO
@@ -189,23 +197,29 @@ impl DeviceOps for FrameBuffer {
             // FBIOGET_FSCREENINFO
             0x4602 => {
                 let info = ax_display::framebuffer_info();
-                (arg as *mut FixScreenInfo).vm_write(FixScreenInfo {
-                    id: *b"Virtio Framebuf\0",
-                    smem_start: info.fb_base_vaddr as u64,
-                    smem_len: info.fb_size as u32,
-                    type_: 0,
-                    type_aux: 0,
-                    visual: 2, // FB_VISUAL_TRUECOLOR
-                    xpanstep: 0,
-                    ypanstep: 0,
-                    ywrapstep: 0,
-                    line_length: (info.fb_size / info.height as usize) as u32,
-                    mmio_start: 0,
-                    mmio_len: 0,
-                    accel: 0,
-                    capabilities: 0,
-                    reserved: [0; 2],
-                })?;
+                (arg as *mut FixScreenInfo).vm_write(
+                    current,
+                    FixScreenInfo {
+                        id: *b"Virtio Framebuf\0",
+                        smem_start: info.fb_base_vaddr as u64,
+                        smem_len: info.fb_size as u32,
+                        type_: 0,
+                        type_aux: 0,
+                        visual: 2, // FB_VISUAL_TRUECOLOR
+                        xpanstep: 0,
+                        ypanstep: 0,
+                        ywrapstep: 0,
+                        _padding0: 0,
+                        line_length: (info.fb_size / info.height as usize) as u32,
+                        _padding1: 0,
+                        mmio_start: 0,
+                        mmio_len: 0,
+                        accel: 0,
+                        capabilities: 0,
+                        reserved: [0; 2],
+                        _padding2: 0,
+                    },
+                )?;
                 Ok(0)
             }
             // FBIOGETCMAP

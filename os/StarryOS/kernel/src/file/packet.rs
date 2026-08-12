@@ -9,22 +9,24 @@ use core::{
 use ax_errno::{AxError, AxResult, LinuxError};
 use ax_io::prelude::*;
 use ax_net::{InterfaceId, InterfaceInfo, InterfaceKind};
-use ax_task::future::{block_on, poll_io};
 use axpoll::{IoEvents, PollSet, Pollable};
 use linux_raw_sys::{
     general::{O_RDWR, S_IFSOCK},
     net::{AF_PACKET, sockaddr},
 };
-use starry_vm::{vm_read_slice, vm_write_slice};
 
 use super::{
     FileLike, Kstat,
-    net::{ARPHRD_ETHER, first_visible_ethernet, visible_interface_by_id},
+    net::{ARPHRD_ETHER, first_visible_ethernet, in_root_net_ns, visible_interface_by_id},
 };
 use crate::{
     file::{IoDst, IoSrc, get_file_like},
-    sync::Mutex,
-    syscall::in_root_net_ns,
+    mm::{vm_read_slice, vm_write_slice},
+    sync::PiMutex,
+    task::{
+        current_user_task,
+        future::{block_on_user, poll_io},
+    },
 };
 
 const PACKET_HOST: u8 = 0;
@@ -65,11 +67,15 @@ impl SockAddrLl {
         })
     }
 
-    pub fn read_from_user(addr: *const sockaddr, addrlen: u32) -> AxResult<Self> {
+    pub fn read_from_user(
+        current: &crate::task::UserTaskRef,
+        addr: *const sockaddr,
+        addrlen: u32,
+    ) -> AxResult<Self> {
         if addrlen < size_of::<Self>() as u32 {
             return Err(AxError::InvalidInput);
         }
-        let data = read_user_bytes::<{ size_of::<Self>() }>(addr as *const u8)?;
+        let data = read_user_bytes::<{ size_of::<Self>() }>(current, addr as *const u8)?;
         let addr = Self {
             sll_family: u16::from_ne_bytes(data[0..2].try_into().unwrap()),
             sll_protocol: u16::from_ne_bytes(data[2..4].try_into().unwrap()),
@@ -85,10 +91,15 @@ impl SockAddrLl {
         Ok(addr)
     }
 
-    pub fn write_to_user(&self, addr: *mut sockaddr, addrlen: &mut u32) -> AxResult<()> {
+    pub fn write_to_user(
+        &self,
+        current: &crate::task::UserTaskRef,
+        addr: *mut sockaddr,
+        addrlen: &mut u32,
+    ) -> AxResult<()> {
         let len = (*addrlen as usize).min(size_of::<Self>());
         let data = unsafe { core::slice::from_raw_parts(self as *const Self as *const u8, len) };
-        vm_write_slice(addr as *mut u8, data)?;
+        vm_write_slice(current, addr as *mut u8, data)?;
         *addrlen = size_of::<Self>() as u32;
         Ok(())
     }
@@ -100,7 +111,7 @@ struct PacketSocketState {
 }
 
 pub struct PacketSocket {
-    state: Mutex<PacketSocketState>,
+    state: PiMutex<PacketSocketState>,
     non_blocking: AtomicBool,
     poll_rx: PollSet,
 }
@@ -112,7 +123,7 @@ impl PacketSocket {
         }
         let info = first_visible_ethernet()?;
         Ok(Self {
-            state: Mutex::new(PacketSocketState {
+            state: PiMutex::new(PacketSocketState {
                 bound: SockAddrLl::from_interface(&info, protocol)?,
                 pending: None,
             }),
@@ -166,14 +177,19 @@ impl PacketSocket {
     }
 
     pub fn recv_packet(&self, dst: &mut IoDst) -> AxResult<(usize, SockAddrLl)> {
-        block_on(poll_io(self, IoEvents::IN, self.nonblocking(), || {
-            let (data, from) = {
-                let mut state = self.state.lock();
-                state.pending.take().ok_or(AxError::WouldBlock)?
-            };
-            let written = dst.write(&data)?;
-            Ok((written, from))
-        }))
+        let task = current_user_task();
+        block_on_user(
+            &task,
+            poll_io(self, IoEvents::IN, self.nonblocking(), || {
+                let (data, from) = {
+                    let mut state = self.state.lock();
+                    state.pending.take().ok_or(AxError::WouldBlock)?
+                };
+                let written = dst.write(&data)?;
+                Ok((written, from))
+            }),
+        )
+        .into_result()?
     }
 
     pub fn from_fd(fd: c_int) -> AxResult<Arc<Self>> {
@@ -222,9 +238,12 @@ fn is_modeled_peer_ipv4(info: &InterfaceInfo, ip: [u8; 4]) -> bool {
         .is_some_and(|gateway| gateway.octets() == ip)
 }
 
-fn read_user_bytes<const N: usize>(ptr: *const u8) -> AxResult<[u8; N]> {
+fn read_user_bytes<const N: usize>(
+    current: &crate::task::UserTaskRef,
+    ptr: *const u8,
+) -> AxResult<[u8; N]> {
     let mut buf = [core::mem::MaybeUninit::<u8>::uninit(); N];
-    vm_read_slice(ptr, &mut buf)?;
+    vm_read_slice(current, ptr, &mut buf)?;
     Ok(buf.map(|b| unsafe { b.assume_init() }))
 }
 
@@ -254,12 +273,12 @@ impl FileLike for PacketSocket {
         self.non_blocking.load(Ordering::Acquire)
     }
 
-    fn ioctl(&self, cmd: u32, arg: usize) -> AxResult<usize> {
+    fn ioctl(&self, current: &crate::task::UserTaskRef, cmd: u32, arg: usize) -> AxResult<usize> {
         // The SIOCGIF* device ioctls are family-agnostic in Linux sock_ioctl ->
         // dev_ioctl, so AF_PACKET answers them through the same shared helper as
         // the other socket families. Interface visibility (and thus netns
         // scoping) is enforced by device_ioctl's own lookups.
-        if let Some(result) = crate::file::net::device_ioctl(cmd, arg) {
+        if let Some(result) = crate::file::net::device_ioctl(current, cmd, arg) {
             return result;
         }
         Err(AxError::NotATty)

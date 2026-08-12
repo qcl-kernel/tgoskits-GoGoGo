@@ -12,6 +12,24 @@ use loongArch64::register::{
 #[cfg(feature = "tls")]
 use crate::KernelTlsBase;
 
+core::arch::global_asm!(
+    ".balign 16",
+    ".global __axcpu_wait_for_irqs_disabled",
+    ".global __axcpu_loongarch_idle_start",
+    ".global __axcpu_loongarch_idle_exit",
+    "__axcpu_wait_for_irqs_disabled:",
+    "__axcpu_loongarch_idle_start:",
+    "ori $t0, $zero, 4",
+    "csrxchg $t0, $t0, 0x0",
+    "idle 0",
+    "__axcpu_loongarch_idle_exit:",
+    "ret",
+);
+
+unsafe extern "C" {
+    fn __axcpu_wait_for_irqs_disabled();
+}
+
 /// Allows the current CPU to respond to interrupts.
 #[inline]
 pub fn enable_irqs() {
@@ -54,6 +72,21 @@ fn set_local_irq_line_enabled(line: LineBasedInterrupt, enabled: bool) {
 #[inline]
 pub fn wait_for_irqs() {
     unsafe { asm!("idle 0", options(nomem, nostack)) }
+}
+
+/// Waits for an interrupt after the caller masks local IRQ delivery.
+///
+/// LoongArch requires `CRMD.IE` to be set when `IDLE` executes. The assembly
+/// window updates `CRMD.IE` immediately before `IDLE`; the trap path
+/// fast-forwards an interrupt inside that window to its exit label. The
+/// function returns with local IRQs enabled.
+#[inline]
+pub fn wait_for_irqs_disabled() {
+    debug_assert!(!irqs_enabled());
+    // SAFETY: the caller has masked local IRQ delivery. The assembly routine
+    // only updates CRMD.IE, executes IDLE, and returns after the trap path has
+    // preserved or fast-forwarded its continuation.
+    unsafe { __axcpu_wait_for_irqs_disabled() }
 }
 
 /// Halt the current CPU.
@@ -140,6 +173,17 @@ pub fn flush_tlb(vaddr: Option<VirtAddr>) {
             asm!("dbar 0; invtlb 0x00, $r0, $r0");
         }
     }
+}
+
+/// Makes a page-table entry installed by the local page-fault handler visible
+/// before retrying the faulting instruction.
+///
+/// The software refill path may cache a non-readable and non-executable
+/// placeholder for a missing page-table level. Invalidate that local entry so
+/// the retry refills from the newly installed PTE.
+#[inline]
+pub fn update_mmu_cache(vaddr: VirtAddr) {
+    flush_tlb(Some(vaddr));
 }
 
 /// Writes the Exception Entry Base Address register (`EENTRY`).
@@ -232,7 +276,11 @@ pub fn enable_lasx() {
 }
 
 #[cfg(feature = "uspace")]
-core::arch::global_asm!(include_asm_macros!(), include_str!("user_copy.S"));
+core::arch::global_asm!(
+    include_asm_macros!(),
+    include_str!("user_copy.S"),
+    include_str!("user_atomic.S"),
+);
 
 #[cfg(feature = "uspace")]
 unsafe extern "C" {

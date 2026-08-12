@@ -1,10 +1,9 @@
-use core::{cell::Cell, sync::atomic::AtomicUsize};
+use core::sync::atomic::AtomicUsize;
 use std::{
     os::arceos::{
         api::task::{self as api, AxCpuMask, AxWaitQueueHandle, ax_set_current_affinity},
         modules::ax_hal::percpu::this_cpu_id,
     },
-    println,
     sync::atomic::{AtomicBool, Ordering},
     thread,
     time::Duration,
@@ -41,14 +40,9 @@ fn pin_current_to_cpu(cpu_id: usize) {
 
 fn wake_sleep_queue_after_waiter_enqueued() {
     for _ in 0..WAITER_ENQUEUE_RETRIES {
-        let woke_waiter = Cell::new(false);
-        api::ax_wait_queue_wake_one_with(&SLEEP_WQ, |task_id| {
-            if task_id != 0 {
-                GO.store(true, Ordering::Release);
-                woke_waiter.set(true);
-            }
-        });
-        if woke_waiter.get() {
+        if api::ax_wait_queue_wake(&SLEEP_WQ, 1) == 1 {
+            GO.store(true, Ordering::Release);
+            let _ = api::ax_wait_queue_wake(&SLEEP_WQ, 1);
             return;
         }
         thread::yield_now();
@@ -56,19 +50,12 @@ fn wake_sleep_queue_after_waiter_enqueued() {
     panic!("sleeper did not enter wait queue");
 }
 
-#[cfg(target_arch = "aarch64")]
-pub fn run() -> crate::TestResult {
-    println!("task_wait_queue_remote_wake: skipped on aarch64");
-    Ok(())
-}
-
-#[cfg(not(target_arch = "aarch64"))]
 pub fn run() -> crate::TestResult {
     let cpu_num = thread::available_parallelism().unwrap().get();
-    if cpu_num < 2 {
-        println!("task_wait_queue_remote_wake: skipped on single CPU");
-        return Ok(());
-    }
+    assert!(
+        cpu_num >= 2,
+        "task_wait_queue_remote_wake requires at least two CPUs"
+    );
 
     let waker_cpu = 0;
     let sleeper_cpu = 1;

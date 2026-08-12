@@ -4,20 +4,20 @@ use core::{future::poll_fn, task::Poll};
 
 use ax_errno::{AxError, AxResult};
 use ax_runtime::hal::cpu::uspace::UserContext;
-use ax_task::{
-    TaskInner, current,
-    future::{block_on, interruptible},
-};
-use axpoll::IoEvents;
-use linux_raw_sys::general::{CLD_CONTINUED, CLD_STOPPED, CLD_TRAPPED};
+use linux_raw_sys::general::{CLD_CONTINUED, CLD_STOPPED, CLD_TRAPPED, RLIMIT_RTTIME};
 use starry_process::Pid;
 use starry_signal::{SignalInfo, SignalOSAction, SignalSet, Signo};
-#[cfg(target_arch = "riscv64")]
-use starry_vm::vm_read_slice;
 
 use super::{
-    AsThread, ProcessData, Thread, do_exit, get_process_data, get_process_group, get_task,
-    is_zombie_pid, signal_publication::publish_before_fatal_stop_release,
+    ProcessData, RttimeLimitAction, Thread, UserTaskRef, current_user_task, do_exit,
+    get_process_data, get_process_group, get_task, is_zombie_pid,
+    signal_publication::publish_before_fatal_stop_release,
+};
+#[cfg(target_arch = "riscv64")]
+use crate::mm::vm_read_slice;
+use crate::{
+    mm::UserMemoryProvider,
+    task::future::{UserWaitOutcome, block_on, block_on_user},
 };
 
 /// Information needed to restart a syscall if SA_RESTART applies.
@@ -38,14 +38,14 @@ struct UserStackFrame {
 }
 
 #[cfg(target_arch = "riscv64")]
-fn read_user_stack_frame(fp: usize) -> Option<UserStackFrame> {
+fn read_user_stack_frame(current: &UserTaskRef, fp: usize) -> Option<UserStackFrame> {
     let frame_addr = fp.checked_sub(size_of::<UserStackFrame>())?;
     if frame_addr == 0 || !frame_addr.is_multiple_of(align_of::<usize>()) {
         return None;
     }
 
     let mut words = [MaybeUninit::<usize>::uninit(); 2];
-    vm_read_slice(frame_addr as *const usize, &mut words).ok()?;
+    vm_read_slice(current, frame_addr as *const usize, &mut words).ok()?;
 
     Some(UserStackFrame {
         fp: unsafe { words[0].assume_init() },
@@ -54,7 +54,7 @@ fn read_user_stack_frame(fp: usize) -> Option<UserStackFrame> {
 }
 
 #[cfg(target_arch = "riscv64")]
-fn dump_user_backtrace(uctx: &UserContext) {
+fn dump_user_backtrace(current: &UserTaskRef, uctx: &UserContext) {
     const MAX_USER_FRAMES: usize = 32;
 
     let mut fp = uctx.regs.s0;
@@ -65,7 +65,7 @@ fn dump_user_backtrace(uctx: &UserContext) {
     );
 
     for depth in 1..MAX_USER_FRAMES {
-        let Some(frame) = read_user_stack_frame(fp) else {
+        let Some(frame) = read_user_stack_frame(current, fp) else {
             warn!("  <unwind stopped: unreadable frame at fp={:#018x}>", fp);
             break;
         };
@@ -91,10 +91,10 @@ fn dump_user_backtrace(uctx: &UserContext) {
 }
 
 #[cfg(not(target_arch = "riscv64"))]
-fn dump_user_backtrace(_uctx: &UserContext) {}
+fn dump_user_backtrace(_current: &UserTaskRef, _uctx: &UserContext) {}
 
 /// Dump user-mode register state once the signal disposition really terminates.
-fn dump_user_crash_context(uctx: &UserContext) {
+fn dump_user_crash_context(current: &UserTaskRef, uctx: &UserContext) {
     #[cfg(target_arch = "riscv64")]
     {
         let r = &uctx.regs;
@@ -171,7 +171,7 @@ fn dump_user_crash_context(uctx: &UserContext) {
         warn!("user register dump: not implemented for this arch");
     }
 
-    dump_user_backtrace(uctx);
+    dump_user_backtrace(current, uctx);
 }
 
 /// Block the current thread in a ptrace stop.
@@ -207,24 +207,30 @@ pub fn wait_existing_ptrace_stop_current(thr: &Thread, uctx: &mut UserContext) {
 }
 
 fn wait_ptrace_resume(thr: &Thread, tid: u32, uctx: &mut UserContext) {
-    let stale_interrupts = current().interrupt_snapshot();
-    current().acknowledge_interrupt(stale_interrupts);
-    let wait_result = block_on(interruptible(poll_fn(|cx| {
-        if thr.proc_data.ptrace_stop_signo_for(tid).is_none() {
-            Poll::Ready(())
-        } else {
-            thr.proc_data.register_ptrace_stop_waker(cx.waker());
+    let task = current_user_task();
+    let stale_interrupts = thr.interrupt_snapshot();
+    thr.acknowledge_interrupt(stale_interrupts);
+    let wait_result = block_on_user(
+        &task,
+        poll_fn(|cx| {
             if thr.proc_data.ptrace_stop_signo_for(tid).is_none() {
                 Poll::Ready(())
             } else {
-                Poll::Pending
+                thr.proc_data.register_ptrace_stop_waker(cx.waker());
+                if thr.proc_data.ptrace_stop_signo_for(tid).is_none() {
+                    Poll::Ready(())
+                } else {
+                    Poll::Pending
+                }
             }
-        }
-    })));
+        }),
+    );
 
-    if wait_result.is_err() {
+    if matches!(wait_result, UserWaitOutcome::Interrupted) {
         thr.proc_data.clear_ptrace_stop();
-    } else if let Some(resume_uctx) = thr.proc_data.take_ptrace_stop_user_context_for(tid) {
+    } else if matches!(wait_result, UserWaitOutcome::Ready(()))
+        && let Some(resume_uctx) = thr.proc_data.take_ptrace_stop_user_context_for(tid)
+    {
         *uctx = resume_uctx;
         thr.proc_data.restore_current_fp_for_ptrace(tid, uctx);
     }
@@ -293,16 +299,24 @@ fn notify_ptrace_waiter(thr: &Thread, signo: Signo) {
         );
         let _ = send_signal_to_process(waiter_pid, Some(sigchld));
         // Ptrace stop report is published before waking waiters.
-        unsafe { parent_data.child_exit_event.wake(axpoll::IoEvents::IN) };
+        unsafe { parent_data.child_exit_event().wake(axpoll::IoEvents::IN) };
     }
 }
 
 pub fn check_signals(
-    thr: &Thread,
+    current: &UserTaskRef,
     uctx: &mut UserContext,
     restore_blocked: Option<SignalSet>,
     restart_info: Option<&SyscallRestartInfo>,
 ) -> bool {
+    let thr = current.as_thread();
+    queue_rttime_limit_signal(thr);
+    if thr.take_deadline_overrun() {
+        let _result = thr
+            .signal()
+            .send_signal(SignalInfo::new_kernel(Signo::SIGXCPU));
+    }
+
     // Honor zap requests before consulting the signal queue. A sibling
     // performing `execve` set this flag, and we must do a thread-only
     // exit (no `group_exit`) so the new image is left intact.
@@ -317,32 +331,35 @@ pub fn check_signals(
         return true;
     }
 
-    let Some((sig, os_action)) =
-        thr.signal
-            .check_signals_with(uctx, restore_blocked, |uctx, _sig, restartable| {
-                // Apply the SA_RESTART decision once per interrupted syscall.
-                // Callers pass `Some(info)` only for the first delivered signal;
-                // later iterations pass `None`, so the restart adjustment remains
-                // single-shot.
-                if let Some(info) = restart_info
-                    && (uctx.retval() as isize) == -(ax_errno::LinuxError::EINTR.code() as isize)
-                    && restartable
-                {
-                    let new_ip = uctx.ip() - uctx.syscall_insn_len();
-                    uctx.set_ip(new_ip);
-                    uctx.set_arg0(info.saved_a0);
-                    // On x86_64, rax holds both the syscall number and the return
-                    // value, so the syscall entry path clobbered sysno with -EINTR.
-                    // Restore it before the syscall instruction re-executes. On
-                    // RISC-V/AArch64/LoongArch64 sysno lives in a separate register
-                    // (a7/x8/a7) that was not touched, so no restore is needed.
-                    #[cfg(target_arch = "x86_64")]
-                    uctx.set_sysno(info.saved_sysno);
-                    #[cfg(not(target_arch = "x86_64"))]
-                    let _ = info.saved_sysno;
-                }
-            })
-    else {
+    let mut user_memory = UserMemoryProvider::new(current);
+    let Some((sig, os_action)) = thr.signal().check_signals_with(
+        &mut user_memory,
+        uctx,
+        restore_blocked,
+        |uctx, _sig, restartable| {
+            // Apply the SA_RESTART decision once per interrupted syscall.
+            // Callers pass `Some(info)` only for the first delivered signal;
+            // later iterations pass `None`, so the restart adjustment remains
+            // single-shot.
+            if let Some(info) = restart_info
+                && (uctx.retval() as isize) == -(ax_errno::LinuxError::EINTR.code() as isize)
+                && restartable
+            {
+                let new_ip = uctx.ip() - uctx.syscall_insn_len();
+                uctx.set_ip(new_ip);
+                uctx.set_arg0(info.saved_a0);
+                // On x86_64, rax holds both the syscall number and the return
+                // value, so the syscall entry path clobbered sysno with -EINTR.
+                // Restore it before the syscall instruction re-executes. On
+                // RISC-V/AArch64/LoongArch64 sysno lives in a separate register
+                // (a7/x8/a7) that was not touched, so no restore is needed.
+                #[cfg(target_arch = "x86_64")]
+                uctx.set_sysno(info.saved_sysno);
+                #[cfg(not(target_arch = "x86_64"))]
+                let _ = info.saved_sysno;
+            }
+        },
+    ) else {
         return false;
     };
 
@@ -359,7 +376,7 @@ pub fn check_signals(
             Some(new_signo) if new_signo != signo => {
                 thr.proc_data
                     .set_ptrace_resume_signal_bypass_for(thr.tid(), new_signo);
-                let _ = thr.signal.send_signal(SignalInfo::new_kernel(new_signo));
+                let _ = thr.signal().send_signal(SignalInfo::new_kernel(new_signo));
                 return true;
             }
             Some(_) => {}
@@ -375,26 +392,18 @@ pub fn check_signals(
     // handler. `compare_exchange` clears the slot only on a match, so
     // unrelated signals leave the flag intact for the real fault
     // signal that follows.
-    let dump_on_terminate = thr
-        .fault_dump_signo
-        .compare_exchange(
-            signo as u8,
-            0,
-            core::sync::atomic::Ordering::AcqRel,
-            core::sync::atomic::Ordering::Relaxed,
-        )
-        .is_ok();
+    let dump_on_terminate = thr.claim_fault_dump(signo as u8);
 
     match os_action {
         SignalOSAction::Terminate => {
             if dump_on_terminate {
-                dump_user_crash_context(uctx);
+                dump_user_crash_context(current, uctx);
             }
             do_exit(signo as i32, true);
         }
         SignalOSAction::CoreDump => {
             if dump_on_terminate {
-                dump_user_crash_context(uctx);
+                dump_user_crash_context(current, uctx);
             }
             do_exit(128 + signo as i32, true);
         }
@@ -403,6 +412,24 @@ pub fn check_signals(
         SignalOSAction::NoFurtherAction => {}
     }
     true
+}
+
+fn queue_rttime_limit_signal(thr: &Thread) {
+    let (soft_limit_us, hard_limit_us) = {
+        let limits = thr.proc_data.rlimits();
+        let limit = &limits[RLIMIT_RTTIME];
+        (limit.current, limit.max)
+    };
+    let action = thr
+        .rttime()
+        .lock()
+        .check_limit(thr.cpu_time(), soft_limit_us, hard_limit_us);
+    let signo = match action {
+        RttimeLimitAction::None => return,
+        RttimeLimitAction::Soft => Signo::SIGXCPU,
+        RttimeLimitAction::Hard => Signo::SIGKILL,
+    };
+    let _queued = thr.signal().send_signal(SignalInfo::new_kernel(signo));
 }
 
 /// Notify a process's parent of a job-control state change by sending it
@@ -423,7 +450,7 @@ fn notify_parent_job_change(proc_data: &ProcessData, code: i32, status: i32) {
     let _ = send_signal_to_process(parent.pid(), Some(sig));
     if let Ok(data) = get_process_data(parent.pid()) {
         // Job-control report is published before waking waiters.
-        unsafe { data.child_exit_event.wake(axpoll::IoEvents::IN) };
+        unsafe { data.child_exit_event().wake(axpoll::IoEvents::IN) };
     }
 }
 
@@ -432,7 +459,7 @@ fn notify_parent_job_change(proc_data: &ProcessData, code: i32, status: i32) {
 /// so the kill can proceed). A seized tracer may wake this loop solely to
 /// publish `PTRACE_EVENT_STOP`; that wake does not release the job stop.
 ///
-/// Uses a plain block — not [`interruptible`](ax_task::future::interruptible) —
+/// Uses a plain block, not [`interruptible`],
 /// because an ordinary signal must **not** wake a stopped process; only
 /// continue/kill clear `is_job_stopped`.
 ///
@@ -507,19 +534,15 @@ fn do_job_stop(thr: &Thread, signo: Signo, uctx: &mut UserContext) {
 }
 
 pub fn block_next_signal() {
-    current().as_thread().block_next_signal_check();
-}
-
-pub fn unblock_next_signal() -> bool {
-    current().as_thread().unblock_next_signal_check()
+    current_user_task().as_thread().block_next_signal_check();
 }
 
 pub fn with_blocked_signals<R>(
     blocked: Option<SignalSet>,
     f: impl FnOnce() -> AxResult<R>,
 ) -> AxResult<R> {
-    let curr = current();
-    let sig = &curr.as_thread().signal;
+    let curr = current_user_task();
+    let sig = curr.as_thread().signal();
 
     let old_blocked = blocked.map(|set| sig.set_blocked(set));
     let result = f();
@@ -529,38 +552,27 @@ pub fn with_blocked_signals<R>(
     result
 }
 
-pub(super) fn send_signal_thread_inner(task: &TaskInner, thr: &Thread, sig: SignalInfo) {
-    let accepted = thr.signal.send_signal(sig);
-    // Always wake signalfd waiters so a signalfd monitoring for this signal
-    // (even a blocked one) can become readable in epoll/poll.  Without this,
-    // a process using signalfd + SA_RESTART or signalfd + blocked signals
-    // would never observe newly-pending signals from the event loop.
-    unsafe { thr.signalfd_waker.wake(IoEvents::IN) };
-    if accepted {
-        task.interrupt();
-    }
-}
-
 /// Sends a signal to a thread.
 pub fn send_signal_to_thread(tgid: Option<Pid>, tid: Pid, sig: Option<SignalInfo>) -> AxResult<()> {
     let task = get_task(tid)?;
-    let thread = task.try_as_thread().ok_or(AxError::OperationNotPermitted)?;
+    let thread = task.as_thread();
     if tgid.is_some_and(|tgid| thread.proc_data.proc.pid() != tgid) {
         return Err(AxError::NoSuchProcess);
     }
 
     if let Some(sig) = sig {
-        info!("Send signal {:?} to thread {}", sig.signo(), tid);
+        let signo = sig.signo();
+        info!("Send signal {signo:?} to thread {tid}");
         // Only wake the target thread when the signal is deliverable
         // (not blocked/not ignored).  Sending a blocked signal via
         // tkill/tgkill must NOT interrupt the target per POSIX; the signal
         // is queued as pending and stays invisible until unblocked.
-        if thread.signal.send_signal(sig) {
+        if thread.signal().send_signal(sig) {
             task.interrupt();
         }
         // Always wake signalfd waiters — even blocked signals should be
         // visible via signalfd in an epoll event loop.
-        unsafe { thread.signalfd_waker.wake(IoEvents::IN) };
+        thread.wake_signalfd();
     }
 
     Ok(())
@@ -618,10 +630,8 @@ pub fn send_signal_to_process(pid: Pid, sig: Option<SignalInfo>) -> AxResult<()>
         // Wake signalfd waiters on every thread: even blocked process-level
         // signals must be visible from signalfd in an epoll event loop.
         for tid in proc_data.proc.threads() {
-            if let Ok(task) = get_task(tid)
-                && let Some(thr) = task.try_as_thread()
-            {
-                unsafe { thr.signalfd_waker.wake(IoEvents::IN) };
+            if let Ok(task) = get_task(tid) {
+                task.as_thread().wake_signalfd();
             }
         }
     }
@@ -634,7 +644,6 @@ fn publish_process_signal(
     sig: SignalInfo,
     ptrace_stop_tid: Option<u32>,
 ) -> Option<u32> {
-    let signo = sig.signo();
     let wake_tid = proc_data.signal.send_signal(sig);
     if let Some(tid) = wake_tid
         && let Ok(task) = get_task(tid)
@@ -650,24 +659,6 @@ fn publish_process_signal(
         // process signal manager selected an unblocked sibling.
         task.interrupt();
     }
-    if wake_tid.is_none() {
-        // All threads have this signal blocked — the signal is now pending at
-        // the process level. Only wake threads that are sleeping in
-        // rt_sigtimedwait/sigwaitinfo for this signal; waking unrelated
-        // waitpid callers would cause spurious EINTR.
-        for tid in proc_data.proc.threads() {
-            if let Ok(task) = get_task(tid)
-                && task
-                    .as_thread()
-                    .signal
-                    .sigwait_set
-                    .lock()
-                    .is_some_and(|set| set.has(signo))
-            {
-                ax_task::wake_task(&task);
-            }
-        }
-    }
     wake_tid
 }
 
@@ -680,7 +671,7 @@ pub fn send_signal_to_process_group(pgid: Pid, sig: Option<SignalInfo>) -> AxRes
         for proc in pg.processes() {
             // A zombie's ProcessData may already be freed; skip it so live
             // siblings still receive the signal.
-            if let Err(e) = send_signal_to_process(proc.pid(), Some(sig.clone())) {
+            if let Err(e) = send_signal_to_process(proc.pid(), Some(sig)) {
                 debug!(
                     "send_signal_to_process_group: skipped pid {}: {:?}",
                     proc.pid(),
@@ -705,7 +696,7 @@ pub fn send_signal_to_process_group(pgid: Pid, sig: Option<SignalInfo>) -> AxRes
 /// behalf) still go through [`send_signal_to_process`] and can land
 /// on any unmasked thread.
 pub fn raise_signal_fatal(sig: SignalInfo, uctx: &UserContext) -> AxResult<()> {
-    let curr = current();
+    let curr = current_user_task();
     let thread = curr.as_thread();
     let signo = sig.signo();
     info!(
@@ -740,10 +731,10 @@ pub fn raise_signal_fatal(sig: SignalInfo, uctx: &UserContext) -> AxResult<()> {
             *act = starry_signal::SignalAction::default();
         }
     }
-    let mut mask = thread.signal.blocked();
+    let mut mask = thread.signal().blocked();
     if mask.has(signo) {
         mask.remove(signo);
-        thread.signal.set_blocked(mask);
+        thread.signal().set_blocked(mask);
     }
 
     // Tag the dump request with the specific fault signo so a later
@@ -752,21 +743,17 @@ pub fn raise_signal_fatal(sig: SignalInfo, uctx: &UserContext) -> AxResult<()> {
     // `send_signal_to_process` skip this path and leave the slot at
     // zero, so peers terminate silently. Storing 0 elsewhere is the
     // "no dump" sentinel — signo values start at 1.
-    thread
-        .fault_dump_signo
-        .store(signo as u8, core::sync::atomic::Ordering::Release);
+    thread.set_fault_dump(signo as u8);
 
-    if thread.signal.send_signal(sig) {
+    if thread.signal().send_signal(sig) {
         curr.interrupt();
     } else {
         // send_signal returning false means the signal was rejected
         // (already pending). Either way the faulting thread is the
         // right one to terminate, so dump and exit here directly so
         // userspace cannot lose the register state.
-        thread
-            .fault_dump_signo
-            .store(0, core::sync::atomic::Ordering::Release);
-        dump_user_crash_context(uctx);
+        thread.clear_fault_dump();
+        dump_user_crash_context(&curr, uctx);
         do_exit(signo as i32, true);
     }
 

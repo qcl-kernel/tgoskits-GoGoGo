@@ -6,7 +6,6 @@ use core::{
 
 use ax_errno::{AxError, AxResult, LinuxError};
 use ax_fs_ng::vfs::is_mount_busy as fs_is_mount_busy;
-use ax_task::current;
 use axfs_ng_vfs::{Filesystem, MetadataUpdate, Mountpoint, NodePermission};
 use axpoll::{IoEvents, Pollable};
 use linux_raw_sys::general::{
@@ -14,11 +13,10 @@ use linux_raw_sys::general::{
     MOUNT_ATTR_NODEV, MOUNT_ATTR_NOEXEC, MOUNT_ATTR_NOSUID, MOUNT_ATTR_RDONLY,
     MOUNT_ATTR_STRICTATIME, MOVE_MOUNT_F_EMPTY_PATH, O_PATH, fsconfig_command,
 };
-use starry_vm::VmPtr;
 
 use crate::{
     file::{Directory, FD_TABLE, File, FileLike},
-    mm::vm_load_string,
+    mm::{VmPtr, vm_load_string},
     pseudofs::{
         MemoryFs,
         dev::{
@@ -27,8 +25,8 @@ use crate::{
         },
         overlay::OverlayOptions,
     },
-    sync::Mutex,
-    task::{AsThread, tasks},
+    sync::PiMutex,
+    task::tasks,
 };
 
 const MNT_FORCE: i32 = 1;
@@ -87,14 +85,17 @@ enum DevPtsInstanceKind {
     New,
 }
 
-fn parse_devpts_options(data: *const c_void) -> AxResult<DevPtsMount> {
+fn parse_devpts_options(
+    current: &crate::task::UserTaskRef,
+    data: *const c_void,
+) -> AxResult<DevPtsMount> {
     let mut options = DevPtsOptions::mounted();
     let mut instance = DevPtsInstanceKind::Legacy;
     if data.is_null() {
         return Ok(DevPtsMount::Legacy(options));
     }
 
-    for item in vm_load_string(data.cast())?.split(',') {
+    for item in vm_load_string(current, data.cast())?.split(',') {
         if item.is_empty() {
             continue;
         }
@@ -119,12 +120,13 @@ fn parse_devpts_options(data: *const c_void) -> AxResult<DevPtsMount> {
 }
 
 fn parse_overlay_options(
+    current: &crate::task::UserTaskRef,
     data: *const c_void,
 ) -> AxResult<(Vec<String>, Option<String>, Option<String>)> {
     if data.is_null() {
         return Err(AxError::InvalidInput);
     }
-    let data = vm_load_string(data.cast())?;
+    let data = vm_load_string(current, data.cast())?;
     let mut lowerdir = None;
     let mut upperdir = None;
     let mut workdir = None;
@@ -177,13 +179,11 @@ fn is_mount_busy(mp: &Arc<axfs_ng_vfs::Mountpoint>) -> bool {
     if fs_is_mount_busy(mp) {
         return true;
     }
-    for task in tasks() {
-        let Some(thread) = task.try_as_thread() else {
-            continue;
-        };
-        let scope = thread.scope.read();
-        let fd_table = FD_TABLE.scope(&scope).clone();
-        drop(scope);
+    let Ok(tasks) = tasks() else {
+        return true;
+    };
+    for task in tasks {
+        let fd_table = task.as_thread().clone_scope_item(&FD_TABLE);
         let table = fd_table.read();
         if table.ids().any(|id| {
             table
@@ -216,14 +216,14 @@ struct MountContextState {
 
 struct MountContext {
     kind: MountContextKind,
-    state: Mutex<MountContextState>,
+    state: PiMutex<MountContextState>,
 }
 
 impl MountContext {
     fn new(kind: MountContextKind) -> Self {
         Self {
             kind,
-            state: Mutex::new(MountContextState {
+            state: PiMutex::new(MountContextState {
                 filesystem: None,
                 source: None,
                 root_mode: NodePermission::from_bits_truncate(0o755),
@@ -292,15 +292,19 @@ fn parse_tmpfs_size(value: &str) -> AxResult<u64> {
         .ok_or(AxError::InvalidInput)
 }
 
-pub fn sys_fsopen(fs_name: *const c_char, flags: u32) -> AxResult<isize> {
+pub fn sys_fsopen(
+    current: &crate::task::UserTaskRef,
+    fs_name: *const c_char,
+    flags: u32,
+) -> AxResult<isize> {
     if flags & !FSOPEN_CLOEXEC != 0 {
         return Err(AxError::InvalidInput);
     }
-    if !current().as_thread().cred().has_cap_sys_admin() {
+    if !current.as_thread().cred().has_cap_sys_admin() {
         return Err(AxError::OperationNotPermitted);
     }
 
-    let kind = match vm_load_string(fs_name)?.as_str() {
+    let kind = match vm_load_string(current, fs_name)?.as_str() {
         "tmpfs" => MountContextKind::Tmpfs,
         "ramfs" => MountContextKind::Ramfs,
         "devpts" => MountContextKind::DevPts,
@@ -312,13 +316,14 @@ pub fn sys_fsopen(fs_name: *const c_char, flags: u32) -> AxResult<isize> {
 }
 
 pub fn sys_fsconfig(
+    current: &crate::task::UserTaskRef,
     fs_fd: i32,
     command: u32,
     key: *const c_char,
     value: *const c_void,
     aux: i32,
 ) -> AxResult<isize> {
-    if !current().as_thread().cred().has_cap_sys_admin() {
+    if !current.as_thread().cred().has_cap_sys_admin() {
         return Err(AxError::OperationNotPermitted);
     }
     let context = MountContext::from_fd(fs_fd)?;
@@ -329,8 +334,8 @@ pub fn sys_fsconfig(
             if key.is_null() || value.is_null() || aux != 0 || state.filesystem.is_some() {
                 return Err(AxError::InvalidInput);
             }
-            let key = vm_load_string(key)?;
-            let value = vm_load_string(value.cast())?;
+            let key = vm_load_string(current, key)?;
+            let value = vm_load_string(current, value.cast())?;
             match (context.kind, key.as_str()) {
                 (_, "source") if state.filesystem.is_none() && !value.is_empty() => {
                     state.source = Some(value);
@@ -361,7 +366,7 @@ pub fn sys_fsconfig(
             if key.is_null() || !value.is_null() || aux != 0 {
                 return Err(AxError::InvalidInput);
             }
-            match vm_load_string(key)?.as_str() {
+            match vm_load_string(current, key)?.as_str() {
                 // Linux systemd deliberately falls back from tmpfs to ramfs
                 // when the kernel cannot configure tmpfs with `noswap`.
                 "noswap"
@@ -414,12 +419,17 @@ pub fn sys_fsconfig(
     Ok(0)
 }
 
-pub fn sys_fsmount(fs_fd: i32, flags: u32, mount_attributes: u32) -> AxResult<isize> {
+pub fn sys_fsmount(
+    current: &crate::task::UserTaskRef,
+    fs_fd: i32,
+    flags: u32,
+    mount_attributes: u32,
+) -> AxResult<isize> {
     if flags & !FSMOUNT_CLOEXEC != 0 || mount_attributes & !SUPPORTED_FSMOUNT_ATTRIBUTES != 0 {
         // systemd retries without MOUNT_ATTR_NOSYMFOLLOW on EINVAL.
         return Err(AxError::InvalidInput);
     }
-    if !current().as_thread().cred().has_cap_sys_admin() {
+    if !current.as_thread().cred().has_cap_sys_admin() {
         return Err(AxError::OperationNotPermitted);
     }
 
@@ -451,16 +461,17 @@ pub fn sys_fsmount(fs_fd: i32, flags: u32, mount_attributes: u32) -> AxResult<is
 }
 
 pub fn sys_move_mount(
+    current: &crate::task::UserTaskRef,
     from_dirfd: i32,
     from_path: *const c_char,
     to_dirfd: i32,
     to_path: *const c_char,
     flags: u32,
 ) -> AxResult<isize> {
-    if flags != MOVE_MOUNT_F_EMPTY_PATH || !vm_load_string(from_path)?.is_empty() {
+    if flags != MOVE_MOUNT_F_EMPTY_PATH || !vm_load_string(current, from_path)?.is_empty() {
         return Err(AxError::InvalidInput);
     }
-    if !current().as_thread().cred().has_cap_sys_admin() {
+    if !current.as_thread().cred().has_cap_sys_admin() {
         return Err(AxError::OperationNotPermitted);
     }
 
@@ -468,7 +479,7 @@ pub fn sys_move_mount(
     if !source.is_detached_mount_handle() {
         return Err(AxError::InvalidInput);
     }
-    let path = vm_load_string(to_path)?;
+    let path = vm_load_string(current, to_path)?;
     let fs_context = ax_fs_ng::vfs::current_fs_context();
     let mount_namespace = fs_context.lock().mount_namespace().clone();
     let target = if path.starts_with('/') {
@@ -487,6 +498,7 @@ pub fn sys_move_mount(
 /// fd and an empty path. Mount propagation, idmapped mounts, recursive changes,
 /// and `MOUNT_ATTR_NOSYMFOLLOW` remain explicit `EINVAL` paths.
 pub fn sys_mount_setattr(
+    current: &crate::task::UserTaskRef,
     dirfd: i32,
     path: *const c_char,
     flags: u32,
@@ -501,14 +513,14 @@ pub fn sys_mount_setattr(
     if size != MOUNT_ATTR_SIZE_VER0 || flags != AT_EMPTY_PATH {
         return Err(AxError::InvalidInput);
     }
-    if !current().as_thread().cred().has_cap_sys_admin() {
+    if !current.as_thread().cred().has_cap_sys_admin() {
         return Err(AxError::OperationNotPermitted);
     }
-    if !vm_load_string(path)?.is_empty() {
+    if !vm_load_string(current, path)?.is_empty() {
         return Err(AxError::InvalidInput);
     }
 
-    let attributes = attributes.vm_read()?;
+    let attributes = attributes.vm_read(current)?;
     validate_mount_attributes(&attributes)?;
 
     let directory = Directory::from_fd(dirfd)?;
@@ -578,6 +590,7 @@ fn apply_mount_attributes(mountpoint: &Arc<Mountpoint>, attributes: &MountAttr) 
 }
 
 pub fn sys_mount(
+    current: &crate::task::UserTaskRef,
     source: *const c_char,
     target: *const c_char,
     fs_type: *const c_char,
@@ -587,17 +600,17 @@ pub fn sys_mount(
     let source = if source.is_null() {
         String::new()
     } else {
-        vm_load_string(source)?
+        vm_load_string(current, source)?
     };
-    let target = vm_load_string(target)?;
+    let target = vm_load_string(current, target)?;
     let fs_type = if fs_type.is_null() {
         String::new()
     } else {
-        vm_load_string(fs_type)?
+        vm_load_string(current, fs_type)?
     };
     debug!("sys_mount <= source: {source:?}, target: {target:?}, fs_type: {fs_type:?}");
 
-    if !current().as_thread().cred().has_cap_sys_admin() {
+    if !current.as_thread().cred().has_cap_sys_admin() {
         return Err(AxError::OperationNotPermitted);
     }
 
@@ -696,7 +709,7 @@ pub fn sys_mount(
             mp.set_mount_flags((flags & MOUNT_OPTION_FLAGS) as u32);
         }
         "devpts" => {
-            let fs = new_devptsfs(parse_devpts_options(data)?);
+            let fs = new_devptsfs(parse_devpts_options(current, data)?);
             let target = ax_fs_ng::vfs::current_fs_context().lock().resolve(target)?;
             let mp = target.mount(&fs)?;
             if (flags & MS_RDONLY) != 0 {
@@ -706,8 +719,8 @@ pub fn sys_mount(
         }
         "cgroup2" => {
             let (cgroup_root, cgroup_root_pin) = {
-                let task = current();
-                let nsproxy = task.as_thread().proc_data.nsproxy.lock();
+                let task = current;
+                let nsproxy = task.as_thread().proc_data.namespace_snapshot();
                 let namespace = nsproxy.cgroup_ns.lock();
                 (namespace.root(), namespace.pin_root())
             };
@@ -725,7 +738,7 @@ pub fn sys_mount(
             mount_ext4(&source, &target, (flags & MS_RDONLY) != 0)?;
         }
         "overlay" => {
-            let (lower_paths, upper_path, work_path) = parse_overlay_options(data)?;
+            let (lower_paths, upper_path, work_path) = parse_overlay_options(current, data)?;
             let fs_context = ax_fs_ng::vfs::current_fs_context();
             let ctx = fs_context.lock();
             let mut lower_dirs = Vec::new();
@@ -772,10 +785,14 @@ fn mount_ext4(source: &str, _target: &str, _readonly: bool) -> AxResult<()> {
     Err(AxError::NoSuchDevice)
 }
 
-pub fn sys_umount2(target: *const c_char, flags: i32) -> AxResult<isize> {
+pub fn sys_umount2(
+    current: &crate::task::UserTaskRef,
+    target: *const c_char,
+    flags: i32,
+) -> AxResult<isize> {
     use alloc::boxed::Box;
 
-    let target = vm_load_string(target)?;
+    let target = vm_load_string(current, target)?;
     debug!("sys_umount2 <= target: {target:?}, flags: {flags:#x}");
 
     if (flags & !VALID_UMOUNT_FLAGS) != 0 {
@@ -798,7 +815,7 @@ pub fn sys_umount2(target: *const c_char, flags: i32) -> AxResult<isize> {
         fs_context.lock().resolve(target)?
     };
 
-    if !current().as_thread().cred().has_cap_sys_admin() {
+    if !current.as_thread().cred().has_cap_sys_admin() {
         return Err(AxError::OperationNotPermitted);
     }
 
@@ -855,15 +872,19 @@ pub fn sys_umount2(target: *const c_char, flags: i32) -> AxResult<isize> {
     Ok(0)
 }
 
-pub fn sys_pivot_root(new_root: *const c_char, put_old: *const c_char) -> AxResult<isize> {
-    let new_root = vm_load_string(new_root)?;
-    let put_old = vm_load_string(put_old)?;
+pub fn sys_pivot_root(
+    current: &crate::task::UserTaskRef,
+    new_root: *const c_char,
+    put_old: *const c_char,
+) -> AxResult<isize> {
+    let new_root = vm_load_string(current, new_root)?;
+    let put_old = vm_load_string(current, put_old)?;
     debug!(
         "sys_pivot_root <= new_root: {:?}, put_old: {:?}",
         new_root, put_old
     );
 
-    if !current().as_thread().cred().has_cap_sys_admin() {
+    if !current.as_thread().cred().has_cap_sys_admin() {
         return Err(AxError::OperationNotPermitted);
     }
 

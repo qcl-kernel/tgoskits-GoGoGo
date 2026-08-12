@@ -32,7 +32,7 @@ use core::{
 
 use ax_errno::{AxError, AxResult, ax_bail, ax_err_type};
 use ax_io::prelude::*;
-use ax_sync::Mutex;
+use ax_sync::{Mutex, SpinLock};
 use axpoll::{IoEvents, Pollable};
 use smoltcp::{
     iface::SocketHandle,
@@ -81,9 +81,12 @@ pub struct UdpSocket {
     /// Shared socket options and blocking helpers.
     general: GeneralOptions,
     /// Egress IP_TOS policies registered for recently used UDP destinations.
-    tos_keys: Mutex<Vec<EgressIpTosKey>>,
+    tos_keys: SpinLock<Vec<EgressIpTosKey>>,
     /// MSG_MORE corking state: captures endpoint at first MSG_MORE
     /// so the merged datagram always goes to the correct peer.
+    // Linux serializes UDP corking with the process-context socket lock. This
+    // state may remain held while the global protocol socket is contended, so
+    // it must be sleepable rather than an IRQ-disabling raw spin lock.
     cork: Mutex<Option<CorkState>>,
 }
 
@@ -100,7 +103,7 @@ impl UdpSocket {
             peer_addr: Mutex::new(None),
 
             general: GeneralOptions::new(2, 2, 17), // SOCK_DGRAM
-            tos_keys: Mutex::new(Vec::new()),
+            tos_keys: SpinLock::new(Vec::new()),
             cork: Mutex::new(None),
         }
     }

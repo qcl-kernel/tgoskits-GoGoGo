@@ -1,17 +1,16 @@
 use alloc::sync::Arc;
 
 use ax_errno::{AxError, AxResult};
-use ax_task::current;
 use bitflags::bitflags;
 use linux_raw_sys::general::{SI_TKILL, SI_USER};
 use starry_signal::{SignalInfo, Signo};
-use starry_vm::VmPtr;
 
 use crate::{
-    file::{FD_TABLE, FileLike, PidFd, add_file_like},
+    file::{FD_TABLE, FileLike, PidFd, add_file_like, current_fd_table},
+    mm::VmPtr,
     syscall::signal::check_kill_permission,
     task::{
-        AsThread, get_task, pidfd_process_identity, pidfd_thread_identity, send_signal_to_process,
+        get_task, pidfd_process_identity, pidfd_thread_identity, send_signal_to_process,
         send_signal_to_process_group, send_signal_to_thread,
     },
 };
@@ -44,13 +43,17 @@ fn parse_signo(signo: u32) -> AxResult<Signo> {
     Signo::from_repr(signo as u8).ok_or(AxError::InvalidInput)
 }
 
-fn make_pidfd_siginfo(signo: Signo, scope: PidFdSignalScope) -> SignalInfo {
+fn make_pidfd_siginfo(
+    current: &crate::task::UserTaskRef,
+    signo: Signo,
+    scope: PidFdSignalScope,
+) -> SignalInfo {
     let code = if scope == PidFdSignalScope::Thread {
         SI_TKILL
     } else {
         SI_USER as _
     };
-    let curr = current();
+    let curr = current;
     let thread = curr.as_thread();
     SignalInfo::new_user(signo, code, thread.proc_data.proc.pid(), thread.cred().uid)
 }
@@ -97,7 +100,12 @@ pub fn sys_pidfd_open(pid: u32, flags: u32) -> AxResult<isize> {
     fd.add_to_fd_table(true).map(|fd| fd as _)
 }
 
-pub fn sys_pidfd_getfd(pidfd: i32, target_fd: i32, flags: u32) -> AxResult<isize> {
+pub fn sys_pidfd_getfd(
+    current: &crate::task::UserTaskRef,
+    pidfd: i32,
+    target_fd: i32,
+    flags: u32,
+) -> AxResult<isize> {
     debug!("sys_pidfd_getfd <= pidfd: {pidfd}, target_fd: {target_fd}, flags: {flags}");
 
     if flags != 0 {
@@ -106,27 +114,21 @@ pub fn sys_pidfd_getfd(pidfd: i32, target_fd: i32, flags: u32) -> AxResult<isize
 
     let pidfd = PidFd::from_fd(pidfd)?;
     let proc_data = pidfd.process_data()?;
-    let curr_proc_data = current().as_thread().proc_data.clone();
+    let curr_proc_data = current.as_thread().proc_data.clone();
     let is_current = Arc::ptr_eq(&proc_data, &curr_proc_data);
     if !is_current {
         // Linux __pidfd_fget() uses ptrace_may_access(PTRACE_MODE_ATTACH_REALCREDS).
         // Until Starry has that, require at least kill-style credentials on the target.
-        check_kill_permission(proc_data.proc.pid())?;
+        check_kill_permission(current, proc_data.proc.pid())?;
     }
     let fd_entry = if is_current {
         // Use the calling thread's live fd table, including any table installed
         // by unshare(CLONE_FILES) or close_range(CLOSE_RANGE_UNSHARE).
-        crate::file::current_fd_table()
-            .read()
-            .get(target_fd as usize)
-            .cloned()
+        current_fd_table().read().get(target_fd as usize).cloned()
     } else {
         let task = get_task(proc_data.proc.pid())?;
-        FD_TABLE
-            .scope(&task.as_thread().scope.read())
-            .read()
-            .get(target_fd as usize)
-            .cloned()
+        let fd_table = task.as_thread().clone_scope_item(&FD_TABLE);
+        fd_table.read().get(target_fd as usize).cloned()
     };
     fd_entry.ok_or(AxError::BadFileDescriptor).and_then(|fd| {
         let fd = add_file_like(fd.inner.clone(), true)?;
@@ -135,6 +137,7 @@ pub fn sys_pidfd_getfd(pidfd: i32, target_fd: i32, flags: u32) -> AxResult<isize
 }
 
 pub fn sys_pidfd_send_signal(
+    current: &crate::task::UserTaskRef,
     pidfd: i32,
     signo: u32,
     sig: *mut SignalInfo,
@@ -162,14 +165,14 @@ pub fn sys_pidfd_send_signal(
         None
     } else if sig.is_null() {
         let signo = parse_signo(signo)?;
-        Some(make_pidfd_siginfo(signo, scope))
+        Some(make_pidfd_siginfo(current, signo, scope))
     } else {
         let signo_parsed = parse_signo(signo)?;
-        let info = unsafe { sig.vm_read_uninit()?.assume_init() };
+        let info = unsafe { sig.vm_read_uninit(current)?.assume_init() };
         if info.signo() != signo_parsed {
             return Err(AxError::InvalidInput);
         }
-        if current().as_thread().proc_data.proc.pid() != target_pid
+        if current.as_thread().proc_data.proc.pid() != target_pid
             && (info.code() >= 0 || info.code() == SI_TKILL)
         {
             return Err(AxError::OperationNotPermitted);
@@ -180,7 +183,7 @@ pub fn sys_pidfd_send_signal(
     match scope {
         PidFdSignalScope::Thread => {
             let (process, tid) = pidfd_obj.signal_thread()?;
-            check_kill_permission(process.pid())?;
+            check_kill_permission(current, process.pid())?;
             if pidfd_obj.is_zombie() {
                 return Ok(0);
             }
@@ -189,13 +192,13 @@ pub fn sys_pidfd_send_signal(
         PidFdSignalScope::ThreadGroup => {
             let process = pidfd_obj.signal_process()?;
             debug_assert_eq!(process.pid(), target_pid);
-            check_kill_permission(target_pid)?;
+            check_kill_permission(current, target_pid)?;
             send_signal_to_process(target_pid, kinfo)?;
         }
         PidFdSignalScope::ProcessGroup => {
             let process = pidfd_obj.signal_process()?;
             let pgid = process.group().pgid();
-            check_kill_permission(pgid)?;
+            check_kill_permission(current, pgid)?;
             send_signal_to_process_group(pgid, kinfo)?;
         }
     }

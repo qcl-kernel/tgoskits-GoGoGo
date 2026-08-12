@@ -12,7 +12,7 @@ use linux_raw_sys::io_uring::{
 };
 
 use super::FileLike;
-use crate::{pseudofs::DeviceMmap, sync::Mutex};
+use crate::{pseudofs::DeviceMmap, sync::PiMutex};
 
 const SQ_HEAD_OFFSET: usize = 0;
 const SQ_TAIL_OFFSET: usize = 4;
@@ -179,7 +179,7 @@ impl IoUringRings {
 
 pub struct IoUring {
     rings: Arc<IoUringRings>,
-    submit_lock: Mutex<()>,
+    submit_lock: PiMutex<()>,
     poll_cq: PollSet,
 }
 
@@ -187,7 +187,7 @@ impl IoUring {
     pub fn new(entries: u32, cq_entries: u32) -> AxResult<Self> {
         Ok(Self {
             rings: Arc::new(IoUringRings::new(entries, cq_entries)?),
-            submit_lock: Mutex::new(()),
+            submit_lock: PiMutex::new(()),
             poll_cq: PollSet::new(),
         })
     }

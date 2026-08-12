@@ -23,7 +23,6 @@ use core::{
 
 use ax_errno::{AxError, AxResult, LinuxError};
 use ax_runtime::hal::time::wall_time;
-use ax_task::future::{block_on, poll_io, timeout_at_wall};
 use axpoll::{IoEvents, PollSet, Pollable};
 use linux_raw_sys::general::{
     O_ACCMODE, O_NONBLOCK, O_RDONLY, O_RDWR, O_WRONLY, S_IFREG, SIGEV_NONE, SIGEV_SIGNAL,
@@ -34,8 +33,12 @@ use starry_signal::{SignalInfo, Signo};
 
 use crate::{
     file::{FileLike, IoDst, IoSrc, Kstat},
-    sync::{IrqMutex, Mutex},
-    task::{AsThread, send_signal_to_process},
+    sync::{IrqMutex, PiMutex, SpinLock},
+    task::{
+        current_user_task,
+        future::{UserWaitOutcome, block_on_user_until_wall, poll_io},
+        send_signal_to_process,
+    },
 };
 
 /// Hard ceiling for `mq_maxmsg` a privileged (`CAP_SYS_RESOURCE`) caller may
@@ -158,7 +161,7 @@ fn mq_bytes(max_msg: usize, msg_size: usize) -> Option<u64> {
 /// `ucounts` (`inc_rlimit_ucounts(UCOUNT_RLIMIT_MSGQUEUE, ...)`); with no
 /// ucounts abstraction here, a global uid-keyed map is the faithful
 /// equivalent. Entries are removed when a user's charge returns to zero.
-static MQ_USER_BYTES: Mutex<BTreeMap<u32, u64>> = Mutex::new(BTreeMap::new());
+static MQ_USER_BYTES: SpinLock<BTreeMap<u32, u64>> = SpinLock::new(BTreeMap::new());
 
 /// Charge `bytes` for `uid` against `limit` (the caller's `RLIMIT_MSGQUEUE`
 /// soft limit). Returns `EMFILE` without mutating state when the charge would
@@ -383,7 +386,9 @@ struct Inner {
 /// the name registry. `PollSet`s drive the blocking `mq_timedsend` /
 /// `mq_timedreceive` paths the same way `EventFd` does.
 pub struct MessageQueue {
-    inner: Mutex<Inner>,
+    /// Sleepable task-context state. Hard IRQ paths never inspect POSIX
+    /// message queues; they publish into their own bounded endpoints instead.
+    inner: PiMutex<Inner>,
     /// Owner uid, captured from `current_fsuid` at creation and checked against
     /// the caller on a later `mq_open`. Linux keeps it in the mqueue inode.
     uid: u32,
@@ -420,7 +425,7 @@ impl MessageQueue {
         MQ_QUEUES_COUNT.fetch_add(1, Ordering::Relaxed);
         let now = wall_time();
         Arc::new(Self {
-            inner: Mutex::new(Inner {
+            inner: PiMutex::new(Inner {
                 buckets: BTreeMap::new(),
                 len: 0,
                 max_msg,
@@ -557,11 +562,16 @@ impl MessageQueue {
             Ok(())
         };
 
-        block_on(timeout_at_wall(
+        let task = current_user_task();
+        match block_on_user_until_wall(
+            &task,
             deadline,
             poll_io(self, IoEvents::OUT, non_blocking, op),
-        ))
-        .map_err(|_| AxError::from(LinuxError::ETIMEDOUT))?
+        ) {
+            UserWaitOutcome::Ready(result) => result,
+            UserWaitOutcome::Interrupted => Err(AxError::Interrupted),
+            UserWaitOutcome::TimedOut => Err(LinuxError::ETIMEDOUT.into()),
+        }
     }
 
     /// Receive the highest-priority, earliest message. Blocks while empty
@@ -620,15 +630,17 @@ impl MessageQueue {
             }
         };
 
-        // Flatten the outer timeout error (`Elapsed` -> ETIMEDOUT) and the inner
-        // `poll_io` result (Ok, or Err(Interrupted)=EINTR, or Err(WouldBlock)=
-        // EAGAIN for O_NONBLOCK) into one result.
-        let result = match block_on(timeout_at_wall(
+        // Preserve operation, interruption, and timeout as distinct outcomes
+        // until the Linux errno boundary.
+        let task = current_user_task();
+        let result = match block_on_user_until_wall(
+            &task,
             deadline,
             poll_io(self, IoEvents::IN, non_blocking, op),
-        )) {
-            Ok(inner_result) => inner_result,
-            Err(_) => Err(AxError::from(LinuxError::ETIMEDOUT)),
+        ) {
+            UserWaitOutcome::Ready(result) => result,
+            UserWaitOutcome::Interrupted => Err(AxError::Interrupted),
+            UserWaitOutcome::TimedOut => Err(LinuxError::ETIMEDOUT.into()),
         };
 
         match result {
@@ -883,7 +895,7 @@ fn deliver_notification(n: &Notification) {
             // that enqueued the message driving the empty -> non-empty edge) and
             // si_value to the registrant's `sigev_value`. This runs in the
             // sender's context (`send` drives it on the current task).
-            let sender = ax_task::current();
+            let sender = current_user_task();
             let sender_pid = sender.as_thread().proc_data.proc.pid();
             let sender_uid = sender.as_thread().cred().uid;
             let info = SignalInfo::new_mqueue(signo, sender_pid, sender_uid, n.sigev_value);
@@ -1069,8 +1081,11 @@ impl Pollable for MqDescriptor {
 }
 
 /// Global `name -> queue` registry. `mq_open` binds names here; `mq_unlink`
-/// removes the binding while descriptors keep the `Arc` alive.
-pub static MQ_REGISTRY: Mutex<BTreeMap<String, Arc<MessageQueue>>> = Mutex::new(BTreeMap::new());
+/// removes the binding while descriptors keep the `Arc` alive. Name lookup and
+/// mutation only run from syscall/VFS task context, so contention may sleep
+/// instead of extending an IRQ-disabled critical section.
+pub static MQ_REGISTRY: PiMutex<BTreeMap<String, Arc<MessageQueue>>> =
+    PiMutex::new(BTreeMap::new());
 
 /// Validate a POSIX message-queue name.
 ///

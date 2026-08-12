@@ -11,10 +11,8 @@ use alloc::vec;
 use ax_errno::{AxError, AxResult};
 use ax_memory_addr::{MemoryAddr, PAGE_SIZE_4K, VirtAddr};
 use ax_runtime::hal::paging::MappingFlags;
-use ax_task::current;
-use starry_vm::vm_write_slice;
 
-use crate::task::AsThread;
+use crate::mm::vm_write_slice;
 
 /// Check whether pages are resident in memory.
 ///
@@ -43,7 +41,12 @@ use crate::task::AsThread;
 /// - EFAULT: vec points to invalid address
 /// - EINVAL: addr not page-aligned
 /// - ENOMEM: length > (TASK_SIZE - addr), negative length, or unmapped memory
-pub fn sys_mincore(addr: usize, length: usize, vec: *mut u8) -> AxResult<isize> {
+pub fn sys_mincore(
+    current: &crate::task::UserTaskRef,
+    addr: usize,
+    length: usize,
+    vec: *mut u8,
+) -> AxResult<isize> {
     let start_addr = VirtAddr::from(addr);
 
     // EINVAL: addr must be a multiple of the page size
@@ -73,7 +76,7 @@ pub fn sys_mincore(addr: usize, length: usize, vec: *mut u8) -> AxResult<isize> 
 
     {
         // Get current address space
-        let curr = current();
+        let curr = current;
         let aspace_arc = curr.as_thread().proc_data.aspace();
         let aspace = aspace_arc.lock();
         let mut i = 0;
@@ -116,7 +119,7 @@ pub fn sys_mincore(addr: usize, length: usize, vec: *mut u8) -> AxResult<isize> 
 
     // EFAULT: Write result to user space
     // vm_write_slice will return EFAULT if vec is invalid
-    vm_write_slice(vec, result.as_slice())?;
+    vm_write_slice(current, vec, result.as_slice())?;
 
     Ok(0)
 }

@@ -9,16 +9,15 @@ mod spsc;
 mod state;
 mod worker;
 
-use alloc::{boxed::Box, sync::Arc, vec::Vec};
+use alloc::{boxed::Box, string::String, sync::Arc, vec::Vec};
 use core::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 use ax_driver::serial::SerialDevice;
 pub use ax_driver::serial::SerialDeviceInfo;
 use ax_errno::{AxError, AxResult};
 use ax_lazyinit::OnceLock;
-use ax_task::{AxCpuMask, IrqNotify, TaskInner, WaitQueue};
 use axpoll::{IoEvents, PollSet};
-pub use rdif_serial::{Config, ConfigError, DataBits, Parity, RxFlag, StopBits};
+pub use rdif_serial::{Config, ConfigError, DataBits, Parity, RxFlag, StopBits, UartRegisterGate};
 pub use state::SerialStats;
 
 use self::{
@@ -28,10 +27,15 @@ use self::{
     state::{SerialIrqLatch, SerialStatsAtomic},
     worker::SerialWorker,
 };
-use crate::sync::SpinLock;
+use crate::{
+    sync::PiMutex,
+    task::{
+        CpuId, CpuSet, IrqRegisterResult, IrqWaitCell, IrqWaitRegistration, ThreadHandle, ThreadId,
+        WaitQueue, quiesce_irq_wait,
+    },
+};
 
 const NO_ACTIVE_CONSOLE: usize = usize::MAX;
-const PANIC_TX_READY_SPINS: usize = 100_000;
 const IRQ_RX_CAPACITY: usize = 16_384;
 const SUBSCRIPTION_RX_CAPACITY: usize = 4_096;
 
@@ -56,7 +60,10 @@ impl Default for RxItem {
 struct RuntimeIrqBridge {
     latch: SerialIrqLatch,
     rx_overflow: AtomicBool,
-    notify: IrqNotify,
+    register_retry: AtomicBool,
+    doorbell: IrqWaitCell,
+    park: WaitQueue,
+    waiter: OnceLock<SerialWorkerWaiter>,
 }
 
 impl RuntimeIrqBridge {
@@ -64,9 +71,114 @@ impl RuntimeIrqBridge {
         Self {
             latch: SerialIrqLatch::new(),
             rx_overflow: AtomicBool::new(false),
-            notify: IrqNotify::new(),
+            register_retry: AtomicBool::new(false),
+            doorbell: IrqWaitCell::new(),
+            park: WaitQueue::new(),
+            waiter: OnceLock::new(),
         }
     }
+
+    fn notify(&self) {
+        let _result = self.doorbell.notify();
+    }
+
+    fn take_register_retry(&self) -> bool {
+        self.register_retry.swap(false, Ordering::AcqRel)
+    }
+
+    fn wait(&self) {
+        let current = crate::task::current_thread_handle().unwrap_or_else(|error| {
+            panic!("serial maintenance worker has no scheduler thread: {error}")
+        });
+        let waiter = self
+            .waiter
+            .call_once(|| create_serial_worker_waiter(&current));
+        assert_eq!(
+            waiter.owner,
+            current.id(),
+            "serial notifications must be consumed by one fixed maintenance thread"
+        );
+
+        match self.doorbell.register(&waiter.registration) {
+            IrqRegisterResult::ConsumedPending => {}
+            IrqRegisterResult::Registered(token)
+            | IrqRegisterResult::NotificationInFlight(token) => {
+                // Registration ownership is the single event predicate. The
+                // notifier releases it before the direct scheduler wake, and
+                // an event coalesced before registration releases it
+                // synchronously without leaving a stale self-wake behind.
+                self.park.wait_until(|| !token.is_attached());
+                quiesce_irq_wait(token)
+                    .unwrap_or_else(|error| panic!("serial IRQ waiter could not quiesce: {error}"));
+            }
+            IrqRegisterResult::Occupied => {
+                panic!("serial IRQ waiter was registered concurrently")
+            }
+        }
+    }
+}
+
+struct SerialWorkerWaiter {
+    owner: ThreadId,
+    registration: IrqWaitRegistration,
+}
+
+struct PendingIrqRegistration {
+    handle: ax_hal::irq::IrqHandle,
+    device_name: String,
+    committed: bool,
+}
+
+impl PendingIrqRegistration {
+    fn new(handle: ax_hal::irq::IrqHandle, device_name: String) -> Self {
+        Self {
+            handle,
+            device_name,
+            committed: false,
+        }
+    }
+
+    fn commit(mut self) {
+        self.committed = true;
+    }
+}
+
+impl Drop for PendingIrqRegistration {
+    fn drop(&mut self) {
+        if self.committed {
+            return;
+        }
+        if let Err(error) = ax_hal::irq::free_irq(self.handle) {
+            warn!(
+                "failed to roll back serial IRQ registration for {}: {error:?}",
+                self.device_name
+            );
+        }
+    }
+}
+
+fn create_serial_worker_waiter(current: &ThreadHandle) -> SerialWorkerWaiter {
+    SerialWorkerWaiter {
+        owner: current.id(),
+        registration: IrqWaitRegistration::new(current.wake_handle()),
+    }
+}
+
+fn try_enter_irq_registers<'a, E: ?Sized>(
+    gate: &'a UartRegisterGate<E>,
+    bridge: &RuntimeIrqBridge,
+) -> Option<rdif_serial::UartRegisterGuard<'a, E>> {
+    let guard = gate.try_enter();
+    if guard.is_none() {
+        // Emergency TX masks every device source before touching the FIFO, so a
+        // level-triggered line cannot continuously reassert while the IRQ
+        // endpoint defers register access. Publish the retry before waking the
+        // fixed worker; it polls status and restores normal source ownership
+        // after the bounded emergency transaction releases the gate.
+        bridge.register_retry.store(true, Ordering::Release);
+        bridge.notify();
+    }
+    guard
 }
 
 struct RuntimeShared {
@@ -74,9 +186,9 @@ struct RuntimeShared {
     info: SerialDeviceInfo,
     owner_cpu: usize,
     polling: bool,
-    port: SpinLock<Box<dyn rdif_serial::UartPort>>,
+    register_gate: Arc<UartRegisterGate>,
     ingress: TxIngress,
-    rx_subscription: SpinLock<Option<SpscConsumer<RxItem>>>,
+    rx_subscription: PiMutex<Option<SpscConsumer<RxItem>>>,
     control: ControlQueue,
     bridge: Arc<RuntimeIrqBridge>,
     stats: Arc<SerialStatsAtomic>,
@@ -100,21 +212,21 @@ impl RuntimeShared {
     fn set_started(&self, started: bool) {
         self.started.store(started, Ordering::Release);
         if !started {
-            self.rx_progress.notify_all(true);
-            self.tx_progress.notify_all(true);
+            self.rx_progress.notify_all();
+            self.tx_progress.notify_all();
         }
     }
 
     fn publish_tx_space(&self) {
-        self.tx_progress.notify_all(true);
+        self.tx_progress.notify_all();
         // SAFETY: the maintenance task publishes queue space before waking
         // task-context poll waiters.
         unsafe { self.tx_source.wake(IoEvents::OUT) };
     }
 
     fn publish_tx_idle(&self) {
-        self.tx_progress.notify_all(true);
-        // SAFETY: idle is published under the TX queue lock before this wake.
+        self.tx_progress.notify_all();
+        // SAFETY: idle is Release-published before this task-context wake.
         unsafe { self.tx_source.wake(IoEvents::OUT) };
     }
 
@@ -161,14 +273,11 @@ impl SerialRuntimeHandle {
         }
     }
 
-    /// Leases the only RX subscription.
-    ///
-    /// Dropping the subscription returns the consumer to this runtime so a
-    /// failed owner initialization does not permanently consume the RX path.
+    /// Takes the only RX subscription. Starry serializes its readers above it.
     pub fn take_rx_subscription(&self) -> Option<SerialRxSubscription> {
-        let consumer = self.shared.rx_subscription.lock_irqsave().take()?;
+        let consumer = self.shared.rx_subscription.lock().take()?;
         Some(SerialRxSubscription {
-            consumer: SpinLock::new(Some(consumer)),
+            consumer: PiMutex::new(Some(consumer)),
             shared: self.shared.clone(),
         })
     }
@@ -176,14 +285,14 @@ impl SerialRuntimeHandle {
     pub fn start(&self, config: Config) -> AxResult {
         self.shared
             .control
-            .submit(ControlOp::Start(config), &self.shared.bridge.notify)
+            .submit(ControlOp::Start(config), || self.shared.bridge.notify())
     }
 
     pub fn shutdown(&self) -> AxResult {
         let result = self
             .shared
             .control
-            .submit(ControlOp::Shutdown, &self.shared.bridge.notify);
+            .submit(ControlOp::Shutdown, || self.shared.bridge.notify());
         if result.is_ok() {
             let _ = ACTIVE_CONSOLE.compare_exchange(
                 self.shared.index,
@@ -198,14 +307,14 @@ impl SerialRuntimeHandle {
     pub fn set_config(&self, config: Config) -> AxResult {
         self.shared
             .control
-            .submit(ControlOp::SetConfig(config), &self.shared.bridge.notify)
+            .submit(ControlOp::SetConfig(config), || self.shared.bridge.notify())
     }
 
-    /// Claims both runtime log routing and the underlying platform UART output.
-    pub fn claim_console_output(&self) -> AxResult {
-        self.shared.ensure_started()?;
+    pub fn activate_console_output(&self) -> AxResult {
+        if !self.shared.started() {
+            return Err(AxError::BadState);
+        }
         ACTIVE_CONSOLE.store(self.shared.index, Ordering::Release);
-        ax_hal::console::claim_runtime_output();
         Ok(())
     }
 
@@ -225,11 +334,13 @@ impl SerialTxSender {
         if bytes.is_empty() {
             return Ok(0);
         }
-        self.shared.ensure_started()?;
+        if !self.shared.started() {
+            return Err(AxError::BadState);
+        }
         let accepted = self
             .shared
             .ingress
-            .try_write(bytes, &self.shared.bridge.notify);
+            .try_write(bytes, || self.shared.bridge.notify());
         if accepted == 0 {
             Err(AxError::WouldBlock)
         } else {
@@ -238,38 +349,30 @@ impl SerialTxSender {
     }
 
     pub fn wait_writable(&self) -> AxResult {
-        self.shared.ensure_started()?;
+        if !self.shared.started() {
+            return Err(AxError::BadState);
+        }
         self.shared
             .tx_progress
             .wait_until(|| self.shared.ingress.write_room() > 0 || !self.shared.started());
         self.shared.started().then_some(()).ok_or(AxError::BadState)
     }
 
-    /// Writes every raw byte, sleeping only when the bounded runtime queue is full.
-    pub fn write_all(&self, bytes: &[u8]) -> AxResult<usize> {
-        self.write_all_with(bytes, |shared, remaining| {
-            shared.ingress.try_write(remaining, &shared.bridge.notify)
-        })
-    }
-
-    /// Writes every text byte while expanding line feeds to CRLF.
+    /// Writes every text byte, sleeping when the bounded TX ring is full.
+    ///
+    /// This task-context operation expands line feeds to CRLF. Hard-IRQ,
+    /// logging, and panic paths must use their dedicated non-blocking
+    /// endpoints instead.
     pub fn write_text_all(&self, bytes: &[u8]) -> AxResult<usize> {
-        self.write_all_with(bytes, |shared, remaining| {
-            shared
-                .ingress
-                .try_write_text(remaining, &shared.bridge.notify)
-        })
-    }
-
-    fn write_all_with(
-        &self,
-        bytes: &[u8],
-        submit: impl Fn(&RuntimeShared, &[u8]) -> usize,
-    ) -> AxResult<usize> {
         let mut written = 0;
         while written < bytes.len() {
-            self.shared.ensure_started()?;
-            let accepted = submit(&self.shared, &bytes[written..]);
+            if !self.shared.started() {
+                return Err(AxError::BadState);
+            }
+            let accepted = self
+                .shared
+                .ingress
+                .try_write_text(&bytes[written..], || self.shared.bridge.notify());
             if accepted == 0 {
                 self.wait_writable()?;
             } else {
@@ -280,7 +383,9 @@ impl SerialTxSender {
     }
 
     pub fn wait_idle(&self) -> AxResult {
-        self.shared.ensure_started()?;
+        if !self.shared.started() {
+            return Err(AxError::BadState);
+        }
         self.shared
             .tx_progress
             .wait_until(|| self.shared.ingress.is_idle() || !self.shared.started());
@@ -295,7 +400,7 @@ impl SerialTxSender {
         self.shared.ensure_started()?;
         self.shared
             .control
-            .submit(ControlOp::DiscardTx, &self.shared.bridge.notify)
+            .submit(ControlOp::DiscardTx, || self.shared.bridge.notify())
     }
 
     pub fn poll_source(&self) -> Arc<PollSet> {
@@ -305,23 +410,18 @@ impl SerialTxSender {
 
 /// The unique RX consumer for one UART runtime.
 pub struct SerialRxSubscription {
-    consumer: SpinLock<Option<SpscConsumer<RxItem>>>,
+    consumer: PiMutex<Option<SpscConsumer<RxItem>>>,
     shared: Arc<RuntimeShared>,
 }
 
 impl SerialRxSubscription {
     pub fn drain(&self, out: &mut [RxItem]) -> usize {
-        let count = {
-            let mut subscription = self.consumer.lock_irqsave();
-            // `None` is only observable from `Drop`, which requires exclusive
-            // access. Keep the runtime boundary non-panicking if that invariant
-            // is changed by a future ownership refactor.
-            let Some(consumer) = subscription.as_mut() else {
-                return 0;
-            };
-            consumer.drain(out)
-        };
-        notify_drained_space(count, || self.shared.bridge.notify.notify());
+        let count = self
+            .consumer
+            .lock()
+            .as_mut()
+            .map_or(0, |consumer| consumer.drain(out));
+        notify_drained_space(count, || self.shared.bridge.notify());
         count
     }
 
@@ -330,13 +430,13 @@ impl SerialRxSubscription {
         self.shared.ensure_started()?;
         self.shared.rx_progress.wait_until(|| {
             self.consumer
-                .lock_irqsave()
+                .lock()
                 .as_ref()
                 .is_some_and(|consumer| !consumer.is_empty())
                 || !self.shared.started()
         });
         self.consumer
-            .lock_irqsave()
+            .lock()
             .as_ref()
             .is_some_and(|consumer| !consumer.is_empty())
             .then_some(())
@@ -349,7 +449,7 @@ impl SerialRxSubscription {
         let result = self
             .shared
             .control
-            .submit(ControlOp::DiscardRx, &self.shared.bridge.notify);
+            .submit(ControlOp::DiscardRx, || self.shared.bridge.notify());
         self.clear_pending();
         result
     }
@@ -359,10 +459,10 @@ impl SerialRxSubscription {
     }
 
     fn clear_pending(&self) {
-        if let Some(consumer) = self.consumer.lock_irqsave().as_mut() {
+        if let Some(consumer) = self.consumer.lock().as_mut() {
             consumer.clear();
         }
-        self.shared.bridge.notify.notify();
+        self.shared.bridge.notify();
     }
 }
 
@@ -371,7 +471,7 @@ impl Drop for SerialRxSubscription {
         let Some(consumer) = self.consumer.get_mut().take() else {
             return;
         };
-        let mut available = self.shared.rx_subscription.lock_irqsave();
+        let mut available = self.shared.rx_subscription.lock();
         debug_assert!(
             available.is_none(),
             "serial runtime cannot have two RX consumers"
@@ -390,6 +490,12 @@ fn notify_drained_space(count: usize, notify_space: impl FnOnce()) {
 
 pub fn runtimes() -> &'static [SerialRuntimeHandle] {
     SERIAL_RUNTIMES.get().map_or(&[], Box::as_ref)
+}
+
+/// Returns the task-context TX capability of the selected runtime console.
+pub fn active_console_tx() -> Option<SerialTxSender> {
+    let index = ACTIVE_CONSOLE.load(Ordering::Acquire);
+    runtimes().get(index).map(SerialRuntimeHandle::tx_sender)
 }
 
 pub(crate) fn init(primary_cpu: usize) {
@@ -412,12 +518,14 @@ fn build_runtime(
         info,
         mut port,
         mut irq,
+        register_gate,
     } = serial;
     port.mask_all();
 
     let polling = info.irq.is_none();
     let bridge = Arc::new(RuntimeIrqBridge::new());
     let stats = Arc::new(SerialStatsAtomic::new());
+    let register_gate: Arc<UartRegisterGate> = Arc::from(register_gate);
     let (irq_rx_producer, irq_rx_consumer) = spsc::channel(IRQ_RX_CAPACITY);
     let (rx_output_producer, rx_output_consumer) = spsc::channel(SUBSCRIPTION_RX_CAPACITY);
     let shared = Arc::new(RuntimeShared {
@@ -425,9 +533,9 @@ fn build_runtime(
         info,
         owner_cpu: primary_cpu,
         polling,
-        port: SpinLock::new(port),
+        register_gate: register_gate.clone(),
         ingress: TxIngress::new(),
-        rx_subscription: SpinLock::new(Some(rx_output_consumer)),
+        rx_subscription: PiMutex::new(Some(rx_output_consumer)),
         control: ControlQueue::new(),
         bridge: bridge.clone(),
         stats: stats.clone(),
@@ -439,14 +547,20 @@ fn build_runtime(
         irq_handle: OnceLock::new(),
     });
 
-    let worker = SerialWorker::new(shared.clone(), irq_rx_consumer, rx_output_producer);
-    let task = TaskInner::new(
-        move || worker.run(),
-        alloc::format!("serial{index}-maint"),
-        ax_task::default_task_stack_size(),
+    let worker = SerialWorker::new(
+        shared.clone(),
+        port,
+        register_gate.clone(),
+        irq_rx_consumer,
+        rx_output_producer,
     );
-    task.set_cpumask(AxCpuMask::one_shot(primary_cpu));
+    let owner_cpu = u32::try_from(primary_cpu).map_err(|_| AxError::InvalidInput)?;
+    let mut affinity = CpuSet::empty(ax_hal::cpu_num());
+    if !affinity.insert(CpuId::new(owner_cpu)) {
+        return Err(AxError::InvalidInput);
+    }
 
+    let mut pending_irq_registration = None;
     if let Some(binding) = shared.info.irq.clone() {
         let irq_id = crate::irq::resolve_binding_irq(binding).map_err(|err| {
             warn!(
@@ -455,24 +569,14 @@ fn build_runtime(
             );
             AxError::Unsupported
         })?;
-        let callback_bridge = bridge;
-        let callback_stats = stats;
-        let mut callback_rx = RuntimeIrqRxSink {
+        let mut callback_publisher = RuntimeIrqPublisher {
             producer: irq_rx_producer,
-            bridge: callback_bridge.clone(),
-            stats: callback_stats.clone(),
+            bridge,
+            stats,
+            register_gate,
         };
         let request = serial_irq_request(
-            ax_hal::irq::IrqRequest::new(move |_| {
-                let Some(event) = irq.handle(&mut callback_rx) else {
-                    callback_stats.spurious_irq();
-                    return ax_hal::irq::IrqReturn::Unhandled;
-                };
-                callback_stats.handled_irq(event);
-                callback_bridge.latch.publish(event);
-                callback_bridge.notify.notify_irq();
-                ax_hal::irq::IrqReturn::Handled
-            }),
+            ax_hal::irq::IrqRequest::new(move |_| callback_publisher.handle(irq.as_mut())),
             primary_cpu,
         );
         let handle = ax_hal::irq::request_irq(irq_id, request).map_err(|err| {
@@ -483,9 +587,28 @@ fn build_runtime(
             AxError::Unsupported
         })?;
         shared.irq_handle.call_once(|| handle);
+        pending_irq_registration = Some(PendingIrqRegistration::new(
+            handle,
+            shared.info.name.clone(),
+        ));
     }
 
-    ax_task::spawn_task(task);
+    crate::task::spawn_raw_with_affinity(
+        move || worker.run(),
+        alloc::format!("serial{index}-maint"),
+        crate::task::default_task_stack_size(),
+        affinity,
+    )
+    .map_err(|error| {
+        warn!(
+            "failed to start serial maintenance worker for {}: {error}",
+            shared.info.name
+        );
+        AxError::BadState
+    })?;
+    if let Some(registration) = pending_irq_registration {
+        registration.commit();
+    }
     info!(
         "serial runtime {} ready: cpu={}, irq={:?}, polling={}",
         shared.info.name, shared.owner_cpu, shared.info.irq, shared.polling
@@ -505,14 +628,48 @@ fn serial_irq_request(
         .auto_enable(ax_hal::irq::AutoEnable::No)
 }
 
-struct RuntimeIrqRxSink {
+/// IRQ-safe publication boundary captured beside the IRQ-owned driver endpoint.
+///
+/// The registered callback cannot reach the serial worker, control queue, or
+/// device manager. It can only execute a bounded register transaction and
+/// publish value reports into preallocated state.
+struct RuntimeIrqPublisher {
     producer: SpscProducer<rdif_serial::RxSample>,
     bridge: Arc<RuntimeIrqBridge>,
     stats: Arc<SerialStatsAtomic>,
+    register_gate: Arc<UartRegisterGate>,
 }
 
-impl rdif_serial::IrqRxSink for RuntimeIrqRxSink {
-    fn push(&mut self, sample: rdif_serial::RxSample) {
+impl RuntimeIrqPublisher {
+    fn handle(&mut self, irq: &mut dyn rdif_serial::UartIrq) -> ax_hal::irq::IrqReturn {
+        let report = {
+            let Some(_register_access) = try_enter_irq_registers(&self.register_gate, &self.bridge)
+            else {
+                // Only emergency output can contend with the same-CPU
+                // worker/IRQ serialization. Never wait in hard IRQ.
+                return ax_hal::irq::IrqReturn::Handled;
+            };
+            irq.handle()
+        };
+        let Some(report) = report else {
+            self.stats.spurious_irq();
+            return ax_hal::irq::IrqReturn::Unhandled;
+        };
+
+        self.publish_batch(report.rx);
+        self.stats.handled_irq(report.event);
+        self.bridge.latch.publish(report.event);
+        self.bridge.notify();
+        ax_hal::irq::IrqReturn::Handled
+    }
+
+    fn publish_batch(&mut self, batch: rdif_serial::IrqRxBatch) {
+        for &sample in batch.as_slice() {
+            self.publish_sample(sample);
+        }
+    }
+
+    fn publish_sample(&mut self, sample: rdif_serial::RxSample) {
         if self.producer.push(sample).is_err() {
             self.stats.add_rx_dropped(1);
             self.bridge.rx_overflow.store(true, Ordering::Release);
@@ -520,61 +677,73 @@ impl rdif_serial::IrqRxSink for RuntimeIrqRxSink {
     }
 }
 
-/// Routes normal logs through the bounded TX channel. Panic output only takes
-/// the port after a successful non-blocking gate acquisition.
+/// Routes normal logs through the lock-free bounded MPSC ring. Panic output
+/// uses only the restricted emergency endpoint after a non-blocking gate.
 pub(crate) fn route_console_bytes(bytes: &[u8]) -> Option<usize> {
     let index = ACTIVE_CONSOLE.load(Ordering::Acquire);
     let runtime = runtimes().get(index)?;
     if axpanic::oops_in_progress() {
-        let Some(mut port) = runtime.shared.port.try_lock_irqsave() else {
-            runtime.shared.stats.add_log_dropped(bytes.len());
-            return Some(0);
-        };
-        port.mask_all();
-        let mut written = 0;
-        let mut spins = 0;
-        while written < bytes.len() && spins < PANIC_TX_READY_SPINS {
-            let count = port.write_tx(&bytes[written..]);
-            if count == 0 {
-                spins += 1;
-                core::hint::spin_loop();
-            } else {
-                written += count;
-                spins = 0;
-            }
-        }
-        runtime.shared.stats.add_log_dropped(bytes.len() - written);
-        return Some(written);
+        return Some(route_emergency_bytes(
+            &runtime.shared.register_gate,
+            &runtime.shared.stats,
+            bytes,
+            || runtime.shared.bridge.notify(),
+        ));
     }
 
     let accepted = runtime
         .shared
         .ingress
-        .try_write_log(bytes, &runtime.shared.bridge.notify);
+        .try_write_text(bytes, || runtime.shared.bridge.notify());
     runtime.shared.stats.add_log_dropped(bytes.len() - accepted);
     Some(accepted)
 }
 
-/// Writes text through the active runtime console, if one has claimed output.
-pub fn write_active_console_text(bytes: &[u8]) -> Option<AxResult<usize>> {
-    let index = ACTIVE_CONSOLE.load(Ordering::Acquire);
-    let runtime = runtimes().get(index)?;
-    Some(runtime.tx_sender().write_text_all(bytes))
+fn route_emergency_bytes<E: rdif_serial::UartEmergencyTx + ?Sized>(
+    register_gate: &UartRegisterGate<E>,
+    stats: &SerialStatsAtomic,
+    bytes: &[u8],
+    notify_released: impl FnOnce(),
+) -> usize {
+    let Some(register_access) = register_gate.try_enter() else {
+        stats.add_log_dropped(bytes.len());
+        return 0;
+    };
+    let written = register_access.try_write(bytes);
+    stats.add_log_dropped(bytes.len() - written);
+    // Publish register availability before the IRQ-safe doorbell. A worker
+    // that consumed the original TX notification while emergency output held
+    // the gate must not sleep until an unrelated interrupt arrives.
+    drop(register_access);
+    notify_released();
+    written
 }
 
 #[cfg(test)]
 mod tests {
+    use core::cell::Cell;
+
     use super::*;
 
+    struct BoundedEmergencyTx;
+
+    impl rdif_serial::UartEmergencyTx for BoundedEmergencyTx {
+        unsafe fn try_write_unlocked(&self, bytes: &[u8]) -> usize {
+            bytes.len().min(2)
+        }
+    }
+
     #[test]
-    fn irq_sink_drops_only_after_the_preallocated_ring_is_full() {
+    fn irq_publisher_drops_only_after_the_preallocated_ring_is_full() {
         let bridge = Arc::new(RuntimeIrqBridge::new());
         let stats = Arc::new(SerialStatsAtomic::new());
         let (producer, mut consumer) = spsc::channel(2);
-        let mut sink = RuntimeIrqRxSink {
+        let register_gate = Arc::new(UartRegisterGate::new(BoundedEmergencyTx));
+        let mut publisher = RuntimeIrqPublisher {
             producer,
             bridge: bridge.clone(),
             stats: stats.clone(),
+            register_gate,
         };
         let samples = [
             rdif_serial::RxSample {
@@ -590,9 +759,11 @@ mod tests {
                 ..rdif_serial::RxSample::default()
             },
         ];
+        let mut batch = rdif_serial::IrqRxBatch::new();
         for sample in samples {
-            rdif_serial::IrqRxSink::push(&mut sink, sample);
+            batch.try_push(sample).unwrap();
         }
+        publisher.publish_batch(batch);
 
         assert_eq!(consumer.pop().and_then(|sample| sample.byte), Some(1));
         assert_eq!(consumer.pop().and_then(|sample| sample.byte), Some(2));
@@ -627,6 +798,54 @@ mod tests {
             request.auto_enable_mode(),
             ax_hal::irq::AutoEnable::No,
             "the IRQ action must not run before the worker has configured the UART"
+        );
+    }
+
+    #[test]
+    fn serial_work_is_coalesced_by_the_irq_doorbell() {
+        let bridge = RuntimeIrqBridge::new();
+
+        bridge.notify();
+
+        assert!(bridge.doorbell.is_pending());
+    }
+
+    #[test]
+    fn irq_gate_conflict_is_published_for_task_context_retry() {
+        let bridge = RuntimeIrqBridge::new();
+        let gate = UartRegisterGate::new(());
+        let _owner = gate.try_enter().expect("first register owner");
+
+        assert!(try_enter_irq_registers(&gate, &bridge).is_none());
+        assert!(
+            bridge.take_register_retry(),
+            "the hard-IRQ path must not silently discard an event while emergency TX owns \
+             registers"
+        );
+        assert!(bridge.doorbell.is_pending());
+    }
+
+    #[test]
+    fn emergency_release_notifies_the_deferred_worker() {
+        let gate = UartRegisterGate::new(BoundedEmergencyTx);
+        let stats = SerialStatsAtomic::new();
+        let notifications = Cell::new(0);
+
+        assert_eq!(
+            route_emergency_bytes(&gate, &stats, b"panic", || {
+                notifications.set(notifications.get() + 1);
+            }),
+            2
+        );
+        assert_eq!(
+            notifications.get(),
+            1,
+            "releasing the emergency register gate must republish deferred worker progress"
+        );
+        assert_eq!(stats.snapshot().log_dropped, 3);
+        assert!(
+            gate.try_enter().is_some(),
+            "the release notification must run after the register gate is dropped"
         );
     }
 }

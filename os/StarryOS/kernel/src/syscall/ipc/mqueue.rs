@@ -13,7 +13,6 @@ use linux_raw_sys::general::{
     __kernel_mode_t, __kernel_timespec, O_ACCMODE, O_CREAT, O_EXCL, O_NONBLOCK, O_RDONLY, O_RDWR,
     O_WRONLY, RLIMIT_MSGQUEUE, SIGEV_NONE, SIGEV_SIGNAL, SIGEV_THREAD, sigevent,
 };
-use starry_vm::{VmMutPtr, VmPtr, vm_load, vm_write_slice};
 
 use crate::{
     file::{add_file_like, get_file_like, netlink::NetlinkSocket},
@@ -22,19 +21,21 @@ use crate::{
         charge_open_bytes, msg_default, msg_max, msgsize_default, msgsize_max, queues_count,
         queues_max, validate_name,
     },
-    mm::vm_load_string,
-    task::AsThread,
+    mm::{VmMutPtr, VmPtr, vm_load, vm_load_string, vm_write_slice},
     time::TimeValueLike,
 };
 
 /// Resolve an optional absolute `CLOCK_REALTIME` timeout pointer into a
 /// wall-clock deadline. A null pointer means "wait forever"; a supplied
 /// timespec is validated the way Linux does (`EINVAL` on out-of-range nsec).
-fn load_deadline(abs_timeout: *const __kernel_timespec) -> AxResult<Option<core::time::Duration>> {
+fn load_deadline(
+    current: &crate::task::UserTaskRef,
+    abs_timeout: *const __kernel_timespec,
+) -> AxResult<Option<core::time::Duration>> {
     if abs_timeout.is_null() {
         return Ok(None);
     }
-    let ts: __kernel_timespec = unsafe { abs_timeout.vm_read_uninit()?.assume_init() };
+    let ts: __kernel_timespec = unsafe { abs_timeout.vm_read_uninit(current)?.assume_init() };
     Ok(Some(ts.try_into_time_value()?))
 }
 
@@ -45,12 +46,23 @@ fn load_deadline(abs_timeout: *const __kernel_timespec) -> AxResult<Option<core:
 /// `O_CREAT` supplies an `attr`, its `mq_maxmsg`/`mq_msgsize` seed the queue
 /// (bounded by the system limits), otherwise the Linux defaults apply.
 pub fn sys_mq_open(
+    current: &crate::task::UserTaskRef,
     name: *const core::ffi::c_char,
     oflag: i32,
     mode: __kernel_mode_t,
     attr: *const MqAttr,
 ) -> AxResult<isize> {
-    let raw = vm_load_string(name)?;
+    // Linux copies a supplied `mq_attr` in the syscall wrapper before
+    // `do_mq_open` enters the mqueue name-creation critical section
+    // (ipc/mqueue.c `SYSCALL_DEFINE4(mq_open)`). Besides preserving EFAULT
+    // precedence, this keeps a faultable user copy out of `MQ_REGISTRY`'s
+    // non-sleeping, IRQ-disabled lock.
+    let user_attr = if attr.is_null() {
+        None
+    } else {
+        Some(attr.vm_read(current)?)
+    };
+    let raw = vm_load_string(current, name)?;
     let short = validate_name(&raw)?;
     let key = {
         let mut k = alloc::string::String::with_capacity(short.len() + 1);
@@ -65,7 +77,7 @@ pub fn sys_mq_open(
     // queue and drive the access check on an existing one (Linux uses
     // current_fsuid()/current_fsgid()); the resource capability lifts the
     // unprivileged attribute ceilings and DAC-override bypasses the open check.
-    let curr = ax_task::current();
+    let curr = current;
     let thr = curr.as_thread();
     let cred = thr.cred();
     let (fsuid, fsgid, can_sys_resource, can_dac_override) = (
@@ -77,7 +89,7 @@ pub fn sys_mq_open(
     let umask = thr.proc_data.umask();
     // The creator's `RLIMIT_MSGQUEUE` soft limit bounds the total bytes across
     // all their queues (Linux charges `mq_bytes` against the ucounts rlimit).
-    let msgqueue_rlimit = thr.proc_data.rlim.read()[RLIMIT_MSGQUEUE].current;
+    let msgqueue_rlimit = thr.proc_data.rlimits()[RLIMIT_MSGQUEUE].current;
 
     let mut registry = MQ_REGISTRY.lock();
     // Whether this call created the queue (so an fd-allocation failure below
@@ -116,13 +128,7 @@ pub fn sys_mq_open(
             if queues_count() >= queues_max() && !can_sys_resource {
                 return Err(LinuxError::ENOSPC.into());
             }
-            let (max_msg, msg_size) = if attr.is_null() {
-                // Linux seeds an attr-less queue with min(mq_msg_max,
-                // mq_msg_default) / min(mq_msgsize_max, mq_msgsize_default)
-                // (ipc/mqueue.c:325), honoring the current sysctl tunables.
-                (msg_default(), msgsize_default())
-            } else {
-                let a: MqAttr = attr.vm_read()?;
+            let (max_msg, msg_size) = if let Some(a) = user_attr {
                 // The unprivileged ceilings come from the (sysctl-tunable)
                 // msg_max/msgsize_max; a `CAP_SYS_RESOURCE` caller gets the
                 // hard limits instead.
@@ -145,6 +151,11 @@ pub fn sys_mq_open(
                     return Err(LinuxError::EOVERFLOW.into());
                 }
                 (max_msg, msg_size)
+            } else {
+                // Linux seeds an attr-less queue with min(mq_msg_max,
+                // mq_msg_default) / min(mq_msgsize_max, mq_msgsize_default)
+                // (ipc/mqueue.c:325), honoring the current sysctl tunables.
+                (msg_default(), msgsize_default())
             };
             // Charge the queue's `mq_bytes` against the creator's
             // `RLIMIT_MSGQUEUE` *before* creating it; too-large a queue (or a
@@ -207,8 +218,11 @@ pub fn sys_mq_open(
 /// dir (the mqueuefs root, created at mount as root, so fsuid == 0), or holds
 /// `CAP_FOWNER`; otherwise `-EPERM`. The dir is world-writable so no extra
 /// `MAY_WRITE`/`MAY_EXEC` gate applies. We enforce the same before removing.
-pub fn sys_mq_unlink(name: *const core::ffi::c_char) -> AxResult<isize> {
-    let raw = vm_load_string(name)?;
+pub fn sys_mq_unlink(
+    current: &crate::task::UserTaskRef,
+    name: *const core::ffi::c_char,
+) -> AxResult<isize> {
+    let raw = vm_load_string(current, name)?;
     let short = validate_name(&raw)?;
     let key = {
         let mut k = alloc::string::String::with_capacity(short.len() + 1);
@@ -217,7 +231,7 @@ pub fn sys_mq_unlink(name: *const core::ffi::c_char) -> AxResult<isize> {
         k
     };
 
-    let curr = ax_task::current();
+    let curr = current;
     let cred = curr.as_thread().cred();
     let (fsuid, can_fowner) = (cred.fsuid, cred.has_cap_fowner());
 
@@ -249,6 +263,7 @@ fn queue_from_fd(mqdes: i32) -> AxResult<Arc<MessageQueue>> {
 
 /// `mq_timedsend(mqdes, msg, len, prio, abs_timeout)`.
 pub fn sys_mq_timedsend(
+    current: &crate::task::UserTaskRef,
     mqdes: i32,
     msg_ptr: *const u8,
     msg_len: usize,
@@ -261,8 +276,8 @@ pub fn sys_mq_timedsend(
         return Err(LinuxError::EBADF.into());
     }
     let queue = desc.queue();
-    let deadline = load_deadline(abs_timeout)?;
-    let data = vm_load(msg_ptr, msg_len)?;
+    let deadline = load_deadline(current, abs_timeout)?;
+    let data = vm_load(current, msg_ptr, msg_len)?;
     queue.send(&data, msg_prio, deadline, desc.is_nonblocking())?;
     Ok(0)
 }
@@ -272,6 +287,7 @@ pub fn sys_mq_timedsend(
 /// Returns the number of bytes copied. `msg_prio`, when non-null, receives the
 /// priority the message was sent with.
 pub fn sys_mq_timedreceive(
+    current: &crate::task::UserTaskRef,
     mqdes: i32,
     msg_ptr: *mut u8,
     msg_len: usize,
@@ -284,11 +300,11 @@ pub fn sys_mq_timedreceive(
         return Err(LinuxError::EBADF.into());
     }
     let queue = desc.queue();
-    let deadline = load_deadline(abs_timeout)?;
+    let deadline = load_deadline(current, abs_timeout)?;
     let (data, prio) = queue.receive(msg_len, deadline, desc.is_nonblocking())?;
-    vm_write_slice(msg_ptr, &data)?;
+    vm_write_slice(current, msg_ptr, &data)?;
     if !msg_prio.is_null() {
-        msg_prio.vm_write(prio)?;
+        msg_prio.vm_write(current, prio)?;
     }
     Ok(data.len() as isize)
 }
@@ -302,14 +318,18 @@ pub fn sys_mq_timedreceive(
 /// `sigev_notify = SIGEV_THREAD`, `sigev_signo = <netlink fd>` and
 /// `sigev_value.sival_ptr = <cookie buffer>`; the kernel pushes the cookie over
 /// that socket on message arrival (ipc/mqueue.c:1287-1351, `netlink_sendskb`).
-pub fn sys_mq_notify(mqdes: i32, sevp: *const sigevent) -> AxResult<isize> {
+pub fn sys_mq_notify(
+    current: &crate::task::UserTaskRef,
+    mqdes: i32,
+    sevp: *const sigevent,
+) -> AxResult<isize> {
     let queue = queue_from_fd(mqdes)?;
-    let pid = ax_task::current().as_thread().proc_data.proc.pid();
+    let pid = current.as_thread().proc_data.proc.pid();
 
     let req = if sevp.is_null() {
         NotifyRequest::Unregister
     } else {
-        let sev: sigevent = unsafe { sevp.vm_read_uninit()?.assume_init() };
+        let sev: sigevent = unsafe { sevp.vm_read_uninit(current)?.assume_init() };
         let kind = sev.sigev_notify as u32;
         match kind {
             SIGEV_SIGNAL => {
@@ -343,7 +363,7 @@ pub fn sys_mq_notify(mqdes: i32, sevp: *const sigevent) -> AxResult<isize> {
                     .downcast_arc::<NetlinkSocket>()
                     .map_err(|_| AxError::from(LinuxError::EINVAL))?;
                 let cookie_ptr = unsafe { sev.sigev_value.sival_ptr } as *const u8;
-                let bytes = vm_load(cookie_ptr, NOTIFY_COOKIE_LEN)?;
+                let bytes = vm_load(current, cookie_ptr, NOTIFY_COOKIE_LEN)?;
                 let mut cookie = [0u8; NOTIFY_COOKIE_LEN];
                 cookie.copy_from_slice(&bytes);
                 NotifyRequest::Thread { sock, cookie }
@@ -362,6 +382,7 @@ pub fn sys_mq_notify(mqdes: i32, sevp: *const sigevent) -> AxResult<isize> {
 /// applied (sizes and count are read-only). When `oldattr` is non-null, the
 /// attributes *before* any change are written back.
 pub fn sys_mq_getsetattr(
+    current: &crate::task::UserTaskRef,
     mqdes: i32,
     newattr: *const MqAttr,
     oldattr: *mut MqAttr,
@@ -377,7 +398,7 @@ pub fn sys_mq_getsetattr(
     previous.mq_flags = (desc.flags() & O_NONBLOCK) as i64;
 
     if !newattr.is_null() {
-        let new: MqAttr = newattr.vm_read()?;
+        let new: MqAttr = newattr.vm_read(current)?;
         // Linux `do_mq_getsetattr` rejects any bit other than `O_NONBLOCK` in
         // `mq_flags` with `EINVAL` before applying the change.
         if new.mq_flags & !(O_NONBLOCK as i64) != 0 {
@@ -388,7 +409,7 @@ pub fn sys_mq_getsetattr(
         queue.touch_attr();
     }
     if !oldattr.is_null() {
-        oldattr.vm_write(previous)?;
+        oldattr.vm_write(current, previous)?;
     }
     Ok(0)
 }

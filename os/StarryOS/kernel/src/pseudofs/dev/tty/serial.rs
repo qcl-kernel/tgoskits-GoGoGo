@@ -21,7 +21,7 @@ use super::{
         termios::{Termios2, TermiosParity},
     },
 };
-use crate::{pseudofs::DeviceOps, sync::Mutex};
+use crate::{pseudofs::DeviceOps, sync::PiMutex};
 
 pub type SerialTtyDriver = Tty<SerialReader, SerialWriter>;
 
@@ -58,9 +58,9 @@ struct SerialBackend {
     runtime: SerialRuntimeHandle,
     tx: SerialTxSender,
     rx: SerialRxSubscription,
-    lifecycle_lock: Mutex<()>,
+    lifecycle_lock: PiMutex<()>,
     started: AtomicBool,
-    output_lock: Mutex<()>,
+    output_lock: PiMutex<()>,
 }
 
 struct NoConsole;
@@ -74,7 +74,12 @@ impl DeviceOps for NoConsole {
         Err(AxError::NoSuchDevice)
     }
 
-    fn ioctl(&self, _cmd: u32, _arg: usize) -> AxResult<usize> {
+    fn ioctl(
+        &self,
+        _current: &crate::task::UserTaskRef,
+        _cmd: u32,
+        _arg: usize,
+    ) -> AxResult<usize> {
         Err(AxError::NoSuchDevice)
     }
 
@@ -142,8 +147,10 @@ pub fn bind_console_to(proc: &Process) -> AxResult<()> {
         && let Some(entry) = SERIAL_REGISTRY.entries.get(index)
     {
         entry.backend.ensure_started()?;
-        entry.backend.runtime.claim_console_output()?;
-        return entry.tty.bind_to(proc);
+        entry.tty.bind_to(proc)?;
+        entry.backend.runtime.activate_console_output()?;
+        ax_runtime::hal::console::claim_runtime_output();
+        return Ok(());
     }
     Err(AxError::NoSuchDevice)
 }
@@ -233,9 +240,9 @@ fn new_serial_tty(number: usize, runtime: SerialRuntimeHandle) -> AxResult<Seria
         runtime,
         tx,
         rx,
-        lifecycle_lock: Mutex::new(()),
+        lifecycle_lock: PiMutex::new(()),
         started: AtomicBool::new(false),
-        output_lock: Mutex::new(()),
+        output_lock: PiMutex::new(()),
     });
 
     let terminal = Arc::new(Terminal::default());

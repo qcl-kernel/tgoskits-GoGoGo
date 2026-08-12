@@ -159,6 +159,49 @@ pub fn memory_accounting_rejects_duplicate_and_conflicting_charges() -> bool {
         && acct.rss_anon_pages() == 1
 }
 
+pub fn futex_empty_wake_op_leaves_fixed_buckets_empty() -> bool {
+    super::task::empty_wake_op_leaves_fixed_buckets_empty_for_test()
+}
+
+pub fn futex_keys_follow_mm_and_backing_identity() -> bool {
+    super::task::futex_keys_follow_mm_and_backing_identity_for_test()
+}
+
+pub fn futex_false_wait_condition_short_circuits_before_task_clone() -> bool {
+    super::task::false_wait_condition_short_circuits_for_test()
+}
+
+pub fn futex_queued_waiter_avoids_state_allocation() -> bool {
+    super::task::queued_waiter_state_allocations_for_test() == 0
+}
+
+pub fn futex_park_prepare_error_cleans_waiter() -> bool {
+    super::task::park_prepare_error_cleans_waiter_for_test()
+}
+
+pub fn futex_park_notification_rechecks_condition() -> bool {
+    super::task::park_notification_rechecks_condition_for_test()
+}
+
+pub fn futex_wake_completion_is_scheduler_driven() -> bool {
+    super::syscall::futex_wake_completion_is_scheduler_driven_for_test()
+}
+
+pub fn nofault_user_access_rejects_unmapped_word() -> bool {
+    use ax_runtime::hal::cpu::{
+        UserAccessError, UserAtomicError, UserAtomicU32Op, user_atomic_u32, user_read_u32,
+    };
+
+    let address = super::config::USER_SPACE_BASE as *mut u32;
+    // SAFETY: USER_SPACE_BASE is aligned and inside the user range. The
+    // bootstrap axtest address space deliberately leaves its first page
+    // unmapped, so both instructions must be recovered by the nofault table.
+    unsafe {
+        user_read_u32(address.cast_const()) == Err(UserAccessError::Fault)
+            && user_atomic_u32(address, UserAtomicU32Op::Set, 1) == Err(UserAtomicError::Fault)
+    }
+}
+
 pub fn accounting_edge_cases_and_snapshot_rules_hold() -> bool {
     super::mm::accounting_edge_cases_and_snapshot_rules_hold_for_test()
 }
@@ -197,6 +240,51 @@ pub fn resource_limit_defaults_hold() -> bool {
 
 pub fn posix_timer_clock_validation_rules_hold() -> bool {
     super::task::posix_timer_clock_validation_rules_hold_for_test()
+}
+
+pub fn posix_timer_clock_sampling_rules_hold() -> bool {
+    super::task::posix_timer_clock_sampling_rules_hold_for_test()
+}
+
+pub fn posix_timer_saturating_timespec_rules_hold() -> bool {
+    super::task::posix_timer_saturating_timespec_rules_hold_for_test()
+}
+
+pub fn posix_timer_expiry_batch_rules_hold() -> bool {
+    super::task::posix_timer_expiry_batch_rules_hold_for_test()
+}
+
+pub fn posix_timer_stale_expiry_signal_is_suppressed() -> bool {
+    super::task::posix_timer_stale_expiry_signal_is_suppressed_for_test()
+}
+
+pub fn alarm_generation_rules_hold() -> bool {
+    super::task::alarm_generation_rules_hold_for_test()
+}
+
+pub fn interval_timer_arm_uses_current_snapshot() -> bool {
+    super::task::interval_timer_arm_uses_current_snapshot_for_test()
+}
+
+pub fn cpu_interval_timers_avoid_wall_alarms() -> bool {
+    super::task::cpu_interval_timers_avoid_wall_alarms_for_test()
+}
+
+pub fn scheduler_tick_group_accounting_is_aggregate() -> bool {
+    super::task::scheduler_tick_group_accounting_is_aggregate_for_test()
+}
+
+pub fn scheduler_tick_sampling_avoids_owner_writer() -> bool {
+    super::task::scheduler_tick_sampling_avoids_owner_writer_for_test()
+}
+
+pub fn inactive_ptrace_syscall_gate_is_lock_free() -> bool {
+    super::task::inactive_ptrace_syscall_gate_is_lock_free_for_test()
+}
+
+pub fn timer_active_gate_rules_hold() -> bool {
+    super::task::interval_timer_active_gate_rules_hold_for_test()
+        && super::task::posix_timer_active_gate_rules_hold_for_test()
 }
 
 pub fn itimer_type_signo_and_time_conversion_rules_hold() -> bool {
@@ -333,6 +421,10 @@ pub fn perf_control_callback_runs_preemptible() -> bool {
 
 pub fn stop_machine_runs_action_and_sync_on_each_cpu() -> bool {
     super::stop_machine::stop_machine_runs_action_and_sync_on_each_cpu_for_test()
+}
+
+pub fn tracepoint_callbacks_run_without_raw_guard() -> bool {
+    super::tracepoint::callbacks_run_without_raw_guard_for_test()
 }
 
 pub fn is_wext_ioctl_validation_rules_hold() -> bool {

@@ -19,11 +19,31 @@ use super::{
 };
 use crate::{
     mm::paging_error_to_ax_error,
-    sync::{IrqMutex, Mutex},
+    sync::{IrqMutex, PiMutex},
 };
 
 struct FrameRefCnt {
     count: u8,
+}
+
+pub(crate) struct DeferredFrameRelease {
+    paddr: PhysAddr,
+    page_size: usize,
+    frame_ref: Arc<IrqMutex<FrameRefCnt>>,
+}
+
+impl DeferredFrameRelease {
+    fn new(paddr: PhysAddr, page_size: usize, frame_ref: Arc<IrqMutex<FrameRefCnt>>) -> Self {
+        Self {
+            paddr,
+            page_size,
+            frame_ref,
+        }
+    }
+
+    pub(crate) fn release(self) {
+        self.frame_ref.lock().drop_frame(self.paddr, self.page_size);
+    }
 }
 
 impl FrameRefCnt {
@@ -354,18 +374,23 @@ impl CowBackend {
         acct: Option<&MemoryAccounting>,
         pt: &mut PageTable,
     ) -> AxResult {
+        let shootdown_range = super::super::tlb::checked_range(vaddr, self.size)?;
         let mut frame_table = FRAME_TABLE.lock();
-        let frame = frame_table
+        let frame_ref = frame_table
             .get_frame_ref(paddr)
             .ok_or(AxError::BadAddress)?;
         drop(frame_table);
-        let mut frame = frame.lock();
-        assert!(frame.count > 0, "invalid frame reference count");
-        debug_assert!(frame.count < u8::MAX, "frame reference count near overflow");
-        match frame.count {
+        let frame_count = frame_ref.lock();
+        assert!(frame_count.count > 0, "invalid frame reference count");
+        debug_assert!(
+            frame_count.count < u8::MAX,
+            "frame reference count near overflow"
+        );
+        match frame_count.count {
             1 => {
                 pt.protect_page(vaddr, vma_flags)
                     .map_err(paging_error_to_ax_error)?;
+                super::super::tlb::record_range_for_shootdown(shootdown_range);
                 let defer_write =
                     self.cow_deferred_file_write(vma_flags, pte_flags) && self.write_upgraded.get();
                 if defer_write && let Some(acct) = acct {
@@ -386,12 +411,16 @@ impl CowBackend {
                     self.deinit_frame(new_frame);
                     return Err(paging_error_to_ax_error(err));
                 }
+                super::super::tlb::record_range_for_shootdown(shootdown_range);
                 if self.file.is_some()
                     && let Some(acct) = acct
                 {
                     self.reclassify_or_adopt_cow_write(acct, vaddr);
                 }
-                frame.drop_frame(paddr, self.size);
+                drop(frame_count);
+                super::super::tlb::defer_frame_until_shootdown(DeferredFrameRelease::new(
+                    paddr, self.size, frame_ref,
+                ));
             }
         }
 
@@ -417,8 +446,9 @@ impl CowBackend {
                 .lock()
                 .get_frame_ref(frame)
                 .ok_or(AxError::BadAddress)?;
-            let mut frame_ref = frame_ref.lock();
-            frame_ref.drop_frame(frame, self.size);
+            super::super::tlb::defer_frame_until_shootdown(DeferredFrameRelease::new(
+                frame, self.size, frame_ref,
+            ));
         }
         Ok(())
     }
@@ -568,7 +598,7 @@ impl BackendOps for CowBackend {
         flags: MappingFlags,
         old_pt: &mut PageTable,
         new_pt: &mut PageTable,
-        _new_aspace: &Arc<Mutex<AddrSpace>>,
+        _new_aspace: &Arc<PiMutex<AddrSpace>>,
         acct: CloneMapAccounting<'_>,
     ) -> AxResult<Backend> {
         let cow_flags = flags - MappingFlags::WRITE;
@@ -576,6 +606,7 @@ impl BackendOps for CowBackend {
         for vaddr in pages_in(range, self.size)? {
             match old_pt.query(vaddr) {
                 Ok((paddr, _pte_flags, page_size)) => {
+                    let shootdown_range = super::super::tlb::checked_range(vaddr, self.size)?;
                     assert_eq!(page_size, self.size);
                     let frame = FRAME_TABLE
                         .lock()
@@ -591,6 +622,7 @@ impl BackendOps for CowBackend {
                     old_pt
                         .protect_page(vaddr, cow_flags)
                         .map_err(paging_error_to_ax_error)?;
+                    super::super::tlb::record_range_for_shootdown(shootdown_range);
                     new_pt
                         .map_page(vaddr, paddr, self.size, cow_flags)
                         .map_err(paging_error_to_ax_error)?;

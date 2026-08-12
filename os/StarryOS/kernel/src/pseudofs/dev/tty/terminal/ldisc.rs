@@ -7,7 +7,6 @@ use core::{
 };
 
 use ax_errno::{AxError, AxResult};
-use ax_task::future::block_on;
 use axpoll::{IoEvents, PollSet};
 use linux_raw_sys::general::{
     ECHOCTL, ECHOK, ICRNL, IGNCR, ISIG, ONLCR, OPOST, VEOF, VERASE, VKILL, VMIN, VTIME,
@@ -20,8 +19,8 @@ use starry_signal::SignalInfo;
 
 use super::{Terminal, termios::Termios2};
 use crate::{
-    sync::{IrqMutex, Mutex},
-    task::send_signal_to_process_group,
+    sync::{IrqMutex, PiMutex},
+    task::{future::block_on, send_signal_to_process_group},
 };
 
 const BUF_SIZE: usize = 4096;
@@ -417,7 +416,7 @@ impl<R: TtyRead> SimpleReader<R> {
 }
 
 enum Processor<R, W> {
-    InterruptDriven(Arc<Mutex<InputReader<R, W>>>),
+    InterruptDriven(Arc<PiMutex<InputReader<R, W>>>),
     Passive(Box<SimpleReader<R>>, Arc<PollSet>),
 }
 
@@ -432,7 +431,7 @@ pub struct LineDiscipline<R, W> {
 }
 
 impl<R: TtyRead, W: TtyWrite> LineDiscipline<R, W> {
-    fn drive_input(reader: &Mutex<InputReader<R, W>>, input_ready: &PollSet) -> bool {
+    fn drive_input(reader: &PiMutex<InputReader<R, W>>, input_ready: &PollSet) -> bool {
         let mut reader = reader.lock();
         let mut progressed = false;
         progressed |= reader.echo.drain_available();
@@ -447,13 +446,13 @@ impl<R: TtyRead, W: TtyWrite> LineDiscipline<R, W> {
     }
 
     fn spawn_interrupt_driven_reader(
-        reader: Arc<Mutex<InputReader<R, W>>>,
+        reader: Arc<PiMutex<InputReader<R, W>>>,
         input_source: Arc<PollSet>,
         output_source: Option<Arc<PollSet>>,
         input_ready: Arc<PollSet>,
         worker_source: Arc<PollSet>,
     ) {
-        ax_task::spawn_with_name(
+        crate::task::spawn_kernel_thread(
             move || {
                 block_on(poll_fn(|cx| {
                     Self::drive_input(&reader, input_ready.as_ref());
@@ -498,7 +497,7 @@ impl<R: TtyRead, W: TtyWrite> LineDiscipline<R, W> {
 
         let processor = match config.process_mode {
             ProcessMode::InterruptDriven { input, output } => {
-                let reader = Arc::new(Mutex::new(reader));
+                let reader = Arc::new(PiMutex::new(reader));
                 Self::spawn_interrupt_driven_reader(
                     reader.clone(),
                     input,

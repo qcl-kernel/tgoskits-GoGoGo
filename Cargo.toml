@@ -22,6 +22,7 @@ members = [
     "components/cpu-local",
     "components/ax-cgroup",
     "components/ax-lazyinit",
+    "components/ax-task",
     "components/axbacktrace",
     "components/axcpu",
     "components/axerrno",
@@ -35,6 +36,7 @@ members = [
     "components/irq-framework",
     "components/kasm-aarch64",
     "components/kernutil",
+    "components/ktracepoint",
     "components/linked_list_r4l",
     "components/scope-local",
     "components/starry-process",
@@ -98,7 +100,6 @@ members = [
     "net/ax-net",
     "os/arceos/modules/axruntime",
     "os/arceos/modules/axsync",
-    "os/arceos/modules/axtask",
     "os/arceos/tools/bwbench_client",
     "os/arceos/tools/deptool",
     "os/arceos/tools/raspi4/chainloader",
@@ -145,6 +146,7 @@ ax-errno = { version = "0.6.3", path = "components/axerrno" }
 ax-fs-ng = { version = "0.8.7", path = "fs/ax-fs-ng" }
 ax-hal = { version = "0.5.31", path = "os/arceos/modules/axhal" }
 irq-framework = { version = "0.3.2", path = "components/irq-framework" }
+ktracepoint = { version = "0.6.0", path = "components/ktracepoint" }
 ax-input = { version = "0.6.8", path = "os/arceos/modules/axinput" }
 ax-io = { version = "0.6.4", path = "components/axio" }
 ax-ipi = { version = "0.5.30", path = "os/arceos/modules/axipi" }
@@ -168,7 +170,7 @@ ax-runtime = { version = "0.10.7", path = "os/arceos/modules/axruntime" }
 ax-sched = { version = "0.5.8", path = "components/axsched" }
 ax-std = { version = "0.5.31", path = "os/arceos/ulib/axstd", default-features = false }
 ax-sync = { version = "0.5.31", path = "os/arceos/modules/axsync" }
-ax-task = { version = "0.6.7", path = "os/arceos/modules/axtask" }
+ax-task = { version = "0.7.0", path = "components/ax-task" }
 axtest = { version = "0.5.14", path = "components/axtest/axtest" }
 axtest-macros = { version = "0.5.14", path = "components/axtest/axtest_macros" }
 xcover = { version = "0.1.3", default-features = false, features = ["alloc"] }
@@ -311,6 +313,7 @@ mmio-api = { version = "0.2.4", path = "memory/mmio-api" }
 cvi-vdec-uapi = { version = "0.1.0", path = "drivers/interface/cvi-vdec-uapi" }
 lock_api = { version = "0.4", default-features = false }
 log = "0.4"
+loom = "0.7.2"
 atomic-waker = { version = "1.1", default-features = false }
 ostool = { version = "0.27.1" }
 riscv = { version = "0.16.1", default-features = false }

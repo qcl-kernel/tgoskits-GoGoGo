@@ -12,37 +12,50 @@ use core::{
 };
 
 use ax_errno::{AxError, AxResult};
+use ax_fs_ng::vfs::current_fs_context;
 use ax_runtime::hal::cpu::uspace::UserContext;
-use ax_task::{current, future::block_on, yield_now};
 use axfs_ng_vfs::Location;
 use kernel_elf_parser::AuxType;
 use linux_raw_sys::general::{AT_EMPTY_PATH, AT_SYMLINK_NOFOLLOW};
 use starry_process::Pid;
-use starry_vm::vm_load_until_nul;
 
 use crate::{
     config::USER_HEAP_BASE,
     file::{ResolveAtResult, memfd::Memfd, resolve_at},
-    mm::{copy_from_kernel, load_user_app, new_user_aspace_empty, vm_load_string},
-    sync::Mutex,
-    task::{AsThread, rebind_task_tid, zap_thread},
+    mm::{
+        copy_from_kernel, load_user_app, new_user_aspace_empty, vm_load_string, vm_load_until_nul,
+    },
+    sync::{InterruptibleMutexExt, PiMutex},
+    task::{future::block_on, rebind_task_tid, release_thread_pid, zap_thread},
 };
 
+fn commit_address_space_handoff<OldAddressSpace>(
+    publish_new: impl FnOnce() -> OldAddressSpace,
+    install_new: impl FnOnce(),
+    release_old: impl FnOnce(OldAddressSpace),
+) {
+    let old_address_space = publish_new();
+    install_new();
+    release_old(old_address_space);
+}
+
 pub fn sys_execve(
+    current: &crate::task::UserTaskRef,
     uctx: &mut UserContext,
     path: *const c_char,
     argv: *const *const c_char,
     envp: *const *const c_char,
 ) -> AxResult<isize> {
-    let path = vm_load_string(path)?;
-    let loc = ax_fs_ng::vfs::current_fs_context().lock().resolve(&path)?;
-    do_execve(uctx, loc, path, argv, envp)
+    let path = vm_load_string(current, path)?;
+    let loc = current_fs_context().lock().resolve(&path)?;
+    do_execve(current, uctx, loc, path, argv, envp)
 }
 
 /// execveat(2) — like execve, but the program is identified by `dirfd` plus
 /// `path` (resolved relative to `dirfd`), or by `dirfd` alone when
 /// `AT_EMPTY_PATH` is set and `path` is empty.
 pub fn sys_execveat(
+    current: &crate::task::UserTaskRef,
     uctx: &mut UserContext,
     dirfd: c_int,
     path: *const c_char,
@@ -54,7 +67,7 @@ pub fn sys_execveat(
         return Err(AxError::InvalidInput);
     }
 
-    let path = vm_load_string(path)?;
+    let path = vm_load_string(current, path)?;
 
     // Resolve dirfd + path to the `Location` the loader reads from. A regular
     // file yields its filesystem path as the display name; an anonymous memfd
@@ -77,7 +90,7 @@ pub fn sys_execveat(
         }
     };
 
-    do_execve(uctx, loc, disp_path, argv, envp)
+    do_execve(current, uctx, loc, disp_path, argv, envp)
 }
 
 /// Shared execve core (Linux's `do_execveat_common` equivalent): both
@@ -86,6 +99,7 @@ pub fn sys_execveat(
 /// `path` is the display name (used for argv0-independent `comm`/`exe_path` and
 /// the loader's `.sh`/shebang handling), not re-resolved against the FS.
 fn do_execve(
+    current: &crate::task::UserTaskRef,
     uctx: &mut UserContext,
     loc: Location,
     path: String,
@@ -105,9 +119,9 @@ fn do_execve(
         if ptr.is_null() {
             Ok(Vec::new())
         } else {
-            vm_load_until_nul(ptr)?
+            vm_load_until_nul(current, ptr)?
                 .into_iter()
-                .map(vm_load_string)
+                .map(|string| vm_load_string(current, string))
                 .collect::<Result<Vec<_>, _>>()
         }
     };
@@ -122,7 +136,7 @@ fn do_execve(
 
     debug!("do_execve <= path: {path:?}, args: {args:?}, envs: {envs:?}");
 
-    let curr = current();
+    let curr = current;
     let thr = curr.as_thread();
     let proc_data = &thr.proc_data;
     let my_tid = thr.tid();
@@ -138,29 +152,19 @@ fn do_execve(
     // the holder has crossed into irreversible teardown — which we observe
     // by `zap_thread` setting our `exit_request`.
     //
-    // We can't use `Mutex::lock` directly: it sleeps on
-    // `WaitQueue::wait_until`, which is not awakened by zap's
-    // `task.interrupt()`, and (worse) on release the loser would acquire
-    // the mutex and proceed with execve on top of the holder's already-
-    // committed new image. Busy-yield with an `exit_request` probe gives
-    // us:
-    //   - fall-through to acquisition if the holder fails before commit,
-    //   - cooperative exit (EINTR → user-return → `do_exit(0, false)`) if
-    //     the holder zaps us during its sibling-teardown loop,
-    // without consuming any flag the user-return `check_signals` needs.
+    // PREEMPT_RT turns this mutex into an rtmutex. Its wait loop first tries
+    // to take a published ownerless handoff, then checks the kill condition,
+    // and removes a cancelled waiter together with its PI donation. The
+    // Starry kill condition is the persistent sibling `exit_request`: generic
+    // signal wakeups must not abort this serialization boundary.
     //
     // Note: we deliberately do *not* abort on generic `task.interrupt()`
     // (signal wakeups). Linux's execve is killable but not arbitrarily
     // signal-interruptible while it serializes through `cred_guard_mutex`.
-    let _exec_guard = loop {
-        if let Some(g) = proc_data.exec_lock.try_lock() {
-            break g;
-        }
-        if thr.has_exit_request() {
-            return Err(AxError::Interrupted);
-        }
-        yield_now();
-    };
+    let _exec_guard = proc_data
+        .exec_lock()
+        .lock_interruptible(|| thr.has_exit_request())
+        .map_err(|_| AxError::Interrupted)?;
 
     // Collect metadata from the already-resolved location before touching
     // anything. An anonymous memfd has no filesystem path, so fall back to the
@@ -190,9 +194,7 @@ fn do_execve(
                 // not by the kernel. This is a pragmatic workaround until
                 // musl's execvp or busybox's ENOEXEC handling is available.
                 let shell_path = "/bin/sh";
-                let shell_loc = ax_fs_ng::vfs::current_fs_context()
-                    .lock()
-                    .resolve(shell_path)?;
+                let shell_loc = current_fs_context().lock().resolve(shell_path)?;
                 new_name = shell_loc.name().to_string();
                 new_exe_path = shell_loc.absolute_path()?.to_string();
                 args = iter::once(String::from(shell_path))
@@ -251,7 +253,7 @@ fn do_execve(
             }
             unsafe {
                 proc_data
-                    .thread_exit_event
+                    .thread_exit_event()
                     .register(cx.waker(), axpoll::IoEvents::IN)
             };
             // Re-check after registering: a sibling could have exited
@@ -276,12 +278,17 @@ fn do_execve(
     // Nothing below may fail; errors here would leave the process broken.
     // ----------------------------------------------------------------
 
-    // Replace the aspace Arc so the parent's shared Arc<Mutex<AddrSpace>>
+    // Replace the aspace Arc so the parent's shared Arc<PiMutex<AddrSpace>>
     // (from CLONE_VM) is never touched. The parent's page table register
     // keeps pointing at the original still-live AddrSpace.
-    let newaspace_arc = Arc::new(Mutex::new(new_aspace));
-    proc_data.replace_current_aspace(&curr, newaspace_arc);
-    proc_data.mark_vm_aspace_private_after_exec();
+    let newaspace_arc = Arc::new(PiMutex::new(new_aspace));
+    let scheduler_address_space = crate::task::scheduler_address_space(newaspace_arc.clone())
+        .unwrap_or_else(|error| panic!("new exec address space has no scheduler owner: {error}"));
+    commit_address_space_handoff(
+        || proc_data.stage_memory_replacement(newaspace_arc),
+        || curr.switch_address_space(scheduler_address_space),
+        |old_memory| crate::mm::release_process_slot(&old_memory.aspace()),
+    );
 
     // PR_SET_KEEPCAPS is deliberately not inherited by a new executable
     // image. Do this only after crossing the point of no return so a failed
@@ -294,12 +301,12 @@ fn do_execve(
     }
 
     curr.set_name(&new_name);
-    *proc_data.exe_path.write() = new_exe_path;
-    *proc_data.cmdline.write() = Arc::new(args);
-    *proc_data.envp.write() = Arc::new(envs);
+    proc_data.set_exe_path(new_exe_path);
+    proc_data.set_cmdline(Arc::new(args));
+    proc_data.set_envp(Arc::new(envs));
     let auxv_len = auxv.len();
     let has_ldso = auxv.iter().any(|e| e.get_type() == AuxType::BASE);
-    *proc_data.auxv.write() = auxv;
+    proc_data.set_auxv(auxv);
 
     proc_data.set_heap_top(USER_HEAP_BASE);
 
@@ -318,8 +325,8 @@ fn do_execve(
     //     reset, since its `ss_sp` pointed into the old aspace which is
     //     no longer mapped.
     proc_data.signal.reset_actions_for_exec();
-    thr.signal.reset_stack();
-    proc_data.posix_timers.clear();
+    thr.signal().reset_stack();
+    proc_data.posix_timers().clear();
 
     // Pointers cached in the thread that referenced user memory in the
     // OLD aspace are now dangling. Clear them so subsequent syscalls and
@@ -388,10 +395,12 @@ fn do_execve(
     // viewpoint), did its `do_exit(0, false)`, and is no longer in the
     // task table or thread group, so the destination TID is free.
     if my_tid != tgid {
-        thr.set_tid(tgid);
-        rebind_task_tid(&curr, my_tid, tgid);
+        rebind_task_tid(curr, my_tid, tgid)
+            .unwrap_or_else(|error| panic!("de_thread TID transfer invariant failed: {error}"));
+        proc_data.clear_retired_leader_nice();
         proc_data.signal.rename_child(my_tid, tgid);
         proc_data.proc.rename_thread(my_tid, tgid);
+        release_thread_pid(&proc_data.identity(), my_tid as u64);
     }
 
     // Reset every user-visible register to a fresh-process state, not
@@ -440,4 +449,31 @@ fn do_execve(
     proc_data.notify_vfork_done();
 
     Ok(0)
+}
+
+#[cfg(test)]
+mod tests {
+    use alloc::vec;
+    use core::cell::RefCell;
+
+    use super::commit_address_space_handoff;
+
+    #[test]
+    fn address_space_handoff_installs_before_releasing_old() {
+        let events = RefCell::new(vec![]);
+
+        commit_address_space_handoff(
+            || {
+                events.borrow_mut().push("publish");
+                "old"
+            },
+            || events.borrow_mut().push("install"),
+            |old| {
+                assert_eq!(old, "old");
+                events.borrow_mut().push("release");
+            },
+        );
+
+        assert_eq!(*events.borrow(), ["publish", "install", "release"]);
+    }
 }

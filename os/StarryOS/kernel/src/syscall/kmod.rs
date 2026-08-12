@@ -10,16 +10,14 @@ use alloc::vec;
 
 use ax_errno::{AxError, AxResult};
 use ax_io::Read;
-use ax_task::current;
 
 use crate::{
     file::get_file_like,
     mm::{VmBytes, vm_load_string},
-    task::AsThread,
 };
 
-fn require_module_privilege() -> AxResult<()> {
-    if current().as_thread().cred().has_cap_sys_module() {
+fn require_module_privilege(current: &crate::task::UserTaskRef) -> AxResult<()> {
+    if current.as_thread().cred().has_cap_sys_module() {
         Ok(())
     } else {
         Err(AxError::OperationNotPermitted)
@@ -27,14 +25,19 @@ fn require_module_privilege() -> AxResult<()> {
 }
 
 /// See <https://man7.org/linux/man-pages/man2/init_module.2.html>
-pub fn sys_init_module(module_ptr: *const u8, len: usize, param_ptr: *const u8) -> AxResult<isize> {
-    require_module_privilege()?;
-    let mut module_buf = VmBytes::new(module_ptr as *mut u8, len);
+pub fn sys_init_module(
+    current: &crate::task::UserTaskRef,
+    module_ptr: *const u8,
+    len: usize,
+    param_ptr: *const u8,
+) -> AxResult<isize> {
+    require_module_privilege(current)?;
+    let mut module_buf = VmBytes::new(current, module_ptr as *mut u8, len);
     let mut module_data = vec![0u8; len];
     module_buf.read(&mut module_data)?;
 
     let param_buf = if !param_ptr.is_null() {
-        Some(vm_load_string(param_ptr as _)?)
+        Some(vm_load_string(current, param_ptr as _)?)
     } else {
         None
     };
@@ -49,8 +52,13 @@ pub fn sys_init_module(module_ptr: *const u8, len: usize, param_ptr: *const u8) 
 
 /// `finit_module(2)` — load a module from an open fd rather than a user
 /// buffer.
-pub fn sys_finit_module(module_fd: i32, param_ptr: *const u8, flags: u32) -> AxResult<isize> {
-    require_module_privilege()?;
+pub fn sys_finit_module(
+    current: &crate::task::UserTaskRef,
+    module_fd: i32,
+    param_ptr: *const u8,
+    flags: u32,
+) -> AxResult<isize> {
+    require_module_privilege(current)?;
     if flags != 0 {
         return Err(AxError::InvalidInput);
     }
@@ -70,7 +78,7 @@ pub fn sys_finit_module(module_fd: i32, param_ptr: *const u8, flags: u32) -> AxR
     }
 
     let param_buf = if !param_ptr.is_null() {
-        Some(vm_load_string(param_ptr as _)?)
+        Some(vm_load_string(current, param_ptr as _)?)
     } else {
         None
     };
@@ -85,9 +93,13 @@ pub fn sys_finit_module(module_fd: i32, param_ptr: *const u8, flags: u32) -> AxR
 }
 
 /// See <https://man7.org/linux/man-pages/man2/delete_module.2.html>
-pub fn sys_delete_module(name_ptr: *const u8, _flags: u32) -> AxResult<isize> {
-    require_module_privilege()?;
-    let name = vm_load_string(name_ptr as _)?;
+pub fn sys_delete_module(
+    current: &crate::task::UserTaskRef,
+    name_ptr: *const u8,
+    _flags: u32,
+) -> AxResult<isize> {
+    require_module_privilege(current)?;
+    let name = vm_load_string(current, name_ptr as _)?;
     warn!("[sys_delete_module]: name={}", name);
     crate::kmod::delete_module(&name)?;
     Ok(0)

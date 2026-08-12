@@ -1,11 +1,10 @@
-use alloc::string::String;
+use alloc::{string::String, vec::Vec};
 use core::{
-    alloc::Layout,
     ffi::c_char,
-    hint::{spin_loop, unlikely},
-    mem::{MaybeUninit, transmute},
-    ptr, slice,
-    sync::atomic::{AtomicU32, AtomicU64, Ordering},
+    hint::unlikely,
+    mem::{MaybeUninit, size_of, transmute},
+    ptr,
+    sync::atomic::{AtomicU64, Ordering},
 };
 
 use ax_errno::{AxError, AxResult};
@@ -13,79 +12,134 @@ use ax_io::prelude::*;
 use ax_memory_addr::{MemoryAddr, VirtAddr};
 use ax_runtime::hal::{
     cpu::{
+        UserAccessError, UserAtomicError, UserAtomicU32Op,
         asm::user_copy,
         trap::{PageFaultFlags, page_fault_handler},
+        user_atomic_u32, user_read_u32,
     },
     paging::MappingFlags,
 };
-use ax_task::{current, might_sleep};
-use extern_trait::extern_trait;
-use starry_vm::{VmError, VmIo, VmResult, vm_load_until_nul, vm_read_slice, vm_write_slice};
+use bytemuck::{AnyBitPattern, NoUninit};
+use starry_vm::{VmError, VmIo, VmResult};
 
 use crate::{
     config::{USER_SPACE_BASE, USER_SPACE_SIZE},
     mm::paging_error_to_ax_error,
-    task::AsThread,
+    task::{UserTaskRef, might_sleep, try_current_user_task},
 };
 
 /// Enables scoped access into user memory, allowing page faults to occur inside
 /// kernel.
 #[track_caller]
-pub fn access_user_memory<R>(f: impl FnOnce() -> R) -> R {
+fn access_user_memory<R>(task: &UserTaskRef, f: impl FnOnce() -> R) -> VmResult<R> {
+    if ax_runtime::hal::irq::in_irq_context() {
+        return Err(VmError::AccessDenied);
+    }
     assert!(
         ax_runtime::hal::cpu::asm::irqs_enabled(),
         "faultable user memory access requires IRQs enabled"
     );
     might_sleep();
 
-    let curr = current();
-    let Some(thr) = curr.try_as_thread() else {
-        panic!("access_user_memory called outside of thread context");
-    };
-
-    thr.set_accessing_user_memory(true);
-    let result = f();
-    thr.set_accessing_user_memory(false);
-    result
+    let _scope = task.as_thread().enter_user_memory_access();
+    Ok(f())
 }
 
-fn check_region(start: VirtAddr, layout: Layout, access_flags: MappingFlags) -> AxResult<()> {
-    let align = layout.align();
-    if start.as_usize() & (align - 1) != 0 {
-        return Err(AxError::BadAddress);
+/// Reads from a virtual pointer through an explicit Starry task capability.
+pub trait VmPtr: starry_vm::VmPtr {
+    /// Returns `None` for a null user pointer.
+    fn nullable(self) -> Option<Self> {
+        if starry_vm::VmPtr::as_ptr(self).is_null() {
+            None
+        } else {
+            Some(self)
+        }
     }
 
-    let curr = current();
-    let Some(thr) = curr.try_as_thread() else {
-        warn!(
-            "reject user region check outside thread context: task={}, start={:#x}, len={}",
-            curr.id_name(),
-            start.as_usize(),
-            layout.size()
-        );
-        return Err(AxError::BadAddress);
-    };
-    let aspace_arc = thr.proc_data.aspace();
-    if unsafe { aspace_arc.raw() }.is_owned_by_current() {
-        return Err(AxError::BadAddress);
-    }
-    let mut aspace = aspace_arc.lock();
-
-    if !aspace.can_access_range(start, layout.size(), access_flags) {
-        return Err(AxError::BadAddress);
+    /// Copies one value without assuming that every user byte pattern is valid.
+    fn vm_read_uninit(self, task: &UserTaskRef) -> VmResult<MaybeUninit<Self::Target>> {
+        let mut vm = UserMemoryProvider::new(task);
+        starry_vm::VmPtr::vm_read_uninit(self, &mut vm)
     }
 
-    let page_start = start.align_down_4k();
-    let page_end = (start + layout.size()).align_up_4k();
-    aspace.populate_area(page_start, page_end - page_start, access_flags)?;
+    /// Copies one value whose type accepts every initialized byte pattern.
+    fn vm_read(self, task: &UserTaskRef) -> VmResult<Self::Target>
+    where
+        Self::Target: AnyBitPattern,
+    {
+        let mut vm = UserMemoryProvider::new(task);
+        starry_vm::VmPtr::vm_read(self, &mut vm)
+    }
+}
 
-    Ok(())
+impl<P: starry_vm::VmPtr> VmPtr for P {}
+
+/// Writes to a virtual pointer through an explicit Starry task capability.
+pub trait VmMutPtr: VmPtr + starry_vm::VmMutPtr {
+    /// Copies one fully initialized kernel value into user memory.
+    fn vm_write(self, task: &UserTaskRef, value: Self::Target) -> VmResult
+    where
+        Self::Target: NoUninit,
+    {
+        let mut vm = UserMemoryProvider::new(task);
+        starry_vm::VmMutPtr::vm_write(self, &mut vm, value)
+    }
+}
+
+impl<P: starry_vm::VmMutPtr> VmMutPtr for P {}
+
+/// Copies initialized user bytes into kernel-owned storage.
+pub fn vm_read_slice<T>(task: &UserTaskRef, ptr: *const T, buf: &mut [MaybeUninit<T>]) -> VmResult {
+    starry_vm::vm_read_slice(&mut UserMemoryProvider::new(task), ptr, buf)
+}
+
+/// Copies initialized kernel bytes into user memory.
+pub fn vm_write_slice<T: NoUninit>(task: &UserTaskRef, ptr: *mut T, buf: &[T]) -> VmResult {
+    starry_vm::vm_write_slice(&mut UserMemoryProvider::new(task), ptr, buf)
+}
+
+/// Loads an initialized vector from user memory.
+pub fn vm_load<T: AnyBitPattern>(
+    task: &UserTaskRef,
+    ptr: *const T,
+    len: usize,
+) -> VmResult<Vec<T>> {
+    starry_vm::vm_load(&mut UserMemoryProvider::new(task), ptr, len)
+}
+
+/// Loads values whose validity is guaranteed by the caller.
+///
+/// # Safety
+///
+/// Every copied user byte pattern must be a valid initialized `T`.
+pub unsafe fn vm_load_any<T>(task: &UserTaskRef, ptr: *const T, len: usize) -> VmResult<Vec<T>> {
+    unsafe { starry_vm::vm_load_any(&mut UserMemoryProvider::new(task), ptr, len) }
+}
+
+/// Loads a zero-terminated sequence from user memory.
+pub fn vm_load_until_nul<T: bytemuck::Pod>(task: &UserTaskRef, ptr: *const T) -> VmResult<Vec<T>> {
+    starry_vm::vm_load_until_nul(&mut UserMemoryProvider::new(task), ptr)
 }
 
 /// A pointer to user space memory.
 #[repr(transparent)]
-#[derive(PartialEq, Clone, Copy)]
 pub struct UserPtr<T>(*mut T);
+
+impl<T> Copy for UserPtr<T> {}
+
+impl<T> Clone for UserPtr<T> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+
+impl<T> PartialEq for UserPtr<T> {
+    fn eq(&self, other: &Self) -> bool {
+        self.0 == other.0
+    }
+}
+
+impl<T> Eq for UserPtr<T> {}
 
 impl<T> From<usize> for UserPtr<T> {
     fn from(value: usize) -> Self {
@@ -106,8 +160,6 @@ impl<T> Default for UserPtr<T> {
 }
 
 impl<T> UserPtr<T> {
-    const ACCESS_FLAGS: MappingFlags = MappingFlags::READ.union(MappingFlags::WRITE);
-
     pub fn address(&self) -> VirtAddr {
         VirtAddr::from_ptr_of(self.0)
     }
@@ -124,58 +176,176 @@ impl<T> UserPtr<T> {
         self.0.is_null()
     }
 
-    pub fn get_as_mut(self) -> AxResult<&'static mut T> {
-        check_region(self.address(), Layout::new::<T>(), Self::ACCESS_FLAGS)?;
-        Ok(unsafe { &mut *self.0 })
+    /// Copies one initialized value from user memory.
+    pub fn read(self, task: &UserTaskRef) -> AxResult<T>
+    where
+        T: AnyBitPattern,
+    {
+        self.0.vm_read(task).map_err(Into::into)
     }
 
-    pub fn get_as_mut_slice(self, len: usize) -> AxResult<&'static mut [T]> {
-        if len == 0 {
-            return Ok(&mut []);
-        }
-        check_region(
-            self.address(),
-            Layout::array::<T>(len).unwrap(),
-            Self::ACCESS_FLAGS,
-        )?;
-        Ok(unsafe { slice::from_raw_parts_mut(self.0, len) })
+    /// Copies one ABI value whose valid-bit-pattern contract is caller-provided.
+    ///
+    /// # Safety
+    ///
+    /// Every possible byte pattern supplied by userspace must be a valid `T`.
+    pub unsafe fn read_abi(self, task: &UserTaskRef) -> AxResult<T> {
+        let value = self.0.vm_read_uninit(task)?;
+        // SAFETY: guaranteed by the caller after the copy initialized every byte.
+        Ok(unsafe { value.assume_init() })
+    }
+
+    /// Copies ABI values whose valid-bit-pattern contract is caller-provided.
+    ///
+    /// # Safety
+    ///
+    /// Every possible byte pattern supplied by userspace must be a valid `T`.
+    pub unsafe fn read_abi_slice(self, task: &UserTaskRef, len: usize) -> AxResult<Vec<T>> {
+        // SAFETY: the caller supplies the element validity contract.
+        unsafe { vm_load_any(task, self.0.cast_const(), len) }.map_err(Into::into)
+    }
+
+    /// Copies one kernel-owned value to user memory.
+    pub fn write(self, task: &UserTaskRef, value: T) -> AxResult<()>
+    where
+        T: NoUninit,
+    {
+        self.0.vm_write(task, value).map_err(Into::into)
+    }
+
+    /// Copies one initialized field without exposing or copying the containing
+    /// ABI object's padding bytes.
+    pub fn write_field<U>(self, task: &UserTaskRef, offset: usize, value: U) -> AxResult<()>
+    where
+        U: NoUninit,
+    {
+        let field_end = offset
+            .checked_add(size_of::<U>())
+            .filter(|end| *end <= size_of::<T>())
+            .ok_or(AxError::BadAddress)?;
+        debug_assert!(field_end <= size_of::<T>());
+        let field_address = self
+            .0
+            .addr()
+            .checked_add(offset)
+            .ok_or(AxError::BadAddress)?;
+        UserPtr::<U>::from(field_address).write(task, value)
+    }
+
+    /// Copies an initialized array field without requiring the containing
+    /// array length to implement [`NoUninit`].
+    pub fn write_field_slice<U>(
+        self,
+        task: &UserTaskRef,
+        offset: usize,
+        values: &[U],
+    ) -> AxResult<()>
+    where
+        U: NoUninit,
+    {
+        let byte_len = size_of::<U>()
+            .checked_mul(values.len())
+            .ok_or(AxError::BadAddress)?;
+        offset
+            .checked_add(byte_len)
+            .filter(|end| *end <= size_of::<T>())
+            .ok_or(AxError::BadAddress)?;
+        let field_address = self
+            .0
+            .addr()
+            .checked_add(offset)
+            .ok_or(AxError::BadAddress)?;
+        UserPtr::<U>::from(field_address).write_slice(task, values)
+    }
+
+    /// Copies kernel-owned values to user memory.
+    pub fn write_slice(self, task: &UserTaskRef, values: &[T]) -> AxResult<()>
+    where
+        T: NoUninit,
+    {
+        vm_write_slice(task, self.0, values).map_err(Into::into)
     }
 }
 
-pub fn atomic_update_user_u32(
+pub fn atomic_update_user_u32_nofault(
     ptr: *mut u32,
-    mut update: impl FnMut(u32) -> AxResult<u32>,
-) -> AxResult<u32> {
-    check_region(
-        VirtAddr::from_ptr_of(ptr),
-        Layout::new::<u32>(),
-        MappingFlags::READ.union(MappingFlags::WRITE),
-    )?;
+    operation: UserAtomicU32Op,
+    argument: u32,
+) -> Result<u32, UserAtomicError> {
+    if ax_runtime::hal::irq::in_irq_context()
+        || !ptr.addr().is_multiple_of(size_of::<u32>())
+        || check_access(ptr.addr(), size_of::<u32>()).is_err()
+    {
+        return Err(UserAtomicError::Fault);
+    }
 
-    let ptr = ptr.cast::<AtomicU32>();
-    access_user_memory(|| {
-        loop {
-            // SAFETY: check_region() validated that the user address is a
-            // writable, properly aligned u32 in the current address space.
-            let old = unsafe { &*ptr }.load(Ordering::SeqCst);
-            let new = update(old)?;
-            match unsafe { &*ptr }.compare_exchange_weak(
-                old,
-                new,
-                Ordering::SeqCst,
-                Ordering::SeqCst,
-            ) {
-                Ok(_) => return Ok(old),
-                Err(_) => spin_loop(),
-            }
-        }
-    })
+    // SAFETY: the range and alignment checks above establish the architecture
+    // contract. The dedicated nofault exception table converts a concurrent
+    // unmap or protection change into `UserAtomicError::Fault`.
+    unsafe { user_atomic_u32(ptr, operation, argument) }
+}
+
+pub fn read_user_u32_nofault(ptr: *const u32) -> Result<u32, UserAccessError> {
+    if ax_runtime::hal::irq::in_irq_context()
+        || !ptr.addr().is_multiple_of(size_of::<u32>())
+        || check_access(ptr.addr(), size_of::<u32>()).is_err()
+    {
+        return Err(UserAccessError::Fault);
+    }
+
+    // SAFETY: the range and alignment checks above establish the architecture
+    // contract. Concurrent mapping changes are recovered by the dedicated
+    // nofault exception table.
+    unsafe { user_read_u32(ptr) }
+}
+
+/// Resolves and validates a readable futex word outside futex bucket locks.
+pub fn fault_in_user_u32_read(task: &UserTaskRef, ptr: *const u32) -> AxResult<()> {
+    fault_in_user_u32(task, ptr.addr(), MappingFlags::READ)
+}
+
+/// Resolves and validates a writable futex word outside futex bucket locks.
+pub fn fault_in_user_u32_write(task: &UserTaskRef, ptr: *mut u32) -> AxResult<()> {
+    fault_in_user_u32(
+        task,
+        ptr.addr(),
+        MappingFlags::READ.union(MappingFlags::WRITE),
+    )
+}
+
+fn fault_in_user_u32(task: &UserTaskRef, address: usize, access: MappingFlags) -> AxResult<()> {
+    if !address.is_multiple_of(size_of::<u32>()) {
+        return Err(AxError::BadAddress);
+    }
+    prepare_user_memory(
+        task,
+        "fault in futex word",
+        address,
+        size_of::<u32>(),
+        access,
+    )
+    .map_err(Into::into)
 }
 
 /// An immutable pointer to user space memory.
 #[repr(transparent)]
-#[derive(PartialEq, Clone, Copy)]
 pub struct UserConstPtr<T>(*const T);
+
+impl<T> Copy for UserConstPtr<T> {}
+
+impl<T> Clone for UserConstPtr<T> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+
+impl<T> PartialEq for UserConstPtr<T> {
+    fn eq(&self, other: &Self) -> bool {
+        self.0 == other.0
+    }
+}
+
+impl<T> Eq for UserConstPtr<T> {}
 
 impl<T> From<usize> for UserConstPtr<T> {
     fn from(value: usize) -> Self {
@@ -196,10 +366,12 @@ impl<T> Default for UserConstPtr<T> {
 }
 
 impl<T> UserConstPtr<T> {
-    const ACCESS_FLAGS: MappingFlags = MappingFlags::READ;
-
     pub fn address(&self) -> VirtAddr {
         VirtAddr::from_ptr_of(self.0)
+    }
+
+    pub fn as_ptr(&self) -> *const T {
+        self.0
     }
 
     pub fn cast<U>(self) -> UserConstPtr<U> {
@@ -210,35 +382,62 @@ impl<T> UserConstPtr<T> {
         self.0.is_null()
     }
 
-    pub fn get_as_ref(self) -> AxResult<&'static T> {
-        check_region(self.address(), Layout::new::<T>(), Self::ACCESS_FLAGS)?;
-        Ok(unsafe { &*self.0 })
+    /// Copies one initialized value from user memory.
+    pub fn read(self, task: &UserTaskRef) -> AxResult<T>
+    where
+        T: AnyBitPattern,
+    {
+        self.0.vm_read(task).map_err(Into::into)
     }
 
-    pub fn get_as_slice(self, len: usize) -> AxResult<&'static [T]> {
+    /// Copies one ABI value whose valid-bit-pattern contract is caller-provided.
+    ///
+    /// # Safety
+    ///
+    /// Every possible byte pattern supplied by userspace must be a valid `T`.
+    pub unsafe fn read_abi(self, task: &UserTaskRef) -> AxResult<T> {
+        let value = self.0.vm_read_uninit(task)?;
+        // SAFETY: guaranteed by the caller after the copy initialized every byte.
+        Ok(unsafe { value.assume_init() })
+    }
+
+    /// Copies ABI values whose valid-bit-pattern contract is caller-provided.
+    ///
+    /// # Safety
+    ///
+    /// Every possible byte pattern supplied by userspace must be a valid `T`.
+    #[cfg(feature = "jpeg")]
+    pub unsafe fn read_abi_slice(self, task: &UserTaskRef, len: usize) -> AxResult<Vec<T>> {
+        // SAFETY: the caller supplies the element validity contract.
+        unsafe { vm_load_any(task, self.0, len) }.map_err(Into::into)
+    }
+
+    /// Copies initialized values from user memory into kernel-owned storage.
+    pub fn read_slice(self, task: &UserTaskRef, len: usize) -> AxResult<Vec<T>>
+    where
+        T: AnyBitPattern,
+    {
+        vm_load(task, self.0, len).map_err(Into::into)
+    }
+
+    /// Validates and prefaults a readable user range without exposing it as a reference.
+    pub fn validate_slice(self, task: &UserTaskRef, len: usize) -> AxResult<()> {
         if len == 0 {
-            return Ok(&[]);
+            return Ok(());
         }
-        check_region(
-            self.address(),
-            Layout::array::<T>(len).unwrap(),
-            Self::ACCESS_FLAGS,
-        )?;
-        Ok(unsafe { slice::from_raw_parts(self.0, len) })
+        let byte_len = size_of::<T>()
+            .checked_mul(len)
+            .ok_or(AxError::InvalidInput)?;
+        prepare_user_memory(
+            task,
+            "validate read",
+            self.0.addr(),
+            byte_len,
+            MappingFlags::READ,
+        )
+        .map_err(Into::into)
     }
 }
-
-macro_rules! nullable {
-    ($ptr:ident.$func:ident($($arg:expr),*)) => {
-        if $ptr.is_null() {
-            Ok(None)
-        } else {
-            Some($ptr.$func($($arg),*)).transpose()
-        }
-    };
-}
-
-pub(crate) use nullable;
 
 /// Cumulative count of user page faults dispatched to the demand-paging handler.
 ///
@@ -248,73 +447,88 @@ pub(crate) use nullable;
 /// `node_vmstat_pgfault`.
 pub static PAGE_FAULT_COUNT: AtomicU64 = AtomicU64::new(0);
 
+/// Fixed, allocation-free diagnostic for malformed or reentrant task identity lookups.
+static PAGE_FAULT_IDENTITY_FAILURES: AtomicU64 = AtomicU64::new(0);
+
+#[cfg(feature = "axtest")]
+const _: fn(&UserTaskRef, &str, usize, usize, MappingFlags) -> VmResult = prepare_user_memory;
+
 #[page_fault_handler]
 fn handle_page_fault(vaddr: VirtAddr, access_flags: PageFaultFlags) -> bool {
     debug!("Page fault at {vaddr:#x}, access_flags: {access_flags:#x?}");
-
     #[cfg(feature = "stack-guard-page")]
-    if ax_task::diagnose_current_stack_guard_page_fault(vaddr) {
+    if ax_runtime::task::diagnose_current_stack_guard_page_fault(vaddr) {
         return false;
     }
 
-    let curr = current();
-    let Some(thr) = curr.try_as_thread() else {
+    // This callback handles only faults caused by a user mapping or by the
+    // kernel explicitly touching one. Reject unrelated kernel addresses before
+    // consulting Starry task identity or entering any sleepable MM path.
+    let user_range = USER_SPACE_BASE..USER_SPACE_BASE + USER_SPACE_SIZE;
+    if !user_range.contains(&vaddr.as_usize()) {
         return false;
-    };
+    }
 
-    if unlikely(!thr.is_accessing_user_memory()) {
-        // Still try to handle kernel-mode faults on user-space addresses.
-        // Several syscall sites (e.g. event.rs, net/io.rs, fs/lock.rs) obtain
-        // a direct `&mut` reference into user memory via get_as_mut /
-        // get_as_mut_slice and write through it outside of
-        // access_user_memory().  If a concurrent fork has re-marked the page
-        // read-only between check_region() and the write, the kernel write
-        // hits a COW #PF with no fixup-table entry and panics.  Handling the
-        // fault here lets the standard COW path copy the page just as it
-        // would for a user-mode write.
-        let user_range = USER_SPACE_BASE..USER_SPACE_BASE + USER_SPACE_SIZE;
-        if !user_range.contains(&vaddr.as_usize()) {
+    // The interrupted task may own a user-copy scope, but an IRQ handler is
+    // not part of that copy. Linux keys uaccess recovery to the faulting
+    // instruction; reject IRQ-context faults here so the task-scoped fallback
+    // cannot turn an unrelated hard-IRQ bug into a sleeping MM operation.
+    if ax_runtime::hal::irq::in_irq_context() {
+        return false;
+    }
+
+    let curr = match resolve_page_fault_user_task(try_current_user_task()) {
+        Ok(Some(task)) => task,
+        Ok(None) => return false,
+        Err(_error) => {
+            PAGE_FAULT_IDENTITY_FAILURES.fetch_add(1, Ordering::Relaxed);
             return false;
         }
-        // Avoid recursion / deadlock: if this thread already holds the
-        // aspace lock (e.g. fault inside aspace.lock().handle_page_fault())
-        // we have to bail out instead of trying to lock it again.
-        let aspace_arc = thr.proc_data.aspace();
-        if unsafe { aspace_arc.raw() }.is_owned_by_current() {
-            return false;
-        }
+    };
+    let thr = curr.as_thread();
+
+    if !thr.has_active_user_memory_access() {
+        return false;
     }
 
     might_sleep();
     let aspace_arc = thr.proc_data.aspace();
     if unsafe { aspace_arc.raw() }.is_owned_by_current() {
-        warn!(
-            "user page fault while current thread already owns its address-space lock: \
-             vaddr={vaddr:#x}, access_flags={access_flags:#x?}"
-        );
         return false;
     }
     PAGE_FAULT_COUNT.fetch_add(1, Ordering::Relaxed);
     aspace_arc.lock().handle_page_fault(vaddr, access_flags)
 }
 
+fn resolve_page_fault_user_task(
+    lookup: Result<Option<UserTaskRef>, ax_std::os::arceos::task::TaskError>,
+) -> Result<Option<UserTaskRef>, ax_std::os::arceos::task::TaskError> {
+    match lookup {
+        Ok(task) => Ok(task),
+        Err(
+            ax_std::os::arceos::task::TaskError::NotInitialized
+            | ax_std::os::arceos::task::TaskError::NoRunnableThread
+            | ax_std::os::arceos::task::TaskError::CpuOwnerBorrowed,
+        ) => Ok(None),
+        Err(error) => Err(error),
+    }
+}
+
 pub const PATH_MAX: usize = 4096;
 
-pub fn vm_load_string(ptr: *const c_char) -> AxResult<String> {
+pub fn vm_load_string(task: &UserTaskRef, ptr: *const c_char) -> AxResult<String> {
     #[allow(clippy::unnecessary_cast)]
-    let bytes = vm_load_until_nul(ptr as *const u8)?;
+    let bytes = vm_load_until_nul(task, ptr as *const u8)?;
     String::from_utf8(bytes).map_err(|_| AxError::IllegalBytes)
 }
 
-pub fn vm_load_path_string(ptr: *const c_char) -> AxResult<String> {
-    let path = vm_load_string(ptr)?;
+pub fn vm_load_path_string(task: &UserTaskRef, ptr: *const c_char) -> AxResult<String> {
+    let path = vm_load_string(task, ptr)?;
     if path.len() >= PATH_MAX {
         return Err(AxError::NameTooLong);
     }
     Ok(path)
 }
-
-struct Vm;
 
 /// Briefly checks if the given memory region is valid user memory.
 pub fn check_access(start: usize, len: usize) -> VmResult {
@@ -327,33 +541,25 @@ pub fn check_access(start: usize, len: usize) -> VmResult {
     }
 }
 
-fn ensure_thread_context(op: &str, start: usize, len: usize) -> VmResult {
-    let curr = current();
-    if curr.try_as_thread().is_some() {
-        Ok(())
-    } else {
-        warn!(
-            "reject user memory {op} outside thread context: task={}, start={start:#x}, len={len}",
-            curr.id_name()
-        );
-        Err(VmError::AccessDenied)
+fn prepare_user_memory(
+    task: &UserTaskRef,
+    op: &str,
+    start: usize,
+    len: usize,
+    access_flags: MappingFlags,
+) -> VmResult {
+    if ax_runtime::hal::irq::in_irq_context() {
+        return Err(VmError::AccessDenied);
     }
-}
-
-fn prepare_user_memory(op: &str, start: usize, len: usize, access_flags: MappingFlags) -> VmResult {
     check_access(start, len)?;
-    if len == 0 {
-        return Ok(());
-    }
-    ensure_thread_context(op, start, len)?;
+    debug_assert_ne!(len, 0, "empty user-memory ranges require no preparation");
 
     let start = VirtAddr::from(start);
     let end = start + len;
     let page_start = start.align_down_4k();
     let page_end = end.align_up_4k();
 
-    let curr = current();
-    let thr = curr.try_as_thread().ok_or(VmError::AccessDenied)?;
+    let thr = task.as_thread();
     let aspace_arc = thr.proc_data.aspace();
     if unsafe { aspace_arc.raw() }.is_owned_by_current() {
         return Err(VmError::AccessDenied);
@@ -366,23 +572,33 @@ fn prepare_user_memory(op: &str, start: usize, len: usize, access_flags: Mapping
 
     aspace
         .populate_area(page_start, page_end - page_start, access_flags)
-        .map_err(|_| VmError::AccessDenied)
+        .map_err(|_| VmError::AccessDenied)?;
+    drop(aspace);
+    let _ = op;
+    Ok(())
 }
 
-#[extern_trait]
-unsafe impl VmIo for Vm {
-    fn new() -> Self {
-        Self
-    }
+/// Task-bound provider passed to capability-oriented VM helper crates.
+pub(crate) struct UserMemoryProvider<'task> {
+    task: &'task UserTaskRef,
+}
 
+impl<'task> UserMemoryProvider<'task> {
+    /// Binds user-memory access to a live Starry task reference.
+    pub(crate) const fn new(task: &'task UserTaskRef) -> Self {
+        Self { task }
+    }
+}
+
+unsafe impl VmIo for UserMemoryProvider<'_> {
     fn read(&mut self, start: usize, buf: &mut [MaybeUninit<u8>]) -> VmResult {
         if buf.is_empty() {
             return Ok(());
         }
-        prepare_user_memory("read", start, buf.len(), MappingFlags::READ)?;
-        let failed_at = access_user_memory(|| unsafe {
+        prepare_user_memory(self.task, "read", start, buf.len(), MappingFlags::READ)?;
+        let failed_at = access_user_memory(self.task, || unsafe {
             user_copy(buf.as_mut_ptr() as *mut _, start as _, buf.len())
-        });
+        })?;
         if unlikely(failed_at != 0) {
             Err(VmError::AccessDenied)
         } else {
@@ -394,10 +610,10 @@ unsafe impl VmIo for Vm {
         if buf.is_empty() {
             return Ok(());
         }
-        prepare_user_memory("write", start, buf.len(), MappingFlags::WRITE)?;
-        let failed_at = access_user_memory(|| unsafe {
+        prepare_user_memory(self.task, "write", start, buf.len(), MappingFlags::WRITE)?;
+        let failed_at = access_user_memory(self.task, || unsafe {
             user_copy(start as _, buf.as_ptr() as *const _, buf.len())
-        });
+        })?;
         if unlikely(failed_at != 0) {
             Err(VmError::AccessDenied)
         } else {
@@ -410,25 +626,26 @@ unsafe impl VmIo for Vm {
 ///
 /// It implements the `ax_io::Read` trait, allowing it to be used with other I/O
 /// operations.
-pub struct VmBytes {
+pub struct VmBytes<'task> {
+    task: &'task UserTaskRef,
     /// The pointer to the start of the buffer in the VM's memory.
     pub ptr: *const u8,
     /// The length of the buffer.
     pub len: usize,
 }
 
-impl VmBytes {
+impl<'task> VmBytes<'task> {
     /// Creates a new `VmBytes` from a raw pointer and a length.
-    pub fn new(ptr: *const u8, len: usize) -> Self {
-        Self { ptr, len }
+    pub fn new(task: &'task UserTaskRef, ptr: *const u8, len: usize) -> Self {
+        Self { task, ptr, len }
     }
 }
 
-impl Read for VmBytes {
+impl Read for VmBytes<'_> {
     /// Reads bytes from the VM's memory into the provided buffer.
     fn read(&mut self, buf: &mut [u8]) -> ax_io::Result<usize> {
         let len = self.len.min(buf.len());
-        vm_read_slice(self.ptr, unsafe {
+        vm_read_slice(self.task, self.ptr, unsafe {
             transmute::<&mut [u8], &mut [MaybeUninit<u8>]>(&mut buf[..len])
         })?;
         self.ptr = self.ptr.wrapping_add(len);
@@ -437,7 +654,7 @@ impl Read for VmBytes {
     }
 }
 
-impl IoBuf for VmBytes {
+impl IoBuf for VmBytes<'_> {
     fn remaining(&self) -> usize {
         self.len
     }
@@ -447,25 +664,26 @@ impl IoBuf for VmBytes {
 ///
 /// It implements the `ax_io::Write` trait, allowing it to be used with other I/O
 /// operations.
-pub struct VmBytesMut {
+pub struct VmBytesMut<'task> {
+    task: &'task UserTaskRef,
     /// The pointer to the start of the buffer in the VM's memory.
     pub ptr: *mut u8,
     /// The length of the buffer.
     pub len: usize,
 }
 
-impl VmBytesMut {
+impl<'task> VmBytesMut<'task> {
     /// Creates a new `VmBytesMut` from a raw pointer and a length.
-    pub fn new(ptr: *mut u8, len: usize) -> Self {
-        Self { ptr, len }
+    pub fn new(task: &'task UserTaskRef, ptr: *mut u8, len: usize) -> Self {
+        Self { task, ptr, len }
     }
 }
 
-impl Write for VmBytesMut {
+impl Write for VmBytesMut<'_> {
     /// Writes bytes from the provided buffer into the VM's memory.
     fn write(&mut self, buf: &[u8]) -> ax_io::Result<usize> {
         let len = self.len.min(buf.len());
-        vm_write_slice(self.ptr, &buf[..len])?;
+        vm_write_slice(self.task, self.ptr, &buf[..len])?;
         self.ptr = self.ptr.wrapping_add(len);
         self.len -= len;
         Ok(len)
@@ -477,7 +695,7 @@ impl Write for VmBytesMut {
     }
 }
 
-impl IoBufMut for VmBytesMut {
+impl IoBufMut for VmBytesMut<'_> {
     fn remaining_mut(&self) -> usize {
         self.len
     }
@@ -496,16 +714,11 @@ where
     let aligned_addr = addr.align_down_4k();
     let aligned_length = (addr + len).align_up_4k() - aligned_addr;
 
-    // The kernel address-space lock (`SpinNoIrq`) MUST be acquired *inside* the
-    // `stop_machine` critical section, not before it. `stop_machine` itself
-    // takes a `SpinNoIrq` (`STOP_MACHINE_LOCK`); acquiring `kernel_aspace`
-    // first and then dropping it inside the closure produces a non-LIFO nesting
-    // of two IRQ-saving guards, which crosses their saved IRQ states and leaks
-    // an IRQ-disabled state out of this function. That stranded state later
-    // trips the atomic-context guard (e.g. `clear_proc_shm` on process exit
-    // right after a static-key `disable_key`). Nesting it LIFO here keeps the
-    // IRQ flag balanced — this mirrors the kprobe `set_writeable_for_address`
-    // path.
+    // Acquire the kernel address-space IRQ-safe lock only after the task-context
+    // stopper coordinator has parked every remote CPU. The coordinator lock is
+    // sleepable and is acquired before IRQs are disabled; the page-table guard
+    // is therefore the only IRQ-saving lock nested inside the stopped region.
+    // Keeping that order avoids restoring saved IRQ state out of order.
     crate::stop_machine::stop_machine(
         move || -> AxResult<()> {
             let mut guard = ax_mm::kernel_aspace().lock();
@@ -561,13 +774,19 @@ pub fn flush_tlb_range(start: VirtAddr, size: usize) {
     ax_runtime::hal::cache::flush_tlb_range(start, size);
 }
 
-pub fn flush_tlb_range_sync(start: VirtAddr, size: usize) -> AxResult {
-    ax_runtime::hal::cache::flush_tlb_range_all_cpus(start, size).map_err(|err| match err {
-        ax_runtime::hal::cache::TlbShootdownError::CpuOffline
-        | ax_runtime::hal::cache::TlbShootdownError::Unsupported => AxError::Unsupported,
-        ax_runtime::hal::cache::TlbShootdownError::Timeout => AxError::TimedOut,
-        ax_runtime::hal::cache::TlbShootdownError::Platform => AxError::Io,
-    })
+pub(crate) fn flush_tlb_range_on_cpus_sync(
+    cpu_mask: usize,
+    start: VirtAddr,
+    size: usize,
+) -> AxResult {
+    ax_runtime::hal::cache::flush_tlb_range_on_cpus(cpu_mask, start, size).map_err(
+        |err| match err {
+            ax_runtime::hal::cache::TlbShootdownError::CpuOffline
+            | ax_runtime::hal::cache::TlbShootdownError::Unsupported => AxError::Unsupported,
+            ax_runtime::hal::cache::TlbShootdownError::Timeout => AxError::TimedOut,
+            ax_runtime::hal::cache::TlbShootdownError::Platform => AxError::Io,
+        },
+    )
 }
 
 fn sync_modified_kernel_text(start: VirtAddr, size: usize) {
@@ -615,4 +834,32 @@ pub(crate) fn user_pointer_metadata_rules_hold_for_test() -> bool {
         && check_access(user_base, USER_SPACE_SIZE).is_ok()
         && check_access(user_base, USER_SPACE_SIZE + 1).is_err()
         && check_access(user_end - 1, usize::MAX).is_err()
+}
+
+#[cfg(test)]
+mod tests {
+    use ax_std::os::arceos::task::TaskError;
+
+    use super::*;
+
+    #[test]
+    fn bootstrap_page_fault_has_no_starry_memory_owner() {
+        assert!(matches!(resolve_page_fault_user_task(Ok(None)), Ok(None)));
+        assert!(matches!(
+            resolve_page_fault_user_task(Err(TaskError::NotInitialized)),
+            Ok(None)
+        ));
+        assert!(matches!(
+            resolve_page_fault_user_task(Err(TaskError::CpuOwnerBorrowed)),
+            Ok(None)
+        ));
+    }
+
+    #[test]
+    fn malformed_user_extension_is_reported_to_the_fatal_trap_path() {
+        assert!(matches!(
+            resolve_page_fault_user_task(Err(TaskError::InvalidRuntimeHandle)),
+            Err(TaskError::InvalidRuntimeHandle)
+        ));
+    }
 }

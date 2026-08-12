@@ -9,7 +9,10 @@ pub use ax_plat::percpu::{
 };
 pub use cpu_local::{
     CpuAreaRef, CpuLocalError, CpuPin, CurrentContext, CurrentThreadHeader, ExclusiveCpu,
-    PreparedThreadSwitch, PreviousThreadBinding, ThreadSwitchError, with_cpu_pin,
+    PreemptExit, PreparedThreadSwitch, PreviousThreadBinding, RuntimeThreadCookie,
+    ThreadSwitchError, scheduler_clear_preempt_need_resched, scheduler_consume_final_preempt_guard,
+    scheduler_enter_preempt_guard, scheduler_preempt_guard_depth,
+    scheduler_prepare_preempt_guard_exit, scheduler_set_preempt_need_resched, with_cpu_pin,
     with_exclusive_cpu,
 };
 
@@ -35,9 +38,32 @@ pub fn current_thread(pin: &CpuPin<'_>) -> Result<NonNull<CurrentThreadHeader>, 
 ///
 /// The caller must keep the scheduler-owned current task alive and must not
 /// dereference the result after a context switch.
-pub unsafe fn current_thread_raw() -> *const CurrentThreadHeader {
+pub unsafe fn scheduler_current_thread_unpinned()
+-> Result<NonNull<CurrentThreadHeader>, CpuLocalError> {
     unsafe { cpu_local::scheduler_current_thread() }
-        .map_or(core::ptr::null(), |pointer| pointer.as_ptr().cast_const())
+}
+
+/// Runs `f` with the task-owned header selected by the architecture `current`
+/// source without pinning the task to a CPU.
+#[inline(always)]
+pub fn with_scheduler_current_thread<R>(
+    f: impl for<'current> FnOnce(&'current CurrentThreadHeader) -> R,
+) -> Result<R, CpuLocalError> {
+    cpu_local::with_scheduler_current_thread(f)
+}
+
+/// Reads the logical CPU ID before constructing a scheduler guard.
+///
+/// # Safety
+///
+/// The caller must already prevent migration or own an offline CPU and must
+/// not use this observation after a context switch.
+#[doc(hidden)]
+#[inline(always)]
+pub unsafe fn scheduler_current_cpu_id() -> usize {
+    unsafe { cpu_local::scheduler_current_cpu_index() }
+        .expect("scheduler current thread must retain a CPU binding")
+        .as_usize()
 }
 
 /// Prepares a complete current-thread switch transaction.

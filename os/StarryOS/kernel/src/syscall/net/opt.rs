@@ -5,16 +5,16 @@ use ax_net::{
     InterfaceId, SocketOps,
     options::{Configurable, GetSocketOption, SetSocketOption, TcpInfo, TcpInfoOptions, TcpState},
 };
+use bytemuck::AnyBitPattern;
 use linux_raw_sys::net::{
     AF_INET6, IP_TOS, IPPROTO_IPV6, IPV6_RECVTCLASS, IPV6_TCLASS, IPV6_V6ONLY, TCP_INFO,
     TCPI_OPT_ECN, TCPI_OPT_ECN_SEEN, TCPI_OPT_SACK, TCPI_OPT_SYN_DATA, TCPI_OPT_TIMESTAMPS,
     TCPI_OPT_WSCALE, socklen_t, tcp_info,
 };
-use starry_vm::{VmMutPtr, VmPtr, vm_write_slice};
 
 use crate::{
     file::{FileLike, Socket, netlink::NetlinkSocket},
-    mm::{UserConstPtr, UserPtr},
+    mm::{UserConstPtr, UserPtr, vm_write_slice},
 };
 
 const PROTO_TCP: u32 = linux_raw_sys::net::IPPROTO_TCP as u32;
@@ -22,12 +22,17 @@ const PROTO_TCP: u32 = linux_raw_sys::net::IPPROTO_TCP as u32;
 const PROTO_IP: u32 = linux_raw_sys::net::IPPROTO_IP as u32;
 
 const IP_TOS_ECN_MASK: u8 = 0x03;
+const IFNAMSIZ: usize = 16;
 
-fn read_int_sockopt(optval: UserConstPtr<u8>, optlen: socklen_t) -> AxResult<i32> {
+fn read_int_sockopt(
+    current: &crate::task::UserTaskRef,
+    optval: UserConstPtr<u8>,
+    optlen: socklen_t,
+) -> AxResult<i32> {
     if (optlen as usize) < size_of::<i32>() {
         return Err(AxError::InvalidInput);
     }
-    Ok(*optval.cast::<i32>().get_as_ref()?)
+    optval.cast::<i32>().read(current)
 }
 
 fn normalize_ip_tos(value: i32) -> u8 {
@@ -45,13 +50,17 @@ fn normalize_ipv6_tclass(value: i32) -> AxResult<u8> {
 }
 
 fn read_bind_to_device(
+    current: &crate::task::UserTaskRef,
     optval: UserConstPtr<u8>,
     optlen: socklen_t,
 ) -> AxResult<Option<InterfaceId>> {
     if optlen == 0 {
         return Ok(None);
     }
-    let buf = optval.get_as_slice(optlen as usize)?;
+    // Linux copies at most IFNAMSIZ - 1 input bytes and supplies its own NUL.
+    // Bound the user-controlled length before allocating kernel storage.
+    let copy_len = (optlen as usize).min(IFNAMSIZ - 1);
+    let buf = optval.read_slice(current, copy_len)?;
     let end = buf.iter().position(|&b| b == 0).unwrap_or(buf.len());
     if end == 0 {
         return Ok(None);
@@ -63,6 +72,7 @@ fn read_bind_to_device(
 }
 
 fn write_bind_to_device(
+    current: &crate::task::UserTaskRef,
     socket: &Socket,
     optval: UserPtr<u8>,
     optlen: &mut socklen_t,
@@ -82,7 +92,7 @@ fn write_bind_to_device(
     let mut out = vec![0u8; write_len];
     let name_len = write_len.saturating_sub(1).min(bytes.len());
     out[..name_len].copy_from_slice(&bytes[..name_len]);
-    Ok(vm_write_slice(optval.as_ptr(), &out)?)
+    Ok(vm_write_slice(current, optval.as_ptr(), &out)?)
 }
 
 fn tcp_state_to_linux(state: TcpState) -> u8 {
@@ -151,7 +161,12 @@ fn to_linux_tcp_info(info: TcpInfo) -> tcp_info {
     raw
 }
 
-fn write_tcp_info(socket: &Socket, optval: UserPtr<u8>, optlen: &mut socklen_t) -> AxResult<()> {
+fn write_tcp_info(
+    current: &crate::task::UserTaskRef,
+    socket: &Socket,
+    optval: UserPtr<u8>,
+    optlen: &mut socklen_t,
+) -> AxResult<()> {
     let mut info = TcpInfo::default();
     socket.get_option(GetSocketOption::TcpInfo(&mut info))?;
 
@@ -169,7 +184,11 @@ fn write_tcp_info(socket: &Socket, optval: UserPtr<u8>, optlen: &mut socklen_t) 
             size_of::<tcp_info>(),
         )
     };
-    Ok(vm_write_slice(optval.as_ptr(), &raw_bytes[..write_len])?)
+    Ok(vm_write_slice(
+        current,
+        optval.as_ptr(),
+        &raw_bytes[..write_len],
+    )?)
 }
 
 fn ensure_ipv6_socket(socket: &Socket) -> AxResult<()> {
@@ -181,11 +200,35 @@ fn ensure_ipv6_socket(socket: &Socket) -> AxResult<()> {
 }
 
 mod conv {
+    use core::mem::{align_of, size_of};
+
     use ax_errno::{AxError, AxResult};
     use ax_net::options::UnixCredentials;
     use linux_raw_sys::{general::timeval, net::ucred};
 
     use crate::time::TimeValueLike;
+
+    #[repr(C)]
+    #[derive(Clone, Copy, bytemuck::NoUninit)]
+    pub struct TimevalOutput {
+        tv_sec: i64,
+        tv_usec: i64,
+    }
+
+    #[repr(C)]
+    #[derive(Clone, Copy, bytemuck::NoUninit)]
+    pub struct UcredOutput {
+        pid: u32,
+        uid: u32,
+        gid: u32,
+    }
+
+    const _: () = {
+        assert!(size_of::<TimevalOutput>() == size_of::<timeval>());
+        assert!(align_of::<TimevalOutput>() == align_of::<timeval>());
+        assert!(size_of::<UcredOutput>() == size_of::<ucred>());
+        assert!(align_of::<UcredOutput>() == align_of::<ucred>());
+    };
 
     pub struct Int<T>(T);
 
@@ -218,8 +261,12 @@ mod conv {
             val.try_into_time_value()
         }
 
-        pub fn rust_to_sys(val: core::time::Duration) -> AxResult<timeval> {
-            Ok(timeval::from_time_value(val))
+        pub fn rust_to_sys(val: core::time::Duration) -> AxResult<TimevalOutput> {
+            let value = timeval::from_time_value(val);
+            Ok(TimevalOutput {
+                tv_sec: value.tv_sec,
+                tv_usec: value.tv_usec,
+            })
         }
     }
 
@@ -234,8 +281,8 @@ mod conv {
             })
         }
 
-        pub fn rust_to_sys(val: UnixCredentials) -> AxResult<ucred> {
-            Ok(ucred {
+        pub fn rust_to_sys(val: UnixCredentials) -> AxResult<UcredOutput> {
+            Ok(UcredOutput {
                 pid: val.pid,
                 uid: val.uid,
                 gid: val.gid,
@@ -313,14 +360,16 @@ macro_rules! call_dispatch {
 }
 
 pub fn sys_getsockopt(
+    current: &crate::task::UserTaskRef,
     fd: i32,
     level: u32,
     optname: u32,
     optval: UserPtr<u8>,
     optlen: UserPtr<socklen_t>,
 ) -> AxResult<isize> {
-    let optlen_ptr = optlen.as_ptr();
-    let initial_optlen = optlen_ptr.vm_read()?;
+    let optlen_ptr = optlen;
+    let initial_optlen = optlen_ptr.read(current)?;
+    let mut optlen = initial_optlen;
     debug!(
         "sys_getsockopt <= fd: {}, level: {}, optname: {}, optval: {:?}, optlen: {}",
         fd,
@@ -331,17 +380,17 @@ pub fn sys_getsockopt(
     );
 
     fn write_fixed<T: bytemuck::NoUninit>(
+        current: &crate::task::UserTaskRef,
         val: UserPtr<u8>,
-        len_ptr: *mut socklen_t,
+        len_ptr: UserPtr<socklen_t>,
         len: socklen_t,
         value: T,
     ) -> AxResult<()> {
         if (len as usize) < size_of::<T>() {
             return Err(AxError::InvalidInput);
         }
-        val.as_ptr().cast::<T>().vm_write(value)?;
-        len_ptr.vm_write(size_of::<T>() as socklen_t)?;
-        Ok(())
+        val.cast().write(current, value)?;
+        len_ptr.write(current, size_of::<T>() as socklen_t)
     }
 
     if let Ok(socket) = NetlinkSocket::from_fd(fd) {
@@ -349,25 +398,15 @@ pub fn sys_getsockopt(
 
         if (level, optname) == (SOL_SOCKET, SO_REUSEADDR) {
             write_fixed(
+                current,
                 optval,
                 optlen_ptr,
-                initial_optlen,
+                optlen,
                 i32::from(socket.reuse_address()),
             )?;
             return Ok(0);
         }
     }
-
-    let optlen = optlen.get_as_mut()?;
-
-    fn get<'a, T: 'static>(val: UserPtr<u8>, len: &mut socklen_t) -> AxResult<&'a mut T> {
-        if (*len as usize) < size_of::<T>() {
-            return Err(AxError::InvalidInput);
-        }
-        *len = size_of::<T>() as socklen_t;
-        val.cast().get_as_mut()
-    }
-
     let socket = Socket::from_fd(fd)?;
 
     // SO_TYPE is normally implied by the kernel socket variant. Raw and Unix
@@ -380,11 +419,17 @@ pub fn sys_getsockopt(
         };
 
         if level == SOL_SOCKET && optname == SO_ACCEPTCONN {
-            *get::<i32>(optval, optlen)? = socket.is_listening() as i32;
+            write_fixed(
+                current,
+                optval,
+                optlen_ptr,
+                optlen,
+                socket.is_listening() as i32,
+            )?;
             return Ok(0);
         }
         if level == SOL_SOCKET && optname == SO_TYPE {
-            if *optlen == 0 {
+            if optlen == 0 {
                 return Ok(0);
             }
             let so_type: i32 = match &**socket {
@@ -398,25 +443,26 @@ pub fn sys_getsockopt(
                 #[cfg(feature = "vsock")]
                 SocketInner::Vsock(_) => SOCK_STREAM as i32,
             };
-            *get(optval, optlen)? = so_type;
+            write_fixed(current, optval, optlen_ptr, optlen, so_type)?;
             return Ok(0);
         }
         if level == SOL_SOCKET && optname == SO_BINDTODEVICE {
-            write_bind_to_device(&socket, optval, optlen)?;
+            write_bind_to_device(current, &socket, optval, &mut optlen)?;
+            optlen_ptr.write(current, optlen)?;
             return Ok(0);
         }
     }
 
     if level == IPPROTO_IPV6 as u32 && optname == IPV6_V6ONLY {
         // TODO: Store and enforce IPV6_V6ONLY once native IPv6 sockets exist.
-        *get::<i32>(optval, optlen)? = 0;
+        write_fixed(current, optval, optlen_ptr, optlen, 0_i32)?;
         return Ok(0);
     }
 
     if level == PROTO_IP && optname == IP_TOS {
         let mut tos = 0;
         socket.get_option(GetSocketOption::IpTos(&mut tos))?;
-        *get::<i32>(optval, optlen)? = i32::from(tos);
+        write_fixed(current, optval, optlen_ptr, optlen, i32::from(tos))?;
         return Ok(0);
     }
 
@@ -426,13 +472,13 @@ pub fn sys_getsockopt(
     {
         use linux_raw_sys::net::{IP_PKTINFO, IPV6_PKTINFO, IPV6_RECVPKTINFO};
         if level == PROTO_IP && optname == IP_PKTINFO {
-            *get::<i32>(optval, optlen)? = 0;
+            write_fixed(current, optval, optlen_ptr, optlen, 0_i32)?;
             return Ok(0);
         }
         if level == IPPROTO_IPV6 as u32 && (optname == IPV6_RECVPKTINFO || optname == IPV6_PKTINFO)
         {
             ensure_ipv6_socket(&socket)?;
-            *get::<i32>(optval, optlen)? = 0;
+            write_fixed(current, optval, optlen_ptr, optlen, 0_i32)?;
             return Ok(0);
         }
     }
@@ -441,7 +487,7 @@ pub fn sys_getsockopt(
         ensure_ipv6_socket(&socket)?;
         let mut tclass = 0;
         socket.get_option(GetSocketOption::IpTos(&mut tclass))?;
-        *get::<i32>(optval, optlen)? = i32::from(tclass);
+        write_fixed(current, optval, optlen_ptr, optlen, i32::from(tclass))?;
         return Ok(0);
     }
 
@@ -449,23 +495,32 @@ pub fn sys_getsockopt(
         ensure_ipv6_socket(&socket)?;
         let mut enabled = false;
         socket.get_option(GetSocketOption::RecvTrafficClass(&mut enabled))?;
-        *get::<i32>(optval, optlen)? = enabled as i32;
+        write_fixed(current, optval, optlen_ptr, optlen, enabled as i32)?;
         return Ok(0);
     }
 
     if level == PROTO_TCP && optname == TCP_INFO {
-        write_tcp_info(&socket, optval, optlen)?;
+        write_tcp_info(current, &socket, optval, &mut optlen)?;
+        optlen_ptr.write(current, optlen)?;
         return Ok(0);
     }
 
     macro_rules! dispatch {
         ($which:ident) => {
-            socket.get_option(GetSocketOption::$which(get(optval, optlen)?))?;
+            let mut val = Default::default();
+            socket.get_option(GetSocketOption::$which(&mut val))?;
+            write_fixed(current, optval, optlen_ptr, optlen, val)?;
         };
         ($which:ident as $conv:ty) => {
             let mut val = Default::default();
             socket.get_option(GetSocketOption::$which(&mut val))?;
-            *get(optval, optlen)? = <$conv>::rust_to_sys(val)?;
+            write_fixed(
+                current,
+                optval,
+                optlen_ptr,
+                optlen,
+                <$conv>::rust_to_sys(val)?,
+            )?;
         };
     }
     call_dispatch!(dispatch, (level, optname));
@@ -474,6 +529,7 @@ pub fn sys_getsockopt(
 }
 
 pub fn sys_setsockopt(
+    current: &crate::task::UserTaskRef,
     fd: i32,
     level: u32,
     optname: u32,
@@ -500,7 +556,7 @@ pub fn sys_setsockopt(
                 return Ok(0);
             }
             (SOL_SOCKET, SO_RCVBUF | SO_RCVBUFFORCE) => {
-                let value = read_int_sockopt(optval, optlen)?;
+                let value = read_int_sockopt(current, optval, optlen)?;
                 socket.set_receive_buffer_size(value.max(0) as usize);
                 return Ok(0);
             }
@@ -509,11 +565,11 @@ pub fn sys_setsockopt(
                 // not have a byte-counted send queue yet. Accept the option so
                 // iproute2 can finish socket setup; the receive side is also
                 // only partially modeled and still uses a fixed message limit.
-                let _ = read_int_sockopt(optval, optlen)?;
+                let _ = read_int_sockopt(current, optval, optlen)?;
                 return Ok(0);
             }
             (SOL_SOCKET, SO_PASSCRED) => {
-                let value = read_int_sockopt(optval, optlen)?;
+                let value = read_int_sockopt(current, optval, optlen)?;
                 socket.set_passcred(value != 0);
                 return Ok(0);
             }
@@ -521,7 +577,7 @@ pub fn sys_setsockopt(
                 // Linux accepts this generic socket option before netlink
                 // bind. Netlink port and multicast-group binding in Starry
                 // does not use local-address reuse to resolve conflicts.
-                socket.set_reuse_address(read_int_sockopt(optval, optlen)? != 0);
+                socket.set_reuse_address(read_int_sockopt(current, optval, optlen)? != 0);
                 return Ok(0);
             }
             _ => return Err(AxError::from(LinuxError::ENOPROTOOPT)),
@@ -532,21 +588,42 @@ pub fn sys_setsockopt(
         use linux_raw_sys::net::{SO_BINDTODEVICE, SO_BROADCAST, SOL_SOCKET};
 
         if (level, optname) == (SOL_SOCKET, SO_BROADCAST) {
-            let _ = read_int_sockopt(optval, optlen)?;
+            let _ = read_int_sockopt(current, optval, optlen)?;
             return Ok(0);
         }
         if (level, optname) == (SOL_SOCKET, SO_BINDTODEVICE) {
-            let binding = read_bind_to_device(optval, optlen)?;
+            let binding = read_bind_to_device(current, optval, optlen)?;
             Socket::from_fd(fd)?.set_option(SetSocketOption::BindToDevice(&binding))?;
             return Ok(0);
         }
     }
 
-    fn get<'a, T: 'static>(val: UserConstPtr<u8>, len: socklen_t) -> AxResult<&'a T> {
+    fn get<T: AnyBitPattern>(
+        current: &crate::task::UserTaskRef,
+        val: UserConstPtr<u8>,
+        len: socklen_t,
+    ) -> AxResult<T> {
         if len as usize != size_of::<T>() {
             return Err(AxError::InvalidInput);
         }
-        val.cast().get_as_ref()
+        val.cast().read(current)
+    }
+
+    /// Reads an integer-only C ABI option record.
+    ///
+    /// # Safety
+    ///
+    /// Every bit pattern supplied by userspace must be a valid `T`.
+    unsafe fn get_abi<T>(
+        current: &crate::task::UserTaskRef,
+        val: UserConstPtr<u8>,
+        len: socklen_t,
+    ) -> AxResult<T> {
+        if len as usize != size_of::<T>() {
+            return Err(AxError::InvalidInput);
+        }
+        // SAFETY: the caller supplies the validity contract for T.
+        unsafe { val.cast().read_abi(current) }
     }
 
     let socket = Socket::from_fd(fd)?;
@@ -556,12 +633,12 @@ pub fn sys_setsockopt(
 
     if level == IPPROTO_IPV6 as u32 && optname == IPV6_V6ONLY {
         // TODO: Store and enforce IPV6_V6ONLY once native IPv6 sockets exist.
-        let _ = *get::<i32>(optval, optlen)?;
+        let _ = get::<i32>(current, optval, optlen)?;
         return Ok(0);
     }
 
     if level == PROTO_IP && optname == IP_TOS {
-        let tos = normalize_ip_tos(*get::<i32>(optval, optlen)?);
+        let tos = normalize_ip_tos(get::<i32>(current, optval, optlen)?);
         socket.set_option(SetSocketOption::IpTos(&tos))?;
         return Ok(0);
     }
@@ -574,37 +651,42 @@ pub fn sys_setsockopt(
     {
         use linux_raw_sys::net::{IP_PKTINFO, IPV6_PKTINFO, IPV6_RECVPKTINFO};
         if level == PROTO_IP && optname == IP_PKTINFO {
-            let _ = read_int_sockopt(optval, optlen)?;
+            let _ = read_int_sockopt(current, optval, optlen)?;
             return Ok(0);
         }
         if level == IPPROTO_IPV6 as u32 && (optname == IPV6_RECVPKTINFO || optname == IPV6_PKTINFO)
         {
             ensure_ipv6_socket(&socket)?;
-            let _ = read_int_sockopt(optval, optlen)?;
+            let _ = read_int_sockopt(current, optval, optlen)?;
             return Ok(0);
         }
     }
 
     if level == IPPROTO_IPV6 as u32 && optname == IPV6_TCLASS {
         ensure_ipv6_socket(&socket)?;
-        let tclass = normalize_ipv6_tclass(*get::<i32>(optval, optlen)?)?;
+        let tclass = normalize_ipv6_tclass(get::<i32>(current, optval, optlen)?)?;
         socket.set_option(SetSocketOption::IpTos(&tclass))?;
         return Ok(0);
     }
 
     if level == IPPROTO_IPV6 as u32 && optname == IPV6_RECVTCLASS {
         ensure_ipv6_socket(&socket)?;
-        let enabled = *get::<i32>(optval, optlen)? != 0;
+        let enabled = get::<i32>(current, optval, optlen)? != 0;
         socket.set_option(SetSocketOption::RecvTrafficClass(&enabled))?;
         return Ok(0);
     }
 
     macro_rules! dispatch {
         ($which:ident) => {
-            socket.set_option(SetSocketOption::$which(get(optval, optlen)?))?;
+            let mut val = get(current, optval, optlen)?;
+            socket.set_option(SetSocketOption::$which(&mut val))?;
         };
         ($which:ident as $conv:ty) => {
-            let mut val = <$conv>::sys_to_rust(*get(optval, optlen)?)?;
+            // SAFETY: every conversion record in call_dispatch is a C ABI
+            // structure made only of integer fields (currently timeval and
+            // ucred), so all copied bit patterns are valid before conversion.
+            let raw = unsafe { get_abi(current, optval, optlen)? };
+            let mut val = <$conv>::sys_to_rust(raw)?;
             socket.set_option(SetSocketOption::$which(&mut val))?;
         };
     }

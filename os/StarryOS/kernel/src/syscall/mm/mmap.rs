@@ -6,7 +6,6 @@ use ax_memory_addr::{
     MemoryAddr, PAGE_SIZE_1G, PAGE_SIZE_2M, PAGE_SIZE_4K, VirtAddr, VirtAddrRange, align_up_4k,
 };
 use ax_runtime::hal::paging::MappingFlags;
-use ax_task::current;
 use linux_raw_sys::general::*;
 
 use crate::{
@@ -14,7 +13,6 @@ use crate::{
     mm::{Backend, BackendOps, SharedPages},
     pseudofs::{Device, DeviceMmap},
     syscall::fs::{memfd_check_write_seal, memfd_check_write_seal_for_shared_file_backend},
-    task::AsThread,
 };
 
 bitflags::bitflags! {
@@ -128,6 +126,7 @@ bitflags::bitflags! {
 }
 
 pub fn sys_mmap(
+    current: &crate::task::UserTaskRef,
     addr: usize,
     length: usize,
     prot: u32,
@@ -139,7 +138,7 @@ pub fn sys_mmap(
         return Err(AxError::InvalidInput);
     }
 
-    let curr = current();
+    let curr = current;
     let curr_aspace = curr.as_thread().proc_data.aspace();
     let mut aspace = curr_aspace.lock();
     let Some(permission_flags) = MmapProt::from_bits(prot) else {
@@ -219,6 +218,12 @@ pub fn sys_mmap(
     } else {
         None
     };
+    // A device implementation has committed to this mapping contract once it
+    // returns an error. Reject it before MAP_FIXED can tear down an existing
+    // mapping; only the typed `DeviceMmap::None` result selects file fallback.
+    if let Some(Err(error)) = device_mmap_top.as_ref() {
+        return Err(*error);
+    }
 
     // Validate file_mmap permissions and memfd seals before any destructive
     // MAP_FIXED unmap (Linux `do_mmap` ordering; avoids tearing down the old
@@ -228,8 +233,9 @@ pub fn sys_mmap(
         let needs_file_mmap_checks = match map_type {
             MmapFlags::PRIVATE => true,
             MmapFlags::SHARED => {
-                // Ok(None) and Err(_) both mean "fall back to file_mmap"
-                // (memfd, regular files). Direct device mappings do not.
+                // `DeviceMmap::None` explicitly means "fall back to
+                // file_mmap" (memfd, regular files). A device implementation's
+                // error is committed and must survive to userspace.
                 match device_mmap_top
                     .as_ref()
                     .expect("file-backed mmap has cached device_mmap")
@@ -240,7 +246,8 @@ pub fn sys_mmap(
                     | Ok(DeviceMmap::PhysicalResolved(..))
                     | Ok(DeviceMmap::PhysicalPages(..))
                     | Ok(DeviceMmap::Cache(_)) => false,
-                    Ok(DeviceMmap::None) | Err(_) => true,
+                    Ok(DeviceMmap::None) => true,
+                    Err(_) => false,
                 }
             }
             _ => false,
@@ -407,14 +414,8 @@ pub fn sys_mmap(
                             Arc::new(SharedPages::borrowed(pages, PAGE_SIZE_4K, retain)?),
                         )
                     }
-                    Ok(DeviceMmap::None) => return Err(AxError::NoSuchDevice),
-                    Ok(_) => return Err(AxError::InvalidInput),
-                    Err(_) => {
-                        // Fall through to file-backed mmap
+                    Ok(DeviceMmap::None) => {
                         let (backend, flags) = file.file_mmap()?;
-                        // man 2 mmap EACCES: a file mapping requires the fd to be
-                        // open for reading, and MAP_SHARED+PROT_WRITE additionally
-                        // requires the fd to be open for writing.
                         if !flags.contains(FileFlags::READ) {
                             return Err(AxError::PermissionDenied);
                         }
@@ -424,27 +425,21 @@ pub fn sys_mmap(
                             return Err(AxError::PermissionDenied);
                         }
                         match backend.clone() {
-                            FileBackend::Cached(cache) => {
-                                // TODO(mivik): file mmap page size
-                                Backend::new_file(
-                                    start,
-                                    cache,
-                                    flags,
-                                    offset,
-                                    &curr.as_thread().proc_data.aspace(),
-                                    true,
-                                )
-                            }
+                            FileBackend::Cached(cache) => Backend::new_file(
+                                start,
+                                cache,
+                                flags,
+                                offset,
+                                &curr.as_thread().proc_data.aspace(),
+                                true,
+                            ),
                             FileBackend::Direct(loc) => {
                                 let device = loc
                                     .entry()
                                     .downcast::<Device>()
                                     .map_err(|_| AxError::NoSuchDevice)?;
-
                                 match device.mmap(offset as u64, length as u64) {
-                                    DeviceMmap::None => {
-                                        return Err(AxError::NoSuchDevice);
-                                    }
+                                    DeviceMmap::None => return Err(AxError::NoSuchDevice),
                                     DeviceMmap::Physical(range, retain) => {
                                         mapping_flags |= MappingFlags::UNCACHED;
                                         if range.is_empty() {
@@ -525,6 +520,8 @@ pub fn sys_mmap(
                             }
                         }
                     }
+                    Ok(_) => return Err(AxError::InvalidInput),
+                    Err(error) => return Err(error),
                 }
             } else {
                 Backend::new_shared(start, Arc::new(SharedPages::new(length, PAGE_SIZE_4K)?))
@@ -591,13 +588,17 @@ pub fn sys_mmap(
     Ok(start.as_usize() as _)
 }
 
-pub fn sys_munmap(addr: usize, length: usize) -> AxResult<isize> {
+pub fn sys_munmap(
+    current: &crate::task::UserTaskRef,
+    addr: usize,
+    length: usize,
+) -> AxResult<isize> {
     // man 2 munmap: "length was 0" → EINVAL (since Linux 2.6.12).
     if length == 0 {
         return Err(AxError::InvalidInput);
     }
     debug!("sys_munmap <= addr: {addr:#x}, length: {length:x}");
-    let curr = current();
+    let curr = current;
     let aspace_arc = curr.as_thread().proc_data.aspace();
     let mut aspace = aspace_arc.lock();
     let length = align_up_4k(length);
@@ -606,7 +607,12 @@ pub fn sys_munmap(addr: usize, length: usize) -> AxResult<isize> {
     Ok(0)
 }
 
-pub fn sys_mprotect(addr: usize, length: usize, prot: u32) -> AxResult<isize> {
+pub fn sys_mprotect(
+    current: &crate::task::UserTaskRef,
+    addr: usize,
+    length: usize,
+    prot: u32,
+) -> AxResult<isize> {
     // TODO: implement PROT_GROWSUP & PROT_GROWSDOWN
     let Some(permission_flags) = MmapProt::from_bits(prot) else {
         return Err(AxError::InvalidInput);
@@ -626,7 +632,7 @@ pub fn sys_mprotect(addr: usize, length: usize, prot: u32) -> AxResult<isize> {
         return Ok(0);
     }
 
-    let curr = current();
+    let curr = current;
     let aspace_arc = curr.as_thread().proc_data.aspace();
     let mut aspace = aspace_arc.lock();
     let length = align_up_4k(length);
@@ -699,7 +705,7 @@ struct MremapMove<'a> {
 
 fn mremap_move(
     aspace: &mut crate::mm::AddrSpace,
-    aspace_ref: &Arc<crate::sync::Mutex<crate::mm::AddrSpace>>,
+    aspace_ref: &Arc<crate::sync::PiMutex<crate::mm::AddrSpace>>,
     move_args: MremapMove<'_>,
 ) -> AxResult {
     let MremapMove {
@@ -768,6 +774,7 @@ fn mremap_move(
 }
 
 pub fn sys_mremap(
+    current: &crate::task::UserTaskRef,
     addr: usize,
     old_size: usize,
     new_size: usize,
@@ -813,7 +820,7 @@ pub fn sys_mremap(
         }
     }
 
-    let curr = current();
+    let curr = current;
     let aspace_ref = &curr.as_thread().proc_data.aspace();
     let mut aspace = aspace_ref.lock();
 
@@ -977,7 +984,12 @@ pub fn sys_mremap(
     Ok(target.as_usize() as isize)
 }
 
-pub fn sys_madvise(addr: usize, length: usize, advice: i32) -> AxResult<isize> {
+pub fn sys_madvise(
+    current: &crate::task::UserTaskRef,
+    addr: usize,
+    length: usize,
+    advice: i32,
+) -> AxResult<isize> {
     debug!("sys_madvise <= addr: {addr:#x}, length: {length:x}, advice: {advice:#x}");
 
     match advice as u32 {
@@ -998,7 +1010,7 @@ pub fn sys_madvise(addr: usize, length: usize, advice: i32) -> AxResult<isize> {
         return Ok(0);
     }
 
-    let curr = current();
+    let curr = current;
     let aspace_arc = curr.as_thread().proc_data.aspace();
     let mut aspace = aspace_arc.lock();
 
@@ -1086,7 +1098,12 @@ pub fn sys_madvise(addr: usize, length: usize, advice: i32) -> AxResult<isize> {
     Ok(0)
 }
 
-pub fn sys_msync(addr: usize, length: usize, flags: u32) -> AxResult<isize> {
+pub fn sys_msync(
+    current: &crate::task::UserTaskRef,
+    addr: usize,
+    length: usize,
+    flags: u32,
+) -> AxResult<isize> {
     debug!("sys_msync <= addr: {addr:#x}, length: {length:x}, flags: {flags:#x}");
 
     if !addr.is_multiple_of(PAGE_SIZE_4K) {
@@ -1109,7 +1126,7 @@ pub fn sys_msync(addr: usize, length: usize, flags: u32) -> AxResult<isize> {
     let end_val = addr.checked_add(length).ok_or(AxError::InvalidInput)?;
     let end = VirtAddr::from(end_val);
 
-    let curr = current();
+    let curr = current;
     let aspace_arc = curr.as_thread().proc_data.aspace();
     let writebacks: Vec<_> = {
         let aspace = aspace_arc.lock();
@@ -1139,11 +1156,20 @@ pub fn sys_msync(addr: usize, length: usize, flags: u32) -> AxResult<isize> {
     Ok(0)
 }
 
-pub fn sys_mlock(addr: usize, length: usize) -> AxResult<isize> {
-    sys_mlock2(addr, length, 0)
+pub fn sys_mlock(
+    current: &crate::task::UserTaskRef,
+    addr: usize,
+    length: usize,
+) -> AxResult<isize> {
+    sys_mlock2(current, addr, length, 0)
 }
 
-pub fn sys_mlock2(addr: usize, length: usize, flags: u32) -> AxResult<isize> {
+pub fn sys_mlock2(
+    current: &crate::task::UserTaskRef,
+    addr: usize,
+    length: usize,
+    flags: u32,
+) -> AxResult<isize> {
     // Linux `mlock2` accepts only `flags == 0` or `MLOCK_ONFAULT`; any other bit
     // is rejected with EINVAL and must produce no populate/fault side effect.
     const MLOCK_ONFAULT: u32 = 0x01;
@@ -1165,7 +1191,7 @@ pub fn sys_mlock2(addr: usize, length: usize, flags: u32) -> AxResult<isize> {
     }
     let size = end - aligned;
 
-    let curr = current();
+    let curr = current;
     let aspace_arc = curr.as_thread().proc_data.aspace();
     let mut aspace = aspace_arc.lock();
     let start = VirtAddr::from(aligned);

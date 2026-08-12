@@ -71,6 +71,7 @@ input = ["dep:ax-input", "ax-runtime/input"]
 ipi = ["ax-runtime/ipi"]
 loongarch64-low-va = []
 memtrack = ["axbacktrace/alloc", "ax-alloc/tracking"]
+qperf-metrics = ["ax-runtime/qperf-metrics"]
 rknpu = ["ax-driver/rknpu"]
 jpeg = ["ax-driver/jpeg"]
 rga = ["ax-driver/rga", "dep:rockchip-rga"]
@@ -102,7 +103,7 @@ sg2002-cvi-usb-camera = [
     "dep:cvi-vdec-uapi",
     "dep:sg200x-jpu",
 ]
-smp = ["ax-std/smp"]
+smp = ["ax-std/smp", "ipi"]
 stack-guard-page = ["ax-runtime/stack-guard-page"]
 stack-protector = ["ax-runtime/stack-protector"]
 axtest = []
@@ -112,7 +113,6 @@ unexpected_cfgs = { level = "warn", check-cfg = ['cfg(axtest)', 'cfg(feature, va
 
 [dependencies]
 ax-alloc = { workspace = true }
-ax-crate-interface.workspace = true
 ax-display.workspace = true
 ax-fs-ng = { workspace = true, features = ["vfs"] }
 ax-cpu = { workspace = true, features = ["fp-simd"] }
@@ -129,17 +129,19 @@ ax-runtime = { workspace = true, features = [
     "irq",
     "uspace",
     "multitask",
+    "fp-simd",
     "rtc",
     "ext4fs",
     "net",
     "serial",
 ] }
-ax-task = { workspace = true, features = [
+ax-std = { workspace = true, default-features = false, features = [
+    "alloc",
+    "fd",
+    "irq",
     "multitask",
     "task-ext",
     "tracepoint-hooks",
-    "sched-rr",
-    "axtest",
 ] }
 rockchip-rga = { workspace = true, optional = true }
 sg2002-tpu = { workspace = true, optional = true }
@@ -149,7 +151,7 @@ usb-serial.workspace = true
 rdrive.workspace = true
 
 axbacktrace = { workspace = true }
-ax-cgroup = { workspace = true }
+ax-cgroup = { workspace = true, features = ["multitask"] }
 ax-errno = { workspace = true }
 axnsproxy = { workspace = true }
 axfs-ng-vfs = { workspace = true }
@@ -166,9 +168,9 @@ chrono = { version = "0.4", default-features = false }
 downcast-rs = { version = "2.0", default-features = false, features = ["sync"] }
 enum_dispatch = "0.3"
 event-listener = { version = "5.4", default-features = false }
-extern-trait = { workspace = true }
 flatten_objects = "0.2.4"
 hashbrown = "0.16"
+heapless.workspace = true
 indoc = "2"
 inherit-methods-macro = "0.1.0"
 kernel-elf-parser = "0.3.4"
@@ -193,7 +195,7 @@ rand = { version = "0.10", default-features = false, features = ["alloc", "chach
 ringbuf = { version = "0.4.8", default-features = false, features = ["alloc"] }
 scope-local = { workspace = true }
 slab = { version = "0.4.9", default-features = false }
-starry-process = { workspace = true }
+starry-process = { workspace = true, features = ["multitask"] }
 starry-signal = { workspace = true }
 starry-vm = { workspace = true }
 strum = { version = "0.28", default-features = false, features = ["derive"] }
@@ -202,7 +204,6 @@ uluru = "3.1.0"
 weak-map = "0.1.1"
 xmas-elf = "0.9"
 zerocopy = { version = "0.8", features = ["derive"] }
-ax-ipi = { workspace = true }
 static-keys = "0.8"
 ddebug = "0.5"
 kprobe = { workspace = true }
@@ -217,7 +218,7 @@ sg200x-jpu = { workspace = true, optional = true }
 # 0.10 to match sg200x-bsp 0.7.x's internal tock-registers; the Writeable trait
 # must come from the same version as sg200x-bsp's ReadWrite types.
 tock-registers = { version = "0.10", optional = true }
-ktracepoint = "0.6"
+ktracepoint.workspace = true
 ksym = "0.6"
 kbpf-basic = "0.6"
 rbpf = { version = "0.4", default-features = false }
@@ -268,6 +269,9 @@ rsext4 = { workspace = true, features = ["axtest"] }
 scope-local = { workspace = true, features = ["axtest"] }
 buddy-slab-allocator = { workspace = true, features = ["axtest"] }
 page-table-generic = { workspace = true }
+
+[target.'cfg(not(target_os = "none"))'.dev-dependencies]
+loom.workspace = true
 
 [[test]]
 name = "axtest_kernel"

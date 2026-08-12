@@ -39,7 +39,7 @@ use axpoll::{IoEvents, Pollable};
 use super::{File, FileLike, IoDst, IoSrc, Kstat, get_file_like};
 use crate::{
     mm::{AddrSpace, Backend},
-    sync::Mutex,
+    sync::PiMutex,
 };
 
 pub const F_SEAL_SEAL: u32 = 0x0001;
@@ -73,7 +73,7 @@ pub struct Memfd {
     name: String,
     /// Serializes seal-check-and-truncate to close the TOCTOU window
     /// between `check_truncate` and the underlying `set_len`.
-    truncate_mtx: Mutex<()>,
+    truncate_mtx: PiMutex<()>,
 }
 
 impl Memfd {
@@ -89,7 +89,7 @@ impl Memfd {
             seals: AtomicU32::new(initial),
             shared_writable_mmap_count: AtomicU32::new(0),
             name,
-            truncate_mtx: Mutex::new(()),
+            truncate_mtx: PiMutex::new(()),
         })
     }
 
@@ -517,8 +517,8 @@ impl FileLike for Memfd {
         self.inner.file_mmap()
     }
 
-    fn ioctl(&self, cmd: u32, arg: usize) -> AxResult<usize> {
-        self.inner.ioctl(cmd, arg)
+    fn ioctl(&self, current: &crate::task::UserTaskRef, cmd: u32, arg: usize) -> AxResult<usize> {
+        self.inner.ioctl(current, cmd, arg)
     }
 
     fn open_flags(&self) -> u32 {

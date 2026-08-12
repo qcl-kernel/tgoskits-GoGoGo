@@ -75,18 +75,26 @@ impl ArchOps for Aarch64Arch {
         vgic_runtime(vm)?.deactivate()
     }
 
+    fn prepare_vcpu_run_slice(
+        _vm: &crate::AxVMRef,
+        vcpu: &crate::vm::AxVCpuRef<Self::VCpu>,
+    ) -> AxVmResult {
+        vcpu.get_arch_vcpu().invalidate_virtual_timer_wait();
+        Ok(())
+    }
+
     fn before_vcpu_run(
         _vm: &crate::AxVMRef,
         vcpu: &crate::vm::AxVCpuRef<Self::VCpu>,
     ) -> AxVmResult {
-        vcpu.get_arch_vcpu().prepare_timer_run()
+        vcpu.get_arch_vcpu().prepare_timer_entry()
     }
 
     fn on_last_vcpu_exit(vm: &crate::AxVMRef) -> AxVmResult {
         Self::deactivate_devices(vm)
     }
 
-    fn handle_vcpu_exit_bound(
+    fn handle_vcpu_exit_unbound(
         vm: &crate::AxVMRef,
         vcpu: &crate::vm::AxVCpuRef<Self::VCpu>,
         exit: <Self::VCpu as VmArchVcpuOps>::Exit,
@@ -117,6 +125,7 @@ impl ArchOps for Aarch64Arch {
             ),
             ArmVmExit::MmioWrite { addr, width, data } => super::handle_mmio_write::<Self>(
                 vm,
+                vcpu,
                 MmioWriteExit {
                     addr: arm_guest_phys_addr_to_ax(addr),
                     width: arm_access_width_to_ax(width),
@@ -229,7 +238,6 @@ impl ArchOps for Aarch64Arch {
                         })?;
                     }
                 }
-                crate::check_timer_events();
             }
         }
         Ok(VcpuRunAction {
@@ -312,7 +320,6 @@ impl ArmHostOps for AxvmArmHostOps {
         {
             warn!("{error}");
         }
-        crate::check_timer_events();
     }
 }
 
@@ -429,8 +436,7 @@ impl AxvmArmVcpu {
         }
     }
 
-    fn prepare_timer_run(&self) -> AxVmResult {
-        self.invalidate_virtual_timer_wait();
+    fn prepare_timer_entry(&self) -> AxVmResult {
         self.timer_binding
             .as_ref()
             .ok_or_else(|| {

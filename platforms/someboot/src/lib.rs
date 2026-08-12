@@ -117,13 +117,23 @@ pub trait ArchTrait {
         Self::shutdown()
     }
     fn secondary_entry_fn_address() -> *const ();
-    fn cpu_on(hartid: usize, entry: usize, arg: usize) -> Result<(), CpuOnError>;
+    /// Delivers the architecture-specific wake request to one secondary CPU.
+    ///
+    /// This method owns only the hardware/firmware transport. The generic
+    /// someboot CPU lifecycle publishes `KICKED`, waits for the target CPU to
+    /// report `ALIVE`, and releases it into the OS entry path.
+    fn kick_secondary_cpu(hartid: usize, entry: usize, arg: usize) -> Result<(), CpuOnError>;
 
-    fn systimer_enable();
+    /// Prepares the per-CPU one-shot timer in a masked, non-firing state.
+    fn systimer_prepare_oneshot();
     fn systimer_irq_enable();
     fn systimer_irq_disable();
     fn systimer_irq_is_enabled() -> bool;
-    /// Set the timer interval in ticks
+    /// Set the timer interval in ticks.
+    ///
+    /// Implementations must preserve the full `usize` interval. An
+    /// architecture with a narrow relative-value register should program a
+    /// wide absolute compare register or explicitly chunk the interval.
     fn systimer_set_interval(ticks: usize);
     /// Acknowledge and clear the timer interrupt
     fn systimer_ack();

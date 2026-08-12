@@ -3,9 +3,9 @@ use core::mem::{self, MaybeUninit};
 use ax_errno::{AxError, AxResult};
 use ax_runtime::hal::cpu::uspace::UserContext;
 use bytemuck::AnyBitPattern;
-use starry_vm::vm_read_slice;
 
 use super::clone::{CloneArgs, CloneFlags};
+use crate::mm::vm_read_slice;
 
 /// Structure passed to clone3() system call.
 #[repr(C)]
@@ -68,7 +68,12 @@ impl TryFrom<Clone3Args> for CloneArgs {
     }
 }
 
-pub fn sys_clone3(uctx: &UserContext, args: *const u8, size: usize) -> AxResult<isize> {
+pub fn sys_clone3(
+    current: &crate::task::UserTaskRef,
+    uctx: &UserContext,
+    args: *const u8,
+    size: usize,
+) -> AxResult<isize> {
     debug!("sys_clone3 <= args: {args:p}, size: {size}");
 
     if size < MIN_CLONE_ARGS_SIZE {
@@ -84,14 +89,14 @@ pub fn sys_clone3(uctx: &UserContext, args: *const u8, size: usize) -> AxResult<
     let read_len = size.min(buffer.len());
     // SAFETY: MaybeUninit<T> is compatible with T, and we're filling in the
     // buffer with bytes read from the user
-    vm_read_slice(args, unsafe {
+    vm_read_slice(current, args, unsafe {
         mem::transmute::<&mut [u8], &mut [MaybeUninit<u8>]>(&mut buffer[..read_len])
     })?;
     let clone3_args: Clone3Args =
         bytemuck::try_pod_read_unaligned(&buffer).map_err(|_| AxError::InvalidInput)?;
 
     let clone_args = CloneArgs::try_from(clone3_args)?;
-    clone_args.do_clone(uctx)
+    clone_args.do_clone(current, uctx)
 }
 
 #[cfg(axtest)]

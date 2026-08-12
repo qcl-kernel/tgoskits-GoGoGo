@@ -1,18 +1,16 @@
 use ax_errno::{AxError, AxResult};
-use ax_task::current;
 use starry_process::Pid;
 
 use crate::task::{
-    AsThread, get_process, get_process_data, get_process_group, register_process_group,
-    register_session,
+    get_process, get_process_data, get_process_group, register_process_group, register_session,
 };
 
 pub fn sys_getsid(pid: Pid) -> AxResult<isize> {
     Ok(get_process(pid)?.group().session().sid() as _)
 }
 
-pub fn sys_setsid() -> AxResult<isize> {
-    let curr = current();
+pub fn sys_setsid(current: &crate::task::UserTaskRef) -> AxResult<isize> {
+    let curr = current;
     let proc = &curr.as_thread().proc_data.proc;
     if get_process_group(proc.pid()).is_ok() {
         return Err(AxError::OperationNotPermitted);
@@ -32,8 +30,8 @@ pub fn sys_getpgid(pid: Pid) -> AxResult<isize> {
 }
 
 #[cfg(target_arch = "x86_64")]
-pub fn sys_getpgrp() -> AxResult<isize> {
-    let curr = current();
+pub fn sys_getpgrp(current: &crate::task::UserTaskRef) -> AxResult<isize> {
+    let curr = current;
     Ok(curr.as_thread().proc_data.proc.group().pgid() as _)
 }
 

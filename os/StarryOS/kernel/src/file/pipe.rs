@@ -7,10 +7,6 @@ use core::{
 
 use ax_errno::{AxError, AxResult};
 use ax_memory_addr::PAGE_SIZE_4K;
-use ax_task::{
-    current,
-    future::{block_on, poll_io},
-};
 use axpoll::{IoEvents, PollSet, Pollable};
 use linux_raw_sys::{
     general::{O_RDONLY, O_WRONLY, S_IFIFO},
@@ -21,13 +17,17 @@ use ringbuf::{
     traits::{Consumer, Observer, Producer},
 };
 use starry_signal::{SignalInfo, Signo};
-use starry_vm::VmMutPtr;
 
 use super::{FileLike, Kstat};
 use crate::{
     file::{IoDst, IoSrc},
-    sync::Mutex,
-    task::{AsThread, send_signal_to_process},
+    mm::VmMutPtr,
+    sync::PiMutex,
+    task::{
+        current_user_task,
+        future::{block_on_user, poll_io},
+        send_signal_to_process,
+    },
 };
 
 const RING_BUFFER_INIT_SIZE: usize = 65536; // 64 KiB
@@ -35,7 +35,7 @@ const RING_BUFFER_MAX_SIZE: usize = 1024 * 1024; // 1 MiB
 const PIPE_BUF: usize = PAGE_SIZE_4K;
 
 struct Shared {
-    state: Mutex<PipeState>,
+    state: PiMutex<PipeState>,
     poll_rx: PollSet,
     poll_tx: PollSet,
 }
@@ -150,7 +150,7 @@ impl Drop for Pipe {
 impl Pipe {
     pub fn new() -> (Pipe, Pipe) {
         let shared = Arc::new(Shared {
-            state: Mutex::new(PipeState {
+            state: PiMutex::new(PipeState {
                 buffer: HeapRb::new(RING_BUFFER_INIT_SIZE),
                 buffers: VecDeque::new(),
                 readers: 1,
@@ -230,64 +230,71 @@ impl Pipe {
         let mut merge_pending = true;
         let merge_bytes = size % PIPE_BUF;
 
-        let result = block_on(poll_io(self, IoEvents::OUT, self.nonblocking(), || {
-            enum WriteStep {
-                Closed,
-                WouldBlock,
-                Wrote(usize),
-            }
-
-            let step = {
-                let mut state = self.shared.state.lock();
-                // Linux makes writes no larger than PIPE_BUF commit atomically;
-                // nonblocking callers get EAGAIN until the whole record fits.
-                if state.readers == 0 {
-                    WriteStep::Closed
-                } else {
-                    let mut written = 0;
-                    if merge_pending {
-                        merge_pending = false;
-                        if merge_bytes > 0 && state.can_merge(merge_bytes) {
-                            written += state.merge_from(src, merge_bytes)?;
-                        }
-                    }
-                    while src.remaining() > 0 && state.has_free_buffer() {
-                        let appended = state.append_from(src)?;
-                        written += appended;
-                        if appended == 0 {
-                            break;
-                        }
-                    }
-                    if written == 0 {
-                        WriteStep::WouldBlock
-                    } else {
-                        WriteStep::Wrote(written)
-                    }
+        let task = current_user_task();
+        let result = block_on_user(
+            &task,
+            poll_io(self, IoEvents::OUT, self.nonblocking(), || {
+                enum WriteStep {
+                    Closed,
+                    WouldBlock,
+                    Wrote(usize),
                 }
-            };
 
-            let written = match step {
-                WriteStep::Closed => {
-                    if total_written > 0 {
+                let step = {
+                    let mut state = self.shared.state.lock();
+                    // Linux makes writes no larger than PIPE_BUF commit atomically;
+                    // nonblocking callers get EAGAIN until the whole record fits.
+                    if state.readers == 0 {
+                        WriteStep::Closed
+                    } else {
+                        let mut written = 0;
+                        if merge_pending {
+                            merge_pending = false;
+                            if merge_bytes > 0 && state.can_merge(merge_bytes) {
+                                written += state.merge_from(src, merge_bytes)?;
+                            }
+                        }
+                        while src.remaining() > 0 && state.has_free_buffer() {
+                            let appended = state.append_from(src)?;
+                            written += appended;
+                            if appended == 0 {
+                                break;
+                            }
+                        }
+                        if written == 0 {
+                            WriteStep::WouldBlock
+                        } else {
+                            WriteStep::Wrote(written)
+                        }
+                    }
+                };
+
+                let written = match step {
+                    WriteStep::Closed => {
+                        if total_written > 0 {
+                            return Ok(total_written);
+                        }
+                        on_broken_pipe();
+                        return Err(AxError::BrokenPipe);
+                    }
+                    WriteStep::WouldBlock => return Err(AxError::WouldBlock),
+                    WriteStep::Wrote(written) => written,
+                };
+
+                if written > 0 {
+                    // Pipe bytes were committed before waking readers.
+                    unsafe { self.shared.poll_rx.wake(IoEvents::IN) };
+                    total_written += written;
+                    if total_written == size || self.nonblocking() {
                         return Ok(total_written);
                     }
-                    on_broken_pipe();
-                    return Err(AxError::BrokenPipe);
                 }
-                WriteStep::WouldBlock => return Err(AxError::WouldBlock),
-                WriteStep::Wrote(written) => written,
-            };
-
-            if written > 0 {
-                // Pipe bytes were committed before waking readers.
-                unsafe { self.shared.poll_rx.wake(IoEvents::IN) };
-                total_written += written;
-                if total_written == size || self.nonblocking() {
-                    return Ok(total_written);
-                }
-            }
-            Err(AxError::WouldBlock)
-        }));
+                Err(AxError::WouldBlock)
+            }),
+        )
+        .into_result()
+        .map_err(AxError::from)
+        .and_then(|result| result);
 
         // Linux returns committed bytes instead of EINTR once a pipe write
         // has made progress. This also prevents SA_RESTART from replaying the
@@ -460,7 +467,7 @@ pub(crate) fn interrupted_pipe_write_preserves_partial_progress_for_test() -> bo
     }
 
     let write_end = Arc::new(write_end);
-    let result = Arc::new(Mutex::new(None));
+    let result = Arc::new(PiMutex::new(None));
     let writer_task = {
         let write_end = Arc::clone(&write_end);
         let result = Arc::clone(&result);
@@ -507,7 +514,7 @@ fn wait_for_pipe_test_condition(mut condition: impl FnMut() -> bool) -> bool {
 }
 
 fn raise_pipe() {
-    let curr = current();
+    let curr = current_user_task();
     send_signal_to_process(
         curr.as_thread().proc_data.proc.pid(),
         Some(SignalInfo::new_kernel(Signo::SIGPIPE)),
@@ -524,28 +531,33 @@ impl FileLike for Pipe {
             return Ok(0);
         }
 
-        block_on(poll_io(self, IoEvents::IN, self.nonblocking(), || {
-            let (read, writers) = {
-                let mut state = self.shared.state.lock();
-                let (left, right) = state.buffer.as_slices();
-                let mut count = dst.write(left)?;
-                if count >= left.len() {
-                    count += dst.write(right)?;
+        let task = current_user_task();
+        block_on_user(
+            &task,
+            poll_io(self, IoEvents::IN, self.nonblocking(), || {
+                let (read, writers) = {
+                    let mut state = self.shared.state.lock();
+                    let (left, right) = state.buffer.as_slices();
+                    let mut count = dst.write(left)?;
+                    if count >= left.len() {
+                        count += dst.write(right)?;
+                    }
+                    unsafe { state.buffer.advance_read_index(count) };
+                    state.consume(count);
+                    (count, state.writers)
+                };
+                if read > 0 {
+                    // Pipe capacity was freed before waking writers.
+                    unsafe { self.shared.poll_tx.wake(IoEvents::OUT) };
+                    Ok(read)
+                } else if writers == 0 {
+                    Ok(0)
+                } else {
+                    Err(AxError::WouldBlock)
                 }
-                unsafe { state.buffer.advance_read_index(count) };
-                state.consume(count);
-                (count, state.writers)
-            };
-            if read > 0 {
-                // Pipe capacity was freed before waking writers.
-                unsafe { self.shared.poll_tx.wake(IoEvents::OUT) };
-                Ok(read)
-            } else if writers == 0 {
-                Ok(0)
-            } else {
-                Err(AxError::WouldBlock)
-            }
-        }))
+            }),
+        )
+        .into_result()?
     }
 
     fn write(&self, src: &mut IoSrc) -> AxResult<usize> {
@@ -576,10 +588,13 @@ impl FileLike for Pipe {
         self.non_blocking.load(Ordering::Acquire)
     }
 
-    fn ioctl(&self, cmd: u32, arg: usize) -> AxResult<usize> {
+    fn ioctl(&self, current: &crate::task::UserTaskRef, cmd: u32, arg: usize) -> AxResult<usize> {
         match cmd {
             FIONREAD => {
-                (arg as *mut u32).vm_write(self.shared.state.lock().buffer.occupied_len() as u32)?;
+                (arg as *mut u32).vm_write(
+                    current,
+                    self.shared.state.lock().buffer.occupied_len() as u32,
+                )?;
                 Ok(0)
             }
             _ => Err(AxError::NotATty),

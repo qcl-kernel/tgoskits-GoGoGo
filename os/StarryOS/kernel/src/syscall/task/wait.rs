@@ -1,10 +1,6 @@
 use alloc::{sync::Arc, vec::Vec};
 
 use ax_errno::{AxError, AxResult, LinuxError};
-use ax_task::{
-    current,
-    future::{block_on, interruptible},
-};
 use bitflags::bitflags;
 use linux_raw_sys::general::{
     __WALL, __WCLONE, __WNOTHREAD, P_ALL, P_PGID, P_PID, P_PIDFD, WCONTINUED, WEXITED, WNOHANG,
@@ -12,15 +8,16 @@ use linux_raw_sys::general::{
 };
 use starry_process::{Pid, Process};
 use starry_signal::{SignalInfo, Signo};
-use starry_vm::{VmMutPtr, VmPtr};
 
-use super::ptrace::PTRACE_EVENT_STOP;
+use super::{ptrace::PTRACE_EVENT_STOP, wait_scan::WaitCandidateScan};
 use crate::{
     file::{PidFd, get_file_like},
+    mm::{VmMutPtr, VmPtr},
     task::{
-        AsThread, JobStatus, ProcessData, ProcessIdentity, decode_wait_status, get_process_data,
-        get_task, get_zombie_cred, is_reaped_process, is_zombie_clone_child, is_zombie_process,
-        processes, reap_process, traced_zombies_for, wait_on_pollset, zombie_wait_parent_tid,
+        JobStatus, ProcessData, ProcessIdentity, decode_wait_status, future::block_on_user,
+        get_process_data, get_task, get_zombie_cred, is_reaped_process, is_zombie_clone_child,
+        is_zombie_process, processes, reap_process, traced_zombies_for, wait_on_pollset,
+        zombie_wait_parent_tid,
     },
 };
 
@@ -100,8 +97,26 @@ impl WaitTarget {
     }
 
     fn ptrace_requires_exact_stop(&self, child: &Process) -> bool {
-        matches!(self, WaitTarget::Pid(pid) if *pid != child.pid() && child.threads().contains(pid))
+        matches!(
+            self,
+            WaitTarget::Pid(pid)
+                if ptrace_pid_requires_exact_stop(
+                    *pid,
+                    child.pid(),
+                    child.threads().contains(pid),
+                )
+        )
     }
+}
+
+fn ptrace_pid_requires_exact_stop(
+    target_pid: Pid,
+    process_pid: Pid,
+    target_is_thread: bool,
+) -> bool {
+    // Linux PIDTYPE_PID waits select one task even when that PID is also the
+    // thread-group leader. They never widen an explicit TID into the group.
+    target_pid == process_pid || target_is_thread
 }
 
 fn waitid_pidfd_target(fd: i32) -> AxResult<WaitTarget> {
@@ -180,7 +195,7 @@ impl WaitChildFilter {
         if self.no_thread {
             let wait_parent_tid = get_process_data(child.pid())
                 .ok()
-                .map(|data| data.wait_parent_tid)
+                .map(|data| data.wait_parent_tid())
                 .or_else(|| zombie_wait_parent_tid(child.pid()));
             if wait_parent_tid != Some(current_tid) {
                 return false;
@@ -237,14 +252,19 @@ fn waitable_processes(
     candidates
 }
 
-pub fn sys_waitpid(pid: i32, exit_code: *mut i32, options: u32) -> AxResult<isize> {
+pub fn sys_waitpid(
+    current: &crate::task::UserTaskRef,
+    pid: i32,
+    exit_code: *mut i32,
+    options: u32,
+) -> AxResult<isize> {
     let options = WaitPidOptions::from_bits(options).ok_or(AxError::InvalidInput)?;
     if pid == i32::MIN {
         return Err(AxError::from(LinuxError::ESRCH));
     }
     info!("sys_waitpid <= pid: {pid:?}, options: {options:?}");
 
-    let curr = current();
+    let curr = current;
     let thr = curr.as_thread();
     let proc = &thr.proc_data.proc;
 
@@ -258,7 +278,7 @@ pub fn sys_waitpid(pid: i32, exit_code: *mut i32, options: u32) -> AxResult<isiz
         WaitTarget::Pgid(-pid as _)
     };
 
-    let scan_children = || {
+    let candidate_scan = WaitCandidateScan::new(|| {
         waitable_processes(
             proc,
             &target,
@@ -266,8 +286,8 @@ pub fn sys_waitpid(pid: i32, exit_code: *mut i32, options: u32) -> AxResult<isiz
             thr.tid(),
             WaitChildFilter::from_waitpid_options(&options),
         )
-    };
-    if scan_children().is_empty() {
+    });
+    if candidate_scan.collect().is_empty() {
         return Err(AxError::from(LinuxError::ECHILD));
     }
 
@@ -276,7 +296,7 @@ pub fn sys_waitpid(pid: i32, exit_code: *mut i32, options: u32) -> AxResult<isiz
         // Linux rescans the authoritative child and ptrace relationships after
         // every wake; another thread can publish an eligible child while this
         // waiter is blocked.
-        let children = scan_children();
+        let children = candidate_scan.collect();
         if let Some((child, data, stop_tid, signo)) = children.iter().find_map(|child| {
             get_process_data(child.pid()).ok().and_then(|data| {
                 let preferred_tid = target.ptrace_preferred_stop_tid(child);
@@ -292,7 +312,7 @@ pub fn sys_waitpid(pid: i32, exit_code: *mut i32, options: u32) -> AxResult<isiz
             let wait_pid = target.ptrace_report_pid(child, &data);
             let status = stopped_wait_status(&data, signo);
             if let Some(exit_code) = exit_code.nullable() {
-                exit_code.vm_write(status)?;
+                exit_code.vm_write(current, status)?;
             }
             data.mark_ptrace_stop_reported_for(stop_tid);
             return Ok(Some(wait_pid as _));
@@ -300,7 +320,7 @@ pub fn sys_waitpid(pid: i32, exit_code: *mut i32, options: u32) -> AxResult<isiz
             // Copy status before claiming the unique reap transition. A failed
             // user write leaves the zombie available for a later retry.
             if let Some(exit_code) = exit_code.nullable() {
-                exit_code.vm_write(child.exit_code())?;
+                exit_code.vm_write(current, child.exit_code())?;
             }
             if let Some(cpu_time) = reap_process(child) {
                 proc_data.add_child_cpu_time(cpu_time.user(), cpu_time.system());
@@ -328,7 +348,7 @@ pub fn sys_waitpid(pid: i32, exit_code: *mut i32, options: u32) -> AxResult<isiz
                     // `exit_code` pointer leaves the report intact to retry
                     // (mirrors the zombie-reap ordering above).
                     if let Some(exit_code) = exit_code.nullable() {
-                        exit_code.vm_write(raw)?;
+                        exit_code.vm_write(current, raw)?;
                     }
                     cdata.take_job_status_if(want_stopped, want_continued);
                     return Ok(Some(child.pid() as _));
@@ -345,19 +365,50 @@ pub fn sys_waitpid(pid: i32, exit_code: *mut i32, options: u32) -> AxResult<isiz
         }
     };
 
-    block_on(interruptible(wait_on_pollset(
-        &proc_data.child_exit_event,
-        || check_children().transpose(),
-    )))?
+    let task = current;
+    block_on_user(
+        task,
+        wait_on_pollset(proc_data.child_exit_event(), || {
+            check_children().transpose()
+        }),
+    )
+    .into_result()?
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn explicit_process_pid_requires_exact_ptrace_stop() {
+        let process_pid = 41;
+
+        assert!(ptrace_pid_requires_exact_stop(
+            process_pid,
+            process_pid,
+            false,
+        ));
+    }
+
+    #[test]
+    fn explicit_non_leader_tid_requires_exact_ptrace_stop() {
+        assert!(ptrace_pid_requires_exact_stop(42, 41, true));
+    }
+
+    #[test]
+    fn unrelated_pid_does_not_select_a_ptrace_stop() {
+        assert!(!ptrace_pid_requires_exact_stop(43, 41, false));
+    }
 }
 
 pub fn sys_waitid(
+    current: &crate::task::UserTaskRef,
     idtype: u32,
     id: i32,
     infop: *mut linux_raw_sys::general::siginfo,
     options: u32,
 ) -> AxResult<isize> {
-    let curr = current();
+    let curr = current;
     let thr = curr.as_thread();
     let proc = &thr.proc_data.proc;
 
@@ -394,7 +445,7 @@ pub fn sys_waitid(
 
     info!("sys_waitid <= idtype: {idtype}, id: {id}, options: {options:?}");
 
-    let scan_children = || {
+    let candidate_scan = WaitCandidateScan::new(|| {
         waitable_processes(
             proc,
             &target,
@@ -402,14 +453,14 @@ pub fn sys_waitid(
             thr.tid(),
             WaitChildFilter::from_waitid_options(&options),
         )
-    };
-    if scan_children().is_empty() {
+    });
+    if candidate_scan.collect().is_empty() {
         return Err(AxError::from(LinuxError::ECHILD));
     }
 
     let proc_data = curr.as_thread().proc_data.clone();
     let check_children = || {
-        let children = scan_children();
+        let children = candidate_scan.collect();
         if options.contains(WaitIdOptions::WUNTRACED)
             && let Some((child, data, stop_tid, signo)) = children.iter().find_map(|child| {
                 get_process_data(child.pid()).ok().and_then(|data| {
@@ -434,7 +485,7 @@ pub fn sys_waitid(
                     linux_raw_sys::general::CLD_TRAPPED as i32,
                     stopped_wait_signo(&data, signo),
                 );
-                infop.vm_write(siginfo.0)?;
+                infop.cast::<SignalInfo>().vm_write(current, siginfo)?;
             }
             if !options.contains(WaitIdOptions::WNOWAIT) {
                 data.mark_ptrace_stop_reported_for(stop_tid);
@@ -463,7 +514,7 @@ pub fn sys_waitid(
                     if let Some(infop) = infop.nullable() {
                         let siginfo =
                             SignalInfo::new_sigchld(child.pid(), child_uid(child), code, status);
-                        infop.vm_write(siginfo.0)?;
+                        infop.cast::<SignalInfo>().vm_write(current, siginfo)?;
                     }
                     if !options.contains(WaitIdOptions::WNOWAIT) {
                         data.take_job_status_if(want_stopped, want_continued);
@@ -482,7 +533,7 @@ pub fn sys_waitid(
 
             if let Some(infop) = infop.nullable() {
                 let siginfo = SignalInfo::new_sigchld(child_pid, child_uid, code, status);
-                infop.vm_write(siginfo.0)?;
+                infop.cast::<SignalInfo>().vm_write(current, siginfo)?;
             }
 
             if options.contains(WaitIdOptions::WNOWAIT) {
@@ -498,8 +549,8 @@ pub fn sys_waitid(
             Err(AxError::from(LinuxError::ECHILD))
         } else if options.contains(WaitIdOptions::WNOHANG) {
             if let Some(infop) = infop.nullable() {
-                let zeroed: linux_raw_sys::general::siginfo = unsafe { core::mem::zeroed() };
-                infop.vm_write(zeroed)?;
+                let zeroed = SignalInfo::zeroed();
+                infop.cast::<SignalInfo>().vm_write(current, zeroed)?;
             }
             Ok(Some(0))
         } else {
@@ -507,8 +558,12 @@ pub fn sys_waitid(
         }
     };
 
-    block_on(interruptible(wait_on_pollset(
-        &proc_data.child_exit_event,
-        || check_children().transpose(),
-    )))?
+    let task = current;
+    block_on_user(
+        task,
+        wait_on_pollset(proc_data.child_exit_event(), || {
+            check_children().transpose()
+        }),
+    )
+    .into_result()?
 }

@@ -11,18 +11,16 @@ use alloc::{
 };
 
 use ax_errno::{AxError, AxResult};
-use ax_task::current;
-use axnsproxy::PidNamespace;
 use axpoll::{IoEvents, PollSet};
 use starry_process::{Pid, Process, ProcessCpuTime, init_proc};
 
-use super::{AsThread, Cred, ProcessData};
-use crate::sync::{IrqMutex, RwLock};
+use super::{Cred, ProcessData, current_user_task};
+use crate::sync::{IrqMutex, PiMutex};
 
 /// Generation-specific identity retained by the PID registry and pidfds.
 pub(crate) struct ProcessIdentity {
     process: Arc<Process>,
-    pid_ns: IrqMutex<Option<Arc<IrqMutex<PidNamespace>>>>,
+    pid_namespaces: Arc<[axnsproxy::PidNamespaceRef]>,
     exit_event: Arc<PollSet>,
     state: IrqMutex<ProcessIdentityState>,
 }
@@ -43,6 +41,7 @@ impl ProcessIdentityState {
 /// Immutable process-exit data retained until one consuming wait reaps it.
 pub(crate) struct ZombieSnapshot {
     pub(crate) cred: Arc<Cred>,
+    pub(crate) nice: i32,
     pub(crate) ptrace_tracer_pid: Option<Pid>,
     pub(crate) is_clone_child: bool,
     pub(crate) wait_parent_tid: Pid,
@@ -54,10 +53,11 @@ impl ProcessIdentity {
         process: Arc<Process>,
         exit_event: Arc<PollSet>,
         proc_data: Weak<ProcessData>,
+        pid_namespaces: Arc<[axnsproxy::PidNamespaceRef]>,
     ) -> Arc<Self> {
         Arc::new(Self {
             process,
-            pid_ns: IrqMutex::new(None),
+            pid_namespaces,
             exit_event,
             state: IrqMutex::new(ProcessIdentityState::Live(proc_data)),
         })
@@ -73,24 +73,21 @@ impl ProcessIdentity {
         self.process.pid()
     }
 
-    /// Binds the process PID namespace when this identity is first published.
-    pub(crate) fn bind_pid_ns(&self, pid_ns: Arc<IrqMutex<PidNamespace>>) {
-        let mut bound_pid_ns = self.pid_ns.lock();
-        if let Some(bound_pid_ns) = bound_pid_ns.as_ref() {
-            assert!(
-                Arc::ptr_eq(bound_pid_ns, &pid_ns),
-                "process identity PID namespace changed after publication"
-            );
-        } else {
-            *bound_pid_ns = Some(pid_ns);
-        }
+    /// Returns the immutable PID namespace membership for this generation.
+    pub(crate) fn pid_namespace(&self) -> axnsproxy::PidNamespaceRef {
+        self.pid_namespaces[0].clone()
     }
 
-    pub(crate) fn pid_ns(&self) -> Arc<IrqMutex<PidNamespace>> {
-        self.pid_ns
-            .lock()
-            .clone()
-            .expect("published process identity must have a PID namespace")
+    /// Returns all PID namespace identities from the active level to root.
+    pub(crate) fn pid_namespaces(&self) -> &[axnsproxy::PidNamespaceRef] {
+        &self.pid_namespaces
+    }
+
+    /// Returns whether this generation is visible in one namespace level.
+    pub(crate) fn belongs_to_pid_namespace(&self, namespace: &axnsproxy::PidNamespaceRef) -> bool {
+        self.pid_namespaces
+            .iter()
+            .any(|member| Arc::ptr_eq(member, namespace))
     }
 
     /// Returns the event shared by process pidfds across all lifecycle states.
@@ -165,18 +162,25 @@ impl ProcessIdentity {
         zombie: ZombieSnapshot,
     ) -> Result<(), ZombieSnapshot> {
         let mut state = self.state.lock();
-        let matches = matches!(
-            &*state,
-            ProcessIdentityState::Live(proc_data)
-                if proc_data
-                    .upgrade()
-                    .is_some_and(|registered| Arc::ptr_eq(&registered, expected))
-        );
-        if !matches {
+        if !Self::state_matches_live_data(&state, expected) {
             return Err(zombie);
         }
         *state = ProcessIdentityState::Zombie(zombie);
         Ok(())
+    }
+
+    fn matches_live_data(&self, expected: &Arc<ProcessData>) -> bool {
+        Self::state_matches_live_data(&self.state.lock(), expected)
+    }
+
+    fn state_matches_live_data(state: &ProcessIdentityState, expected: &Arc<ProcessData>) -> bool {
+        matches!(
+            state,
+            ProcessIdentityState::Live(proc_data)
+                if proc_data
+                    .upgrade()
+                    .is_some_and(|registered| Arc::ptr_eq(&registered, expected))
+        )
     }
 
     fn claim_reap(&self, expected: &Arc<Process>) -> Option<ZombieSnapshot> {
@@ -214,15 +218,15 @@ impl ProcessIdentity {
     }
 }
 
-static PROCESS_TABLE: RwLock<BTreeMap<Pid, Arc<ProcessIdentity>>> = RwLock::new(BTreeMap::new());
+// Lock order: registry first, then an identity's bounded raw state lock. No
+// identity-state critical section may acquire this sleepable registry lock.
+static PROCESS_TABLE: PiMutex<BTreeMap<Pid, Arc<ProcessIdentity>>> = PiMutex::new(BTreeMap::new());
 
 /// Registers the process identity associated with a newly published task.
 pub(crate) fn register_process_identity(proc_data: &Arc<ProcessData>) {
     let pid = proc_data.proc.pid();
     let identity = proc_data.identity();
-    let pid_ns = proc_data.nsproxy.lock().pid_ns.clone();
-    identity.bind_pid_ns(pid_ns);
-    let mut process_table = PROCESS_TABLE.write();
+    let mut process_table = PROCESS_TABLE.lock();
     match process_table.get(&pid) {
         Some(registered) if Arc::ptr_eq(registered, &identity) => {}
         Some(_) => panic!("PID must not be reused before its identity is reaped"),
@@ -232,10 +236,39 @@ pub(crate) fn register_process_identity(proc_data: &Arc<ProcessData>) {
     }
 }
 
+/// Registers a freshly prepared process without replacing an existing PID
+/// generation.
+///
+/// Unlike [`register_process_identity`], this reports a collision so clone can
+/// roll back all resources before the scheduler thread becomes runnable.
+pub(crate) fn register_prepared_process_identity(proc_data: &Arc<ProcessData>) -> AxResult<()> {
+    let pid = proc_data.proc.pid();
+    let identity = proc_data.identity();
+    let mut process_table = PROCESS_TABLE.lock();
+    if process_table.contains_key(&pid) {
+        return Err(AxError::BadState);
+    }
+    process_table.insert(pid, identity);
+    Ok(())
+}
+
+/// Removes only the still-live identity installed for a failed prepared clone.
+pub(crate) fn unregister_prepared_process_identity(proc_data: &Arc<ProcessData>) {
+    let pid = proc_data.proc.pid();
+    let identity = proc_data.identity();
+    let mut process_table = PROCESS_TABLE.lock();
+    let matches = process_table.get(&pid).is_some_and(|registered| {
+        Arc::ptr_eq(registered, &identity) && registered.matches_live_data(proc_data)
+    });
+    if matches {
+        process_table.remove(&pid);
+    }
+}
+
 /// Lists live process runtime resources.
 pub fn processes() -> Vec<Arc<ProcessData>> {
     PROCESS_TABLE
-        .read()
+        .lock()
         .values()
         .filter_map(|identity| identity.live_data())
         .collect()
@@ -244,10 +277,10 @@ pub fn processes() -> Vec<Arc<ProcessData>> {
 /// Finds live process runtime resources by PID.
 pub fn get_process_data(pid: Pid) -> AxResult<Arc<ProcessData>> {
     if pid == 0 {
-        return Ok(current().as_thread().proc_data.clone());
+        return Ok(current_user_task().as_thread().proc_data.clone());
     }
     PROCESS_TABLE
-        .read()
+        .lock()
         .get(&pid)
         .and_then(|identity| identity.live_data())
         .ok_or(AxError::NoSuchProcess)
@@ -255,9 +288,9 @@ pub fn get_process_data(pid: Pid) -> AxResult<Arc<ProcessData>> {
 
 /// Resolves one stable generation for `pidfd_open()`.
 pub(crate) fn pidfd_process_identity(pid: Pid) -> AxResult<Arc<ProcessIdentity>> {
-    // Holding the registry read lock through the state check linearizes this
-    // lookup against the write-locked Zombie -> Reaping claim.
-    let process_table = PROCESS_TABLE.read();
+    // Holding the registry lock through the state check linearizes this lookup
+    // against the registry-locked Zombie -> Reaping claim.
+    let process_table = PROCESS_TABLE.lock();
     process_table
         .get(&pid)
         .filter(|identity| identity.is_publicly_resolvable())
@@ -267,7 +300,7 @@ pub(crate) fn pidfd_process_identity(pid: Pid) -> AxResult<Arc<ProcessIdentity>>
 
 /// Resolves the exact openable identity for a process object.
 pub(crate) fn pidfd_thread_identity(process: &Arc<Process>) -> Option<Arc<ProcessIdentity>> {
-    let process_table = PROCESS_TABLE.read();
+    let process_table = PROCESS_TABLE.lock();
     process_table
         .get(&process.pid())
         .filter(|identity| identity.matches_process(process))
@@ -278,7 +311,7 @@ pub(crate) fn pidfd_thread_identity(process: &Arc<Process>) -> Option<Arc<Proces
 /// Resolves the exact registered identity for lifecycle observation.
 fn process_identity(process: &Arc<Process>) -> Option<Arc<ProcessIdentity>> {
     PROCESS_TABLE
-        .read()
+        .lock()
         .get(&process.pid())
         .filter(|identity| identity.matches_process(process))
         .cloned()
@@ -286,7 +319,7 @@ fn process_identity(process: &Arc<Process>) -> Option<Arc<ProcessIdentity>> {
 
 /// Atomically replaces live runtime resources with an immutable zombie.
 pub(crate) fn publish_zombie(proc_data: &Arc<ProcessData>, zombie: ZombieSnapshot) -> AxResult<()> {
-    let process_table = PROCESS_TABLE.write();
+    let process_table = PROCESS_TABLE.lock();
     let Some(identity) = process_table.get(&proc_data.proc.pid()) else {
         return Err(AxError::BadState);
     };
@@ -298,7 +331,7 @@ pub(crate) fn publish_zombie(proc_data: &Arc<ProcessData>, zombie: ZombieSnapsho
 /// Reaps exactly one matching zombie and returns its frozen CPU time.
 pub(crate) fn reap_process(process: &Arc<Process>) -> Option<ProcessCpuTime> {
     let (identity, zombie) = {
-        let process_table = PROCESS_TABLE.write();
+        let process_table = PROCESS_TABLE.lock();
         let identity = process_table.get(&process.pid())?.clone();
         let zombie = identity.claim_reap(process)?;
         (identity, zombie)
@@ -312,7 +345,7 @@ pub(crate) fn reap_process(process: &Arc<Process>) -> Option<ProcessCpuTime> {
     // same parent/group key before the old generation has retired.
     process.retire();
     {
-        let mut process_table = PROCESS_TABLE.write();
+        let mut process_table = PROCESS_TABLE.lock();
         let registered = process_table
             .get(&process.pid())
             .expect("claimed identity must remain registered until reap finishes");
@@ -323,6 +356,7 @@ pub(crate) fn reap_process(process: &Arc<Process>) -> Option<ProcessCpuTime> {
         identity.finish_reap();
         process_table.remove(&process.pid());
     }
+    super::pid_namespace::release_process_pid(&identity);
     unsafe {
         identity
             .exit_event
@@ -334,7 +368,7 @@ pub(crate) fn reap_process(process: &Arc<Process>) -> Option<ProcessCpuTime> {
 /// Returns whether `pid` names an exited, unreaped process.
 pub fn is_zombie_pid(pid: Pid) -> bool {
     PROCESS_TABLE
-        .read()
+        .lock()
         .get(&pid)
         .is_some_and(|identity| identity.is_zombie())
 }
@@ -353,31 +387,104 @@ fn is_live_process(process: &Arc<Process>) -> bool {
     process_identity(process).is_some_and(|identity| identity.live_data().is_some())
 }
 
-/// Chooses the nearest live child subreaper, falling back to init.
-pub(crate) fn orphan_reaper_for(process: &Arc<Process>) -> Arc<Process> {
-    let init = init_proc();
+/// Relationship action selected for the last exiting thread of a process.
+pub(crate) enum OrphanReaper {
+    /// Reparent existing children to a live reaper in the same PID namespace.
+    ReparentTo(Arc<Process>),
+    /// Retain children while the PID namespace reaper shuts the namespace down.
+    ShutdownNamespace(axnsproxy::PidNamespaceRef),
+}
+
+fn same_pid_namespace(process: &Arc<Process>, namespace: &axnsproxy::PidNamespaceRef) -> bool {
+    process_identity(process)
+        .is_some_and(|identity| Arc::ptr_eq(&identity.pid_namespace(), namespace))
+}
+
+fn registered_process(pid: Pid) -> Option<Arc<Process>> {
+    PROCESS_TABLE
+        .lock()
+        .get(&pid)
+        .map(|identity| identity.process())
+}
+
+/// Returns the live namespace init that must autoreap this shutdown victim.
+pub(crate) fn namespace_shutdown_parent(process: &Arc<Process>) -> Option<Arc<ProcessData>> {
+    let identity = process_identity(process)?;
+    let parent = process.parent()?;
+    for namespace in identity.pid_namespaces() {
+        if !namespace.is_shutting_down() {
+            continue;
+        }
+        let init_pid = Pid::try_from(namespace.init_global_tid()?).ok()?;
+        if parent.pid() != init_pid {
+            continue;
+        }
+        let init_identity = PROCESS_TABLE.lock().get(&init_pid)?.clone();
+        if Arc::ptr_eq(&init_identity.process(), &parent)
+            && init_identity.belongs_to_pid_namespace(namespace)
+        {
+            return init_identity.live_data();
+        }
+    }
+    None
+}
+
+/// Returns whether a stable process generation belongs to this PID namespace.
+pub(crate) fn process_belongs_to_pid_namespace(
+    process: &Arc<Process>,
+    namespace: &axnsproxy::PidNamespaceRef,
+) -> bool {
+    process_identity(process).is_some_and(|identity| identity.belongs_to_pid_namespace(namespace))
+}
+
+/// Chooses the nearest live child subreaper without crossing a PID namespace.
+pub(crate) fn orphan_reaper_for(proc_data: &Arc<ProcessData>) -> OrphanReaper {
+    let process = &proc_data.proc;
+    let namespace = proc_data.identity().pid_namespace();
+    let level = namespace.level();
+    let init_global_tid = namespace.init_global_tid();
+
+    if level > 0 && init_global_tid == Some(process.pid() as u64) {
+        return OrphanReaper::ShutdownNamespace(namespace);
+    }
+
+    let init = if level == 0 {
+        init_proc()
+    } else {
+        let init_pid = init_global_tid
+            .and_then(|tid| Pid::try_from(tid).ok())
+            .expect("published PID namespace must retain its init identity");
+        registered_process(init_pid)
+            .expect("PID namespace init identity must outlive every namespace member")
+    };
     let mut cursor = process.parent();
 
     while let Some(candidate) = cursor {
         if Arc::ptr_eq(&candidate, &init) {
             break;
         }
-        if candidate.is_child_subreaper() && is_live_process(&candidate) {
-            return candidate;
+        if !same_pid_namespace(&candidate, &namespace) {
+            break;
+        }
+        if candidate.is_child_subreaper()
+            && candidate.accepts_child_publication()
+            && is_live_process(&candidate)
+        {
+            return OrphanReaper::ReparentTo(candidate);
         }
         cursor = candidate.parent();
     }
-    init
+    OrphanReaper::ReparentTo(init)
 }
 
 /// Finds the stable process object for a publicly visible live or zombie PID.
 pub fn get_process(pid: Pid) -> AxResult<Arc<Process>> {
     if pid == 0 {
-        return Ok(current().as_thread().proc_data.proc.clone());
+        return Ok(current_user_task().as_thread().proc_data.proc.clone());
     }
-    // Holding the registry read lock through the lifecycle check linearizes
-    // lookup against the write-locked Zombie -> Reaping claim.
-    let process_table = PROCESS_TABLE.read();
+    // Holding the registry lock through the lifecycle check linearizes lookup
+    // against the registry-locked Zombie -> Reaping claim.
+    let process_table = PROCESS_TABLE.lock();
     process_table
         .get(&pid)
         .ok_or(AxError::NoSuchProcess)?
@@ -387,28 +494,36 @@ pub fn get_process(pid: Pid) -> AxResult<Arc<Process>> {
 /// Returns the credential snapshot for a zombie PID.
 pub fn get_zombie_cred(pid: Pid) -> Option<Arc<Cred>> {
     PROCESS_TABLE
-        .read()
+        .lock()
         .get(&pid)?
         .zombie_snapshot(|zombie| zombie.cred.clone())
 }
 
+/// Returns the thread-group leader's nice value retained for a zombie PID.
+pub fn get_zombie_nice(pid: Pid) -> Option<i32> {
+    PROCESS_TABLE
+        .lock()
+        .get(&pid)?
+        .zombie_snapshot(|zombie| zombie.nice)
+}
+
 pub(crate) fn is_zombie_clone_child(pid: Pid) -> Option<bool> {
     PROCESS_TABLE
-        .read()
+        .lock()
         .get(&pid)?
         .zombie_snapshot(|zombie| zombie.is_clone_child)
 }
 
 pub(crate) fn zombie_wait_parent_tid(pid: Pid) -> Option<Pid> {
     PROCESS_TABLE
-        .read()
+        .lock()
         .get(&pid)?
         .zombie_snapshot(|zombie| zombie.wait_parent_tid)
 }
 
 pub(crate) fn traced_zombies_for(tracer_pid: Pid) -> Vec<Arc<Process>> {
     PROCESS_TABLE
-        .read()
+        .lock()
         .values()
         .filter(|identity| {
             identity

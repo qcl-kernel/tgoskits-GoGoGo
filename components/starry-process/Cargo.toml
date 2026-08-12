@@ -11,6 +11,9 @@ license = "Apache-2.0"
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(axtest)'] }
 
+[features]
+multitask = ["ax-runtime/multitask"]
+
 [dependencies]
 ax-runtime.workspace = true
 ax-lazyinit = { workspace = true }

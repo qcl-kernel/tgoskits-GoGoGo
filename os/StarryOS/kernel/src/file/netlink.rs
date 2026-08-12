@@ -35,7 +35,6 @@ use core::{
 use ax_errno::{AxError, AxResult, LinuxError};
 use ax_lazyinit::LazyLock;
 use ax_net::{InterfaceFlags, InterfaceId, InterfaceInfo, InterfaceKind};
-use ax_task::future::{block_on, poll_io};
 use axpoll::{IoEvents, PollSet, Pollable};
 use linux_raw_sys::{
     general::{O_RDWR, S_IFSOCK},
@@ -44,10 +43,12 @@ use linux_raw_sys::{
 };
 
 use crate::{
-    file::{FileLike, IoDst, IoSrc},
-    sync::IrqMutex as Mutex,
-    syscall::in_root_net_ns,
-    task::AsThread,
+    file::{FileLike, IoDst, IoSrc, net::in_root_net_ns},
+    sync::Mutex,
+    task::{
+        current_user_task,
+        future::{block_on_user, poll_io},
+    },
 };
 
 /// Maximum number of queued receive messages per socket.  Matches
@@ -369,7 +370,11 @@ impl NetlinkSocket {
         match state.addr {
             Some(addr) if addr.nl_pid != 0 => addr.nl_pid,
             _ => {
-                let pid = ax_task::current().as_thread().proc_data.proc.pid();
+                let pid = crate::task::current_user_task()
+                    .as_thread()
+                    .proc_data
+                    .proc
+                    .pid();
                 state.addr = Some(sockaddr_nl {
                     nl_family: AF_NETLINK as _,
                     nl_pad: 0,
@@ -624,26 +629,36 @@ impl NetlinkSocket {
         dontwait: bool,
     ) -> AxResult<(usize, bool)> {
         let non_blocking = self.nonblocking() || dontwait;
-        block_on(poll_io(self, IoEvents::IN, non_blocking, || {
-            self.read_one(dst, peek, truncate)
-        }))
+        let task = current_user_task();
+        block_on_user(
+            &task,
+            poll_io(self, IoEvents::IN, non_blocking, || {
+                self.read_one(dst, peek, truncate)
+            }),
+        )
+        .into_result()?
     }
 }
 
 impl FileLike for NetlinkSocket {
-    fn ioctl(&self, cmd: u32, arg: usize) -> AxResult<usize> {
+    fn ioctl(&self, current: &crate::task::UserTaskRef, cmd: u32, arg: usize) -> AxResult<usize> {
         // Device ioctls (SIOCGIF*) are family-agnostic in Linux sock_ioctl, so a
         // netlink socket answers them too rather than returning ENOTTY.
-        if let Some(result) = crate::file::net::device_ioctl(cmd, arg) {
+        if let Some(result) = crate::file::net::device_ioctl(current, cmd, arg) {
             return result;
         }
         Err(AxError::NotATty)
     }
 
     fn read(&self, dst: &mut IoDst) -> AxResult<usize> {
-        block_on(poll_io(self, IoEvents::IN, self.nonblocking(), || {
-            self.read_one(dst, false, false)
-        }))
+        let task = current_user_task();
+        block_on_user(
+            &task,
+            poll_io(self, IoEvents::IN, self.nonblocking(), || {
+                self.read_one(dst, false, false)
+            }),
+        )
+        .into_result()?
         .map(|(len, _)| len)
     }
 

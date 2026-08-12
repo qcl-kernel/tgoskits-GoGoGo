@@ -9,7 +9,7 @@ use axpoll::{IoEvents, Pollable};
 use inherit_methods_macro::inherit_methods;
 
 use super::fs::{SimpleFs, SimpleFsNode};
-use crate::sync::Mutex;
+use crate::sync::PiMutex;
 
 fn fs_events_to_io(events: FsIoEvents) -> IoEvents {
     IoEvents::from_bits_truncate(events.bits())
@@ -376,7 +376,7 @@ impl<T: DirectRwFsFileOps> FileNodeOps for SpecialFsFile<T> {
 /// A Sequential file, which only supports reading all content. It is used for procfs and sysfs.
 pub struct SeqObject {
     ops: Arc<dyn SimpleFileOps>,
-    content_cache: Mutex<Option<Vec<u8>>>,
+    content_cache: PiMutex<Option<Vec<u8>>>,
 }
 
 impl DirectRwFsFileOps for SeqObject {
@@ -405,7 +405,7 @@ impl SeqObject {
     /// more features like iterating content.
     pub fn new(ops: impl SimpleFileOps) -> Self {
         Self {
-            content_cache: Mutex::new(None),
+            content_cache: PiMutex::new(None),
             ops: Arc::new(ops),
         }
     }

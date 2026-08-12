@@ -138,12 +138,12 @@ impl ArchTrait for Arch {
         _secondary_entry as *const ()
     }
 
-    fn cpu_on(hartid: usize, entry: usize, arg: usize) -> Result<(), CpuOnError> {
-        power::cpu_on(hartid, entry, arg)
+    fn kick_secondary_cpu(hartid: usize, entry: usize, arg: usize) -> Result<(), CpuOnError> {
+        power::kick_secondary_cpu(hartid, entry, arg)
     }
 
-    fn systimer_enable() {
-        trap::timer_enable();
+    fn systimer_prepare_oneshot() {
+        trap::timer_prepare_oneshot();
     }
 
     fn systimer_irq_enable() {

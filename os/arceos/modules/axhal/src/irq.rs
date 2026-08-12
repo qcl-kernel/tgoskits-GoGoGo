@@ -10,13 +10,14 @@ pub use ax_plat::irq::{
     IrqRequest, IrqReturn, IrqScope, IrqSource, IrqStatus, IrqTrigger, LEGACY_IRQ_DOMAIN,
     LOONGARCH_EIOINTC_DOMAIN, LOONGARCH_PCH_PIC_DOMAIN, RISCV_PLIC_DOMAIN, ShareMode, TrapVector,
     X86_IOAPIC_DOMAIN, X86_LAPIC_DOMAIN, cpu_online, disable_irq, dispatch_irq, enable_irq,
-    free_irq, handle, in_irq_context, init_boot_irqs, irq_status, is_cpu_online, legacy_irq,
-    legacy_irq_raw, prepare_irq_context, request_irq, request_percpu_irq, request_shared_irq,
-    resolve_irq_source, resolve_percpu_irq, run_on_cpu_sync, set_enable, set_run_on_cpu_sync,
-    set_trigger, synchronize_irq, try_legacy_irq,
+    free_irq, in_irq_context, init_boot_irqs, irq_status, is_cpu_online, legacy_irq,
+    legacy_irq_raw, request_irq, request_percpu_irq, request_shared_irq, resolve_irq_source,
+    resolve_percpu_irq, run_on_cpu_sync, set_enable, set_run_on_cpu_sync, set_trigger,
+    synchronize_irq, try_legacy_irq,
 };
 #[cfg(feature = "ipi")]
 pub use ax_plat::irq::{IpiTarget, send_ipi};
+use ax_plat::irq::{handle, prepare_irq_context};
 
 /// Returns the platform IRQ id used for inter-processor interrupts.
 #[cfg(feature = "ipi")]
@@ -40,6 +41,16 @@ pub fn handle_irq(vector: usize) -> bool {
     )
 }
 
+/// Dispatches an IRQ that was acknowledged by an architecture backend.
+///
+/// Hypervisors may consume the physical interrupt token while the guest is
+/// running and dispatch the already-resolved action only after dropping guest
+/// CPU ownership. This entry retains the same IRQ/preemption contract as a
+/// hardware trap without acknowledging the controller a second time.
+pub fn handle_acknowledged_irq(irq: IrqId) -> IrqOutcome {
+    with_irq_entry(|| {}, || dispatch_irq(irq))
+}
+
 fn with_irq_entry<T>(prepare: impl FnOnce(), dispatch: impl FnOnce() -> T) -> T {
     with_observed_irq_entry(prepare, dispatch, || {})
 }
@@ -49,18 +60,30 @@ fn with_observed_irq_entry<T>(
     dispatch: impl FnOnce() -> T,
     after_preempt_release: impl FnOnce(),
 ) -> T {
-    // Keep IRQs disabled until the preemption guard has handed any pending
-    // reschedule back to the IRQ-return path. Hardware traps already enter in
-    // this state; IrqSave also covers deferred VM-exit dispatchers.
-    let irq_guard = ax_sync::IrqSaveGuard::new();
+    let mut irq_guard = ax_sync::IrqSaveGuard::new();
     prepare();
-    let preempt_guard = ax_sync::PreemptGuard::new();
+    let preempt_guard = irq_guard.disable_preempt_for_irq_return();
+    ax_sync::hardirq_enter();
     let result = dispatch();
+    ax_sync::hardirq_exit();
 
-    drop(preempt_guard); // rescheduling may occur when preemption is re-enabled.
+    drop(preempt_guard); // Explicit IRQ-return scheduling keeps local IRQs disabled.
     after_preempt_release();
     drop(irq_guard);
     result
+}
+
+/// Tests IRQ-action context while the caller already pins the current CPU.
+///
+/// # Safety
+///
+/// The caller must prevent migration for the complete CPU identity and IRQ
+/// publication observation.
+#[doc(hidden)]
+#[inline(always)]
+pub unsafe fn in_irq_context_pinned() -> bool {
+    let cpu = CpuId(unsafe { crate::percpu::scheduler_current_cpu_id() });
+    ax_plat::irq::in_irq_context_on(cpu)
 }
 
 /// Installs the default ArceOS IRQ dispatcher into `ax-cpu`'s runtime hook.

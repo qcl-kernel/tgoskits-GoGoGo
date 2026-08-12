@@ -1,11 +1,14 @@
 use core::{
-    mem::{offset_of, size_of},
+    mem::{align_of, offset_of, size_of},
+    num::NonZeroUsize,
     pin::Pin,
     ptr::NonNull,
     sync::atomic::{AtomicUsize, Ordering},
 };
 
-use crate::{CpuAreaRef, ThreadSwitchError};
+use crate::{
+    CpuAreaPrefix, CpuAreaRef, CpuIndex, PreemptExit, ThreadSwitchError, preempt::PreemptState,
+};
 
 /// Stable opaque identity of one runtime-owned execution context.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -39,8 +42,40 @@ const CPU_BINDING: usize = 0b01;
 const CPU_BOUND: usize = 0b10;
 const CPU_UNBINDING: usize = 0b11;
 
+const fn align_up(value: usize, alignment: usize) -> usize {
+    (value + alignment - 1) & !(alignment - 1)
+}
+
 const fn current_thread_reserved_size() -> usize {
-    64 - 5 * size_of::<usize>()
+    let cookie_offset = align_up(
+        5 * size_of::<usize>() + size_of::<PreemptState>(),
+        align_of::<AtomicUsize>(),
+    );
+    64 - cookie_offset - size_of::<AtomicUsize>()
+}
+
+/// Opaque non-zero identity installed by the runtime before a thread can run.
+///
+/// The CPU-local layer does not interpret this value. It keeps the cookie in
+/// the current-thread cache line so a runtime can implement a Linux-style
+/// direct `current` identity without consulting a remote runqueue endpoint.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[repr(transparent)]
+pub struct RuntimeThreadCookie(NonZeroUsize);
+
+impl RuntimeThreadCookie {
+    /// Converts a non-zero runtime-owned scalar into a thread cookie.
+    pub const fn new(raw: usize) -> Option<Self> {
+        match NonZeroUsize::new(raw) {
+            Some(raw) => Some(Self(raw)),
+            None => None,
+        }
+    }
+
+    /// Returns the runtime-owned scalar representation.
+    pub const fn get(self) -> usize {
+        self.0.get()
+    }
 }
 
 /// Pinned scheduler/architecture header for one execution context.
@@ -54,6 +89,8 @@ pub struct CurrentThreadHeader {
     cpu_area: AtomicUsize,
     binding_epoch: AtomicUsize,
     architecture_state: [AtomicUsize; 2],
+    preempt_state: PreemptState,
+    runtime_thread_cookie: AtomicUsize,
     reserved: [u8; current_thread_reserved_size()],
 }
 
@@ -65,6 +102,8 @@ impl CurrentThreadHeader {
             cpu_area: AtomicUsize::new(0),
             binding_epoch: AtomicUsize::new(CPU_UNBOUND),
             architecture_state: [const { AtomicUsize::new(0) }; 2],
+            preempt_state: PreemptState::new(),
+            runtime_thread_cookie: AtomicUsize::new(0),
             reserved: [0; current_thread_reserved_size()],
         }
     }
@@ -75,6 +114,25 @@ impl CurrentThreadHeader {
             cpu_area: AtomicUsize::new(area_base),
             binding_epoch: AtomicUsize::new(CPU_BOUND),
             architecture_state: [const { AtomicUsize::new(0) }; 2],
+            preempt_state: PreemptState::bootstrap_disabled(),
+            runtime_thread_cookie: AtomicUsize::new(0),
+            reserved: [0; current_thread_reserved_size()],
+        }
+    }
+
+    /// Creates the scheduler-owned continuation of the permanent boot header.
+    ///
+    /// It retains Linux's `PREEMPT_DISABLED` boot invariant until the runtime
+    /// has published rq/current/idle and every local scheduler wake source.
+    #[doc(hidden)]
+    pub const fn new_bootstrap(context: CurrentContext) -> Self {
+        Self {
+            context: context.0,
+            cpu_area: AtomicUsize::new(0),
+            binding_epoch: AtomicUsize::new(CPU_UNBOUND),
+            architecture_state: [const { AtomicUsize::new(0) }; 2],
+            preempt_state: PreemptState::bootstrap_disabled(),
+            runtime_thread_cookie: AtomicUsize::new(0),
             reserved: [0; current_thread_reserved_size()],
         }
     }
@@ -84,14 +142,104 @@ impl CurrentThreadHeader {
         CurrentContext::from_raw(self.context)
     }
 
+    /// Binds the runtime-owned identity before this thread can become current.
+    ///
+    /// The cookie is immutable once installed. On failure the returned value
+    /// is the identity that already owns this header.
+    pub fn bind_runtime_thread_cookie(
+        &self,
+        cookie: RuntimeThreadCookie,
+    ) -> Result<(), RuntimeThreadCookie> {
+        self.runtime_thread_cookie
+            .compare_exchange(0, cookie.get(), Ordering::AcqRel, Ordering::Acquire)
+            .map(|_| ())
+            .map_err(|existing| {
+                RuntimeThreadCookie::new(existing)
+                    .expect("a failed runtime-cookie bind must observe a non-zero owner")
+            })
+    }
+
+    /// Returns the immutable runtime-owned current-thread identity.
+    #[inline(always)]
+    pub fn runtime_thread_cookie(&self) -> Option<RuntimeThreadCookie> {
+        RuntimeThreadCookie::new(self.runtime_thread_cookie.load(Ordering::Acquire))
+    }
+
+    /// Returns this execution context's ordinary preemption-guard depth.
+    ///
+    /// Load/store architectures use this task-owned state directly. x86_64
+    /// retains its Linux-compatible fixed per-CPU fast path instead.
+    #[doc(hidden)]
+    #[inline(always)]
+    pub fn preempt_guard_depth(&self) -> u32 {
+        self.preempt_state.depth()
+    }
+
+    /// Returns whether this execution context must schedule at its next safe point.
+    #[doc(hidden)]
+    #[inline(always)]
+    pub fn preempt_need_resched(&self) -> bool {
+        self.preempt_state.need_resched()
+    }
+
+    /// Publishes scheduler work into this context's preemption word.
+    #[doc(hidden)]
+    #[inline(always)]
+    pub fn set_preempt_need_resched(&self) {
+        self.preempt_state.set_need_resched();
+    }
+
+    /// Clears scheduler work after the safe point drains its CPU queues.
+    #[doc(hidden)]
+    #[inline(always)]
+    pub fn clear_preempt_need_resched(&self) {
+        self.preempt_state.clear_need_resched();
+    }
+
+    /// Enters one ordinary preemption guard on this execution context.
+    #[doc(hidden)]
+    #[inline(always)]
+    pub fn enter_preempt_guard(&self) {
+        self.preempt_state.enter_guard();
+    }
+
+    /// Consumes a nested guard or retains the final depth for baton conversion.
+    #[doc(hidden)]
+    #[inline(always)]
+    pub fn prepare_preempt_guard_exit(&self) -> PreemptExit {
+        self.preempt_state.prepare_guard_exit()
+    }
+
+    /// Converts the exact final ordinary guard into scheduler-owned state.
+    #[doc(hidden)]
+    #[inline(always)]
+    pub fn consume_final_preempt_guard(&self) -> bool {
+        self.preempt_state.consume_final_guard()
+    }
+
     /// Returns the stable CPU area while this header is fully bound.
     pub fn cpu_area(&self) -> Option<CpuAreaRef> {
         self.cpu_binding().map(|binding| binding.area)
     }
 
     /// Returns the raw bound area base used by architecture trap entry.
+    #[inline(always)]
     pub fn cpu_area_base(&self) -> Option<usize> {
-        self.cpu_binding().map(|binding| binding.area.base())
+        self.raw_cpu_binding().map(|(area_base, _)| area_base)
+    }
+
+    /// Returns the immutable logical identity of the bound CPU area.
+    #[inline(always)]
+    pub fn cpu_index(&self) -> Option<CpuIndex> {
+        let area_base = self.cpu_area_base()?;
+        // SAFETY: bind_cpu accepts only a validated shutdown-lifetime
+        // CpuAreaRef. The binding epoch above keeps the selected base coherent,
+        // and the prefix identity is immutable after initialization.
+        Some(
+            unsafe { &*(area_base as *const CpuAreaPrefix) }
+                .header()
+                .cpu_index(),
+        )
     }
 
     pub(crate) unsafe fn bind_cpu(
@@ -143,6 +291,7 @@ impl CurrentThreadHeader {
         Some(CurrentCpuBinding { area, epoch })
     }
 
+    #[inline(always)]
     pub(crate) fn raw_cpu_binding(&self) -> Option<(usize, CpuBindingEpoch)> {
         loop {
             let before = self.binding_epoch.load(Ordering::Acquire);
@@ -169,10 +318,52 @@ pub const CURRENT_THREAD_CPU_BASE_OFFSET: usize = offset_of!(CurrentThreadHeader
 /// Byte offset of architecture-owned task trap state.
 pub const CURRENT_THREAD_ARCH_STATE_OFFSET: usize =
     offset_of!(CurrentThreadHeader, architecture_state);
+/// Byte offset of task-owned preemption state on load/store architectures.
+#[doc(hidden)]
+pub const CURRENT_THREAD_PREEMPT_STATE_OFFSET: usize =
+    offset_of!(CurrentThreadHeader, preempt_state);
 /// Reserved bytes available to architecture-owned task trap state.
 pub const CURRENT_THREAD_ARCH_STATE_SIZE: usize = 2 * size_of::<usize>();
 
 const _: () = {
+    assert!(CURRENT_THREAD_CPU_BASE_OFFSET == size_of::<usize>());
+    assert!(CURRENT_THREAD_ARCH_STATE_OFFSET == 3 * size_of::<usize>());
+    assert!(CURRENT_THREAD_PREEMPT_STATE_OFFSET == 5 * size_of::<usize>());
+    assert!(
+        offset_of!(CurrentThreadHeader, runtime_thread_cookie) + size_of::<AtomicUsize>() <= 64
+    );
     assert!(size_of::<CurrentThreadHeader>() == 64);
     assert!(core::mem::align_of::<CurrentThreadHeader>() == 64);
 };
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn bootstrap_and_ordinary_headers_have_distinct_preemption_state() {
+        let context = CurrentContext::from_raw(1).unwrap();
+        let bootstrap = CurrentThreadHeader::new_bootstrap(context);
+        let ordinary = CurrentThreadHeader::new(context);
+
+        assert_eq!(bootstrap.preempt_guard_depth(), 1);
+        assert_eq!(ordinary.preempt_guard_depth(), 0);
+    }
+
+    #[test]
+    fn runtime_thread_cookie_is_bound_once_in_the_current_cache_line() {
+        let header = CurrentThreadHeader::new(CurrentContext::from_raw(1).unwrap());
+        let first = RuntimeThreadCookie::new(0x1_0000_0002).unwrap();
+        let second = RuntimeThreadCookie::new(0x2_0000_0003).unwrap();
+
+        assert_eq!(header.runtime_thread_cookie(), None);
+        assert_eq!(header.bind_runtime_thread_cookie(first), Ok(()));
+        assert_eq!(header.runtime_thread_cookie(), Some(first));
+        assert_eq!(header.bind_runtime_thread_cookie(second), Err(first));
+        assert_eq!(header.runtime_thread_cookie(), Some(first));
+        assert!(
+            offset_of!(CurrentThreadHeader, runtime_thread_cookie) + size_of::<AtomicUsize>() <= 64
+        );
+        assert_eq!(size_of::<CurrentThreadHeader>(), 64);
+    }
+}

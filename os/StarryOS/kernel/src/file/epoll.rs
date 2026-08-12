@@ -19,7 +19,6 @@ use core::{
 };
 
 use ax_errno::{AxError, AxResult};
-use ax_task::current;
 use axpoll::{IoEvents, PollSet};
 use bitflags::bitflags;
 use hashbrown::HashMap;
@@ -34,7 +33,7 @@ use super::epoll_topology::{
 use crate::{
     file::{FileLike, get_file_like, signalfd::Signalfd},
     sync::IrqMutex,
-    task::{AsThread, ProcessData},
+    task::{ProcessData, current_user_task},
 };
 
 pub struct EpollEvent {
@@ -189,7 +188,7 @@ impl EpollInterest {
             signalfd_registration_owner: key
                 .get_file()
                 .filter(|file| file.is::<Signalfd>())
-                .map(|_| Arc::downgrade(&current().as_thread().proc_data)),
+                .map(|_| Arc::downgrade(&current_user_task().as_thread().proc_data)),
             key,
             event,
             nested_link,
@@ -281,13 +280,9 @@ impl EpollInterest {
         self.signalfd_registration_owner
             .as_ref()
             .is_none_or(|owner| {
-                let current_task = current();
-                let Some(thread) = current_task.try_as_thread() else {
-                    return false;
-                };
-                owner
-                    .upgrade()
-                    .is_some_and(|owner| Arc::ptr_eq(&owner, &thread.proc_data))
+                owner.upgrade().is_some_and(|owner| {
+                    Arc::ptr_eq(&owner, &current_user_task().as_thread().proc_data)
+                })
             })
     }
 

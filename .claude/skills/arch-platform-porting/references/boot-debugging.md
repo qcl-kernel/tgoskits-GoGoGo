@@ -119,6 +119,18 @@ concurrency guard, not an ABI version. vCPU exits must restore the host register
 to host Rust; LoongArch KS4/KS5 remain vCPU scratch and AArch64 must restore host TPIDR_EL0 before
 calling Rust exception handlers.
 
+AxVM's vCPU execution boundary follows Linux KVM's `vcpu_load()` / `vcpu_put()` split. For every
+public guest exit, load the architecture backend, publish the CPU-local current-vCPU identity, enter
+the guest, restore host state, unload the backend, and withdraw that publication under one
+non-migrating CPU pin. Only architecture register loading, pending-interrupt injection, guest
+entry/exit, and host-state restoration belong in that scope. Run MMIO/PIO emulation, hypercalls,
+guest-console callbacks, allocation, and other potentially blocking exit work after the backend is
+unloaded and preemption is enabled; a logical run slice may still continue with another load/entry
+after the handler completes. If Axvisor reaches a `futex` or conditional-wait `UnsafeContext`, use
+GDB to identify the outer vCPU frame and check whether `with_current_cpu_set` incorrectly spans the
+exit handler before changing the contested lock. On AArch64, keep run-slice timer-wait invalidation
+separate from the per-entry, pinned host-PPI migration preparation.
+
 For boot debugging, verify the typed per-CPU layout is finalized and frozen before CPU binding.
 Check both the architectural register and its defined mirror (RISC-V sscratch or LoongArch KS3)
 on secondaries. A separate current-task per-CPU variable can mask a stale register during normal
@@ -182,6 +194,11 @@ Use this order when auditing an early boot port:
 10. Runtime CPU areas and secondary boot stacks are dynamically allocated; every typed area is
     initialized once, frozen, and bound through the architecture CPU-local register contract.
 11. Secondary CPU release happens only after boot arguments and page tables are visible to other CPUs.
+12. The architecture hook ends after delivering its wake transport. The common someboot owner
+    publishes one per-CPU `KICKED` state before that hook, waits for the AP to report `ALIVE`
+    after reaching the final stack/page-table/common-entry boundary, and then releases exactly
+    that CPU as `SHOULD_ONLINE`. Keep this handshake separate from both immutable trampoline
+    metadata and the OS scheduler/IRQ online state.
 
 ## RISC-V FDT SMP Notes
 
@@ -287,6 +304,7 @@ device-specific drivers.
 - Initialize trap vectors on every CPU, not only the boot CPU.
 - Flush or barrier boot arguments before `cpu_on`; otherwise secondaries can observe stale stack, page table, or per-CPU data.
 - Keep logical CPU ID mapping separate from firmware CPU IDs. LoongArch CPU IDs in firmware data are not guaranteed to be dense array indices.
+- Keep the final scheduler idle handoff atomic. Set `CRMD.IE` immediately before `IDLE`, give that window stable assembly labels, and fast-forward interrupt return to the exit label. An empty `ESTAT` at the return instruction can be a consumed spurious interrupt from this window, not a new exception.
 - Compare ordering with local Linux architecture code when uncertain. For LoongArch, useful topics include DMW setup, CSR write ordering, TLB refill vector, exception entry, SMP boot argument handoff, and cache/TLB barriers.
 
 ## Finding Local Linux Source
@@ -343,7 +361,7 @@ Important details:
 | Immediate reset after MMU enable | wrong page table root, missing identity/current mapping, bad barrier/TLB flush, invalid jump target |
 | High-half fetch fault | kernel high map, relocation offset, symbol address basis, direct-map window |
 | TLB refill recursion | TLB refill vector address, stack mapping, refill handler mapping, CSR ordering |
-| Secondary CPU silent | `cpu_on` argument, cache flush, stack, per-CPU base, trap setup, logical CPU ID mapping |
+| Secondary CPU silent | Per-CPU `KICKED/ALIVE/SHOULD_ONLINE` state, architecture wake delivery, `cpu_on` argument, cache flush, stack, per-CPU base, trap setup, logical CPU ID mapping; on x86 verify SIPI is `APIC_DM_STARTUP` (`0x600`) rather than INIT level encoding |
 | ArceOS works but Starry fails | rootfs staging, std/musl ABI, console/input feature, tty assumptions, CPR sizing |
 | Starry shell works but grouped tests fail | generated runner path, copied assets, success regex, `shell_init_cmd` versus `test_commands` |
 | AArch64 Axvisor stops at first dynamic MMIO read | missing `ax-cpu/arm-el2`, inactive EL1 page-table root, stale `TTBR0_EL2` boot table |

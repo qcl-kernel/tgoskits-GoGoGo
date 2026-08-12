@@ -1,6 +1,9 @@
 //! Structures and functions for user space.
 
-use core::ops::{Deref, DerefMut};
+use core::{
+    mem::size_of,
+    ops::{Deref, DerefMut},
+};
 
 use ax_memory_addr::VirtAddr;
 use loongArch64::register::{
@@ -8,6 +11,7 @@ use loongArch64::register::{
     estat::{self, Exception, Trap},
 };
 
+use super::irq::is_spurious_interrupt;
 pub use crate::uspace_common::{ExceptionKind, ExceptionSyndrome, ReturnReason};
 use crate::{TrapFrame, trap::PageFaultFlags};
 
@@ -19,6 +23,15 @@ const ECODE_BINARY_TRANSLATION_DISABLED: usize = 0x14;
 #[derive(Debug, Clone, Copy)]
 #[repr(C)]
 pub struct UserContext(TrapFrame);
+
+// SAFETY: `TrapFrame` is a contiguous C-layout register image containing only
+// integer fields and has no padding.
+unsafe impl bytemuck::NoUninit for UserContext {}
+
+const _: () = {
+    assert!(size_of::<TrapFrame>() == 34 * size_of::<usize>());
+    assert!(size_of::<UserContext>() == size_of::<TrapFrame>());
+};
 
 impl UserContext {
     /// Creates a new context with the given entry point, user stack pointer,
@@ -102,10 +115,9 @@ impl UserContext {
                 // user access can also arrive here after the low-level TLB
                 // refill path installs a non-user placeholder entry. Treat it
                 // as a user page fault so the VM layer can populate a lazy user
-                // mapping or reject a real permission violation. Flush the
-                // address first in case the exception came from such an entry
-                // or a stale kernel-only TLB entry for the same VA.
-                crate::asm::flush_tlb(Some(va!(badv)));
+                // mapping or reject a real permission violation. The common
+                // page-fault completion path synchronizes the installed PTE
+                // through `update_mmu_cache` before retrying user mode.
                 ReturnReason::PageFault(va!(badv), PageFaultFlags::USER)
             }
             Trap::Exception(e) => ReturnReason::Exception(ExceptionInfo {
@@ -129,6 +141,7 @@ impl UserContext {
                     esubcode,
                 })
             }
+            Trap::Unknown if is_spurious_interrupt(&estat) => ReturnReason::Interrupt,
             _ => ReturnReason::Unknown,
         };
 

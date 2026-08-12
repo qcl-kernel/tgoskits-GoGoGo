@@ -301,7 +301,7 @@ impl ArchTrait for Arch {
         _secondary_entry as *const ()
     }
 
-    fn cpu_on(hartid: usize, entry: usize, arg: usize) -> Result<(), CpuOnError> {
+    fn kick_secondary_cpu(hartid: usize, entry: usize, arg: usize) -> Result<(), CpuOnError> {
         match sbi::hart_start(hartid, entry, arg) {
             Ok(()) => Ok(()),
             Err(sbi::HartStartError::AlreadyAvailable | sbi::HartStartError::AlreadyStarted) => {
@@ -317,9 +317,8 @@ impl ArchTrait for Arch {
         }
     }
 
-    fn systimer_enable() {
-        // Only bring the timer source into a known idle state here.
-        // IRQ masking/unmasking is controlled separately by the timer core.
+    fn systimer_prepare_oneshot() {
+        Self::systimer_irq_disable();
         let _ = sbi::set_timer(u64::MAX);
     }
 
@@ -356,7 +355,7 @@ impl ArchTrait for Arch {
         let next = if ticks == usize::MAX {
             u64::MAX
         } else {
-            now.saturating_add(ticks as u64).max(now + 1)
+            crate::timer::saturating_deadline_from_interval(now, ticks as u64)
         };
         let _ = sbi::set_timer(next);
     }
