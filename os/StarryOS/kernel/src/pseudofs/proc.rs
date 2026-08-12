@@ -51,6 +51,7 @@ static IRQ_CNT: AtomicUsize = AtomicUsize::new(0);
 const PROCFS_INIT_PID: Pid = 1;
 
 pub static KALLSYMS: LazyInit<KallsymsMapped<'static>> = LazyInit::new();
+static BOOT_ID: LazyInit<String> = LazyInit::new();
 
 fn read_kallsyms() -> KallsymsMapped<'static> {
     unsafe extern "C" {
@@ -97,6 +98,72 @@ fn procfs_lookup_process(pid: Pid) -> VfsResult<Arc<ProcessData>> {
     } else {
         get_process_data(pid).map_err(|_| VfsError::NotFound)
     }
+}
+
+fn boot_id_proc_file(fs: Arc<SimpleFs>) -> Option<Arc<SimpleFile>> {
+    let generated_boot_id = boot_id_from_entropy(ax_runtime::hal::boot::boot_entropy())?;
+    let boot_id = BOOT_ID.get_or_init(|| generated_boot_id).clone();
+    let file = SimpleFile::new_regular(fs, move || Ok(boot_id.clone()));
+    let now = wall_time();
+    file.set_attrs(
+        NodePermission::from_bits_truncate(0o444),
+        0,
+        0,
+        now,
+        now,
+        now,
+    );
+    Some(file)
+}
+
+fn boot_id_from_entropy(boot_entropy: Option<[u8; 32]>) -> Option<String> {
+    let boot_entropy = boot_entropy?;
+    let random_bytes = boot_entropy[..16]
+        .try_into()
+        .expect("boot entropy contains 16 UUID bytes");
+    Some(format_boot_id(random_bytes))
+}
+
+fn format_boot_id(mut random_bytes: [u8; 16]) -> String {
+    random_bytes[6] = (random_bytes[6] & 0x0f) | 0x40;
+    random_bytes[8] = (random_bytes[8] & 0x3f) | 0x80;
+
+    format!(
+        "{:02x}{:02x}{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}{:02x}{:\
+         02x}{:02x}{:02x}\n",
+        random_bytes[0],
+        random_bytes[1],
+        random_bytes[2],
+        random_bytes[3],
+        random_bytes[4],
+        random_bytes[5],
+        random_bytes[6],
+        random_bytes[7],
+        random_bytes[8],
+        random_bytes[9],
+        random_bytes[10],
+        random_bytes[11],
+        random_bytes[12],
+        random_bytes[13],
+        random_bytes[14],
+        random_bytes[15],
+    )
+}
+
+#[cfg(axtest)]
+pub(crate) fn boot_id_formats_firmware_entropy_for_test() -> bool {
+    boot_id_from_entropy(Some([
+        0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e,
+        0x0f, 0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1a, 0x1b, 0x1c, 0x1d,
+        0x1e, 0x1f,
+    ]))
+    .as_deref()
+        == Some("00010203-0405-4607-8809-0a0b0c0d0e0f\n")
+}
+
+#[cfg(axtest)]
+pub(crate) fn boot_id_is_omitted_without_trusted_entropy_for_test() -> bool {
+    boot_id_from_entropy(None).is_none()
 }
 
 fn render_meminfo() -> String {
@@ -1974,6 +2041,13 @@ fn builder(fs: Arc<SimpleFs>) -> DirMaker {
                     }),
                 ),
             );
+            kernel.add("random", {
+                let mut random = DirMapping::new();
+                if let Some(boot_id) = boot_id_proc_file(fs.clone()) {
+                    random.add("boot_id", boot_id);
+                }
+                SimpleDir::new_maker(fs.clone(), Arc::new(random))
+            });
 
             // perf knobs the upstream Linux `perf` tool probes at startup.
             // `perf_event_paranoid` gates how much unprivileged users may

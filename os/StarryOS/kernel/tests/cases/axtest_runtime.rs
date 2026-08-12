@@ -27,6 +27,16 @@ fn random_write_mixes_entropy() {
 }
 
 #[axtest]
+fn boot_id_formats_firmware_entropy() {
+    ax_assert!(axtest_exports::boot_id_formats_firmware_entropy());
+}
+
+#[axtest]
+fn boot_id_is_omitted_without_trusted_entropy() {
+    ax_assert!(axtest_exports::boot_id_is_omitted_without_trusted_entropy());
+}
+
+#[axtest]
 fn time_value_conversion_rules_hold() {
     ax_assert!(axtest_exports::time_value_conversion_rules_hold());
 }
