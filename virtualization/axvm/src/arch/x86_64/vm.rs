@@ -116,15 +116,25 @@ fn plan_devices(
             std::sync::Arc::new(super::cmos::X86CmosModel::new(low_memory_size)),
         ),
         DeviceNodeSpec::virtual_device(
-            DeviceNodeId::new("pci-config")?,
-            std::sync::Arc::new(super::pci_config::X86PciConfigModel),
-        ),
-        DeviceNodeSpec::virtual_device(
             DeviceNodeId::new("acpi-pm-timer")?,
             std::sync::Arc::new(super::acpi_pm_timer::X86AcpiPmTimerModel),
         )
         .with_dependency(controller_id.clone()),
     ];
+    if config.address_space_policy() == axvm_types::AddressSpacePolicy::Passthrough {
+        nodes.push(DeviceNodeSpec::virtual_device(
+            DeviceNodeId::new("host-pci-config")?,
+            std::sync::Arc::new(super::port::HostPortPassthroughDeviceModel::new(
+                axdevice::X86PciConfigDevice::PORT_BASE,
+                axdevice::X86PciConfigDevice::PORT_SIZE,
+            )),
+        ));
+    } else {
+        nodes.push(DeviceNodeSpec::virtual_device(
+            DeviceNodeId::new("pci-config")?,
+            std::sync::Arc::new(super::pci_config::X86PciConfigModel),
+        ));
+    }
     for port in config.pass_through_ports() {
         let id = DeviceNodeId::new(std::format!("host-port-{:x}", port.base))?;
         nodes.push(DeviceNodeSpec::virtual_device(
