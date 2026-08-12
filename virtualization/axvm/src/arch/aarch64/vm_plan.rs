@@ -52,7 +52,7 @@ impl Aarch64VmPlan {
             config,
             nodes,
             &replacement_ranges,
-            super::resource_pools::create(vgic.config())?,
+            super::resource_pools::create(vgic.config(), config.id())?,
         )?;
         let firmware = Aarch64FirmwarePlan::new(config, vgic.config(), devices.graph())?;
         Ok(Self { devices, firmware })

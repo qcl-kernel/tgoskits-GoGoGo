@@ -116,7 +116,7 @@ impl DeviceModel for VirtioNetModel {
                 4,
                 ResourceRequest::Auto,
             )?
-            .with_wired_irq(
+        .with_wired_irq(
                 ResourceSlot::new(IRQ_SLOT)?,
                 self.controller,
                 InterruptTrigger::EdgeTriggered,

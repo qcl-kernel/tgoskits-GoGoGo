@@ -9,7 +9,7 @@ use crate::AxVmResult;
 const AUTO_MMIO: core::ops::Range<u64> = 0x0b00_0000..0x1000_0000;
 const AUTO_MSI_ID_END: u32 = 0x1_0000;
 
-pub(super) fn create(vgic: &ArmVgicConfig) -> AxVmResult<ResourcePools> {
+pub(super) fn create(vgic: &ArmVgicConfig, vm_id: usize) -> AxVmResult<ResourcePools> {
     let controller = vgic.controller_id();
     let spi_count = match vgic {
         ArmVgicConfig::V2(config) => config.spi_count(),
@@ -21,9 +21,14 @@ pub(super) fn create(vgic: &ArmVgicConfig) -> AxVmResult<ResourcePools> {
 
     let mut pools = ResourcePools::new();
     pools.add_auto_mmio(AUTO_MMIO)?;
+    // Offset the auto SPI range per-VM so that concurrent VMs don't collide
+    // in the global ASSIGNED_SPI_ROUTES table. Each VM gets a 64-SPI window.
+    let window = 64usize;
+    let auto_irq_start = 32usize + vm_id * window;
+    let auto_irq_end = auto_irq_start.checked_add(window).unwrap_or(spi_end).min(spi_end);
     pools.add_auto_controller_inputs(
         controller,
-        ControllerInputId::new(32)..ControllerInputId::new(spi_end),
+        ControllerInputId::new(auto_irq_start)..ControllerInputId::new(auto_irq_end),
     )?;
 
     for assigned in vgic.assigned_spis() {
