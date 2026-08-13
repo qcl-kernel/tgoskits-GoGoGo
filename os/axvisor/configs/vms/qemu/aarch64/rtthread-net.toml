@@ -1,7 +1,7 @@
 [base]
 id = 3
 name = "rtthread-net"
-guest_type = "passthrough"
+guest_type = "virtualized"
 cpu_num = 1
 phys_cpu_ids = [2]
 phys_cpu_sets = [4]
@@ -24,6 +24,7 @@ disabled = [
   { path = "/gpio-key-poweroff" },
   { path = "/virtio_mmio@a000000" },
   { path = "/virtio_mmio@a000200" },
+  { path = "/virtio_mmio@a000400" },
   { path = "/virtio_mmio@a000600" },
   { path = "/virtio_mmio@a000800" },
   { path = "/virtio_mmio@a000a00" },
