@@ -318,6 +318,9 @@ impl<T: GuestMemoryAccessor + Clone> VirtioMmioState<T> {
             | vc::VIRTIO_MMIO_QUEUE_AVAIL_HIGH
             | vc::VIRTIO_MMIO_QUEUE_USED_LOW
             | vc::VIRTIO_MMIO_QUEUE_USED_HIGH) => self.write_queue_address(reg, val),
+            // Legacy virtio-mmio register offsets that some guests (e.g. RT-Thread)
+            // still write even in version 2 mode. Treat as no-ops.
+            0x028 | 0x03c | 0x040 => {}
             _ => return Err(VirtioError::InvalidRegister),
         }
         Ok(MmioWriteAction::None)

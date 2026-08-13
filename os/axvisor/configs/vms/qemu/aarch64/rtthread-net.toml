@@ -1,7 +1,7 @@
 [base]
 id = 3
 name = "rtthread-net"
-guest_type = "virtualized"
+guest_type = "passthrough"
 cpu_num = 1
 phys_cpu_ids = [2]
 phys_cpu_sets = [4]
@@ -13,12 +13,47 @@ kernel_path = "/home/yfblock/Code/hyper-rtos/.worktrees/rtthread-guest/tmp/rt-th
 kernel_load_addr = 0xa000_0000
 dtb_load_addr = 0xaf00_0000
 memory_regions = [
-  [0xa000_0000, 0x1000_0000, 0x7, 0],
+  [0xa000_0000, 0x1000_0000, 0x7, 2],
 ]
 
 [devices]
 passthrough = []
-disabled = []
+disabled = [
+  { path = "/pl061@9030000" },
+  { path = "/pl031@9010000" },
+  { path = "/gpio-key-poweroff" },
+  { path = "/virtio_mmio@a000000" },
+  { path = "/virtio_mmio@a000200" },
+  { path = "/virtio_mmio@a000600" },
+  { path = "/virtio_mmio@a000800" },
+  { path = "/virtio_mmio@a000a00" },
+  { path = "/virtio_mmio@a000c00" },
+  { path = "/virtio_mmio@a000e00" },
+  { path = "/virtio_mmio@a001000" },
+  { path = "/virtio_mmio@a001200" },
+  { path = "/virtio_mmio@a001400" },
+  { path = "/virtio_mmio@a001600" },
+  { path = "/virtio_mmio@a001800" },
+  { path = "/virtio_mmio@a001a00" },
+  { path = "/virtio_mmio@a001c00" },
+  { path = "/virtio_mmio@a001e00" },
+  { path = "/virtio_mmio@a002000" },
+  { path = "/virtio_mmio@a002200" },
+  { path = "/virtio_mmio@a002400" },
+  { path = "/virtio_mmio@a002600" },
+  { path = "/virtio_mmio@a002800" },
+  { path = "/virtio_mmio@a002a00" },
+  { path = "/virtio_mmio@a002c00" },
+  { path = "/virtio_mmio@a002e00" },
+  { path = "/virtio_mmio@a003000" },
+  { path = "/virtio_mmio@a003200" },
+  { path = "/virtio_mmio@a003400" },
+  { path = "/virtio_mmio@a003600" },
+  { path = "/virtio_mmio@a003800" },
+  { path = "/virtio_mmio@a003a00" },
+  { path = "/virtio_mmio@a003c00" },
+  { path = "/virtio_mmio@a003e00" },
+]
 
 [[devices.virtual]]
 id = "virtnet0"
