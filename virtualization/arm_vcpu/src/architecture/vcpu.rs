@@ -166,13 +166,14 @@ pub struct ArmVcpuCreateConfig {
 
 /// Fixed EL2 setup policy for a new [`ArmVcpu`].
 ///
-/// Physical interrupts and timers are always trapped. A physical device may
-/// back a virtual interrupt, but it must still pass through the VM-owned
-/// virtual interrupt controller rather than bypassing vCPU state.
+/// Physical interrupts and timers may be trapped or passed through depending
+/// on the VM's passthrough policy.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct ArmVcpuSetupConfig {
     timer: ArmTimerVmConfig,
     host_irq: ArmHostIrqConfig,
+    passthrough_interrupt: bool,
+    trap_wfi: bool,
 }
 
 impl ArmVcpuSetupConfig {
@@ -180,8 +181,13 @@ impl ArmVcpuSetupConfig {
     /// host interrupt-controller interface.
     ///
     /// Every vCPU in one VM must receive the same immutable configuration.
-    pub const fn new(timer: ArmTimerVmConfig, host_irq: ArmHostIrqConfig) -> Self {
-        Self { timer, host_irq }
+    pub const fn new(
+        timer: ArmTimerVmConfig,
+        host_irq: ArmHostIrqConfig,
+        passthrough_interrupt: bool,
+        trap_wfi: bool,
+    ) -> Self {
+        Self { timer, host_irq, passthrough_interrupt, trap_wfi }
     }
 
     /// Returns the VM-wide timer configuration.
@@ -304,9 +310,11 @@ impl<H: ArmHostOps> ArmVcpu<H> {
 
     /// Init guest context. Also set some el2 register value.
     fn init_vm_context(&mut self, config: ArmVcpuSetupConfig) {
-        // CNTHCTL_EL2.modify(CNTHCTL_EL2::EL1PCEN::SET + CNTHCTL_EL2::EL1PCTEN::SET);
-        let guest_hypervisor_control =
-            (CNTHCTL_EL2::EL1PCEN::CLEAR + CNTHCTL_EL2::EL1PCTEN::CLEAR).into();
+        let guest_hypervisor_control = if config.passthrough_interrupt {
+            (CNTHCTL_EL2::EL1PCEN::SET + CNTHCTL_EL2::EL1PCTEN::SET).into()
+        } else {
+            (CNTHCTL_EL2::EL1PCEN::CLEAR + CNTHCTL_EL2::EL1PCTEN::CLEAR).into()
+        };
         self.timer = ArmVcpuTimer::new(config.timer(), guest_hypervisor_control);
         self.host.irq_interface = config.host_irq().interface();
         self.host.irq_cpu_interface_base = config.host_irq().cpu_interface_base();
@@ -322,12 +330,14 @@ impl<H: ArmHostOps> ArmVcpu<H> {
             self.guest_system_regs.vtcr_el2 = vtcr_for_config(levels, gpa_bits, pa_bits);
         }
 
-        let hcr_el2 = HCR_EL2::VM::Enable
+        let mut hcr_el2 = HCR_EL2::VM::Enable
             + HCR_EL2::TSC::EnableTrapEl1SmcToEl2
-            + HCR_EL2::TWI::SET
             + HCR_EL2::RW::EL1IsAarch64
             + HCR_EL2::IMO::EnableVirtualIRQ
             + HCR_EL2::FMO::EnableVirtualFIQ;
+        if config.trap_wfi {
+            hcr_el2 += HCR_EL2::TWI::SET;
+        }
 
         self.guest_system_regs.hcr_el2 = hcr_el2.into();
 

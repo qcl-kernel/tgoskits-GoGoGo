@@ -43,6 +43,8 @@ impl Aarch64Arch {
             let timer_config = timer_vm_config(&timer_profile, &vcpu_mappings)?;
             let host_irq_config = super::gic::host_irq_config()
                 .map_err(|error| AxVmError::interrupt("discover host IRQ CPU interface", error))?;
+            let passthrough_interrupt = resources.config().uses_passthrough_address_space();
+            let trap_wfi = !passthrough_interrupt;
             let dtb_addr = resources
                 .config()
                 .image_config()
@@ -74,7 +76,12 @@ impl Aarch64Arch {
 
             resources.prepare_guest_address_space(vm.id(), &[])?;
             vcpus.setup(resources, move |_config, _memory_regions| {
-                Ok(ArmVcpuSetupConfig::new(timer_config, host_irq_config))
+                Ok(ArmVcpuSetupConfig::new(
+                    timer_config,
+                    host_irq_config,
+                    passthrough_interrupt,
+                    trap_wfi,
+                ))
             })?;
 
             let interrupt_controller: Arc<dyn axdevice_base::VirtualInterruptController> =
