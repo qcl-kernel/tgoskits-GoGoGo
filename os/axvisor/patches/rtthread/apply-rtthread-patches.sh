@@ -16,6 +16,13 @@ RTCONFIG="$BSPDIR/rtconfig.h"
 
 echo "Applying RT-Thread patches for axvisor..."
 
+# 0. Remove RT_USING_VIRTIO_MMIO_ALIGN: with this macro enabled, the compiler
+#    may emit sub-32-bit volatile loads/stores for virtio_mmio_config fields,
+#    which some hypervisor transports reject. We use the natural (non-packed)
+#    layout instead, since all fields are uint32_t and already aligned.
+sed -i '/RT_USING_VIRTIO_MMIO_ALIGN/d' "$RTCONFIG"
+echo "Removed RT_USING_VIRTIO_MMIO_ALIGN from rtconfig.h"
+
 # 1. rtconfig.h: Remove RT_LWIP_DHCP, quote IP addresses, add virtio/net config
 #    (manual edits - see rtconfig.h.diff for details)
 

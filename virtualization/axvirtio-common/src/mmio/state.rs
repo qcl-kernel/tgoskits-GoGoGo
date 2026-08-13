@@ -190,6 +190,8 @@ impl<T: GuestMemoryAccessor + Clone> VirtioMmioState<T> {
         let offset = transport::calculate_offset(addr, self.base_ipa);
         if offset < vc::VIRTIO_MMIO_CONFIG_OFFSET {
             transport::validate_access_width(width)?;
+            // Round to 4-byte register boundary for sub-word accesses
+            // (some guests like RT-Thread emit byte-width volatile reads).
         }
 
         let value = match offset {
@@ -265,6 +267,8 @@ impl<T: GuestMemoryAccessor + Clone> VirtioMmioState<T> {
         let offset = transport::calculate_offset(addr, self.base_ipa);
         if offset < vc::VIRTIO_MMIO_CONFIG_OFFSET {
             transport::validate_access_width(width)?;
+            // Round to 4-byte register boundary for sub-word accesses
+            // (some guests like RT-Thread emit byte-width volatile reads).
         }
         let val = val as u32;
 
