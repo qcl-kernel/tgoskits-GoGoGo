@@ -342,6 +342,7 @@ pub(crate) fn patch_guest_fdt_for_runtime(
     timer_profile: Option<&crate::machine::GuestTimerProfile>,
     initrd_start_size: Option<(u64, u64)>,
     create_chosen: bool,
+    virtio_net_spi_override: Option<u32>,
 ) -> AxVmResult<Vec<u8>> {
     let mut tree = FdtTree::from_bytes(fdt_bytes)?;
     let memory_specs = guest_memory_specs(memory_regions, crate_config);
@@ -359,7 +360,7 @@ pub(crate) fn patch_guest_fdt_for_runtime(
         gic_profile,
         plic_profile,
     )?;
-    install_configured_virtio_net(&mut tree, crate_config, gic_profile, plic_profile)?;
+    install_configured_virtio_net(&mut tree, crate_config, gic_profile, plic_profile, virtio_net_spi_override)?;
     super::timer::install_machine_timer(&mut tree, timer_profile)?;
     super::serial::install_machine_serial(&mut tree, serial_profile, serial_identity)?;
     for serial in additional_serials {
@@ -377,6 +378,7 @@ fn install_configured_virtio_net(
     config: &GuestConfig,
     gic_profile: Option<&crate::machine::GuestGicProfile>,
     plic_profile: Option<&crate::machine::GuestPlicProfile>,
+    spi_override: Option<u32>,
 ) -> AxVmResult {
     if !config
         .devices
@@ -389,7 +391,7 @@ fn install_configured_virtio_net(
 
     const BASE: u32 = 0x0b00_0000;
     const SIZE: u32 = 0x200;
-    let interrupt = virtio_net_interrupt_binding(gic_profile, plic_profile)?;
+    let interrupt = virtio_net_interrupt_binding(gic_profile, plic_profile, spi_override)?;
     let node_id = tree.ensure_path("/virtio_mmio@b000000")?;
     tree.set_property(
         node_id,
@@ -399,7 +401,8 @@ fn install_configured_virtio_net(
         .view_typed_mut(node_id)
         .ok_or_else(|| ax_err_type!(InvalidData, "new virtio-net node is missing"))?
         .set_regs(&[RegInfo::new(BASE as u64, Some(SIZE as u64))]);
-    tree.set_property(node_id, u32_list_property("interrupts", interrupt.cells()))?;
+    let int_cells = interrupt.cells();
+    tree.set_property(node_id, u32_list_property("interrupts", &int_cells))?;
     tree.set_property(
         node_id,
         u32_list_property("interrupt-parent", &[interrupt.parent()]),
@@ -410,24 +413,24 @@ fn install_configured_virtio_net(
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum VirtioNetInterruptBinding {
-    Gic { parent: u32 },
-    Plic { parent: u32 },
+    Gic { parent: u32, spi: u32 },
+    Plic { parent: u32, source: u32 },
 }
 
 impl VirtioNetInterruptBinding {
     const fn parent(self) -> u32 {
         match self {
-            Self::Gic { parent } | Self::Plic { parent } => parent,
+            Self::Gic { parent, .. } | Self::Plic { parent, .. } => parent,
         }
     }
 
-    const fn cells(self) -> &'static [u32] {
+    fn cells(self) -> std::vec::Vec<u32> {
         // AxVisor routes controller input 48 to virtio-net. GIC firmware
         // describes that input as SPI 16 (SPIs start at 32), while a PLIC
         // binding uses the controller input directly as source 48.
         match self {
-            Self::Gic { .. } => &[0, 16, 1],
-            Self::Plic { .. } => &[48],
+            Self::Gic { spi, .. } => std::vec![0, spi, 1],
+            Self::Plic { source, .. } => std::vec![source],
         }
     }
 }
@@ -435,15 +438,18 @@ impl VirtioNetInterruptBinding {
 fn virtio_net_interrupt_binding(
     gic_profile: Option<&crate::machine::GuestGicProfile>,
     plic_profile: Option<&crate::machine::GuestPlicProfile>,
+    spi_override: Option<u32>,
 ) -> AxVmResult<VirtioNetInterruptBinding> {
+    // Default SPI 16 (controller input 48) when no override is provided.
+    let spi = spi_override.unwrap_or(16);
     match (gic_profile, plic_profile) {
         (Some(gic), None) => gic
             .node_phandle
-            .map(|parent| VirtioNetInterruptBinding::Gic { parent })
+            .map(|parent| VirtioNetInterruptBinding::Gic { parent, spi })
             .ok_or_else(|| ax_err_type!(InvalidData, "guest GIC has no phandle for virtio-net")),
         (None, Some(plic)) => plic
             .node_phandle
-            .map(|parent| VirtioNetInterruptBinding::Plic { parent })
+            .map(|parent| VirtioNetInterruptBinding::Plic { parent, source: 48 })
             .ok_or_else(|| ax_err_type!(InvalidData, "guest PLIC has no phandle for virtio-net")),
         (Some(_), Some(_)) => Err(ax_err_type!(
             InvalidData,

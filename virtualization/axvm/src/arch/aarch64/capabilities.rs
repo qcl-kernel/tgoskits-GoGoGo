@@ -86,6 +86,25 @@ pub(super) fn patch_runtime_fdt(
                 plan.timer_profile().clone(),
             ))
         })?;
+
+    // Extract the resolved virtio-net SPI from the device graph so the FDT
+    // uses the same interrupt number the device runtime will pulse.
+    let virtio_net_spi: Option<u32> = vm.with_planned_device_graph(|graph| {
+        for node in graph.nodes() {
+            let firmware = node.firmware();
+            if firmware.compatible().iter().any(|c| c == "virtio,mmio") {
+                for slot in firmware.interrupt_slots() {
+                    if let Ok(resolved) = graph.resources_for(node.id()) {
+                        if let Ok(irq) = resolved.wired_irq(slot) {
+                            let input = irq.input();
+                            return Ok(Some((input.value() as u32).saturating_sub(32))); // GIC FDT: SPI num = INTID - 32
+                        }
+                    }
+                }
+            }
+        }
+        Ok(None)
+    })?;
     super::fdt::core::create::patch_guest_fdt_for_runtime(
         fdt_bytes,
         &vm.memory_regions(),
@@ -98,6 +117,7 @@ pub(super) fn patch_runtime_fdt(
         Some(&timer_profile),
         initrd,
         true,
+        virtio_net_spi,
     )
 }
 
