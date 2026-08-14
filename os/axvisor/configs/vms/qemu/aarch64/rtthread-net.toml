@@ -14,7 +14,6 @@ kernel_load_addr = 0xa000_0000
 dtb_load_addr = 0xaf00_0000
 memory_regions = [
   [0xa000_0000, 0x1000_0000, 0x7, 2],
-  [0x0900_0000, 0x0001_0000, 0x7, 1],
 ]
 
 [devices]
