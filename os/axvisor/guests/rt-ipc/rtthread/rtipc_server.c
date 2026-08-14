@@ -11,6 +11,7 @@
 #include <sys/time.h>
 #include "rt_ipc.h"
 #include <errno.h>
+#include <unistd.h>
 
 #define DBG_TAG "rtipic.srv"
 #define DBG_LVL DBG_INFO
@@ -147,6 +148,7 @@ static void rtipc_server_entry(void *param)
     struct sockaddr_in addr = {0};
     addr.sin_family = AF_INET;
     addr.sin_addr.s_addr = INADDR_ANY;
+    inet_aton(SERVER_IP, &addr.sin_addr);
     addr.sin_port = htons(RTIPC_PORT);
 
     if (bind(sock, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
@@ -177,6 +179,13 @@ static void rtipc_server_entry(void *param)
         ssize_t n = recvfrom(sock, s_recv_buf, sizeof(s_recv_buf), 0,
                              (struct sockaddr *)&peer, &peer_len);
         if (n > 0) {
+            /* After first packet, connect socket to peer to populate ARP cache */
+            static int connected = 0;
+            if (!connected && peer.sin_family != 0) {
+                int cr = connect(sock, (struct sockaddr *)&peer, peer_len);
+                LOG_I("connect() to peer: ret=%d", cr);
+                connected = 1;
+            }
             rtipc_connection_on_recv(&s_conn, s_recv_buf, (size_t)n, now_ms());
             msg_count++;
             byte_count += (uint64_t)n;

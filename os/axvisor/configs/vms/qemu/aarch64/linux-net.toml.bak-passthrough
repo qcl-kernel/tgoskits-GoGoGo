@@ -1,0 +1,28 @@
+[base]
+id = 1
+name = "linux-net"
+guest_type = "virtualized"
+cpu_num = 2
+phys_cpu_ids = [0, 1]
+
+[kernel]
+entry_point = 0x8020_0000
+image_location = "memory"
+kernel_path = "/home/yfblock/Code/hyper-rtos/tgoskits/tmp/vmconfigs/two-guest-net/current/linux-kernel"
+kernel_load_addr = 0x8020_0000
+dtb_load_addr = 0x8f00_0000
+ramdisk_path = "/home/yfblock/Code/hyper-rtos/tgoskits/tmp/vmconfigs/two-guest-net/current/linux-1-initramfs.cpio"
+ramdisk_load_addr = 0x8c00_0000
+memory_regions = [
+  [0x8000_0000, 0x2000_0000, 0x7, 2],
+]
+
+[devices]
+passthrough = [
+  { path = "/virtio_mmio@a000000" },
+]
+disabled = [
+  { path = "/pl061@9030000" },
+  { path = "/pl031@9010000" },
+  { path = "/gpio-key-poweroff" },
+]

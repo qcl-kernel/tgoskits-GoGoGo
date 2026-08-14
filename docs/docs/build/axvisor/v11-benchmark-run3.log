@@ -600,3 +600,45 @@ by AxVisor Team
 [VM 3] [32m[I/rtipic.srv] stats: msgs=174 bytes=12KB conn=0[0m
 [VM 3] [32m[I/rtipic.srv] stats: msgs=174 bytes=12KB conn=0[0m
 [VM 3] [33m[W/rtipic.srv] client disconnected[0m
+[VM 3] [32m[I/rtipic.srv] stats: msgs=174 bytes=12KB conn=0[0m
+[VM 3] [33m[W/rtipic.srv] client disconnected[0m
+[VM 3] [32m[I/rtipic.srv] stats: msgs=174 bytes=12KB conn=0[0m
+[VM 3] [33m[W/rtipic.srv] client disconnected[0m
+[VM 3] [32m[I/rtipic.srv] stats: msgs=174 bytes=12KB conn=0[0m
+[VM 3] [32m[I/rtipic.srv] stats: msgs=174 bytes=12KB conn=0[0m
+[VM 3] [33m[W/rtipic.srv] client disconnected[0m
+[VM 3] [32m[I/rtipic.srv] stats: msgs=174 bytes=12KB conn=0[0m
+[VM 3] [33m[W/rtipic.srv] client disconnected[0m
+[VM 3] [32m[I/rtipic.srv] stats: msgs=174 bytes=12KB conn=0[0m
+[VM 3] [33m[W/rtipic.srv] client disconnected[0m
+[VM 3] [32m[I/rtipic.srv] stats: msgs=174 bytes=12KB conn=0[0m
+[VM 3] [32m[I/rtipic.srv] stats: msgs=174 bytes=12KB conn=0[0m
+[VM 3] [33m[W/rtipic.srv] client disconnected[0m
+[VM 3] [32m[I/rtipic.srv] stats: msgs=174 bytes=12KB conn=0[0m
+[VM 3] [33m[W/rtipic.srv] client disconnected[0m
+[VM 3] [32m[I/rtipic.srv] stats: msgs=174 bytes=12KB conn=0[0m
+[VM 3] [33m[W/rtipic.srv] client disconnected[0m
+[VM 3] [32m[I/rtipic.srv] stats: msgs=174 bytes=12KB conn=0[0m
+[VM 3] [33m[W/rtipic.srv] client disconnected[0m
+[VM 3] [32m[I/rtipic.srv] stats: msgs=174 bytes=12KB conn=0[0m
+[VM 3] [32m[I/rtipic.srv] stats: msgs=174 bytes=12KB conn=0[0m
+[VM 3] [33m[W/rtipic.srv] client disconnected[0m
+[VM 3] [32m[I/rtipic.srv] stats: msgs=174 bytes=12KB conn=0[0m
+[VM 3] [33m[W/rtipic.srv] client disconnected[0m
+[VM 3] [32m[I/rtipic.srv] stats: msgs=174 bytes=12KB conn=0[0m
+[VM 3] [33m[W/rtipic.srv] client disconnected[0m
+[VM 3] [32m[I/rtipic.srv] stats: msgs=174 bytes=12KB conn=0[0m
+[VM 3] [32m[I/rtipic.srv] stats: msgs=174 bytes=12KB conn=0[0m
+[VM 3] [33m[W/rtipic.srv] client disconnected[0m
+[VM 3] [32m[I/rtipic.srv] stats: msgs=174 bytes=12KB conn=0[0m
+[VM 3] [33m[W/rtipic.srv] client disconnected[0m
+[VM 3] [32m[I/rtipic.srv] stats: msgs=174 bytes=12KB conn=0[0m
+[VM 3] [33m[W/rtipic.srv] client disconnected[0m
+[VM 3] [32m[I/rtipic.srv] stats: msgs=174 bytes=12KB conn=0[0m
+[VM 3] [32m[I/rtipic.srv] stats: msgs=174 bytes=12KB conn=0[0m
+[VM 3] [33m[W/rtipic.srv] client disconnected[0m
+[VM 3] [32m[I/rtipic.srv] stats: msgs=174 bytes=12KB conn=0[0m
+[VM 3] [33m[W/rtipic.srv] client disconnected[0m
+[VM 3] [32m[I/rtipic.srv] stats: msgs=174 bytes=12KB conn=0[0m
+[VM 3] [33m[W/rtipic.srv] client disconnected[0m
+qemu-system-aarch64: terminating on signal 15 from pid 168712 (timeout)
