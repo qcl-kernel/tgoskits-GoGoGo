@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/busybox sh
 
 /bin/busybox mkdir -p /proc /sys /dev /dev/pts
 /bin/busybox mount -t proc proc /proc 2>/dev/null || true

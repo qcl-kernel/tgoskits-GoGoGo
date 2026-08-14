@@ -389,7 +389,7 @@ fn install_configured_virtio_net(
         return Ok(());
     }
 
-    const BASE: u32 = 0x0b00_0000;
+    const BASE: u32 = 0x0a00_0000;
     const SIZE: u32 = 0x200;
     let interrupt = virtio_net_interrupt_binding(gic_profile, plic_profile, spi_override)?;
     let node_id = tree.ensure_path("/virtio_mmio@b000000")?;

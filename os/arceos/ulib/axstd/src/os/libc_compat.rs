@@ -1831,6 +1831,11 @@ unsafe fn futex_wait(addr: *mut u32, expected: u32, timeout: *const libc::timesp
     }
     #[cfg(feature = "multitask")]
     {
+        // If we're in an atomic context (IRQs disabled), don't attempt to wait
+        // as it would trigger might_sleep(). Return ETIMEDOUT instead.
+        if ax_task::in_atomic_context() {
+            return fail(LinuxError::ETIMEDOUT);
+        }
         if unsafe { addr.read_volatile() } != expected {
             return fail(LinuxError::EAGAIN);
         }

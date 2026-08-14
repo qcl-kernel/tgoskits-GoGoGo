@@ -307,10 +307,14 @@ impl ArmHostOps for AxvmArmHostOps {
     }
 
     fn handle_current_host_irq() {
-        if let Some(token) = gic::acknowledge_host_irq()
-            && let Err(error) = gic::route_acknowledged_host_irq(token)
-        {
-            warn!("{error}");
+        if let Some(token) = gic::acknowledge_host_irq() {
+            let intid = token & 0x3ff;
+            if intid >= 32 {
+                info!("VM host IRQ: intid={} (SPI {})", intid, intid - 32);
+            }
+            if let Err(error) = gic::route_acknowledged_host_irq(token) {
+                warn!("{error}");
+            }
         }
         crate::check_timer_events();
     }

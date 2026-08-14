@@ -6,7 +6,7 @@ use axdevice_base::*;
 
 use crate::AxVmResult;
 
-const AUTO_MMIO: core::ops::Range<u64> = 0x0b00_0000..0x1000_0000;
+const AUTO_MMIO: core::ops::Range<u64> = 0x0a00_0000..0x0b00_0000;
 const AUTO_MSI_ID_END: u32 = 0x1_0000;
 
 pub(super) fn create(vgic: &ArmVgicConfig, vm_id: usize) -> AxVmResult<ResourcePools> {
