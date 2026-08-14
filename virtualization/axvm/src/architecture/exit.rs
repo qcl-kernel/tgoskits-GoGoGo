@@ -11,7 +11,13 @@ pub(crate) fn handle_mmio_read<V: VmArchVcpuOps, D>(
     exit: MmioReadExit,
 ) -> AxVmResult<BoundVcpuExit<D>> {
     if !try_handle_mmio_read(vm, vcpu, exit)? {
-        return Err(missing_mmio_error("read", exit.addr, exit.width));
+        // Return 0 for unmapped MMIO reads instead of crashing the VM.
+        // This allows guest drivers to probe device presence (e.g. virtio MMIO scan).
+        warn!(
+            "Unhandled MMIO read at {:#x} width {:?} - returning 0",
+            exit.addr, exit.width
+        );
+        vcpu.set_gpr(exit.reg, 0);
     }
     Ok(BoundVcpuExit::Continue)
 }
@@ -43,7 +49,11 @@ pub(crate) fn handle_mmio_write<A: ArchOps>(
     exit: MmioWriteExit,
 ) -> AxVmResult<BoundVcpuExit<A::DeferredRunWork>> {
     if !try_handle_mmio_write::<A>(vm, exit)? {
-        return Err(missing_mmio_error("write", exit.addr, exit.width));
+        // Silently ignore unmapped MMIO writes instead of crashing the VM.
+        warn!(
+            "Unhandled MMIO write at {:#x} width {:?} data={:#x} - ignoring",
+            exit.addr, exit.width, exit.data
+        );
     }
     Ok(BoundVcpuExit::Continue)
 }
