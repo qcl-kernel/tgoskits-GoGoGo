@@ -38,7 +38,15 @@ fn write_impl(fd: c_int, buf: *const c_void, count: usize) -> LinuxResult<ctypes
     let src = unsafe { core::slice::from_raw_parts(buf as *const u8, count) };
     #[cfg(feature = "fd")]
     {
-        Ok(get_file_like(fd)?.write(src)? as ctypes::ssize_t)
+        match get_file_like(fd) {
+            Ok(file) => Ok(file.write(src)? as ctypes::ssize_t),
+            Err(LinuxError::EBADF) if fd == 1 || fd == 2 => {
+                // Fallback: scope-local fd table not initialized for this task
+                ax_hal::console::write_text_bytes(src);
+                Ok(src.len() as ctypes::ssize_t)
+            }
+            Err(e) => Err(e),
+        }
     }
     #[cfg(not(feature = "fd"))]
     match fd {
