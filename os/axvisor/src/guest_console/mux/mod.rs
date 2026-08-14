@@ -10,7 +10,8 @@ use anyhow::{Result, bail};
 use axvm::{SerialBackend, SerialBackendFactory, VMId, VmStatus};
 use core::ops::Bound::{Excluded, Unbounded};
 use log::warn;
-use std::sync::{LazyLock, Mutex, MutexGuard};
+use std::sync::LazyLock;
+use ax_std::os::arceos::modules::ax_task::sync::{SpinLock, SpinLockGuard};
 
 use super::host::write_host_bytes;
 
@@ -59,11 +60,11 @@ pub struct GuestConsoleMux {
 
 #[derive(Debug)]
 struct ConsoleCore {
-    state: Mutex<ConsoleState>,
+    state: SpinLock<ConsoleState>,
     /// Serializes host writes with backend replacement and invalidation.
     ///
     /// Code that needs both locks must acquire `output_lock` before `state`.
-    output_lock: Mutex<()>,
+    output_lock: SpinLock<()>,
 }
 
 #[derive(Debug, Default)]
@@ -103,8 +104,8 @@ impl GuestConsoleMux {
     fn new() -> Self {
         Self {
             core: Arc::new(ConsoleCore {
-                state: Mutex::new(ConsoleState::default()),
-                output_lock: Mutex::new(()),
+                state: SpinLock::new(ConsoleState::default()),
+                output_lock: SpinLock::new(()),
             }),
         }
     }
@@ -339,16 +340,14 @@ fn switch_guest(state: &mut ConsoleState, direction: GuestSwitchDirection) -> Ro
 }
 
 impl ConsoleCore {
-    fn lock_state(&self) -> MutexGuard<'_, ConsoleState> {
+    fn lock_state(&self) -> SpinLockGuard<'_, ConsoleState> {
         self.state
             .lock()
-            .expect("guest console state mutex poisoned")
     }
 
-    fn lock_output(&self) -> MutexGuard<'_, ()> {
+    fn lock_output(&self) -> SpinLockGuard<'_, ()> {
         self.output_lock
             .lock()
-            .expect("guest console output mutex poisoned")
     }
 
     fn create_serial_backend(self: &Arc<Self>, vm_id: VMId) -> Arc<GuestSerialBackend> {
