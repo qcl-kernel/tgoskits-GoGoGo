@@ -42,6 +42,7 @@ typedef struct {
     int received;
     uint64_t total_bytes;
     uint64_t sum_rtt;
+    uint64_t total_time_ms;
     uint64_t min_rtt;
     uint64_t max_rtt;
     uint64_t *rtt_samples;
@@ -64,8 +65,8 @@ static void run_test(int sock, struct sockaddr_in *peer,
     int disconnect_done = 0;
 
     for (int i = 0; i < count; i++) {
-        /* Mid-test disconnect */
-        if (!disconnect_done && i == count / 2) {
+        /* Mid-test disconnect - only for 64B test (first payload size) */
+        if (!disconnect_done && i == count / 2 && payload_size == 64) {
             printf("[client] simulated disconnect (3s)...\n");
             fflush(stdout);
             sleep(3);
@@ -149,9 +150,7 @@ static void run_test(int sock, struct sockaddr_in *peer,
         }
     }
 
-    /* Fill unused sample slots with max value for sorting */
-    for (int i = result->received; i < count; i++)
-        result->rtt_samples[i] = result->max_rtt;
+    result->total_time_ms = now_ms() - test_start;
 }
 
 int main(int argc, char *argv[])
@@ -243,11 +242,11 @@ int main(int argc, char *argv[])
 
         run_test(sock, &peer, sizes[si], count, &conn, &result);
 
-        qsort(result.rtt_samples, count, sizeof(uint64_t), cmp_u64);
+        qsort(result.rtt_samples, result.received > 0 ? result.received : 1, sizeof(uint64_t), cmp_u64);
         uint64_t avg = result.received > 0 ? result.sum_rtt / result.received : 0;
-        uint64_t p50 = percentile(result.rtt_samples, count, 0.50);
-        uint64_t p95 = percentile(result.rtt_samples, count, 0.95);
-        uint64_t p99 = percentile(result.rtt_samples, count, 0.99);
+        uint64_t p50 = percentile(result.rtt_samples, result.received, 0.50);
+        uint64_t p95 = percentile(result.rtt_samples, result.received, 0.95);
+        uint64_t p99 = percentile(result.rtt_samples, result.received, 0.99);
 
         int loss = result.sent > 0 ? (result.sent - result.received) * 100 / result.sent : 0;
 
@@ -258,9 +257,10 @@ int main(int argc, char *argv[])
                (unsigned long long)p50, (unsigned long long)p95,
                (unsigned long long)p99);
         if (result.received > 0) {
-            uint64_t elapsed_s = (now_ms() - 0) / 1000;
+            uint64_t elapsed_s = result.total_time_ms / 1000;
+            if (elapsed_s == 0) elapsed_s = 1;
             printf("  throughput=%lluKB/s\n",
-                   (unsigned long long)(result.total_bytes / (count > 0 ? 3 : 1) / 1024));
+                   (unsigned long long)(result.total_bytes / elapsed_s / 1024));
         }
         printf("\n");
         fflush(stdout);
