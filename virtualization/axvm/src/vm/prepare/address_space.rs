@@ -82,28 +82,6 @@ impl AxVMResources {
             &emulated_resources,
         )?;
 
-        // Collect HostReplacement device MMIO ranges for identity passthrough.
-        // This gives guests direct access to VGIC registers, avoiding the trap overhead
-        // of emulating every GIC register access (RT-Thread GICv3 init causes 200K+ traps).
-        let host_replacement_identity: Vec<(usize, usize)> = {
-            let mut ranges: Vec<(usize, usize)> = Vec::new();
-            for node in graph.nodes() {
-                if node.kind() != DeviceNodeKind::HostReplacement {
-                    continue;
-                }
-                if let Ok(resolved) = graph.resources_for(node.id()) {
-                    for (_, base, size) in resolved.mmio_ranges() {
-                        let b = usize::try_from(base).unwrap_or(0);
-                        let s = usize::try_from(size).unwrap_or(0);
-                        if b != 0 && s != 0 {
-                            ranges.push((b, s));
-                        }
-                    }
-                }
-            }
-            ranges
-        };
-
         for mapping in address_layout.mappings() {
             debug!(
                 "VM[{vm_id}] stage2 {:?}: [{:#x}, {:#x}) -> [{:#x}, {:#x}) {:?}",
@@ -119,22 +97,6 @@ impl AxVMResources {
                 .map_err(|error| AxVmError::from_addrspace("map guest address space", error))?;
         }
 
-        // Apply identity mappings for HostReplacement device MMIO ranges.
-        for (base, size) in &host_replacement_identity {
-            debug!(
-                "VM[{vm_id}] stage2 HostReplacement identity: [{:#x}, {:#x})",
-                base,
-                base + size
-            );
-            self.address_space
-                .map_linear(
-                    GuestPhysAddr::from(*base),
-                    HostPhysAddr::from(*base),
-                    *size,
-                    crate::layout::device_mapping_flags(),
-                )
-                .map_err(|error| AxVmError::from_addrspace("map HostReplacement identity", error))?;
-        }
         self.address_layout = Some(address_layout);
 
         Ok(())
