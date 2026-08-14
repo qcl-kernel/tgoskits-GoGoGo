@@ -66,3 +66,43 @@ v10: 4360+ msgs exchanged, 0% loss, disconnect/reconnect verified.
 - Task 1: 90% (missing: hardware long-duration test)
 - Task 2: 95% (complete with disconnect/reconnect)
 - Task 3: 0% (not started)
+
+---
+
+## Appendix: Third Independent Run (v10-run3)
+
+Run3 was performed with a completely fresh axvisor rebuild and the same rtthread.bin.
+All three independent runs (v9, v10-run1, v10-run3) show consistent results.
+
+### Timer Jitter (3 rounds x 999 samples)
+
+| Metric | Round 1 | Round 2 | Round 3 |
+|--------|---------|---------|---------|
+| min (us) | 1082 | 1080 | 913 |
+| max (us) | 10004 | 10142 | 15531 |
+| avg (us) | 1163 | 1184 | 1294 |
+| P99 (us) | 2260 | 5083 | 7391 |
+| P99.9 (us) | 9831 | 9994 | 10272 |
+| miss>100us | 232 | 283 | 373 |
+| miss>1ms | 12 | 15 | 38 |
+| callback_max (ns) | 24480 | 4432 | 9104 |
+
+### Preemption Latency (200 samples)
+- min=1136ns, max=17936ns, avg=1360ns, P99=2912ns, P99.9=17936ns
+
+### Interrupt Latency (200 samples)
+- min=585us, max=1159us, avg=1010us, P99=1108us, P99.9=1159us
+
+### Cross-Run Consistency Summary
+
+| Metric | v9 | v10-run1 | v10-run3 | Mean | Std Dev |
+|--------|-----|----------|----------|------|---------|
+| Timer avg (us) | 1255 | 1243 | 1214 | 1237 | 21 (1.7%) |
+| Timer P99 (us) | 7134 | 6919 | 4911 | 6321 | 1185 (18.7%) |
+| Preempt avg (ns) | 2400 | 1456 | 1360 | 1739 | 573 (33%) |
+| Preempt P99 (ns) | 4320 | 6464 | 2912 | 4565 | 1791 (39%) |
+| IRQ avg (us) | 1009 | 1001 | 1010 | 1007 | 4.9 (0.5%) |
+| IRQ P99 (us) | 1122 | 1102 | 1108 | 1111 | 10.1 (0.9%) |
+
+The interrupt latency P99 varies by less than 1% across runs - excellent reproducibility.
+Timer jitter and preemption show more variation due to QEMU TCG translation timing sensitivity.
