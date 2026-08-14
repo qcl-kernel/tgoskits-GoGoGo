@@ -10,8 +10,6 @@
 #include <netdev.h>
 #include <sys/time.h>
 #include "rt_ipc.h"
-#include <errno.h>
-#include <unistd.h>
 
 #define DBG_TAG "rtipic.srv"
 #define DBG_LVL DBG_INFO
@@ -21,7 +19,7 @@
 #define SERVER_IP        "192.168.77.30"
 #define SERVER_NM        "255.255.255.0"
 #define SERVER_GW        "192.168.77.1"
-#define RECV_TIMEOUT_MS  200
+#define RECV_TIMEOUT_MS  100
 
 static rtipc_connection_t s_conn;
 static uint8_t s_recv_buf[RTIPC_MAX_PACKET];
@@ -33,78 +31,34 @@ static uint64_t now_ms(void)
 
 static void process_actions(int sock, struct sockaddr_in *peer, socklen_t *peer_len)
 {
-    static int send_err_count = 0;
-    /* Process all actions. Note: rtipc_connection_send() calls action_clear
-     * internally, so we must handle DELIVER specially: save the payload,
-     * process all SEND actions first, then call send and process new actions. */
-    for (;;) {
-        const rtipc_action_t *act = rtipc_action_next(&s_conn);
-        if (act == NULL) break;
-        
-        if (act->type == RTIPC_ACTION_DELIVER) {
-            /* Save payload before send wipes actions */
-            size_t plen = act->payload_len;
-            if (plen > RTIPC_MAX_PAYLOAD) plen = RTIPC_MAX_PAYLOAD;
-            uint8_t payload_buf[RTIPC_MAX_PAYLOAD];
-            memcpy(payload_buf, act->payload, plen);
-            
-            /* First send any remaining ACK/SYNACK actions */
+    const rtipc_action_t *act;
+    while ((act = rtipc_action_next(&s_conn)) != NULL) {
+        switch (act->type) {
+        case RTIPC_ACTION_SEND:
+            if (peer->sin_family != 0)
+                sendto(sock, act->data, act->data_len, 0,
+                       (struct sockaddr *)peer, *peer_len);
+            break;
+        case RTIPC_ACTION_CONNECTED:
+            LOG_I("client connected");
+            break;
+        case RTIPC_ACTION_DISCONNECTED:
+            LOG_W("client disconnected");
+            break;
+        case RTIPC_ACTION_DELIVER: {
+            /* Received CTRL_CMD: echo back as STATUS_REP */
+            rtipc_connection_send(&s_conn, RTIPC_MSG_STATUS_REP,
+                                  act->payload, act->payload_len, now_ms());
             const rtipc_action_t *sa;
             while ((sa = rtipc_action_next(&s_conn)) != NULL) {
                 if (sa->type == RTIPC_ACTION_SEND && peer->sin_family != 0)
-                {
-                    int ret = sendto(sock, sa->data, sa->data_len, 0,
+                    sendto(sock, sa->data, sa->data_len, 0,
                            (struct sockaddr *)peer, *peer_len);
-                    if (ret < 0 && send_err_count < 5) {
-                        LOG_E("sendto failed: ret=%d errno=%d peer=%s:%d",
-                              ret, errno, inet_ntoa(peer->sin_addr),
-                              ntohs(peer->sin_port));
-                        send_err_count++;
-                    } else if (ret > 0 && send_err_count > 0 && send_err_count < 5) {
-                        LOG_I("sendto recovered: ret=%d", ret);
-                        send_err_count = 0;
-                    }
-                }
             }
-            rtipc_action_clear(&s_conn);
-            
-            /* Now send STATUS_REP - this clears and refills actions */
-            rtipc_connection_send(&s_conn, RTIPC_MSG_STATUS_REP,
-                                  payload_buf, plen, now_ms());
-            while ((sa = rtipc_action_next(&s_conn)) != NULL) {
-                if (sa->type == RTIPC_ACTION_SEND && peer->sin_family != 0)
-                {
-                    int ret = sendto(sock, sa->data, sa->data_len, 0,
-                           (struct sockaddr *)peer, *peer_len);
-                    if (ret < 0 && send_err_count < 5) {
-                        LOG_E("sendto(ack) failed: ret=%d errno=%d", ret, errno);
-                        send_err_count++;
-                    }
-                }
-            }
-            rtipc_action_clear(&s_conn);
-        } else {
-            switch (act->type) {
-            case RTIPC_ACTION_SEND:
-                if (peer->sin_family != 0)
-                {
-                    int ret = sendto(sock, act->data, act->data_len, 0,
-                           (struct sockaddr *)peer, *peer_len);
-                    if (ret < 0 && send_err_count < 5) {
-                        LOG_E("sendto(ctrl) failed: ret=%d errno=%d", ret, errno);
-                        send_err_count++;
-                    }
-                }
-                break;
-            case RTIPC_ACTION_CONNECTED:
-                LOG_I("client connected");
-                break;
-            case RTIPC_ACTION_DISCONNECTED:
-                LOG_W("client disconnected");
-                break;
-            default:
-                break;
-            }
+            break;
+        }
+        default:
+            break;
         }
     }
     rtipc_action_clear(&s_conn);
@@ -148,7 +102,6 @@ static void rtipc_server_entry(void *param)
     struct sockaddr_in addr = {0};
     addr.sin_family = AF_INET;
     addr.sin_addr.s_addr = INADDR_ANY;
-    inet_aton(SERVER_IP, &addr.sin_addr);
     addr.sin_port = htons(RTIPC_PORT);
 
     if (bind(sock, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
@@ -163,8 +116,8 @@ static void rtipc_server_entry(void *param)
     rtipc_config_t cfg;
     rtipc_config_default(&cfg);
     cfg.auto_reconnect = true;
-    cfg.heartbeat_interval_ms = 1000;
-    cfg.heartbeat_timeout_ms = 15000;
+    cfg.heartbeat_interval_ms = 500;
+    cfg.heartbeat_timeout_ms = 2000;
     rtipc_connection_init(&s_conn, &cfg);
 
     struct sockaddr_in peer = {0};
@@ -179,13 +132,6 @@ static void rtipc_server_entry(void *param)
         ssize_t n = recvfrom(sock, s_recv_buf, sizeof(s_recv_buf), 0,
                              (struct sockaddr *)&peer, &peer_len);
         if (n > 0) {
-            /* After first packet, connect socket to peer to populate ARP cache */
-            static int connected = 0;
-            if (!connected && peer.sin_family != 0) {
-                int cr = connect(sock, (struct sockaddr *)&peer, peer_len);
-                LOG_I("connect() to peer: ret=%d", cr);
-                connected = 1;
-            }
             rtipc_connection_on_recv(&s_conn, s_recv_buf, (size_t)n, now_ms());
             msg_count++;
             byte_count += (uint64_t)n;

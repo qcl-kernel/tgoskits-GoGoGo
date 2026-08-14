@@ -16,7 +16,7 @@
 
 #define DEFAULT_HOST   "192.168.77.30"
 #define DEFAULT_PORT   9876
-#define DEFAULT_COUNT  200
+#define DEFAULT_COUNT  1000
 #define MAX_PAYLOAD_SIZES 3
 
 static uint64_t now_ms(void) {
@@ -181,10 +181,10 @@ int main(int argc, char *argv[])
     rtipc_config_t cfg;
     rtipc_config_default(&cfg);
     cfg.auto_reconnect = true;
-    cfg.heartbeat_interval_ms = 1000;
-    cfg.heartbeat_timeout_ms = 15000;
-    cfg.rto_ms = 500;
-    cfg.max_retries = 10;
+    cfg.heartbeat_interval_ms = 500;
+    cfg.heartbeat_timeout_ms = 2000;
+    cfg.rto_ms = 100;
+    cfg.max_retries = 5;
 
     static rtipc_connection_t conn;
     rtipc_connection_init(&conn, &cfg);
