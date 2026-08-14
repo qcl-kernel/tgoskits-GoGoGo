@@ -86,7 +86,10 @@ pub struct Stdout {
 
 impl Write for Stdout {
     fn write(&mut self, buf: &[u8]) -> AxResult<usize> {
-        self.inner.lock().write(buf)
+        // Bypass the sleeping Mutex when in atomic/trap context to avoid
+        // might_sleep() panic. StdoutRaw has no shared state that needs
+        // a lock — it just calls console_write_bytes().
+        console_write_bytes(buf)
     }
 
     fn flush(&mut self) -> AxResult {
@@ -153,7 +156,8 @@ impl super::fd_ops::FileLike for Stdout {
     }
 
     fn write(&self, buf: &[u8]) -> LinuxResult<usize> {
-        Ok(self.inner.lock().write(buf)?)
+        // Bypass the sleeping Mutex — see Stdout::write() for rationale.
+        Ok(console_write_bytes(buf)?)
     }
 
     fn stat(&self) -> LinuxResult<crate::ctypes::stat> {

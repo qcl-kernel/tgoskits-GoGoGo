@@ -227,6 +227,13 @@ impl<H: ArmHostOps> ArmVcpu<H> {
     pub fn set_entry(&mut self, entry: ArmGuestPhysAddr) -> ArmVcpuResult {
         debug!("set vcpu entry:{entry:?}");
         self.set_elr(entry.as_usize());
+        // Initialize VBAR_EL1 to the entry point. The guest will set its own
+        // vector table early in boot, but if an exception fires before that,
+        // fetching the handler from VBAR=0 (default) causes a Stage-2 fault.
+        // Pointing VBAR at valid guest code prevents this.
+        if self.guest_system_regs.vbar_el1 == 0 {
+            self.guest_system_regs.vbar_el1 = entry.as_usize() as u64;
+        }
         Ok(())
     }
 
