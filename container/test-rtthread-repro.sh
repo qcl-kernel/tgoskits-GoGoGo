@@ -83,7 +83,7 @@ def parse_instructions(source):
 
 
 instructions = parse_instructions(sys.stdin.read())
-for required in (BASE_ARG, UV_ARG, QEMU_VERSION_ARG, QEMU_COMMIT_ARG):
+for required in (BASE_ARG, UV_ARG):
     if instructions.count(required) != 1:
         fail(f"must contain exactly one {required}")
 
@@ -109,6 +109,9 @@ base_stage = re.compile(
 uv_stage = re.compile(
     r"FROM \$\{UV_IMAGE\}(?: AS [A-Za-z0-9_.-]+)?", re.IGNORECASE
 )
+qemu_builder_stage = re.compile(
+    r"FROM \$\{BASE_IMAGE\} AS qemu-builder", re.IGNORECASE
+)
 if not any(uv_stage.fullmatch(instruction) for instruction in instructions):
     fail("must contain a FROM ${UV_IMAGE} stage")
 
@@ -116,6 +119,40 @@ runtime_from = from_indices[-1]
 if base_stage.fullmatch(instructions[runtime_from]) is None:
     fail("final stage must use FROM ${BASE_IMAGE}")
 runtime_instructions = instructions[runtime_from + 1:]
+
+qemu_builder_froms = [
+    index
+    for index in from_indices
+    if qemu_builder_stage.fullmatch(instructions[index])
+]
+if len(qemu_builder_froms) != 1:
+    fail("must contain exactly one FROM ${BASE_IMAGE} AS qemu-builder stage")
+qemu_builder_from = qemu_builder_froms[0]
+if qemu_builder_from >= runtime_from:
+    fail("qemu-builder must precede the final runtime stage")
+qemu_builder_end = next(
+    index for index in from_indices if index > qemu_builder_from
+)
+qemu_builder_instructions = instructions[qemu_builder_from + 1:qemu_builder_end]
+
+for required in (QEMU_VERSION_ARG, QEMU_COMMIT_ARG):
+    argument_name = required.split("=", 1)[0]
+    builder_declarations = [
+        instruction
+        for instruction in qemu_builder_instructions
+        if instruction == argument_name
+        or instruction.startswith(f"{argument_name}=")
+    ]
+    runtime_declarations = [
+        instruction
+        for instruction in runtime_instructions
+        if instruction == argument_name
+        or instruction.startswith(f"{argument_name}=")
+    ]
+    if builder_declarations != [required]:
+        fail(f"qemu-builder stage must contain exactly one {required}")
+    if runtime_declarations != [required]:
+        fail(f"final runtime stage must contain exactly one {required}")
 
 for command in REQUIRED_COMMANDS:
     required_run = f"RUN command -v {command} >/dev/null 2>&1"
@@ -142,13 +179,14 @@ if missing_packages:
 '
 }
 
-validate_preflight_contract() {
+validate_preflight_contract() (
     local preflight="$1"
     local shim_dir
     local command_name
     local result=0
 
     shim_dir="$(mktemp -d)" || return 1
+    trap 'rm -rf -- "$shim_dir"' EXIT
     for command_name in "${PREFLIGHT_COMMANDS[@]}"; do
         printf '%s\n' '#!/bin/sh' 'exit 0' >"$shim_dir/$command_name"
         chmod +x "$shim_dir/$command_name"
@@ -168,12 +206,8 @@ validate_preflight_contract() {
         done
     fi
 
-    for command_name in "${PREFLIGHT_COMMANDS[@]}"; do
-        rm -f -- "$shim_dir/$command_name" "$shim_dir/$command_name.missing"
-    done
-    rmdir "$shim_dir"
     return "$result"
-}
+)
 
 capture_rendered_stdout() {
     local stderr_file="$1"
@@ -270,6 +304,17 @@ run_self_tests() {
     local option_bypass_dockerfile
     local quoted_dockerfile
     local heredoc_dockerfile
+    local qemu_arg
+    local qemu_arg_name
+    local qemu_arg_alternate
+    local missing_builder_arg_dockerfile
+    local missing_runtime_arg_dockerfile
+    local duplicate_builder_arg_dockerfile
+    local duplicate_runtime_arg_dockerfile
+    local alternate_builder_arg_dockerfile
+    local alternate_runtime_arg_dockerfile
+    local no_default_builder_arg_dockerfile
+    local no_default_runtime_arg_dockerfile
     local captured_json
     local captured_warning
     local capture_stderr_file
@@ -291,6 +336,8 @@ FROM ${BASE_IMAGE} AS qemu-builder
 ARG QEMU_VERSION=11.0.2
 ARG QEMU_COMMIT=e545d8bb9d63e9dd61542b88463183314cff9482
 FROM ${BASE_IMAGE}
+ARG QEMU_VERSION=11.0.2
+ARG QEMU_COMMIT=e545d8bb9d63e9dd61542b88463183314cff9482
 RUN apt-get update && apt-get install -y --no-install-recommends binutils-aarch64-linux-gnu sysstat socat util-linux && rm -rf /var/lib/apt/lists/*
 RUN command -v aarch64-linux-gnu-strip >/dev/null 2>&1
 RUN command -v pidstat >/dev/null 2>&1
@@ -298,6 +345,72 @@ RUN command -v socat >/dev/null 2>&1
 RUN command -v uclampset >/dev/null 2>&1'
     validate_dockerfile_contract <<<"$valid_dockerfile" ||
         fail "self-test rejected the planned Dockerfile instruction grammar"
+
+    for qemu_arg in \
+        'ARG QEMU_VERSION=11.0.2' \
+        'ARG QEMU_COMMIT=e545d8bb9d63e9dd61542b88463183314cff9482'; do
+        qemu_arg_name="${qemu_arg%%=*}"
+        case "$qemu_arg_name" in
+            'ARG QEMU_VERSION') qemu_arg_alternate='ARG QEMU_VERSION=0.0.0' ;;
+            'ARG QEMU_COMMIT') qemu_arg_alternate='ARG QEMU_COMMIT=0000000000000000000000000000000000000000' ;;
+        esac
+
+        missing_builder_arg_dockerfile="${valid_dockerfile/$qemu_arg/}"
+        if validate_dockerfile_contract <<<"$missing_builder_arg_dockerfile" \
+            >/dev/null 2>&1; then
+            fail "self-test accepted missing $qemu_arg in qemu-builder"
+        fi
+
+        missing_runtime_arg_dockerfile="${valid_dockerfile/$qemu_arg/__KEEP_QEMU_ARG__}"
+        missing_runtime_arg_dockerfile="${missing_runtime_arg_dockerfile/$qemu_arg/}"
+        missing_runtime_arg_dockerfile="${missing_runtime_arg_dockerfile/__KEEP_QEMU_ARG__/$qemu_arg}"
+        if validate_dockerfile_contract <<<"$missing_runtime_arg_dockerfile" \
+            >/dev/null 2>&1; then
+            fail "self-test accepted missing $qemu_arg in final runtime"
+        fi
+
+        duplicate_builder_arg_dockerfile="${valid_dockerfile/$qemu_arg/$qemu_arg$'\n'$qemu_arg}"
+        if validate_dockerfile_contract <<<"$duplicate_builder_arg_dockerfile" \
+            >/dev/null 2>&1; then
+            fail "self-test accepted duplicate $qemu_arg in qemu-builder"
+        fi
+
+        duplicate_runtime_arg_dockerfile="${valid_dockerfile/$qemu_arg/__KEEP_QEMU_ARG__}"
+        duplicate_runtime_arg_dockerfile="${duplicate_runtime_arg_dockerfile/$qemu_arg/$qemu_arg$'\n'$qemu_arg}"
+        duplicate_runtime_arg_dockerfile="${duplicate_runtime_arg_dockerfile/__KEEP_QEMU_ARG__/$qemu_arg}"
+        if validate_dockerfile_contract <<<"$duplicate_runtime_arg_dockerfile" \
+            >/dev/null 2>&1; then
+            fail "self-test accepted duplicate $qemu_arg in final runtime"
+        fi
+
+        alternate_builder_arg_dockerfile="${valid_dockerfile/$qemu_arg/$qemu_arg$'\n'$qemu_arg_alternate}"
+        if validate_dockerfile_contract <<<"$alternate_builder_arg_dockerfile" \
+            >/dev/null 2>&1; then
+            fail "self-test accepted alternate $qemu_arg_name in qemu-builder"
+        fi
+
+        alternate_runtime_arg_dockerfile="${valid_dockerfile/$qemu_arg/__KEEP_QEMU_ARG__}"
+        alternate_runtime_arg_dockerfile="${alternate_runtime_arg_dockerfile/$qemu_arg/$qemu_arg$'\n'$qemu_arg_alternate}"
+        alternate_runtime_arg_dockerfile="${alternate_runtime_arg_dockerfile/__KEEP_QEMU_ARG__/$qemu_arg}"
+        if validate_dockerfile_contract <<<"$alternate_runtime_arg_dockerfile" \
+            >/dev/null 2>&1; then
+            fail "self-test accepted alternate $qemu_arg_name in final runtime"
+        fi
+
+        no_default_builder_arg_dockerfile="${valid_dockerfile/$qemu_arg/$qemu_arg$'\n'$qemu_arg_name}"
+        if validate_dockerfile_contract <<<"$no_default_builder_arg_dockerfile" \
+            >/dev/null 2>&1; then
+            fail "self-test accepted no-default $qemu_arg_name in qemu-builder"
+        fi
+
+        no_default_runtime_arg_dockerfile="${valid_dockerfile/$qemu_arg/__KEEP_QEMU_ARG__}"
+        no_default_runtime_arg_dockerfile="${no_default_runtime_arg_dockerfile/$qemu_arg/$qemu_arg$'\n'$qemu_arg_name}"
+        no_default_runtime_arg_dockerfile="${no_default_runtime_arg_dockerfile/__KEEP_QEMU_ARG__/$qemu_arg}"
+        if validate_dockerfile_contract <<<"$no_default_runtime_arg_dockerfile" \
+            >/dev/null 2>&1; then
+            fail "self-test accepted no-default $qemu_arg_name in final runtime"
+        fi
+    done
 
     stage_bypass_dockerfile='ARG BASE_IMAGE=ghcr.io/rcore-os/tgoskits-container@sha256:d011369e5da7d4d5f4379fafad3d46868c116b9d23bfc6f92ce3846432cad9d4
 ARG UV_IMAGE=ghcr.io/astral-sh/uv@sha256:265d074d08ed8080bc578087ca68a8e94611f9c7be671d40e18b3d3b1ad0dad4
@@ -336,6 +449,8 @@ FROM ${BASE_IMAGE} AS qemu-builder
 ARG QEMU_VERSION=11.0.2
 ARG QEMU_COMMIT=e545d8bb9d63e9dd61542b88463183314cff9482
 FROM ${BASE_IMAGE}
+ARG QEMU_VERSION=11.0.2
+ARG QEMU_COMMIT=e545d8bb9d63e9dd61542b88463183314cff9482
 RUN printf "%s\n" "
 RUN apt-get update && apt-get install -y --no-install-recommends binutils-aarch64-linux-gnu sysstat socat util-linux && rm -rf /var/lib/apt/lists/*
 RUN command -v aarch64-linux-gnu-strip >/dev/null 2>&1
@@ -355,6 +470,8 @@ FROM ${BASE_IMAGE} AS qemu-builder
 ARG QEMU_VERSION=11.0.2
 ARG QEMU_COMMIT=e545d8bb9d63e9dd61542b88463183314cff9482
 FROM ${BASE_IMAGE}
+ARG QEMU_VERSION=11.0.2
+ARG QEMU_COMMIT=e545d8bb9d63e9dd61542b88463183314cff9482
 RUN cat<<EOF
 RUN apt-get update && apt-get install -y --no-install-recommends binutils-aarch64-linux-gnu sysstat socat util-linux && rm -rf /var/lib/apt/lists/*
 RUN command -v aarch64-linux-gnu-strip >/dev/null 2>&1
