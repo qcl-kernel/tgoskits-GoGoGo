@@ -1,0 +1,26 @@
+services:
+  rtthread-repro:
+    build:
+      context: .
+      dockerfile: container/Dockerfile.rtthread-repro
+    image: tgoskits-rtthread-repro:2026-08-16
+    pull_policy: build
+    init: true
+    cap_add:
+      - SYS_NICE
+    cpuset: "${RT_REPRO_CPUSET:-0-3}"
+    user: "${RT_REPRO_UID:-1000}:${RT_REPRO_GID:-1000}"
+    working_dir: /workspace
+    environment:
+      HOME: /workspace/.docker-cache/home
+      CARGO_HOME: /workspace/.docker-cache/cargo
+      UV_CACHE_DIR: /workspace/.docker-cache/uv
+      RTTHREAD_SRC: /workspace/.docker-cache/rt-thread-5.2.2
+      QEMU: /opt/qemu-11.0.2/bin/qemu-system-aarch64
+    volumes:
+      - .:/workspace
+    stdin_open: true
+    tty: true
+    security_opt:
+      - no-new-privileges:true
+    stop_grace_period: 30s

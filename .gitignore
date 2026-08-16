@@ -55,6 +55,7 @@ __pycache__/
 .board*
 
 # Tooling artifacts
+/.docker-cache/
 .codex
 .agents
 .image.toml

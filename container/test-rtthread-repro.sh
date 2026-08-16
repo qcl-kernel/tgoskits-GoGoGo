@@ -232,6 +232,19 @@ def fail(message):
 
 
 expected_uid, expected_gid, expected_cpuset = sys.argv[1:4]
+RESOURCE_LIMIT_FIELDS = (
+    "cpus",
+    "cpu_count",
+    "cpu_percent",
+    "cpu_quota",
+    "cpu_period",
+    "cpu_rt_runtime",
+    "cpu_rt_period",
+    "mem_limit",
+    "mem_reservation",
+    "memswap_limit",
+    "pids_limit",
+)
 
 try:
     document = json.load(sys.stdin)
@@ -252,8 +265,11 @@ if not isinstance(service, dict):
 cap_add = service.get("cap_add")
 if not isinstance(cap_add, list) or not all(isinstance(item, str) for item in cap_add):
     fail("service rtthread-repro cap_add must be a string array")
-if "SYS_NICE" not in cap_add:
-    fail("service rtthread-repro cap_add must contain SYS_NICE")
+if cap_add != ["SYS_NICE"]:
+    fail("service rtthread-repro cap_add must be exactly [SYS_NICE]")
+
+if service.get("pull_policy") != "build":
+    fail("service rtthread-repro pull_policy must be exactly build")
 
 if service.get("cpuset") != expected_cpuset:
     fail(f"service rtthread-repro cpuset must be exactly {expected_cpuset}")
@@ -275,6 +291,41 @@ if "network_mode" in service:
     if network_mode == "host":
         fail("service rtthread-repro must not use host networking")
 
+for namespace_field in ("pid", "ipc"):
+    if namespace_field in service:
+        fail(f"service rtthread-repro must not define {namespace_field}")
+
+configured_resource_limits = [
+    field for field in RESOURCE_LIMIT_FIELDS if field in service
+]
+if configured_resource_limits:
+    fail(
+        "service rtthread-repro must not define resource limits: "
+        + ", ".join(configured_resource_limits)
+    )
+
+if "deploy" in service:
+    deploy = service["deploy"]
+    if not isinstance(deploy, dict):
+        fail("service rtthread-repro deploy must be an object")
+    if "replicas" in deploy:
+        fail("service rtthread-repro deploy must not define replicas")
+    if "resources" in deploy:
+        resources = deploy["resources"]
+        if not isinstance(resources, dict):
+            fail("service rtthread-repro deploy resources must be an object")
+        forbidden_resource_fields = [
+            field for field in ("limits", "reservations") if field in resources
+        ]
+        if forbidden_resource_fields:
+            fail(
+                "service rtthread-repro deploy resources must not define: "
+                + ", ".join(forbidden_resource_fields)
+            )
+
+if "gpus" in service:
+    fail("service rtthread-repro must not define GPU device requests")
+
 devices = service.get("devices", [])
 if not isinstance(devices, list):
     fail("service rtthread-repro devices must be an array")
@@ -287,12 +338,21 @@ for device in devices:
             fail(f"service rtthread-repro device {field} must be a string")
         if value == "/dev/kvm":
             fail(f"service rtthread-repro device {field} must not be /dev/kvm")
+if devices:
+    fail("service rtthread-repro must not define device mappings")
 ' "$expected_uid" "$expected_gid" "$expected_cpuset"
 }
 
 run_self_tests() {
     local sentinel_json
     local decoy_json
+    local registry_pull_json
+    local empty_deploy_resources_json
+    local unsafe_fixture_index
+    local unsafe_fixture_report
+    local -a unsafe_fixture_names
+    local -a unsafe_fixture_json
+    local -a fixture_failures
     local valid_preflight
     local spoofed_preflight
     local valid_preflight_file
@@ -319,14 +379,85 @@ run_self_tests() {
     local captured_warning
     local capture_stderr_file
 
-    sentinel_json='{"services":{"rtthread-repro":{"cap_add":["SYS_NICE"],"cpuset":"5-7","user":"23456:23457"}}}'
+    sentinel_json='{"services":{"rtthread-repro":{"cap_add":["SYS_NICE"],"pull_policy":"build","cpuset":"5-7","user":"23456:23457"}}}'
     validate_compose_json 23456 23457 5-7 <<<"$sentinel_json" ||
         fail "self-test rejected target-service sentinel interpolation"
 
-    decoy_json='{"services":{"rtthread-repro":{"cap_add":["SYS_NICE"],"cpuset":"0-3","user":"1000:1000"},"decoy":{"cpuset":"5-7","user":"23456:23457"}}}'
+    decoy_json='{"services":{"rtthread-repro":{"cap_add":["SYS_NICE"],"pull_policy":"build","cpuset":"0-3","user":"1000:1000"},"decoy":{"pull_policy":"build","cpuset":"5-7","user":"23456:23457"}}}'
     if validate_compose_json 23456 23457 5-7 \
         <<<"$decoy_json" >/dev/null 2>&1; then
         fail "self-test accepted sentinel interpolation from another service"
+    fi
+
+    registry_pull_json='{"services":{"rtthread-repro":{"cap_add":["SYS_NICE"],"pull_policy":"missing","cpuset":"5-7","user":"23456:23457"}}}'
+    if validate_compose_json 23456 23457 5-7 \
+        <<<"$registry_pull_json" >/dev/null 2>&1; then
+        fail "self-test accepted a registry pull policy"
+    fi
+
+    unsafe_fixture_names=(
+        extra-capability
+        duplicate-capability
+        device-mapping
+        host-pid
+        host-ipc
+        cpus-limit
+        cpu-count-limit
+        cpu-percent-limit
+        cpu-quota
+        cpu-period
+        cpu-rt-runtime
+        cpu-rt-period
+        memory-limit
+        memory-reservation
+        memory-swap-limit
+        pids-limit
+        gpu-device-request
+        deploy-resource-limits
+        deploy-resource-reservations
+        deploy-replicas
+    )
+    unsafe_fixture_json=(
+        '{"services":{"rtthread-repro":{"cap_add":["SYS_NICE","SYS_ADMIN"],"pull_policy":"build","cpuset":"5-7","user":"23456:23457"}}}'
+        '{"services":{"rtthread-repro":{"cap_add":["SYS_NICE","SYS_NICE"],"pull_policy":"build","cpuset":"5-7","user":"23456:23457"}}}'
+        '{"services":{"rtthread-repro":{"cap_add":["SYS_NICE"],"pull_policy":"build","cpuset":"5-7","user":"23456:23457","devices":[{"source":"/dev/null","target":"/dev/null","permissions":"rwm"}]}}}'
+        '{"services":{"rtthread-repro":{"cap_add":["SYS_NICE"],"pull_policy":"build","cpuset":"5-7","user":"23456:23457","pid":"host"}}}'
+        '{"services":{"rtthread-repro":{"cap_add":["SYS_NICE"],"pull_policy":"build","cpuset":"5-7","user":"23456:23457","ipc":"host"}}}'
+        '{"services":{"rtthread-repro":{"cap_add":["SYS_NICE"],"pull_policy":"build","cpuset":"5-7","user":"23456:23457","cpus":1.5}}}'
+        '{"services":{"rtthread-repro":{"cap_add":["SYS_NICE"],"pull_policy":"build","cpuset":"5-7","user":"23456:23457","cpu_count":2}}}'
+        '{"services":{"rtthread-repro":{"cap_add":["SYS_NICE"],"pull_policy":"build","cpuset":"5-7","user":"23456:23457","cpu_percent":50}}}'
+        '{"services":{"rtthread-repro":{"cap_add":["SYS_NICE"],"pull_policy":"build","cpuset":"5-7","user":"23456:23457","cpu_quota":50000}}}'
+        '{"services":{"rtthread-repro":{"cap_add":["SYS_NICE"],"pull_policy":"build","cpuset":"5-7","user":"23456:23457","cpu_period":100000}}}'
+        '{"services":{"rtthread-repro":{"cap_add":["SYS_NICE"],"pull_policy":"build","cpuset":"5-7","user":"23456:23457","cpu_rt_runtime":400000}}}'
+        '{"services":{"rtthread-repro":{"cap_add":["SYS_NICE"],"pull_policy":"build","cpuset":"5-7","user":"23456:23457","cpu_rt_period":1000000}}}'
+        '{"services":{"rtthread-repro":{"cap_add":["SYS_NICE"],"pull_policy":"build","cpuset":"5-7","user":"23456:23457","mem_limit":"536870912"}}}'
+        '{"services":{"rtthread-repro":{"cap_add":["SYS_NICE"],"pull_policy":"build","cpuset":"5-7","user":"23456:23457","mem_reservation":"268435456"}}}'
+        '{"services":{"rtthread-repro":{"cap_add":["SYS_NICE"],"pull_policy":"build","cpuset":"5-7","user":"23456:23457","memswap_limit":"1073741824"}}}'
+        '{"services":{"rtthread-repro":{"cap_add":["SYS_NICE"],"pull_policy":"build","cpuset":"5-7","user":"23456:23457","pids_limit":100}}}'
+        '{"services":{"rtthread-repro":{"cap_add":["SYS_NICE"],"pull_policy":"build","cpuset":"5-7","user":"23456:23457","gpus":[{"count":-1}]}}}'
+        '{"services":{"rtthread-repro":{"cap_add":["SYS_NICE"],"pull_policy":"build","cpuset":"5-7","user":"23456:23457","deploy":{"resources":{"limits":{"cpus":0.5,"memory":"268435456","pids":50}},"placement":{}}}}}'
+        '{"services":{"rtthread-repro":{"cap_add":["SYS_NICE"],"pull_policy":"build","cpuset":"5-7","user":"23456:23457","deploy":{"resources":{"reservations":{"cpus":0.25,"memory":"134217728"}},"placement":{}}}}}'
+        '{"services":{"rtthread-repro":{"cap_add":["SYS_NICE"],"pull_policy":"build","cpuset":"5-7","user":"23456:23457","deploy":{"replicas":2,"placement":{}}}}}'
+    )
+    fixture_failures=()
+    for unsafe_fixture_index in "${!unsafe_fixture_names[@]}"; do
+        if validate_compose_json 23456 23457 5-7 \
+            <<<"${unsafe_fixture_json[$unsafe_fixture_index]}" \
+            >/dev/null 2>&1; then
+            fixture_failures+=(
+                "accepted:${unsafe_fixture_names[$unsafe_fixture_index]}"
+            )
+        fi
+    done
+    empty_deploy_resources_json='{"services":{"rtthread-repro":{"cap_add":["SYS_NICE"],"pull_policy":"build","cpuset":"5-7","user":"23456:23457","deploy":{"resources":{},"placement":{}}}}}'
+    if ! validate_compose_json 23456 23457 5-7 \
+        <<<"$empty_deploy_resources_json" >/dev/null 2>&1; then
+        fixture_failures+=(rejected:empty-deploy-resources)
+    fi
+    if ((${#fixture_failures[@]} != 0)); then
+        printf -v unsafe_fixture_report \
+            '%s, ' "${fixture_failures[@]}"
+        fail "self-test normalized service fixture failures: ${unsafe_fixture_report%, }"
     fi
 
     valid_dockerfile='ARG BASE_IMAGE=ghcr.io/rcore-os/tgoskits-container@sha256:d011369e5da7d4d5f4379fafad3d46868c116b9d23bfc6f92ce3846432cad9d4
