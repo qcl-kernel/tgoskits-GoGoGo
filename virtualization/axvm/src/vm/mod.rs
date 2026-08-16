@@ -786,7 +786,9 @@ const TEMP_MAX_VCPU_NUM: usize = 64;
 pub struct AxVM {
     id: usize,
     name: String,
+    #[cfg(target_arch = "aarch64")]
     host_vcpu_idle_policy: HostVcpuIdlePolicy,
+    #[cfg(target_arch = "aarch64")]
     guest_tlbi_policy: GuestTlbiPolicy,
     machine: Mutex<Machine<AxVMResources, Arc<VmRuntimeHandle>>>,
     fw_cfg_payload: Arc<FwCfgPayloadSlot>,
@@ -804,7 +806,9 @@ impl AxVM {
     pub fn new(config: AxVMConfig) -> AxVmResult<AxVMRef> {
         let id = config.id();
         let name = config.name();
+        #[cfg(target_arch = "aarch64")]
         let host_vcpu_idle_policy = config.host_vcpu_idle_policy();
+        #[cfg(target_arch = "aarch64")]
         let guest_tlbi_policy = config.guest_tlbi_policy();
         let fw_cfg_payload = Arc::new(FwCfgPayloadSlot::new());
         let resources =
@@ -812,7 +816,9 @@ impl AxVM {
         let result = Arc::new(Self {
             id,
             name,
+            #[cfg(target_arch = "aarch64")]
             host_vcpu_idle_policy,
+            #[cfg(target_arch = "aarch64")]
             guest_tlbi_policy,
             machine: Mutex::new(Machine::Ready(resources)),
             fw_cfg_payload,
@@ -835,11 +841,13 @@ impl AxVM {
     }
 
     /// Returns the immutable host behavior selected for trapped guest WFI exits.
+    #[cfg(target_arch = "aarch64")]
     pub(crate) const fn host_vcpu_idle_policy(&self) -> HostVcpuIdlePolicy {
         self.host_vcpu_idle_policy
     }
 
     /// Returns the immutable guest EL1 TLB-maintenance policy.
+    #[cfg(target_arch = "aarch64")]
     pub(crate) const fn guest_tlbi_policy(&self) -> GuestTlbiPolicy {
         self.guest_tlbi_policy
     }

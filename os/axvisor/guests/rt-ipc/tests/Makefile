@@ -1,6 +1,13 @@
 CC ?= gcc
 CFLAGS = -Wall -Wextra -O2 -I../common
 
+TEST_BINS := target/protocol_test target/echo_responder_test \
+	target/loopback_test target/fault_profile_test \
+	target/state_machine_regression_test target/crc_concurrency_test \
+	target/linux_shutdown_test target/platform_safety_test
+
+all: $(TEST_BINS)
+
 target/protocol_test: protocol_test.c ../common/rt_ipc.c ../common/rt_ipc.h
 	mkdir -p target
 	$(CC) $(CFLAGS) -o target/protocol_test protocol_test.c ../common/rt_ipc.c
@@ -69,10 +76,7 @@ target/linux_shutdown_test: linux_shutdown_test.c ../common/rt_ipc.c \
 		linux_shutdown_test.c ../common/rt_ipc.c \
 		../linux/rtipc_client_report.c ../linux/rtipc_shutdown.c
 
-test: target/protocol_test target/echo_responder_test target/loopback_test \
-		target/fault_profile_test target/state_machine_regression_test \
-		target/crc_concurrency_test target/linux_shutdown_test \
-		target/platform_safety_test
+test: all
 	./target/protocol_test
 	./target/echo_responder_test
 	./target/loopback_test
@@ -108,5 +112,5 @@ test_crc_concurrency: target/crc_concurrency_test
 clean:
 	rm -rf target
 
-.PHONY: test test_loopback test_fault_profile test_state_machine \
+.PHONY: all test test_loopback test_fault_profile test_state_machine \
 	test_crc_concurrency clean

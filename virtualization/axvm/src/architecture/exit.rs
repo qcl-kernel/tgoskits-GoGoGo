@@ -69,23 +69,6 @@ pub(crate) fn try_handle_mmio_write<A: ArchOps>(
     Ok(handled)
 }
 
-fn missing_mmio_error(
-    operation: &'static str,
-    addr: axvm_types::GuestPhysAddr,
-    width: axvm_types::AccessWidth,
-) -> AxVmError {
-    AxVmError::device(
-        "access guest MMIO",
-        axdevice::DeviceManagerError::Access {
-            operation,
-            bus: axdevice_base::BusKind::Mmio,
-            addr: addr.as_usize() as u64,
-            width,
-            source: axdevice_base::DeviceError::NotFound,
-        },
-    )
-}
-
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) enum HyperCallExitAction {
     Return(usize),
