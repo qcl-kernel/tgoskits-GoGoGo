@@ -230,7 +230,13 @@ Expected: 299999/299999 samples and 90000/90000 requests, no timeout, protocol/a
 
 - [ ] **Step 3: Apply regression rule**
 
-Compare with v8: P50 8.288 us, P95 241.328 us, P99 293.712 us, P99.9 362.144 us, max 1.193376 ms, miss_1ms=2. Fail on functional regression or repeatable P50/P95/P99 increase over 10 percent. If only max or miss_1ms worsens, repeat the long run once.
+Use an artifact-matched, test-only pre-cleanup control: restore only the removed
+VirtIO diagnostic counters/logging and Linux success-path dumps, keep the QEMU
+binary, VM configuration, workload, and host controls unchanged, then restore
+the cleaned files and verify their SHA-256 values. Fail on functional regression
+or a repeatable cleaned-run P50/P95/P99 increase over 10 percent relative to
+that control. Keep v8 as cross-QEMU historical context only. If only max or
+miss_1ms worsens, repeat the long run once.
 
 - [ ] **Step 4: Update report**
 

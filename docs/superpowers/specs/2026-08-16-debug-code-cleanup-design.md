@@ -85,11 +85,13 @@ require:
 
 ## Performance Verification
 
-Use the existing v8 300-second result as the pre-cleanup long-run baseline:
-P50 8.288 us, P99 293.712 us, maximum 1.193376 ms, two samples over 1 ms,
-90,000 of 90,000 network requests successful, and no timeout or protocol error.
-The historical best 300-second maximum of 997.808 us remains context rather
-than the regression baseline.
+The formal cleanup regression baseline must use the same QEMU binary, VM
+configuration, workload, host controls, and guest source as the cleaned run.
+Reconstruct the removed VirtIO counters/logging and Linux success-path dumps in
+a test-only control, run the 300-second workload, then restore the cleaned files
+and verify their SHA-256 values byte-for-byte. The existing v8 result remains
+historical context because it used a different QEMU binary; it is not a valid
+causal cleanup baseline.
 
 After cleanup, first run the same 1,000-sample suite, then run the same
 300-second concurrent benchmark. Compare P50, P95, P99, P99.9, maximum latency,
@@ -97,11 +99,13 @@ threshold miss counts, network RTT, effective throughput, timeout count, and
 protocol/application error count.
 
 Functional counters are strict: request success, timeout, and error results may
-not regress. A repeatable increase greater than 10 percent in P50, P95, or P99
-is a performance regression. Because QEMU TCG produces stochastic tail spikes,
-a single maximum or `miss_1ms` increase triggers a repeat run and investigation
-rather than an automatic regression verdict. All raw results and comparisons
-will be appended to the existing realtime report.
+not regress. Against the artifact-matched pre-cleanup control, a repeatable
+increase greater than 10 percent in P50, P95, or P99 is a performance
+regression. Cross-QEMU comparisons are reported separately and cannot establish
+cleanup causality. Because QEMU TCG produces stochastic tail spikes, a single
+maximum or `miss_1ms` increase triggers a repeat run and investigation rather
+than an automatic regression verdict. All raw results and comparisons will be
+appended to the existing realtime report.
 
 ## Change Discipline
 
