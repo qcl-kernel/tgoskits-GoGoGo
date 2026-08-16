@@ -20,6 +20,13 @@ if [[ -e "$DESTINATION" ]]; then
         exit 1
     fi
 
+    dirty="$(git -C "$DESTINATION" status --porcelain=v1 --untracked-files=all)"
+    if [[ -n "$dirty" ]]; then
+        echo "RT-Thread source tree is dirty: $DESTINATION" >&2
+        printf '%s\n' "$dirty" >&2
+        exit 1
+    fi
+
     echo "Using existing RT-Thread source at $DESTINATION ($RTTHREAD_COMMIT)"
     exit 0
 fi
