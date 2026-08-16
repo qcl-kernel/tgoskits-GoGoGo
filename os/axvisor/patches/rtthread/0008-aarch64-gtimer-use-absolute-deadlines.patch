@@ -9,7 +9,7 @@ index 840668a7..b160e6ce 100644
 -    msr     CNTP_CTL_EL0, x0
 +    msr     CNTV_CTL_EL0, x0
      ret
- 
+
  /*
 - *set gtimer CNTP_TVAL_EL0 value
 + *set gtimer CNTV_TVAL_EL0 value
@@ -19,7 +19,7 @@ index 840668a7..b160e6ce 100644
 -    msr     CNTP_TVAL_EL0, x0
 +    msr     CNTV_TVAL_EL0, x0
      ret
- 
+
  /*
 - *get gtimer CNTP_TVAL_EL0 value
 + *get gtimer CNTV_TVAL_EL0 value
@@ -29,8 +29,8 @@ index 840668a7..b160e6ce 100644
 -    mrs     x0, CNTP_TVAL_EL0
 +    mrs     x0, CNTV_TVAL_EL0
      ret
- 
- 
+
+
 diff --git a/libcpu/aarch64/common/gtimer.c b/libcpu/aarch64/common/gtimer.c
 index 514ec4e0..561b4a86 100644
 --- a/libcpu/aarch64/common/gtimer.c
@@ -38,13 +38,13 @@ index 514ec4e0..561b4a86 100644
 @@ -17,19 +17,34 @@
  #include <ktime.h>
  #endif
- 
+
 -#define EL1_PHY_TIMER_IRQ_NUM 30
 +#define EL1_VIR_TIMER_IRQ_NUM 27
- 
+
  static volatile rt_uint64_t timer_step;
 +static volatile rt_uint64_t timer_deadline;
- 
+
  static void rt_hw_timer_isr(int vector, void *parameter)
  {
 -    rt_hw_set_gtimer_val(timer_step);
@@ -66,7 +66,7 @@ index 514ec4e0..561b4a86 100644
 +        rt_tick_increase();
 +    }
  }
- 
+
  void rt_hw_gtimer_init(void)
  {
 -    rt_hw_interrupt_install(EL1_PHY_TIMER_IRQ_NUM, rt_hw_timer_isr, RT_NULL, "tick");
@@ -99,11 +99,11 @@ index 322f2506..a4ef2eb0 100644
 --- a/libcpu/aarch64/common/include/gtimer.h
 +++ b/libcpu/aarch64/common/include/gtimer.h
 @@ -21,7 +21,7 @@ void rt_hw_gtimer_enable();
- 
+
  rt_inline void rt_hw_gtimer_disable(void)
  {
 -    __asm__ volatile ("msr CNTP_CTL_EL0, xzr":::"memory");
 +    __asm__ volatile ("msr CNTV_CTL_EL0, xzr":::"memory");
  }
- 
+
  void rt_hw_set_gtimer_val(rt_uint64_t value);
