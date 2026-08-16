@@ -1537,6 +1537,7 @@ dependencies = [
  "axbuild",
  "axdevice",
  "axdevice_base",
+ "axplat-dyn",
  "axtest",
  "axvirtio-common",
  "axvirtio-net",

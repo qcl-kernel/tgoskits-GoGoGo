@@ -16,6 +16,7 @@ use crate::{
     AxVmResult,
     architecture::cpu_up::{self, CpuUpExit, CpuUpOps},
     ax_err,
+    config::{GuestTlbiPolicy, HostVcpuIdlePolicy},
 };
 
 mod capabilities;
@@ -29,6 +30,7 @@ mod shared_mmio;
 mod shared_provider;
 #[path = "../../architecture/sysreg.rs"]
 mod sysreg;
+mod tlbi;
 mod vgic;
 mod vm;
 mod vm_plan;
@@ -138,6 +140,16 @@ impl ArchOps for Aarch64Arch {
                     value,
                 },
             ),
+            ArmVmExit::TlbInvalidate { .. } => {
+                if vm.guest_tlbi_policy() != GuestTlbiPolicy::VmScoped {
+                    return ax_err!(
+                        BadState,
+                        "received trapped EL1 TLBI while VM-scoped policy is disabled"
+                    );
+                }
+                tlbi::invalidate_vm(vm)?;
+                Ok(BoundVcpuExit::Continue)
+            }
             ArmVmExit::GicCpuInterfaceRead {
                 register,
                 destination,
@@ -153,15 +165,15 @@ impl ArchOps for Aarch64Arch {
             ArmVmExit::ExternalInterrupt { token } => Ok(BoundVcpuExit::Defer(
                 Aarch64DeferredRunWork::ExternalInterrupt { token },
             )),
-            ArmVmExit::WaitForInterrupt => {
-                vcpu.get_arch_vcpu().arm_timer_wait()?;
-                Ok(BoundVcpuExit::Complete(VcpuRunAction {
-                    waits_for_event: true,
-                    stop_reason: None,
-                    resets_vm: false,
-                    exits_vcpu: false,
-                }))
-            }
+            ArmVmExit::WaitForInterrupt => match vm.host_vcpu_idle_policy() {
+                HostVcpuIdlePolicy::Busy => Ok(BoundVcpuExit::Continue),
+                HostVcpuIdlePolicy::Halt => {
+                    vcpu.get_arch_vcpu().arm_timer_wait()?;
+                    Ok(BoundVcpuExit::Complete(aarch64_guest_wfi_action(
+                        HostVcpuIdlePolicy::Halt,
+                    )))
+                }
+            },
             ArmVmExit::CpuDown { state } => {
                 warn!(
                     "VM[{}] run VCpu[{}] CpuDown state {state:#x}",
@@ -605,6 +617,10 @@ impl VmArchPerCpuOps for AxvmArmPerCpu {
     }
 }
 
+fn aarch64_guest_wfi_action(policy: HostVcpuIdlePolicy) -> VcpuRunAction {
+    VcpuRunAction::for_guest_wfi(policy)
+}
+
 fn arm_result<T>(result: ArmVcpuResult<T>) -> BackendResult<T> {
     result.map_err(arm_error_to_backend)
 }
@@ -667,7 +683,15 @@ fn arm_sys_reg_addr_to_ax(addr: ArmSysRegAddr) -> SysRegAddr {
 
 #[cfg(test)]
 mod tests {
+    use axvmconfig::HostVcpuIdlePolicy;
+
     use super::*;
+
+    #[test]
+    fn guest_wfi_obeys_per_vm_host_idle_policy() {
+        assert!(aarch64_guest_wfi_action(HostVcpuIdlePolicy::Halt).waits_for_event);
+        assert!(!aarch64_guest_wfi_action(HostVcpuIdlePolicy::Busy).waits_for_event);
+    }
 
     #[test]
     fn converts_arm_vcpu_errors_to_backend_errors() {

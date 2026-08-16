@@ -343,6 +343,7 @@ pub(crate) fn patch_guest_fdt_for_runtime(
     initrd_start_size: Option<(u64, u64)>,
     create_chosen: bool,
     virtio_net_spi_override: Option<u32>,
+    virtio_net_mmio: Option<(u64, u64)>,
 ) -> AxVmResult<Vec<u8>> {
     let mut tree = FdtTree::from_bytes(fdt_bytes)?;
     let memory_specs = guest_memory_specs(memory_regions, crate_config);
@@ -360,7 +361,14 @@ pub(crate) fn patch_guest_fdt_for_runtime(
         gic_profile,
         plic_profile,
     )?;
-    install_configured_virtio_net(&mut tree, crate_config, gic_profile, plic_profile, virtio_net_spi_override)?;
+    install_configured_virtio_net(
+        &mut tree,
+        crate_config,
+        gic_profile,
+        plic_profile,
+        virtio_net_spi_override,
+        virtio_net_mmio,
+    )?;
     super::timer::install_machine_timer(&mut tree, timer_profile)?;
     super::serial::install_machine_serial(&mut tree, serial_profile, serial_identity)?;
     for serial in additional_serials {
@@ -379,6 +387,7 @@ fn install_configured_virtio_net(
     gic_profile: Option<&crate::machine::GuestGicProfile>,
     plic_profile: Option<&crate::machine::GuestPlicProfile>,
     spi_override: Option<u32>,
+    mmio: Option<(u64, u64)>,
 ) -> AxVmResult {
     if !config
         .devices
@@ -389,10 +398,12 @@ fn install_configured_virtio_net(
         return Ok(());
     }
 
-    const BASE: u32 = 0x0a00_0000;
-    const SIZE: u32 = 0x200;
+    const DEFAULT_BASE: u64 = 0x0a00_0000;
+    const DEFAULT_SIZE: u64 = 0x200;
+    let (base, size) = mmio.unwrap_or((DEFAULT_BASE, DEFAULT_SIZE));
     let interrupt = virtio_net_interrupt_binding(gic_profile, plic_profile, spi_override)?;
-    let node_id = tree.ensure_path("/virtio_mmio@b000000")?;
+    let node_path = std::format!("/virtio_mmio@{base:x}");
+    let node_id = tree.ensure_path(&node_path)?;
     tree.set_property(
         node_id,
         super::tree::prop_string("compatible", "virtio,mmio"),
@@ -400,7 +411,7 @@ fn install_configured_virtio_net(
     tree.inner_mut()
         .view_typed_mut(node_id)
         .ok_or_else(|| ax_err_type!(InvalidData, "new virtio-net node is missing"))?
-        .set_regs(&[RegInfo::new(BASE as u64, Some(SIZE as u64))]);
+        .set_regs(&[RegInfo::new(base, Some(size))]);
     let int_cells = interrupt.cells();
     tree.set_property(node_id, u32_list_property("interrupts", &int_cells))?;
     tree.set_property(
@@ -593,6 +604,8 @@ mod tests {
             &virtio_net_config(),
             None,
             Some(&plic_profile(9)),
+            None,
+            None,
         )
         .unwrap();
         let node = tree.inner().get_by_path("/virtio_mmio@a000000").unwrap();
@@ -622,6 +635,8 @@ mod tests {
             &virtio_net_config(),
             Some(&gic_profile(7)),
             None,
+            None,
+            None,
         )
         .unwrap();
         let node = tree.inner().get_by_path("/virtio_mmio@a000000").unwrap();
@@ -640,6 +655,31 @@ mod tests {
                 .get_u32_iter()
                 .collect::<std::vec::Vec<_>>(),
             [0, 16, 1]
+        );
+    }
+
+    #[test]
+    fn virtio_net_node_unit_address_matches_configured_mmio_base() {
+        let mut tree = FdtTree::new();
+        super::install_configured_virtio_net(
+            &mut tree,
+            &virtio_net_config(),
+            Some(&gic_profile(7)),
+            None,
+            None,
+            Some((0x0a00_0400, 0x200)),
+        )
+        .unwrap();
+
+        assert!(
+            tree.inner()
+                .get_by_path_id("/virtio_mmio@a000400")
+                .is_some()
+        );
+        assert!(
+            tree.inner()
+                .get_by_path_id("/virtio_mmio@b000000")
+                .is_none()
         );
     }
 
@@ -719,6 +759,8 @@ mod tests {
             None,
             None,
             false,
+            None,
+            None,
         )
         .unwrap();
         let reparsed = Fdt::from_bytes(&patched).unwrap();
@@ -738,6 +780,8 @@ mod tests {
             None,
             None,
             true,
+            None,
+            None,
         )
         .unwrap();
         let reparsed = Fdt::from_bytes(&patched).unwrap();

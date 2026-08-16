@@ -6,6 +6,7 @@ SOURCE="${SCRIPT_DIR}/../guests/zephyr-net/src/main.c"
 CMAKE_SOURCE="${SCRIPT_DIR}/../guests/zephyr-net/CMakeLists.txt"
 SETUP_SOURCE="${SCRIPT_DIR}/setup_qemu_three_guest_net.sh"
 AXVISOR_CONFIG_SOURCE="${SCRIPT_DIR}/../src/config.rs"
+ARTIFACT_VALIDATOR="${SCRIPT_DIR}/validate_qemu_artifact.sh"
 ZEPHYR_VM_CONFIG="${SCRIPT_DIR}/../configs/vms/qemu/aarch64/zephyr-net.toml"
 GENERIC_BOARD_CONFIG="${SCRIPT_DIR}/../configs/board/qemu-aarch64.toml"
 THREE_GUEST_BOARD_CONFIG="${SCRIPT_DIR}/../configs/board/qemu-aarch64-three-guest-net.toml"
@@ -81,15 +82,26 @@ rg -q --fixed-strings "host_timer_policy" "$SETUP_SOURCE" || {
   echo "[rtbench-precision] missing per-VM host timer policy" >&2
   exit 1
 }
-for pattern in \
+for debug_pattern in \
   'configured host policy: timer={:?}, vcpu_yield={}, vcpu_idle={:?}' \
-  '#[unsafe(export_name = "axvisor_log_configured_host_policy")]' \
-  'target: HOST_POLICY_DIAGNOSTIC_MARKER' \
+  'axvisor_log_configured_host_policy' \
+  'HOST_POLICY_DIAGNOSTIC_MARKER' \
   'log_configured_host_policy(&vm_config)'; do
-  rg -q --fixed-strings "$pattern" "$AXVISOR_CONFIG_SOURCE" || {
-    echo "[rtbench-precision] missing runtime-coupled host policy diagnostic: ${pattern}" >&2
-    exit 1
-  }
+  for debug_source in "$AXVISOR_CONFIG_SOURCE" "$ARTIFACT_VALIDATOR"; do
+    debug_scan_status=0
+    rg -q --fixed-strings "$debug_pattern" "$debug_source" || debug_scan_status=$?
+    case "$debug_scan_status" in
+      0)
+        echo "[rtbench-precision] stale host-policy debug code remains in ${debug_source}: ${debug_pattern}" >&2
+        exit 1
+        ;;
+      1) ;;
+      *)
+        echo "[rtbench-precision] host-policy debug scan failed for ${debug_source}: rg status ${debug_scan_status}" >&2
+        exit 1
+        ;;
+    esac
+  done
 done
 require_source "late_cycles * 1000000LL" "cycle-based deadline thresholds"
 require_source "K_SEM_DEFINE(rtbench_done" "benchmark completion semaphore"
@@ -140,6 +152,174 @@ fail_test() {
   echo "[rtbench-precision] functional test failed: $*" >&2
   exit 1
 }
+
+require_validator_error() {
+  local output="$1"
+  local pattern="$2"
+  local description="$3"
+  local scan_status=0
+  printf '%s\n' "$output" | rg -q --fixed-strings "$pattern" || scan_status=$?
+  case "$scan_status" in
+    0) ;;
+    1) fail_test "${description} lacked the expected diagnostic: ${pattern}" ;;
+    *) fail_test "${description} diagnostic scan failed: rg status ${scan_status}" ;;
+  esac
+}
+
+validator_fixture_root="${functional_root}/artifact-validator"
+validator_copy_bin="${validator_fixture_root}/copy-bin"
+validator_mutate_bin="${validator_fixture_root}/mutate-bin"
+mkdir -p "$validator_copy_bin" "$validator_mutate_bin"
+printf '%s\n' \
+  '#!/usr/bin/env bash' \
+  'set -euo pipefail' \
+  '[ "$#" -eq 4 ]' \
+  '[ "$1" = "-O" ]' \
+  '[ "$2" = "binary" ]' \
+  'cp -- "$3" "$4"' \
+  >"${validator_copy_bin}/rust-objcopy"
+printf '%s\n' \
+  '#!/usr/bin/env bash' \
+  'set -euo pipefail' \
+  '[ "$#" -eq 4 ]' \
+  '[ "$1" = "-O" ]' \
+  '[ "$2" = "binary" ]' \
+  'cp -- "$3" "$4"' \
+  'printf "%s\n" "fixture mutation" >>"$3"' \
+  >"${validator_mutate_bin}/rust-objcopy"
+chmod +x \
+  "${validator_copy_bin}/rust-objcopy" \
+  "${validator_mutate_bin}/rust-objcopy"
+
+write_embedded_validator_fixture() {
+  local fixture_root="$1"
+  mkdir -p "$fixture_root"
+  printf '%s\n' \
+    '[base]' \
+    'id = 7' \
+    'name = "validator fixture"' \
+    >"${fixture_root}/vm-config.toml"
+  {
+    printf '%s\n' 'fixture artifact prefix'
+    command cat -- "${fixture_root}/vm-config.toml"
+    printf '%s\n' 'fixture artifact suffix'
+  } >"${fixture_root}/axvisor.elf"
+  cp -- "${fixture_root}/axvisor.elf" "${fixture_root}/axvisor.bin"
+}
+
+validator_success_root="${validator_fixture_root}/success"
+write_embedded_validator_fixture "$validator_success_root"
+set +e
+validator_success_output="$(
+  PATH="${validator_copy_bin}:${PATH}" \
+    bash "$ARTIFACT_VALIDATOR" \
+      "${validator_success_root}/manifest.tsv" \
+      "${validator_success_root}/axvisor.elf" \
+      "${validator_success_root}/axvisor.bin" \
+      "${validator_success_root}/vm-config.toml" 2>&1
+)"
+validator_success_status=$?
+set -e
+[ "$validator_success_status" -eq 0 ] \
+  || fail_test "artifact validator rejected embedded VM config fixture: ${validator_success_output}"
+python3 - \
+  "${validator_success_root}/manifest.tsv" \
+  "${validator_success_root}/axvisor.elf" \
+  "${validator_success_root}/axvisor.bin" \
+  "${validator_success_root}/vm-config.toml" <<'PY' \
+  || fail_test "artifact validator manifest did not describe canonical inputs and hashes"
+import hashlib
+import pathlib
+import sys
+
+manifest_path, elf_path, raw_path, config_path = map(pathlib.Path, sys.argv[1:])
+expected = [
+    ("version", "1"),
+    ("elf", str(elf_path.resolve()), hashlib.sha256(elf_path.read_bytes()).hexdigest()),
+    ("raw", str(raw_path.resolve()), hashlib.sha256(raw_path.read_bytes()).hexdigest()),
+    (
+        "vm-config",
+        str(config_path.resolve()),
+        hashlib.sha256(config_path.read_bytes()).hexdigest(),
+    ),
+]
+actual = [tuple(line.split("\t")) for line in manifest_path.read_text().splitlines()]
+assert actual == expected
+PY
+
+validator_mismatch_root="${validator_fixture_root}/raw-mismatch"
+write_embedded_validator_fixture "$validator_mismatch_root"
+printf '%s\n' 'raw mismatch' >>"${validator_mismatch_root}/axvisor.bin"
+printf '%s\n' 'existing raw mismatch manifest' >"${validator_mismatch_root}/manifest.tsv"
+validator_mismatch_manifest_before="$(sha256sum -- "${validator_mismatch_root}/manifest.tsv")"
+set +e
+validator_mismatch_error="$(
+  PATH="${validator_copy_bin}:${PATH}" \
+    bash "$ARTIFACT_VALIDATOR" \
+      "${validator_mismatch_root}/manifest.tsv" \
+      "${validator_mismatch_root}/axvisor.elf" \
+      "${validator_mismatch_root}/axvisor.bin" \
+      "${validator_mismatch_root}/vm-config.toml" 2>&1
+)"
+validator_mismatch_status=$?
+set -e
+[ "$validator_mismatch_status" -ne 0 ] \
+  || fail_test "artifact validator accepted raw bytes that differ from objcopy output"
+require_validator_error \
+  "$validator_mismatch_error" \
+  "regenerated raw binary does not match supplied raw binary" \
+  "raw mismatch failure"
+[ "$(sha256sum -- "${validator_mismatch_root}/manifest.tsv")" = "$validator_mismatch_manifest_before" ] \
+  || fail_test "raw mismatch failure replaced the existing manifest"
+
+validator_missing_root="${validator_fixture_root}/missing-config"
+mkdir -p "$validator_missing_root"
+printf '%s\n' '[base]' 'id = 8' >"${validator_missing_root}/vm-config.toml"
+printf '%s\n' 'artifact without VM config bytes' >"${validator_missing_root}/axvisor.elf"
+cp -- "${validator_missing_root}/axvisor.elf" "${validator_missing_root}/axvisor.bin"
+set +e
+validator_missing_error="$(
+  PATH="${validator_copy_bin}:${PATH}" \
+    bash "$ARTIFACT_VALIDATOR" \
+      "${validator_missing_root}/manifest.tsv" \
+      "${validator_missing_root}/axvisor.elf" \
+      "${validator_missing_root}/axvisor.bin" \
+      "${validator_missing_root}/vm-config.toml" 2>&1
+)"
+validator_missing_status=$?
+set -e
+[ "$validator_missing_status" -ne 0 ] \
+  || fail_test "artifact validator accepted artifacts without embedded VM config bytes"
+require_validator_error \
+  "$validator_missing_error" \
+  "required VM config bytes are absent from Axvisor artifacts" \
+  "missing VM config failure"
+[ ! -e "${validator_missing_root}/manifest.tsv" ] \
+  || fail_test "missing VM config failure published a manifest"
+
+validator_changed_root="${validator_fixture_root}/input-changed"
+write_embedded_validator_fixture "$validator_changed_root"
+printf '%s\n' 'existing input changed manifest' >"${validator_changed_root}/manifest.tsv"
+validator_changed_manifest_before="$(sha256sum -- "${validator_changed_root}/manifest.tsv")"
+set +e
+validator_changed_error="$(
+  PATH="${validator_mutate_bin}:${PATH}" \
+    bash "$ARTIFACT_VALIDATOR" \
+      "${validator_changed_root}/manifest.tsv" \
+      "${validator_changed_root}/axvisor.elf" \
+      "${validator_changed_root}/axvisor.bin" \
+      "${validator_changed_root}/vm-config.toml" 2>&1
+)"
+validator_changed_status=$?
+set -e
+[ "$validator_changed_status" -ne 0 ] \
+  || fail_test "artifact validator accepted an ELF changed during validation"
+require_validator_error \
+  "$validator_changed_error" \
+  "input changed during validation: elf:" \
+  "input changed failure"
+[ "$(sha256sum -- "${validator_changed_root}/manifest.tsv")" = "$validator_changed_manifest_before" ] \
+  || fail_test "input changed failure replaced the existing manifest"
 
 write_vm_fixture() {
   local output="$1"
@@ -1032,6 +1212,7 @@ run_complete_publication_fixture() {
       ROOTFS_TARGET="$2/rootfs-target.img"
       QEMU_CONFIG="$3"
       publication_failure="$4"
+      verify_generated_set() { return 0; }
       case "$4" in
         config)
           patch_calls=0

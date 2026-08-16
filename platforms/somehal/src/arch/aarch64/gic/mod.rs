@@ -184,7 +184,6 @@ impl ActiveIrq {
         }
     }
 
-
     pub fn defer_deactivation_to_guest(&mut self) -> Result<(), crate::irq::IrqError> {
         match self {
             Self::V2(active) => active.defer_deactivation_to_guest(),

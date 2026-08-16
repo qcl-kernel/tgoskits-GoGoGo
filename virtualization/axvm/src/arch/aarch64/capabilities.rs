@@ -89,10 +89,18 @@ pub(super) fn patch_runtime_fdt(
 
     // Extract the resolved virtio-net SPI from the device graph so the FDT
     // uses the same interrupt number the device runtime will pulse.
+    let mut virtio_net_mmio: Option<(u64, u64)> = None;
     let virtio_net_spi: Option<u32> = vm.with_planned_device_graph(|graph| {
         for node in graph.nodes() {
             let firmware = node.firmware();
             if firmware.compatible().iter().any(|c| c == "virtio,mmio") {
+                for slot in firmware.register_slots() {
+                    if let Ok(resolved) = graph.resources_for(node.id()) {
+                        if let Ok(mmio) = resolved.mmio(slot) {
+                            virtio_net_mmio = Some(mmio);
+                        }
+                    }
+                }
                 for slot in firmware.interrupt_slots() {
                     if let Ok(resolved) = graph.resources_for(node.id()) {
                         if let Ok(irq) = resolved.wired_irq(slot) {
@@ -118,6 +126,7 @@ pub(super) fn patch_runtime_fdt(
         initrd,
         true,
         virtio_net_spi,
+        virtio_net_mmio,
     )
 }
 

@@ -12,33 +12,76 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Public AArch64 WFI trap policy contract.
+//! AArch64 software-trapped physical timer policy contract.
 
-use arm_vcpu::{Aarch64VCpuSetupConfig, HcrEl2Twi, TrappedWfxDisposition, trapped_wfx_disposition};
+#![cfg(target_arch = "aarch64")]
 
-#[test]
-fn setup_config_exposes_an_opt_in_wfi_trap_policy() {
-    let default_config = Aarch64VCpuSetupConfig::default();
-    let trapping_config = Aarch64VCpuSetupConfig {
-        passthrough_interrupt: false,
-        passthrough_timer: false,
-        trap_wfi: true,
-    };
+use arm_vcpu::{
+    ArmHostIrqConfig, ArmHostOps, ArmTimerVmConfig, ArmVcpu, ArmVcpuCreateConfig, ArmVcpuResult,
+    ArmVcpuSetupConfig, ArmVcpuTlbiPolicy,
+};
 
-    assert!(!default_config.trap_wfi);
-    assert!(trapping_config.trap_wfi);
-    assert_eq!(default_config.hcr_el2_twi(), HcrEl2Twi::Clear);
-    assert_eq!(trapping_config.hcr_el2_twi(), HcrEl2Twi::Set);
+const CNTHCTL_EL1PCTEN: u64 = 1 << 0;
+const CNTHCTL_EL1PCEN: u64 = 1 << 1;
+const HCR_TWI: u64 = 1 << 13;
+const HCR_TTLB: u64 = 1 << 25;
+
+struct TestHost;
+
+impl ArmHostOps for TestHost {
+    fn inject_virtual_interrupt(_vector: u32) -> ArmVcpuResult {
+        Ok(())
+    }
+
+    fn finish_pending_host_irq(_raw_ack: u32) -> Option<usize> {
+        None
+    }
+
+    fn handle_current_host_irq() {}
+}
+
+fn new_vcpu() -> ArmVcpu<TestHost> {
+    ArmVcpu::new(1, 0, ArmVcpuCreateConfig::default()).unwrap()
 }
 
 #[test]
-fn trapped_wfi_and_wfe_decode_to_distinct_typed_dispositions() {
-    assert_eq!(
-        trapped_wfx_disposition(0),
-        TrappedWfxDisposition::WaitForInterrupt
+fn set_entry_installs_a_fallback_exception_vector() {
+    let mut vcpu = new_vcpu();
+
+    vcpu.set_entry(0x40_0000usize.into()).unwrap();
+
+    let (_, _, vbar_el1) = vcpu.saved_setup_state_for_test();
+    assert_eq!(vbar_el1, 0x40_0000);
+}
+
+#[test]
+fn setup_saves_software_trapped_cntp_and_wfi_policy() {
+    let mut vcpu = new_vcpu();
+    let timer = ArmTimerVmConfig::new(1_000_000, 0, 0).unwrap();
+    let setup = ArmVcpuSetupConfig::new(timer, ArmHostIrqConfig::gicv3_sysreg());
+
+    vcpu.setup(setup).unwrap();
+
+    let (cnthctl_el2, hcr_el2, _) = vcpu.saved_setup_state_for_test();
+    assert_eq!(cnthctl_el2 & (CNTHCTL_EL1PCEN | CNTHCTL_EL1PCTEN), 0);
+    assert_ne!(hcr_el2 & HCR_TWI, 0);
+    assert_eq!(hcr_el2 & HCR_TTLB, 0);
+}
+
+#[test]
+fn explicit_tlbi_trap_policy_sets_hcr_ttlb_without_changing_timer_or_wfi() {
+    let mut vcpu = new_vcpu();
+    let timer = ArmTimerVmConfig::new(1_000_000, 0, 0).unwrap();
+    let setup = ArmVcpuSetupConfig::with_tlbi_policy(
+        timer,
+        ArmHostIrqConfig::gicv3_sysreg(),
+        ArmVcpuTlbiPolicy::TrapEl1,
     );
-    assert_eq!(
-        trapped_wfx_disposition(1),
-        TrappedWfxDisposition::UnsupportedWaitForEvent
-    );
+
+    vcpu.setup(setup).unwrap();
+
+    let (cnthctl_el2, hcr_el2, _) = vcpu.saved_setup_state_for_test();
+    assert_eq!(cnthctl_el2 & (CNTHCTL_EL1PCEN | CNTHCTL_EL1PCTEN), 0);
+    assert_ne!(hcr_el2 & HCR_TWI, 0);
+    assert_ne!(hcr_el2 & HCR_TTLB, 0);
 }

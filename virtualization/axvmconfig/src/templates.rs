@@ -62,6 +62,8 @@ pub fn get_vm_config_template(params: VmTemplateParams) -> GuestConfig {
             name: params.name,
             guest_type: params.guest_type,
             cpu_num: params.cpu_num,
+            host_vcpu_idle_policy: HostVcpuIdlePolicy::Halt,
+            guest_tlbi_policy: GuestTlbiPolicy::Native,
             // Assign sequential CPU IDs starting from 0
             phys_cpu_ids: Some((0..params.cpu_num).collect()),
             phys_cpu_sets: None,

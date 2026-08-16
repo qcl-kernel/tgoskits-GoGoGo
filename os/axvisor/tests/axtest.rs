@@ -3,6 +3,9 @@
 
 extern crate alloc;
 
+#[macro_use]
+extern crate log;
+
 use ax_hal as _;
 use ax_std as _;
 use axvm as _;
@@ -31,6 +34,9 @@ mod manager {
 
 #[path = "../src/guest_console/mux/mod.rs"]
 mod guest_console_mux;
+
+#[path = "../src/virtio_net.rs"]
+mod virtio_net;
 
 #[cfg(feature = "fs")]
 #[path = "../src/shell/command/fs.rs"]

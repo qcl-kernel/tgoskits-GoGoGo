@@ -1,0 +1,20 @@
+diff --git a/components/net/lwip/port/ethernetif.c b/components/net/lwip/port/ethernetif.c
+--- a/components/net/lwip/port/ethernetif.c
++++ b/components/net/lwip/port/ethernetif.c
+@@ -832,7 +832,15 @@ rt_err_t eth_device_ready(struct eth_device* dev)
+         if(dev->rx_notice == RT_FALSE)
+         {
+             dev->rx_notice = RT_TRUE;
+-            return rt_mb_send(&eth_rx_thread_mb, (rt_ubase_t)dev);
++            rt_err_t result = rt_mb_send(&eth_rx_thread_mb, (rt_ubase_t)dev);
++            if (result != RT_EOK)
++            {
++                /* The mailbox is full, so an RX notification is already
++                 * pending. Clear the coalescing flag; otherwise later
++                 * interrupts would be suppressed forever after this failure. */
++                dev->rx_notice = RT_FALSE;
++            }
++            return result;
+         }
+         else
+             return RT_EOK;

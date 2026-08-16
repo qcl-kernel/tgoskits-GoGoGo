@@ -6,7 +6,10 @@
 /bin/busybox mount -t devtmpfs devtmpfs /dev 2>/dev/null || true
 /bin/busybox mount -t devpts devpts /dev/pts 2>/dev/null || true
 
-/bin/busybox ifconfig -a > /dev/console 2>&1
+linux_online_cpus=$(/bin/busybox cat /sys/devices/system/cpu/online 2>/dev/null)
+linux_nproc=$(/bin/busybox nproc 2>/dev/null)
+echo "LINUX_SMP_READY configured=2 online=$linux_online_cpus nproc=$linux_nproc" > /dev/console
+
 /bin/busybox ip addr add 192.168.77.11/24 dev eth0
 /bin/busybox ip link set dev eth0 up
 echo "Linux network guest ready: 192.168.77.11/24" > /dev/console
@@ -29,9 +32,10 @@ fi
 
 # Run RT-IPC benchmark if client binary is available
 if [ -x /bin/rtipic-client ]; then
-/bin/busybox sleep 15
+  /bin/busybox sleep 2
   echo "Starting RT-IPC benchmark..." > /dev/console
   /bin/rtipic-client --host 192.168.77.30 --port 9876 --count 1000 > /dev/console 2>&1
+  echo "RT-IPC client exited with rc=$?" > /dev/console
 else
   echo "rtipic-client not found, skipping benchmark" > /dev/console
 fi

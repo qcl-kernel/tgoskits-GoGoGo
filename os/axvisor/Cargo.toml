@@ -43,6 +43,8 @@ host-xtask = []
 axtest = []
 fs = ["ax-std/ext4fs", "ax-std/fatfs", "axvm/host-fs"]
 sstc = ["axvm/sstc"]
+qemu-aarch64-three-guest-net = ["axplat-dyn/qemu-aarch64-three-guest-net"]
+qemu-aarch64-two-guest-net = ["axplat-dyn/qemu-aarch64-three-guest-net"]
 stack-protector = ["ax-std/stack-protector"]
 backtrace = ["ax-std/backtrace", "dep:axbacktrace"]
 test-backtrace-panic = ["backtrace"]
@@ -66,6 +68,8 @@ ax-std = { workspace = true, default-features = false, features = [
   "paging",
   "irq",
     "multitask",
+  "ipi",
+  "sched-rr",
     "task-ext",
   "smp",
   "hv",
@@ -81,6 +85,7 @@ axdevice.workspace = true
 axdevice_base.workspace = true
 axvirtio-common.workspace = true
 axvirtio-net.workspace = true
+axplat-dyn = { workspace = true, optional = true }
 toml.workspace = true
 ax-driver = { workspace = true, optional = true }
 axbacktrace = { workspace = true, optional = true }

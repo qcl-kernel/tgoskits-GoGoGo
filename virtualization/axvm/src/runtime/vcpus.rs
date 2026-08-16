@@ -245,8 +245,13 @@ pub(crate) enum VcpuOnError {
     StartFailed,
 }
 
-/// Boot target VCpu on the specified VM.
-/// This function is used to boot a secondary VCpu on a VM, setting the entry point and argument for the VCpu.
+/// Request boot of a target vCPU on the specified VM.
+///
+/// PSCI `CPU_ON` is deliberately asynchronous here. The caller is inside the
+/// vCPU run critical section, which holds the vCPU CPU-binding preemption
+/// guard; waiting for the secondary task from that section would deadlock the
+/// scheduler contract and is rejected by `might_sleep()`. The spawned task
+/// performs the binding and publishes its startup result independently.
 ///
 /// # Arguments
 ///
@@ -297,37 +302,6 @@ pub(crate) fn vcpu_on(
         let vcpu_task = build_vcpu_task(&vm, vcpu.clone());
         spawn_registered_vcpu_task(vm.id(), vcpu_id, runtime.clone(), vcpu_task);
         runtime.notify_all();
-
-        runtime.wait_until(|| ack.is_complete() || !vm.running());
-
-        if !ack.is_complete() && !vm.running() {
-            if ack.cancel_before_startup() {
-                runtime.notify_all();
-
-                if let Some(task) = runtime.remove_vcpu_task(vcpu_id) {
-                    let _ = task.join();
-                }
-
-                runtime.remove_cpu_on_start_ack(vcpu_id);
-                return Err(VcpuOnError::StartFailed);
-            }
-
-            runtime.wait_until(|| ack.is_complete());
-        }
-
-        let result = ack.take_result().unwrap_or_else(|| {
-            Err(ax_err_type!(
-                BadState,
-                format!("vCPU {vcpu_id} CPU_ON startup did not complete")
-            ))
-        });
-        runtime.remove_cpu_on_start_ack(vcpu_id);
-
-        if result.is_err() {
-            runtime.remove_vcpu_task(vcpu_id);
-            return Err(VcpuOnError::StartFailed);
-        }
-
         Ok(())
     })();
 
@@ -452,6 +426,8 @@ fn vcpu_run() {
                 BadState,
                 format!("vCPU {vcpu_id} CPU_ON startup was cancelled")
             )));
+            runtime.remove_cpu_on_start_ack(vcpu_id);
+            vcpu.rollback_cpu_on();
             runtime.notify_all();
             return;
         }
@@ -460,12 +436,14 @@ fn vcpu_run() {
             Ok(()) => {
                 CurrentArch::before_first_run(&vm, &vcpu);
                 runtime.publish_cpu_on_start_success(ack);
+                runtime.remove_cpu_on_start_ack(vcpu_id);
                 runtime.notify_all();
             }
             Err(err) => {
                 ack.complete(Err(err));
-                runtime.notify_all();
                 runtime.remove_cpu_on_start_ack(vcpu_id);
+                vcpu.rollback_cpu_on();
+                runtime.notify_all();
                 runtime.remove_vcpu_task(vcpu_id);
                 return;
             }

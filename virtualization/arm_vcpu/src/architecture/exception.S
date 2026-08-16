@@ -183,7 +183,29 @@
     # vmexit_trampoline returns directly to ArmVcpu::run.
 .endm
 
+.macro FAST_RETURN_BUSY_WFI
+    # A busy-pinned vCPU treats WFI as a NOP. Keep the direct guest timer
+    # loaded and avoid the full register save, Rust exit, and scheduler yield.
+    stp     x9, x10, [sp, #-16]!
+    mrs     x9, esr_el2
+    ubfx    x10, x9, #26, #6
+    cmp     x10, #1
+    b.ne    .Lbusy_wfi_slow\@
+    tbnz    x9, #0, .Lbusy_wfi_slow\@
+    add     x10, sp, #16
+    ldr     w9, [x10, {host_busy_wfi_fastpath_delta}]
+    cbz     w9, .Lbusy_wfi_slow\@
+    mrs     x9, elr_el2
+    add     x9, x9, #4
+    msr     elr_el2, x9
+    ldp     x9, x10, [sp], #16
+    eret
+.Lbusy_wfi_slow\@:
+    ldp     x9, x10, [sp], #16
+.endm
+
 .macro HANDLE_LOWER_SYNC_VCPU
+    FAST_RETURN_BUSY_WFI
     SAVE_VCPU_REGS_FROM_EL1
     mov     x0, {exception_sync}
     bl      vmexit_trampoline
