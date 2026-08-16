@@ -22,7 +22,7 @@ as primary data channels.
 All implementation and commits are made in:
 
 ```text
-/home/yfblock/Code/hyper-rtos/.worktrees/axvisor-task123
+/home/yfblock/Code/hyper-rtos/.worktrees/axvisor-task123-integration
 ```
 
 The integration branch is:

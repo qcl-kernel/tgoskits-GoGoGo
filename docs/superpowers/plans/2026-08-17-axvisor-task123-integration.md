@@ -4,7 +4,7 @@
 
 **Goal:** Build one reproducible AxVisor system that boots a two-vCPU Linux guest and a dedicated-core RT-Thread guest, preserves the accepted realtime and RT-IPC results, and runs the complete AI inference-to-control feedback loop over VirtIO-net/IPv4/UDP/RT-IPC v2.
 
-**Architecture:** Work only on `feat/axvisor-task123` in `/home/yfblock/Code/hyper-rtos/.worktrees/axvisor-task123`. Curate Task 1/2 from the read-only original checkout, import only Git-tracked Task 3 content under `os/axvisor/guests/task3`, keep Task 2 on UDP 9876 and Task 3 on UDP 9877, and use one owned outer QEMU process per run. RT-Thread vCPU0 is restricted to pCPU 2 with busy WFI; both Linux vCPUs may run on pCPUs 0, 1, and 3.
+**Architecture:** Work only on `feat/axvisor-task123` in `/home/yfblock/Code/hyper-rtos/.worktrees/axvisor-task123-integration`. Curate Task 1/2 from the read-only original checkout, import only Git-tracked Task 3 content under `os/axvisor/guests/task3`, keep Task 2 on UDP 9876 and Task 3 on UDP 9877, and use one owned outer QEMU process per run. RT-Thread vCPU0 is restricted to pCPU 2 with busy WFI; both Linux vCPUs may run on pCPUs 0, 1, and 3.
 
 **Tech Stack:** Rust 2024/no_std AxVisor and AxVM crates, AArch64 EL2/GICv3, RT-Thread 5.2.2, VirtIO-net MMIO, lwIP, C11 RT-IPC v2, Buildroot Linux, POSIX shell/Bash, SCons through `uv`, QEMU `virt`, Python 3/NumPy report tools.
 
@@ -15,7 +15,7 @@
 All mutating commands in this plan run from:
 
 ```text
-/home/yfblock/Code/hyper-rtos/.worktrees/axvisor-task123
+/home/yfblock/Code/hyper-rtos/.worktrees/axvisor-task123-integration
 ```
 
 These trees are read-only migration inputs:
@@ -59,7 +59,7 @@ Generated sources, images, logs, CSV, JSON, and run manifests stay below `tmp/ta
 Run:
 
 ```bash
-test "$(git rev-parse --show-toplevel)" = "/home/yfblock/Code/hyper-rtos/.worktrees/axvisor-task123"
+test "$(git rev-parse --show-toplevel)" = "/home/yfblock/Code/hyper-rtos/.worktrees/axvisor-task123-integration"
 test "$(git branch --show-current)" = "feat/axvisor-task123"
 git status --short
 git -C /home/yfblock/Code/hyper-rtos/tgoskits rev-parse HEAD
