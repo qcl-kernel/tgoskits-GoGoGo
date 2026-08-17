@@ -14,7 +14,7 @@
          if (p != RT_NULL)
          {
 -        rt_memcpy(p->payload, (void *)queue_rx->desc[id].addr + PV_OFFSET, len);
-+        rt_memcpy(p->payload, virtio_net_dev->info[id / 2].rx_buffer, len);
++            rt_memcpy(p->payload, virtio_net_dev->info[id / 2].rx_buffer, len);
 
              queue_rx->used_idx++;
 

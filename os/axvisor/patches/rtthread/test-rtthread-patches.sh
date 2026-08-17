@@ -20,6 +20,7 @@ LWIPOPTS="$RTDIR/components/net/lwip/port/lwipopts.h"
 RTCONFIG="$RTDIR/bsp/qemu-virt64-aarch64/rtconfig.h"
 APPLY_SCRIPT="$ROOT/os/axvisor/patches/rtthread/apply-rtthread-patches.sh"
 GTIMER_PATCH="$ROOT/os/axvisor/patches/rtthread/0008-aarch64-gtimer-use-absolute-deadlines.patch"
+LEGACY_NO_POLL_PATCH="$ROOT/os/axvisor/patches/rtthread/0001-virtio-net-remove-rx-polling.patch"
 BENCHMARK="$ROOT/os/axvisor/guests/rt-benchmark/rtthread/rt_benchmark.c"
 INSTALLED_BENCHMARK="$RTDIR/bsp/qemu-virt64-aarch64/applications/rt_benchmark.c"
 
@@ -29,6 +30,10 @@ if [[ ! -f "$DRIVER" ]]; then
 fi
 
 failures=0
+if [[ -e "$LEGACY_NO_POLL_PATCH" ]]; then
+    echo "FAIL: obsolete virtio-net polling/debug cleanup patch must be removed" >&2
+    failures=$((failures + 1))
+fi
 if ! git apply --numstat "$GTIMER_PATCH" >/dev/null 2>&1; then
     echo "FAIL: AArch64 absolute-deadline patch is syntactically valid" >&2
     failures=$((failures + 1))
@@ -188,6 +193,10 @@ reject_pattern \
 reject_pattern \
     "virtio-net TX exhaustion path contains no temporary debug print" \
     'VNET_TX FULL' \
+    "$DRIVER"
+reject_pattern \
+    "virtio-net uses interrupt-driven RX without a polling timer fallback" \
+    'g_virtio_net_poll_timer|virtio_net_poll_timer_cb' \
     "$DRIVER"
 require_pattern \
     "virtio DMA translation has the rt_kmem_v2p declaration on AArch64" \
@@ -369,13 +378,22 @@ require_pattern \
     "apply script installs the canonical RT benchmark" \
     'cp .*RTBENCH.*rt_benchmark\.c.*APPDIR' \
     "$APPLY_SCRIPT"
-require_pattern \
-    "apply script verifies the GICv3 get-pending fallback" \
-    'arm_gic_get_pending_irq' \
-    "$APPLY_SCRIPT"
-require_pattern \
-    "apply script verifies the GICv3 clear-pending fallback" \
-    'GIC_RDISTSGI_ICPENDR0' \
+for patch_variable in \
+    RX_MAILBOX_PATCH \
+    TX_USED_RECLAIM_PATCH \
+    RX_USED_HEAD_PATCH \
+    UDP_RECV_MBOX_PATCH \
+    GICV3_PENDING_PATCH \
+    GIC_ENABLE_QUERY_PATCH \
+    GTIMER_DEADLINE_PATCH; do
+    require_pattern \
+        "apply script checks the exact state of $patch_variable" \
+        "apply_patch_exactly .*\\\$$patch_variable" \
+        "$APPLY_SCRIPT"
+done
+reject_pattern \
+    "apply script does not accept marker text as proof of complete patches" \
+    'elif[[:space:]]+![[:space:]]+rg' \
     "$APPLY_SCRIPT"
 require_pattern \
     "apply script installs the GICv3 enable-state query" \

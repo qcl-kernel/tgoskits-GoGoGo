@@ -17,6 +17,7 @@ trap cleanup EXIT
 
 RTTHREAD_REPOSITORY="$SEED_REPOSITORY" "$PREPARE" "$SOURCE"
 "$APPLY" "$SOURCE"
+"$APPLY" "$SOURCE"
 "$VERIFY" "$SOURCE"
 
 if rg -n '/home/[^/]+/' \
