@@ -4,10 +4,15 @@
 >
 > 集成分支：`feat/axvisor-task123`
 >
-> 当前实现提交：`7e25b6ceeb8a1613705b90d47969482479a10dda`
+> 受测 runtime 提交：`7e25b6ceeb8a1613705b90d47969482479a10dda`
 >
 > 平台：Ubuntu 24.04，QEMU 11.0.2 TCG，AArch64 `virt`，
 > 4 个外层 vCPU
+
+测试完成后的提交只修改三份报告、文档契约和三行导入历史日志的行尾空格，
+没有修改 AxVisor、RT-Thread、Linux workload、协议、模型、配置或 runner
+运行逻辑。因此运行证据绑定到受测 runtime commit，而报告所在 HEAD 可以更晚。
+`git diff --name-only 7e25b6cee..HEAD` 可审计该边界。
 
 ## 1. 结论
 
@@ -205,3 +210,17 @@ os/axvisor/scripts/run_task123.sh \
 
 完整环境、构建步骤、故障诊断和哈希复核见
 `task123-reproduction-cn.md`。
+
+## 8. 本地不可变证据归档
+
+按计划，运行日志、CSV、JSON、二进制和 manifest 保留在 `tmp`，不提交 Git。
+共享工作区中的交付归档为：
+
+```text
+tmp/task123-results/task123-evidence-7e25b6cee.tar.gz
+SHA-256 5e2f220eeb7e22bbd540172c77d9818a606f9d0228e81ae8025acc792c5a62ba
+```
+
+归档包含 runtime commit 元数据、realtime suite、四轮 300 秒长稳、Task 3
+normal 和五个 fault profile，共 99 个条目。使用
+`gzip -t`、`tar -tzf` 和 `sha256sum` 可独立校验。

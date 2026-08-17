@@ -4,12 +4,15 @@
 >
 > 分支：`feat/axvisor-task123`
 >
-> 当前提交：`7e25b6ceeb8a1613705b90d47969482479a10dda`
+> 受测 runtime 提交：`7e25b6ceeb8a1613705b90d47969482479a10dda`
 >
 > RTOS：RT-Thread 5.2.2，固定提交
 > `ddf52e2cdd977f14fc04035c88672ac204aec713`
 >
 > 虚拟平台：QEMU 11.0.2 TCG / AArch64 `virt`
+
+报告提交晚于受测 runtime commit；其后的变更仅为报告、文档契约和导入历史
+日志的行尾空格，不改变任何可执行代码、配置、镜像或运行参数。
 
 ## 1. 总体完成度
 
@@ -144,6 +147,11 @@ RTOS 使用 AArch64 architectural counter 测量自身处理时间。
 | `stability-300s-r3-timerslack1/console.log` | `31ce71aaf87d6916da50aefc2b80afcc3cfa172d8eeebbfe2b7a98e1a33f8574` |
 | `stability-300s-r4-low-host-load/console.log` | `32a567eb8fd3544175bc97999804fc5dcd349625549d8840f5e0d2de7dcc6dc8` |
 | `task3-faults/fault-summary.json` | `55fa19d2206012f6a7278363ce05d92f2b513caa60930bdb70474dc82a8cd0f8` |
+
+完整原始证据在共享工作区的
+`tmp/task123-results/task123-evidence-7e25b6cee.tar.gz`，SHA-256 为
+`5e2f220eeb7e22bbd540172c77d9818a606f9d0228e81ae8025acc792c5a62ba`。
+归档不进入 Git，但可在当前工作区直接读取和复核。
 
 ## 9. 需求到证据映射
 

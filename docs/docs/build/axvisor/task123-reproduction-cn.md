@@ -8,7 +8,7 @@ AxVisor 实例中运行实时性测试、RT-IPC 网络通信和 AI 控制闭环�
 | 项目 | 版本 |
 |---|---|
 | 分支 | `feat/axvisor-task123` |
-| AxVisor 集成提交 | `7e25b6ceeb8a1613705b90d47969482479a10dda` |
+| 受测 runtime 提交 | `7e25b6ceeb8a1613705b90d47969482479a10dda` |
 | RTOS | RT-Thread 5.2.2 |
 | RT-Thread commit | `ddf52e2cdd977f14fc04035c88672ac204aec713` |
 | 宿主 | Ubuntu 24.04，kernel `6.17.0-40` |
@@ -20,6 +20,9 @@ AxVisor 实例中运行实时性测试、RT-IPC 网络通信和 AI 控制闭环�
 所有修改必须在
 `/home/yfblock/Code/hyper-rtos/.worktrees/axvisor-task123-integration`
 中进行。原始 `tgoskits` 和 `qemu-task3` checkout 是只读输入。
+报告提交可以晚于受测 runtime commit，但
+`git diff --name-only 7e25b6cee..HEAD` 必须只包含报告、文档契约或导入
+baseline 文本规范化，不得包含可执行源码、配置或 runner 逻辑。
 
 ## 2. 宿主依赖
 
@@ -292,6 +295,19 @@ sha256sum \
   tmp/task123-results/stability-300s-r4-low-host-load/console.log \
   tmp/task123-results/task3-faults/fault-summary.json
 ```
+
+完整交付归档：
+
+```bash
+sha256sum tmp/task123-results/task123-evidence-7e25b6cee.tar.gz
+# 期望：
+# 5e2f220eeb7e22bbd540172c77d9818a606f9d0228e81ae8025acc792c5a62ba
+gzip -t tmp/task123-results/task123-evidence-7e25b6cee.tar.gz
+tar -tzf tmp/task123-results/task123-evidence-7e25b6cee.tar.gz
+```
+
+归档包含 99 个条目，覆盖 suite、四轮 300 秒、Task 3 normal/fault 和
+`evidence-runtime-commit.txt`。它位于共享工作区 `tmp`，按计划不提交 Git。
 
 ## 12. 故障诊断
 

@@ -66,6 +66,10 @@ for file in "$REPORT" "$GUIDE"; do
     require_literal "$file" 'RT-Thread 5.2.2'
     require_literal "$file" 'QEMU 11.0.2'
 done
+for file in "$REALTIME" "$REPORT" "$GUIDE"; do
+    require_literal "$file" '受测 runtime'
+    require_literal "$file" '7e25b6ceeb8a1613705b90d47969482479a10dda'
+done
 for token in 'Ubuntu 24.04' '6.17.0-40' '2026-07-14' 'uv 0.11.16' '13.3.0'; do
     require_literal "$GUIDE" "$token"
 done
@@ -179,6 +183,10 @@ for hash in \
     require_literal "$REPORT" "$hash"
     require_literal "$GUIDE" "$hash"
 done
+for file in "$REALTIME" "$REPORT" "$GUIDE"; do
+    require_literal "$file" \
+        '5e2f220eeb7e22bbd540172c77d9818a606f9d0228e81ae8025acc792c5a62ba'
+done
 
 for hash in \
     'ddfda7b2051d95af499f720ba4f29eda702a51dd8d4881d91854092bba967e91' \
@@ -219,6 +227,7 @@ evidence_paths=(
     tmp/task123-results/stability-300s-r3-timerslack1/console.log
     tmp/task123-results/stability-300s-r4-low-host-load/console.log
     tmp/task123-results/task3-faults/fault-summary.json
+    tmp/task123-results/task123-evidence-7e25b6cee.tar.gz
 )
 evidence_present=0
 for evidence_path in "${evidence_paths[@]}"; do
@@ -259,6 +268,9 @@ verify_hash_if_present \
 verify_hash_if_present \
     tmp/task123-results/task3-faults/fault-summary.json \
     55fa19d2206012f6a7278363ce05d92f2b513caa60930bdb70474dc82a8cd0f8
+verify_hash_if_present \
+    tmp/task123-results/task123-evidence-7e25b6cee.tar.gz \
+    5e2f220eeb7e22bbd540172c77d9818a606f9d0228e81ae8025acc792c5a62ba
 fi
 
 if (( failures > 0 )); then
