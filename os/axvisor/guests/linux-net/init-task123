@@ -59,8 +59,11 @@ parse_command_line() {
             task2.*|task3.*)
                 invalid_control "${argument%%=*}"
                 ;;
-        esac
+            esac
     done
+    if [ "$task2_fault" = reliability ] && [ "$task2_count" -lt 2 ]; then
+        invalid_control 'task2.count'
+    fi
 }
 
 main() {
@@ -140,8 +143,12 @@ main() {
 
 finish() {
     status=$1
-    /bin/busybox sync
-    /bin/busybox poweroff -f
+    if ! /bin/busybox sync; then
+        [ "$status" -ne 0 ] || status=1
+    fi
+    if ! /bin/busybox poweroff -f; then
+        [ "$status" -ne 0 ] || status=1
+    fi
     exit "$status"
 }
 

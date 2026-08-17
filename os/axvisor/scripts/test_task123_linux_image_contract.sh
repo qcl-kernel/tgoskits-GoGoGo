@@ -76,6 +76,12 @@ if grep -E 'ip addr add' "$INIT" |
     grep -Ev '192\.168\.77\.11/24 dev eth0' >/dev/null; then
     fail '/init configures an address other than 192.168.77.11/24'
 fi
+for command in \
+    '/bin/busybox ip addr flush dev eth0' \
+    '/bin/busybox ip addr add 192.168.77.11/24 dev eth0' \
+    '/bin/busybox ip link set dev eth0 up'; do
+    require_line "$command" "$INIT"
+done
 
 require_line '/bin/rtipic-client' "$INIT"
 require_line '--port 9876' "$INIT"
@@ -226,13 +232,22 @@ shift
 case "$applet" in
     cat) exec /bin/cat "$@" ;;
     nproc) printf '%s\n' 2 ;;
-    mkdir|mount|ip|sync) exit 0 ;;
+    mkdir|mount|sync) exit 0 ;;
+    ip)
+        printf 'IP' >>"$TASK123_EVENTS"
+        for argument in "$@"; do
+            printf ' <%s>' "$argument" >>"$TASK123_EVENTS"
+        done
+        printf '\n' >>"$TASK123_EVENTS"
+        exit "${IP_FAKE_STATUS:-0}"
+        ;;
     poweroff)
         printf 'POWEROFF' >>"$TASK123_EVENTS"
         for argument in "$@"; do
             printf ' <%s>' "$argument" >>"$TASK123_EVENTS"
         done
         printf '\n' >>"$TASK123_EVENTS"
+        exit "${POWEROFF_FAKE_STATUS:-0}"
         ;;
     *) exit 99 ;;
 esac
@@ -264,10 +279,13 @@ run_init() {
     task2_status=$2
     task3_status=$3
     expected_status=$4
+    ip_status=${5:-0}
+    poweroff_status=${6:-0}
     : >"$events"
     printf '%s\n' "$command_line" >"$cmdline"
     if TASK123_EVENTS="$events" TASK2_FAKE_STATUS="$task2_status" \
-        TASK3_FAKE_STATUS="$task3_status" "$harness_init"; then
+        TASK3_FAKE_STATUS="$task3_status" IP_FAKE_STATUS="$ip_status" \
+        POWEROFF_FAKE_STATUS="$poweroff_status" "$harness_init"; then
         actual_status=0
     else
         actual_status=$?
@@ -296,6 +314,9 @@ assert_success_profile() {
         0 0 0
     cat >"$expected" <<EOF_SUCCESS
 LINUX_SMP_READY configured=2 online=0-1 nproc=2
+IP <addr> <flush> <dev> <eth0>
+IP <addr> <add> <192.168.77.11/24> <dev> <eth0>
+IP <link> <set> <dev> <eth0> <up>
 TASK123_LINUX_NET_READY ip=192.168.77.11 peer=192.168.77.30
 TASK2_LINUX_BEGIN port=9876
 $task2_args
@@ -320,6 +341,9 @@ run_init 'task2.count=23 task2.fault=none task3.frames=3 task3.fault=normal' \
     7 0 7
 cat >"$expected" <<EOF_TASK2_FAIL
 LINUX_SMP_READY configured=2 online=0-1 nproc=2
+IP <addr> <flush> <dev> <eth0>
+IP <addr> <add> <192.168.77.11/24> <dev> <eth0>
+IP <link> <set> <dev> <eth0> <up>
 TASK123_LINUX_NET_READY ip=192.168.77.11 peer=192.168.77.30
 TASK2_LINUX_BEGIN port=9876
 TASK2_ARGS <--host> <192.168.77.30> <--port> <9876> <--count> <23> <--fault-profile> <none>
@@ -336,6 +360,9 @@ run_init 'task2.count=23 task2.fault=none task3.frames=3 task3.fault=normal' \
     0 9 9
 cat >"$expected" <<EOF_TASK3_FAIL
 LINUX_SMP_READY configured=2 online=0-1 nproc=2
+IP <addr> <flush> <dev> <eth0>
+IP <addr> <add> <192.168.77.11/24> <dev> <eth0>
+IP <link> <set> <dev> <eth0> <up>
 TASK123_LINUX_NET_READY ip=192.168.77.11 peer=192.168.77.30
 TASK2_LINUX_BEGIN port=9876
 TASK2_ARGS <--host> <192.168.77.30> <--port> <9876> <--count> <23> <--fault-profile> <none>
@@ -347,6 +374,35 @@ TASK123_LINUX_END status=FAIL
 POWEROFF <-f>
 EOF_TASK3_FAIL
 assert_events 'Task 3 failure'
+
+run_init 'task2.count=23 task2.fault=none task3.frames=3 task3.fault=normal' \
+    0 0 1 1
+cat >"$expected" <<EOF_NET_FAIL
+LINUX_SMP_READY configured=2 online=0-1 nproc=2
+IP <addr> <flush> <dev> <eth0>
+TASK123_LINUX_END status=FAIL
+POWEROFF <-f>
+EOF_NET_FAIL
+assert_events 'network setup failure'
+
+run_init 'task2.count=23 task2.fault=none task3.frames=3 task3.fault=normal' \
+    0 0 1 0 5
+cat >"$expected" <<EOF_POWEROFF_FAIL
+LINUX_SMP_READY configured=2 online=0-1 nproc=2
+IP <addr> <flush> <dev> <eth0>
+IP <addr> <add> <192.168.77.11/24> <dev> <eth0>
+IP <link> <set> <dev> <eth0> <up>
+TASK123_LINUX_NET_READY ip=192.168.77.11 peer=192.168.77.30
+TASK2_LINUX_BEGIN port=9876
+TASK2_ARGS <--host> <192.168.77.30> <--port> <9876> <--count> <23> <--fault-profile> <none>
+TASK2_LINUX_END status=PASS
+TASK3_LINUX_READY ip=192.168.77.11 peer=192.168.77.30:9877
+$task3_args
+TASK3_LINUX_END status=PASS
+TASK123_LINUX_END status=PASS
+POWEROFF <-f>
+EOF_POWEROFF_FAIL
+assert_events 'poweroff failure'
 
 assert_invalid() {
     command_line=$1
@@ -366,6 +422,7 @@ assert_invalid 'task2.count=-1' task2.count
 assert_invalid 'task2.count=nope' task2.count
 assert_invalid 'task2.count=999999999999999999999999999999999999' task2.count
 assert_invalid 'task2.count=2147483648' task2.count
+assert_invalid 'task2.count=1 task2.fault=reliability' task2.count
 assert_invalid 'task2.fault=bad' task2.fault
 assert_invalid 'task3.frames=' task3.frames
 assert_invalid 'task3.frames=0' task3.frames
