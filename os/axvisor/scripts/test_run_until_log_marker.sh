@@ -42,6 +42,82 @@ while :; do sleep 1; done
 EOF
 }
 
+internal_error_log="$TMP_DIR/internal-error.log"
+internal_error_status_file="$TMP_DIR/internal-error.status"
+internal_error_reason_file="$TMP_DIR/internal-error.reason"
+mkdir "$TMP_DIR/pid-file-is-a-directory"
+set +e
+RUN_UNTIL_CHILD_PID_FILE="$TMP_DIR/pid-file-is-a-directory" \
+RUN_UNTIL_CHILD_STATUS_FILE="$internal_error_status_file" \
+RUN_UNTIL_TERMINATION_REASON_FILE="$internal_error_reason_file" \
+"$RUN_UNTIL" 5 "$internal_error_log" 'NEVER WRITTEN' -- sleep 10
+internal_error_rc=$?
+set -e
+if [ "$internal_error_rc" -eq 0 ]; then
+    echo "FAIL: PID-file publication error returned success" >&2
+    exit 1
+fi
+if ! grep -Eq '^([0-9]|[1-9][0-9]|1[0-9][0-9]|2[0-4][0-9]|25[0-5])$' \
+    "$internal_error_status_file" 2>/dev/null; then
+    echo "FAIL: internal error did not atomically publish a valid raw status" >&2
+    exit 1
+fi
+if [ "$(cat "$internal_error_reason_file" 2>/dev/null)" != internal-error ]; then
+    echo "FAIL: internal error reason was not published" >&2
+    exit 1
+fi
+
+publication_failure_log="$TMP_DIR/publication-failure.log"
+publication_failure_status_file="$TMP_DIR/missing-parent/publication-failure.status"
+publication_failure_reason_file="$TMP_DIR/publication-failure.reason"
+set +e
+RUN_UNTIL_CHILD_STATUS_FILE="$publication_failure_status_file" \
+RUN_UNTIL_TERMINATION_REASON_FILE="$publication_failure_reason_file" \
+"$RUN_UNTIL" 5 "$publication_failure_log" 'NEVER WRITTEN' -- sh -c 'exit 7'
+publication_failure_rc=$?
+set -e
+if [ "$publication_failure_rc" -ne 7 ]; then
+    echo "FAIL: status publication failure changed child exit 7 to $publication_failure_rc" >&2
+    exit 1
+fi
+
+early_signal_log="$TMP_DIR/early-signal.log"
+early_signal_status_file="$TMP_DIR/early-signal.status"
+early_signal_reason_file="$TMP_DIR/early-signal.reason"
+early_markers=()
+for early_marker_index in $(seq 1 50000); do
+    early_markers+=("marker-$early_marker_index")
+done
+RUN_UNTIL_CHILD_STATUS_FILE="$early_signal_status_file" \
+RUN_UNTIL_TERMINATION_REASON_FILE="$early_signal_reason_file" \
+    "$RUN_UNTIL" 30 "$early_signal_log" "${early_markers[@]}" -- sleep 10 &
+early_signal_pid=$!
+early_signal_deadline_ns=$(( $(date +%s%N) + 3000000000 ))
+while ! tr '\0' '\n' < "/proc/$early_signal_pid/environ" 2>/dev/null | \
+    grep -Fxq 'RUN_UNTIL_SIGNALS_RESET=1'; do
+    if ! kill -0 "$early_signal_pid" 2>/dev/null || \
+       [ "$(date +%s%N)" -ge "$early_signal_deadline_ns" ]; then
+        kill -KILL "$early_signal_pid" 2>/dev/null || true
+        echo "FAIL: early-signal helper did not enter its reset-signal phase" >&2
+        exit 1
+    fi
+    sleep 0.01
+done
+kill -TERM "$early_signal_pid"
+set +e
+wait "$early_signal_pid"
+early_signal_rc=$?
+set -e
+if [ "$early_signal_rc" -ne 143 ]; then
+    echo "FAIL: early TERM returned $early_signal_rc instead of 143" >&2
+    exit 1
+fi
+if [ "$(cat "$early_signal_status_file" 2>/dev/null)" != 143 ] ||
+   [ "$(cat "$early_signal_reason_file" 2>/dev/null)" != signal ]; then
+    echo "FAIL: early TERM did not publish valid signal completion" >&2
+    exit 1
+fi
+
 marker_log="$TMP_DIR/marker.log"
 child_pid_file="$TMP_DIR/marker.pid"
 reported_pid_file="$TMP_DIR/reported.pid"

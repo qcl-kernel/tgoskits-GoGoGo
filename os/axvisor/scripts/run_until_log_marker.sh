@@ -5,47 +5,46 @@ if [ "${RUN_UNTIL_SIGNALS_RESET:-0}" != 1 ]; then
     exec env --default-signal=HUP,INT,TERM bash "$0" "$@"
 fi
 
-set -eu
-
-if [ "$#" -lt 5 ]; then
-    echo "usage: $0 TIMEOUT_S LOG MARKER [MARKER ...] -- COMMAND [ARG ...]" >&2
-    exit 2
-fi
-
-timeout_s=$1
-log=$2
-shift 2
-markers=()
-while [ "$#" -gt 0 ] && [ "$1" != "--" ]; do
-    markers+=("$1")
-    shift
-done
-if [ "${#markers[@]}" -eq 0 ] || [ "$#" -lt 2 ] || [ "$1" != "--" ]; then
-    echo "usage: $0 TIMEOUT_S LOG MARKER [MARKER ...] -- COMMAND [ARG ...]" >&2
-    exit 2
-fi
-shift
-
-case "$timeout_s" in
-    ''|*[!0-9]*|0)
-        echo "invalid timeout: $timeout_s" >&2
-        exit 2
-        ;;
-esac
-
 child_pid=
 child_pgid=
 child_rc=
+completion_recorded=0
+
+atomic_write_completion() {
+    local destination=$1
+    local value=$2
+    local temporary="${destination}.tmp.$$"
+
+    printf '%s\n' "$value" > "$temporary" &&
+        mv -- "$temporary" "$destination"
+}
 
 record_completion() {
     local reason=$1
+    local raw_status=$2
+    local publish_rc=0
+
+    [ "$completion_recorded" -eq 0 ] || return 0
+    completion_recorded=1
+    case "$raw_status" in
+        ''|*[!0-9]*) raw_status=1 ;;
+        *)
+            if [ "$raw_status" -gt 255 ]; then
+                raw_status=1
+            fi
+            ;;
+    esac
+    [ -n "$reason" ] || reason=internal-error
 
     if [ -n "${RUN_UNTIL_CHILD_STATUS_FILE:-}" ]; then
-        printf '%s\n' "$child_rc" > "$RUN_UNTIL_CHILD_STATUS_FILE"
+        atomic_write_completion "$RUN_UNTIL_CHILD_STATUS_FILE" "$raw_status" ||
+            publish_rc=$?
     fi
     if [ -n "${RUN_UNTIL_TERMINATION_REASON_FILE:-}" ]; then
-        printf '%s\n' "$reason" > "$RUN_UNTIL_TERMINATION_REASON_FILE"
+        atomic_write_completion "$RUN_UNTIL_TERMINATION_REASON_FILE" "$reason" ||
+            publish_rc=$?
     fi
+    return "$publish_rc"
 }
 
 child_is_running() {
@@ -96,23 +95,61 @@ terminate_child_group() {
     child_pgid=
 }
 
-cleanup() {
+handle_exit() {
+    local exit_rc=$?
+
+    trap - EXIT HUP INT TERM
+    set +e
     terminate_child_group
+    if [ "$completion_recorded" -eq 0 ]; then
+        record_completion internal-error "$exit_rc"
+    fi
+    exit "$exit_rc"
 }
 
 handle_signal() {
     local signal_rc=$1
+    local raw_status
 
-    trap - EXIT HUP INT TERM
+    trap - HUP INT TERM
     terminate_child_group
-    record_completion signal
+    raw_status=${child_rc:-$signal_rc}
+    record_completion signal "$raw_status" || true
     exit "$signal_rc"
 }
 
-trap cleanup EXIT
+trap handle_exit EXIT
 trap 'handle_signal 129' HUP
 trap 'handle_signal 130' INT
 trap 'handle_signal 143' TERM
+
+set -eu
+
+if [ "$#" -lt 5 ]; then
+    echo "usage: $0 TIMEOUT_S LOG MARKER [MARKER ...] -- COMMAND [ARG ...]" >&2
+    exit 2
+fi
+
+timeout_s=$1
+log=$2
+shift 2
+markers=()
+while [ "$#" -gt 0 ] && [ "$1" != "--" ]; do
+    markers+=("$1")
+    shift
+done
+if [ "${#markers[@]}" -eq 0 ] || [ "$#" -lt 2 ] || [ "$1" != "--" ]; then
+    echo "usage: $0 TIMEOUT_S LOG MARKER [MARKER ...] -- COMMAND [ARG ...]" >&2
+    exit 2
+fi
+shift
+
+case "$timeout_s" in
+    ''|*[!0-9]*|0)
+        echo "invalid timeout: $timeout_s" >&2
+        exit 2
+        ;;
+esac
 
 setsid -- "$@" <&0 &
 child_pid=$!
@@ -140,7 +177,7 @@ while :; do
             terminated_by_helper=1
         fi
         terminate_child_group
-        record_completion marker-complete
+        record_completion marker-complete "$child_rc" || true
         if [ "$child_rc" -eq 0 ] || \
            { [ "$terminated_by_helper" -eq 1 ] && \
              { [ "$child_rc" -eq 143 ] || [ "$child_rc" -eq 137 ]; }; }; then
@@ -154,13 +191,13 @@ while :; do
         exited_child_rc=$child_rc
         terminate_child_group
         child_rc=$exited_child_rc
-        record_completion child-exit
+        record_completion child-exit "$child_rc" || true
         exit "$child_rc"
     fi
 
     if [ "$(date +%s%N)" -ge "$deadline_ns" ]; then
         terminate_child_group
-        record_completion timeout
+        record_completion timeout "$child_rc" || true
         exit 124
     fi
 

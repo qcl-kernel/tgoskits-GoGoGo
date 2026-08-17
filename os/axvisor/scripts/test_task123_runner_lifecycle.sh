@@ -52,6 +52,11 @@ if [[ "$*" == "xtask image pull qemu-aarch64 -o "* ]]; then
     printf 'pulled rootfs\n' > "$output_dir/pulled/rootfs.img"
     exit 0
 fi
+if [[ "${FAKE_CARGO_BEHAVIOR:-pass}" == hang ]]; then
+    printf '%s\n' "$$" > "$FAKE_CARGO_PID_FILE"
+    trap 'exit 143' TERM
+    while :; do sleep 1; done
+fi
 [[ "${FAKE_BUILD_FAIL:-0}" != 1 ]] || exit 41
 mkdir -p "$CARGO_TARGET_DIR/aarch64-unknown-linux-musl/release"
 printf 'fake axvisor elf\n' > "$CARGO_TARGET_DIR/aarch64-unknown-linux-musl/release/axvisor"
@@ -263,6 +268,7 @@ common_env=(
     ROOTFS_IMAGE="$fixtures/rootfs.img"
     TASK123_MODEL_IMAGE="$fixtures/model.bin"
     FAKE_CARGO_LOG="$records/cargo.log"
+    FAKE_CARGO_PID_FILE="$records/fake-cargo.pid"
     FAKE_CARGO_VMCONFIG_DIR="$records"
     FAKE_QEMU_LOG="$records/qemu.log"
     FAKE_QEMU_PID_FILE="$records/qemu.pid"
@@ -476,6 +482,12 @@ expect_failure "zero task3 frame count was accepted" \
 expect_failure "zero task2 count was accepted" \
     env "${common_env[@]}" "$RUNNER" --mode smoke --task2-count 0 \
     --output "$tmp/zero-task2"
+expect_failure "zero build timeout was accepted" \
+    env "${common_env[@]}" TASK123_BUILD_TIMEOUT_S=0 \
+    "$RUNNER" --mode smoke --output "$tmp/zero-build-timeout"
+expect_failure "phase timeout above the limit was accepted" \
+    env "${common_env[@]}" TASK123_PHASE_TIMEOUT_S=86401 \
+    "$RUNNER" --mode smoke --output "$tmp/large-phase-timeout"
 expect_failure "out-of-range realtime sample count was accepted" \
     env "${common_env[@]}" "$RUNNER" --mode realtime-suite \
     --rtbench-samples 100001 --output "$tmp/invalid-samples"
@@ -573,6 +585,29 @@ expect_failure "timeout returned success" \
 [[ -e "$timeout_output/console.log" ]] || fail "timeout discarded console log"
 timeout_pid="$(cat "$records/qemu.pid")"
 assert_reaped "$timeout_pid"
+
+: > "$records/qemu.log"
+build_timeout_output="$tmp/build-timeout"
+rm -f -- "$records/fake-cargo.pid"
+build_timeout_start_ns=$(date +%s%N)
+expect_failure "cargo build timeout returned success" \
+    timeout -k 2 5 env "${common_env[@]}" \
+    FAKE_CARGO_BEHAVIOR=hang TASK123_BUILD_TIMEOUT_S=1 \
+    "$RUNNER" --mode smoke --task2-count 2 --task3-frames 3 \
+    --output "$build_timeout_output"
+build_timeout_elapsed_ms=$(( ($(date +%s%N) - build_timeout_start_ns) / 1000000 ))
+[[ "$build_timeout_elapsed_ms" -lt 4500 ]] ||
+    fail "cargo build timeout did not stop the phase promptly"
+[[ -s "$build_timeout_output/runner.log" ]] ||
+    fail "cargo build timeout discarded its log"
+grep -Fq 'cargo-xtask-axvisor-build timed out after 1s' \
+    "$build_timeout_output/runner.log" ||
+    fail "cargo build timeout did not preserve timeout diagnostics"
+[[ ! -s "$records/qemu.log" ]] ||
+    fail "QEMU started after cargo build timeout"
+[[ -s "$records/fake-cargo.pid" ]] ||
+    fail "fake cargo did not record its PID"
+assert_reaped "$(cat "$records/fake-cargo.pid")"
 
 : > "$records/qemu.log"
 term_output="$tmp/term"

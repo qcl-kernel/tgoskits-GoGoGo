@@ -160,6 +160,8 @@ validate_mode_options() {
         require_integer "$stability_seconds" 1 3600 seconds
     fi
     require_integer "${TASK123_TIMEOUT_S:-600}" 1 86400 TASK123_TIMEOUT_S
+    require_integer "${TASK123_BUILD_TIMEOUT_S:-1800}" 1 86400 TASK123_BUILD_TIMEOUT_S
+    require_integer "${TASK123_PHASE_TIMEOUT_S:-600}" 1 86400 TASK123_PHASE_TIMEOUT_S
     require_integer "${QEMU_UCLAMP_MIN:-1024}" 0 1024 QEMU_UCLAMP_MIN
 }
 
@@ -347,10 +349,28 @@ phase() {
     printf 'PHASE %s\n' "$1"
 }
 
+run_timed() {
+    local timeout_s=$1
+    local phase_name=$2
+    local phase_rc
+    shift 2
+
+    if timeout --foreground --signal TERM --kill-after 5s \
+        "$timeout_s" "$@"; then
+        return 0
+    else
+        phase_rc=$?
+    fi
+    if [[ "$phase_rc" -eq 124 || "$phase_rc" -eq 137 || "$phase_rc" -eq 143 ]]; then
+        echo "task123 runner: $phase_name timed out after ${timeout_s}s" >&2
+    fi
+    return "$phase_rc"
+}
+
 resolve_dependencies() {
     phase dependency-check
     local command_name
-    for command_name in realpath sha256sum awk sed grep find mktemp cp chmod date python3; do
+    for command_name in realpath sha256sum awk sed grep find mktemp cp chmod date python3 timeout; do
         command -v "$command_name" >/dev/null || fail "required command not found: $command_name"
     done
     RUN_UNTIL="$(canonical_tool run-until "$RUN_UNTIL")"
@@ -374,7 +394,8 @@ resolve_rootfs_image() {
 
     local rootfs_dir="$RUNTIME_DIR/rootfs"
     local rootfs_candidates=()
-    "$CARGO" xtask image pull qemu-aarch64 -o "$rootfs_dir"
+    run_timed "$TASK123_BUILD_TIMEOUT_S" image-pull \
+        "$CARGO" xtask image pull qemu-aarch64 -o "$rootfs_dir"
     mapfile -t rootfs_candidates < <(find "$rootfs_dir" -type f -name rootfs.img -print)
     [[ "${#rootfs_candidates[@]}" -eq 1 ]] || {
         fail "image pull must produce exactly one rootfs.img (found ${#rootfs_candidates[@]})"
@@ -388,7 +409,8 @@ build_linux_images_if_needed() {
         return
     fi
     local build_root="$RUNTIME_DIR/task3-linux-build"
-    BUILD_DIR="$build_root" "$TASK3_ROOT/scripts/build_linux.sh"
+    run_timed "$TASK123_BUILD_TIMEOUT_S" linux-image-build \
+        env BUILD_DIR="$build_root" "$TASK3_ROOT/scripts/build_linux.sh"
     LINUX_KERNEL_IMAGE="$build_root/images/linux/Image"
     LINUX_INITRAMFS_IMAGE="$build_root/images/linux/rootfs.cpio"
     TASK123_MODEL_IMAGE="${TASK123_MODEL_IMAGE:-$build_root/model/model_weights.h}"
@@ -400,10 +422,12 @@ build_rtthread_variant() {
     local drop_status=$3
     local delay_ms=$4
     local bsp="$source_tree/bsp/qemu-virt64-aarch64"
-    env TASK3_FAULT_DROP_STATUS_ONCE="$drop_status" \
+    run_timed "$TASK123_BUILD_TIMEOUT_S" rtthread-clean \
+        env TASK3_FAULT_DROP_STATUS_ONCE="$drop_status" \
         TASK3_FAULT_DELAY_START_MS="$delay_ms" \
         uv run --with scons scons -C "$bsp" -c
-    env TASK3_FAULT_DROP_STATUS_ONCE="$drop_status" \
+    run_timed "$TASK123_BUILD_TIMEOUT_S" rtthread-build \
+        env TASK3_FAULT_DROP_STATUS_ONCE="$drop_status" \
         TASK3_FAULT_DELAY_START_MS="$delay_ms" \
         uv run --with scons scons -C "$bsp" -j"$(getconf _NPROCESSORS_ONLN)"
     cp -- "$bsp/rtthread.bin" "$output"
@@ -419,8 +443,10 @@ build_rtthread_images_if_needed() {
     local source_tree="$RUNTIME_DIR/rtthread-source"
     local image_dir="$RUNTIME_DIR/rtthread-images"
     mkdir -- "$image_dir"
-    "$ROOT/os/axvisor/patches/rtthread/prepare_rtthread_source.sh" "$source_tree"
-    "$ROOT/os/axvisor/patches/rtthread/apply-rtthread-patches.sh" "$source_tree"
+    run_timed "$TASK123_PHASE_TIMEOUT_S" prepare-rtthread-source \
+        "$ROOT/os/axvisor/patches/rtthread/prepare_rtthread_source.sh" "$source_tree"
+    run_timed "$TASK123_PHASE_TIMEOUT_S" apply-rtthread-patches \
+        "$ROOT/os/axvisor/patches/rtthread/apply-rtthread-patches.sh" "$source_tree"
     RTTHREAD_NORMAL_IMAGE="$image_dir/rtthread-normal.bin"
     RTTHREAD_DROP_STATUS_IMAGE="$image_dir/rtthread-drop-status.bin"
     RTTHREAD_DELAYED_SERVER_IMAGE="$image_dir/rtthread-delayed-server.bin"
@@ -445,7 +471,8 @@ resolve_or_build_images() {
             TASK123_MODEL_IMAGE="$TASK3_ROOT/build/model/model_weights.h"
         else
             local model_build="$RUNTIME_DIR/task3-model-build"
-            BUILD_DIR="$model_build" "$TASK3_ROOT/scripts/build_model.sh"
+            run_timed "$TASK123_BUILD_TIMEOUT_S" model-build \
+                env BUILD_DIR="$model_build" "$TASK3_ROOT/scripts/build_model.sh"
             TASK123_MODEL_IMAGE="$model_build/model/model_weights.h"
         fi
     fi
@@ -475,12 +502,14 @@ generate_vmconfigs() {
     local guest_cmdline
     guest_cmdline="console=ttyAMA0 rdinit=/init task2.count=$task2_count task2.fault=none task3.frames=$task3_frames task3.fault=$guest_fault"
     LINUX_VMCONFIG="$(
-        "$LINUX_VMCONFIG_GENERATOR" "$ROOT" "$LINUX_VMCONFIG_TEMPLATE" \
+        run_timed "$TASK123_PHASE_TIMEOUT_S" linux-vmconfig-generator \
+            "$LINUX_VMCONFIG_GENERATOR" "$ROOT" "$LINUX_VMCONFIG_TEMPLATE" \
             "$LINUX_KERNEL_IMAGE" "$LINUX_INITRAMFS_IMAGE" \
             "$LINUX_RUNTIME_DIR" "$guest_cmdline"
     )"
     RTTHREAD_VMCONFIG="$(
-        "$RTTHREAD_VMCONFIG_GENERATOR" "$ROOT" "$RTTHREAD_VMCONFIG_TEMPLATE" \
+        run_timed "$TASK123_PHASE_TIMEOUT_S" rtthread-vmconfig-generator \
+            "$RTTHREAD_VMCONFIG_GENERATOR" "$ROOT" "$RTTHREAD_VMCONFIG_TEMPLATE" \
             "$SELECTED_RTTHREAD_IMAGE" "$RTTHREAD_RUNTIME_DIR"
     )"
     chmod a-w -- "$LINUX_VMCONFIG" "$RTTHREAD_VMCONFIG"
@@ -489,7 +518,8 @@ generate_vmconfigs() {
 build_axvisor() {
     phase cargo-xtask-axvisor-build
     export CARGO_TARGET_DIR="$RUNTIME_DIR/cargo-target"
-    "$CARGO" xtask axvisor build --config qemu-aarch64-two-guest-net \
+    run_timed "$TASK123_BUILD_TIMEOUT_S" cargo-xtask-axvisor-build \
+        "$CARGO" xtask axvisor build --config qemu-aarch64-two-guest-net \
         --vmconfigs "$LINUX_VMCONFIG" \
         --vmconfigs "$RTTHREAD_VMCONFIG"
     local axvisor_elf="$CARGO_TARGET_DIR/aarch64-unknown-linux-musl/release/axvisor"
@@ -497,8 +527,10 @@ build_axvisor() {
 
     phase strip-objcopy
     local stripped="$RUNTIME_DIR/axvisor.stripped"
-    "$AARCH64_STRIP" -o "$stripped" "$axvisor_elf"
-    "$AARCH64_OBJCOPY" -O binary "$stripped" "$AXVISOR_BIN"
+    run_timed "$TASK123_BUILD_TIMEOUT_S" strip \
+        "$AARCH64_STRIP" -o "$stripped" "$axvisor_elf"
+    run_timed "$TASK123_BUILD_TIMEOUT_S" objcopy \
+        "$AARCH64_OBJCOPY" -O binary "$stripped" "$AXVISOR_BIN"
     [[ -s "$AXVISOR_BIN" ]] || fail "AxVisor binary conversion produced no output"
 }
 
@@ -508,7 +540,7 @@ record_artifact() {
     local resolved
     local digest
     resolved="$(canonical_existing_file "$label" "$path")"
-    digest="$(sha256sum "$resolved")"
+    digest="$(run_timed "$TASK123_PHASE_TIMEOUT_S" artifact-digest sha256sum "$resolved")"
     digest=${digest%% *}
     [[ "$digest" =~ ^[0-9a-f]{64}$ ]] || fail "invalid digest for $label"
     printf 'ARTIFACT name=%s path=%s sha256=%s\n' "$label" "$resolved" "$digest" >> "$MANIFEST_TMP"
@@ -670,7 +702,8 @@ launch_one_qemu() {
     wait_for_qemu_pid "$qemu_pid_file"
 
     phase apply-qemu-realtime-controls
-    "$QEMU_REALTIME_CONTROL" "$qemu_pid" "$QEMU_UCLAMP_MIN"
+    run_timed "$TASK123_PHASE_TIMEOUT_S" apply-qemu-realtime-controls \
+        "$QEMU_REALTIME_CONTROL" "$qemu_pid" "$QEMU_UCLAMP_MIN"
     if [[ "$mode" == realtime-suite || "$mode" == stability ]]; then
         feed_benchmark_command &
         feeder_pid=$!
@@ -720,7 +753,8 @@ run_result_gate() {
     elif [[ "$mode" == task3-fault ]]; then
         arguments+=(--task3-fault "$task3_fault")
     fi
-    "$RESULT_GATE" "${arguments[@]}"
+    run_timed "$TASK123_PHASE_TIMEOUT_S" result-gate \
+        "$RESULT_GATE" "${arguments[@]}"
 }
 
 publish_manifest() {
@@ -739,6 +773,8 @@ main() {
     cd "$ROOT"
 
     TASK123_TIMEOUT_S=${TASK123_TIMEOUT_S:-600}
+    TASK123_BUILD_TIMEOUT_S=${TASK123_BUILD_TIMEOUT_S:-1800}
+    TASK123_PHASE_TIMEOUT_S=${TASK123_PHASE_TIMEOUT_S:-600}
     QEMU_UCLAMP_MIN=${QEMU_UCLAMP_MIN:-1024}
     mkdir -p -- "$ROOT/tmp"
     RUNTIME_DIR="$(mktemp -d "$ROOT/tmp/task123-runtime.XXXXXX")"
