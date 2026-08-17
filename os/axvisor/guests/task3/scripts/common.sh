@@ -11,7 +11,7 @@ die() {
 [ -n "${TASK3_ROOT:-}" ] || die "TASK3_ROOT must be set before sourcing common.sh"
 TASK3_ROOT=$(CDPATH= cd -- "$TASK3_ROOT" && pwd)
 BUILD_DIR=${BUILD_DIR:-"$TASK3_ROOT/build"}
-RTIPC_DIR=${RTIPC_DIR:-"$TASK3_ROOT/../protocol/c"}
+RTIPC_DIR=${RTIPC_DIR:-"$TASK3_ROOT/../rt-ipc/common"}
 export TASK3_ROOT BUILD_DIR RTIPC_DIR
 
 require_command() {

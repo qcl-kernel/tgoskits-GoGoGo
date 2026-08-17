@@ -4,7 +4,7 @@ mountpoint -q /proc || mount -t proc proc /proc
 mountpoint -q /sys || mount -t sysfs sysfs /sys
 mountpoint -q /dev || mount -t devtmpfs devtmpfs /dev
 ifconfig eth0 192.168.77.11 netmask 255.255.255.0 up
-printf '%s\n' 'TASK3_LINUX_READY ip=192.168.77.11 peer=192.168.77.30:9876'
+printf '%s\n' 'TASK3_LINUX_READY ip=192.168.77.11 peer=192.168.77.30:9877'
 frames=600
 drop_tx_seq=
 duplicate_frame_once=0
@@ -37,7 +37,7 @@ esac
     --video /opt/task3/line-follow.y4m \
     --truth /opt/task3/truth.csv \
     --peer 192.168.77.30 \
-    --port 9876 \
+    --port 9877 \
     --frames "$frames" \
     --csv /tmp/task3-frames.csv \
     "$@"

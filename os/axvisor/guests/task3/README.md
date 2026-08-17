@@ -22,7 +22,7 @@ git status --short
 - Kconfiglib 14.1.0
 - QEMU >= 8.2，已验证 QEMU 11.0.2
 - Python 3、NumPy、Git、Make、SCons、curl、tar 和 xz
-- 上级工作区 `protocol/c` 中的 RT-IPC 头文件与源码按锁文件 SHA-256 校验
+- 相邻 `rt-ipc/common` 中的 AxVisor RT-IPC v2 头文件与源码按锁文件 SHA-256 校验
 
 ## 一次性复现
 
@@ -77,9 +77,9 @@ qemu-system-aarch64 -M virt,gic-version=2 -cpu cortex-a53 \
 | 客户机 | vCPU | 内存 | MAC | IPv4 | 工作 |
 |---|---:|---:|---|---|---|
 | Linux | 2 | 256 MiB | `52:54:00:77:00:11` | `192.168.77.11/24` | Y4M、CNN、RT-IPC 客户端、采集 |
-| RT-Thread | 1 | 128 MiB | `52:54:00:77:00:30` | `192.168.77.30/24` | UDP/9876、协议、PWM/转向控制 |
+| RT-Thread | 1 | 128 MiB | `52:54:00:77:00:30` | `192.168.77.30/24` | UDP/9877、协议、PWM/转向控制 |
 
-两端在同一 QEMU multicast socket LAN，使用 `/24` 直连路由，无默认网关。无 NAT、无宿主 tap/bridge、无端口转发；测试网络不配置客户机防火墙或访问控制，隔离边界是仅宿主可加入的 multicast UDP 组。应用服务监听 RT-Thread `0.0.0.0:9876`，Linux 只接受来自 `192.168.77.30:9876` 的回复。
+两端在同一 QEMU multicast socket LAN，使用 `/24` 直连路由，无默认网关。无 NAT、无宿主 tap/bridge、无端口转发；测试网络不配置客户机防火墙或访问控制，隔离边界是仅宿主可加入的 multicast UDP 组。当前 Task 3 应用服务监听 RT-Thread `0.0.0.0:9877`，Linux 只接受来自 `192.168.77.30:9877` 的回复；Task 2 独立保留 UDP/9876。
 
 QEMU TCG 的 vCPU 是宿主线程，本方案没有把它们绑定到特定物理 CPU。CPU 负载分工是：Linux 两个 vCPU 承担推理、网络和串口采集，RT-Thread 单 vCPU 承担 virtio 网络中断、lwIP/RT-IPC 和控制更新。宿主调度、TCG、虚拟中断和串口输出都会影响延迟，因此结果用于功能闭环和同平台对比，不等同于物理硬实时上界。
 

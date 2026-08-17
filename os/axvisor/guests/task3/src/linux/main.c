@@ -18,7 +18,7 @@
 #include <time.h>
 
 enum {
-    TASK3_DEFAULT_PORT = 9876,
+    TASK3_DEFAULT_PORT = 9877,
     TASK3_DEFAULT_FRAMES = 600,
     TASK3_MAX_FRAMES_PER_MODE = 600,
     TASK3_CONNECT_TIMEOUT_MS = 60000,
@@ -51,7 +51,7 @@ static void print_usage(FILE *stream, const char *program)
             "  --video PATH        Y4M input (default /opt/task3/line-follow.y4m)\n"
             "  --truth PATH        truth CSV (default /opt/task3/truth.csv)\n"
             "  --peer IPV4         RT-Thread peer (default 192.168.77.30)\n"
-            "  --port PORT         UDP peer port (default 9876)\n"
+            "  --port PORT         UDP peer port (default 9877)\n"
             "  --frames N          frames per mode, 1..600 (default 600)\n"
             "  --csv PATH          result CSV (default /tmp/task3-frames.csv)\n"
             "  --drop-tx-seq N     drop the Nth CTRL_CMD transmit attempt\n"

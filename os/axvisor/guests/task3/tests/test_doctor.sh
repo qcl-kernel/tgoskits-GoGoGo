@@ -106,9 +106,9 @@ set -e
 assert_contains "$output" 'required host command not found: scons'
 
 bad_rtipc="$tmp/bad-rtipc"
-mkdir -p "$bad_rtipc/include" "$bad_rtipc/src"
-printf '%s\n' 'modified header' >"$bad_rtipc/include/rt_ipc.h"
-cp "$root/../protocol/c/src/rt_ipc.c" "$bad_rtipc/src/rt_ipc.c"
+mkdir -p "$bad_rtipc"
+printf '%s\n' 'modified header' >"$bad_rtipc/rt_ipc.h"
+cp "$root/../rt-ipc/common/rt_ipc.c" "$bad_rtipc/rt_ipc.c"
 set +e
 output=$(PATH="$fake_path" TASK3_ROOT="$root" RTIPC_DIR="$bad_rtipc" \
     "$doctor" --print-only 2>&1)
@@ -123,7 +123,7 @@ output=$(TASK3_ROOT="$root" sh -c '
 ' /path/that/does/not/exist/caller "$root" 2>&1) \
     || fail 'common.sh derived paths from the sourcing shell $0'
 expected_paths=$(printf '%s\n%s\n%s\n' \
-    "$root" "$root/build" "$root/../protocol/c")
+    "$root" "$root/build" "$root/../rt-ipc/common")
 [ "$output" = "$expected_paths" ] || fail 'common.sh exported unexpected paths'
 
 no_sha_path="$tmp/no-sha256sum"

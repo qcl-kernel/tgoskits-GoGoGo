@@ -160,7 +160,7 @@ int task3_server_handle_message(task3_server_app_t *app, uint8_t message_type,
 #include <unistd.h>
 
 enum {
-    TASK3_SERVER_PORT = 9876,
+    TASK3_SERVER_PORT = 9877,
     TASK3_SERVER_STACK_SIZE = 16384,
     TASK3_SERVER_PRIORITY = 15,
     TASK3_SERVER_TICK = 5,
@@ -284,9 +284,11 @@ static void task3_server_entry(void *parameter)
         return;
     }
     task3_server_app_init(&runtime.app, send_application_reply, &runtime);
-    task3_session_init(&runtime.session, TASK3_SESSION_SERVER, send_datagram,
+    task3_session_init(&runtime.session, TASK3_SESSION_SERVER,
+                       (now_ms() ^ (uint64_t)(uintptr_t)&runtime) | UINT64_C(1),
+                       send_datagram,
                        deliver_message, &runtime);
-    rt_kprintf("TASK3_RTOS_READY ip=192.168.77.30 port=9876\n");
+    rt_kprintf("TASK3_RTOS_READY ip=192.168.77.30 port=9877\n");
     next_report = now_ms() + 5000;
     while (!runtime.app.stop_requested) {
         struct sockaddr_in peer;

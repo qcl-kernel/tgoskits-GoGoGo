@@ -12,7 +12,7 @@ DEADLINE_BIN := $(BIN_DIR)/test_deadline
 LINUX_BIN := $(BIN_DIR)/task3-linux-host
 RTTHREAD_SERVER_BIN := $(BIN_DIR)/test_rtthread_server
 MODEL_DIR ?= ../build/model
-RTIPC_DIR ?= ../../protocol/c
+RTIPC_DIR ?= ../../rt-ipc/common
 
 ifeq ($(SANITIZE),1)
 CFLAGS += -O1 -fsanitize=address,undefined -fno-omit-frame-pointer
@@ -59,9 +59,9 @@ $(CNN_RUNNER): cnn_runner.c ../src/linux/cnn.c ../src/linux/cnn.h $(MODEL_DIR)/m
 test_session: $(SESSION_BIN)
 	$(SESSION_BIN)
 
-$(SESSION_BIN): test_session.c ../src/common/session.c ../src/common/session.h ../src/common/controller.c ../src/common/controller.h ../src/common/task3_protocol.c ../src/common/task3_protocol.h $(RTIPC_DIR)/src/rt_ipc.c $(RTIPC_DIR)/include/rt_ipc.h
+$(SESSION_BIN): test_session.c ../src/common/session.c ../src/common/session.h ../src/common/controller.c ../src/common/controller.h ../src/common/task3_protocol.c ../src/common/task3_protocol.h $(RTIPC_DIR)/rt_ipc.c $(RTIPC_DIR)/rt_ipc.h
 	mkdir -p $(BIN_DIR)
-	$(CC) -I../src/common -I$(RTIPC_DIR)/include $(CFLAGS) -Wno-unused-parameter -o $@ test_session.c ../src/common/session.c ../src/common/controller.c ../src/common/task3_protocol.c $(RTIPC_DIR)/src/rt_ipc.c $(LDFLAGS)
+	$(CC) -I../src/common -I$(RTIPC_DIR) $(CFLAGS) -Wno-unused-parameter -o $@ test_session.c ../src/common/session.c ../src/common/controller.c ../src/common/task3_protocol.c $(RTIPC_DIR)/rt_ipc.c $(LDFLAGS)
 
 test_metrics: $(METRICS_BIN)
 	$(METRICS_BIN)
@@ -79,9 +79,9 @@ $(DEADLINE_BIN): test_deadline.c ../src/linux/deadline.c ../src/linux/deadline.h
 
 linux_cli: $(LINUX_BIN)
 
-$(LINUX_BIN): ../src/linux/main.c ../src/linux/rtipc_client.c ../src/linux/rtipc_client.h ../src/linux/deadline.c ../src/linux/deadline.h ../src/linux/metrics.c ../src/linux/metrics.h ../src/linux/y4m.c ../src/linux/y4m.h ../src/linux/cnn.c ../src/linux/cnn.h ../src/common/session.c ../src/common/session.h ../src/common/task3_protocol.c ../src/common/task3_protocol.h $(RTIPC_DIR)/src/rt_ipc.c $(RTIPC_DIR)/include/rt_ipc.h $(MODEL_DIR)/model_weights.h
+$(LINUX_BIN): ../src/linux/main.c ../src/linux/rtipc_client.c ../src/linux/rtipc_client.h ../src/linux/deadline.c ../src/linux/deadline.h ../src/linux/metrics.c ../src/linux/metrics.h ../src/linux/y4m.c ../src/linux/y4m.h ../src/linux/cnn.c ../src/linux/cnn.h ../src/common/session.c ../src/common/session.h ../src/common/task3_protocol.c ../src/common/task3_protocol.h $(RTIPC_DIR)/rt_ipc.c $(RTIPC_DIR)/rt_ipc.h $(MODEL_DIR)/model_weights.h
 	mkdir -p $(BIN_DIR)
-	$(CC) -I../src/linux -I../src/common -I$(RTIPC_DIR)/include -I$(MODEL_DIR) $(CFLAGS) -Wno-unused-parameter -o $@ ../src/linux/main.c ../src/linux/rtipc_client.c ../src/linux/deadline.c ../src/linux/metrics.c ../src/linux/y4m.c ../src/linux/cnn.c ../src/common/session.c ../src/common/task3_protocol.c $(RTIPC_DIR)/src/rt_ipc.c $(LDFLAGS)
+	$(CC) -I../src/linux -I../src/common -I$(RTIPC_DIR) -I$(MODEL_DIR) $(CFLAGS) -Wno-unused-parameter -o $@ ../src/linux/main.c ../src/linux/rtipc_client.c ../src/linux/deadline.c ../src/linux/metrics.c ../src/linux/y4m.c ../src/linux/cnn.c ../src/common/session.c ../src/common/task3_protocol.c $(RTIPC_DIR)/rt_ipc.c $(LDFLAGS)
 
 test_linux_cli: $(LINUX_BIN)
 	sh ./test_linux_cli.sh
@@ -91,7 +91,7 @@ test_rtthread_server: $(RTTHREAD_SERVER_BIN)
 
 $(RTTHREAD_SERVER_BIN): test_rtthread_server.c ../src/rtthread/task3_server.c ../src/common/controller.c ../src/common/controller.h ../src/common/task3_protocol.c ../src/common/task3_protocol.h
 	mkdir -p $(BIN_DIR)
-	$(CC) -Irtthread_stubs -I../src/common -I$(RTIPC_DIR)/include $(CFLAGS) -o $@ test_rtthread_server.c ../src/common/controller.c ../src/common/task3_protocol.c $(LDFLAGS)
+	$(CC) -Irtthread_stubs -I../src/common -I$(RTIPC_DIR) $(CFLAGS) -o $@ test_rtthread_server.c ../src/common/controller.c ../src/common/task3_protocol.c $(LDFLAGS)
 
 test_doctor:
 	sh ./test_doctor.sh
@@ -103,6 +103,7 @@ test_contracts:
 	sh ./test_build_contracts.sh
 	sh ./test_run_demo_contract.sh
 	sh ./test_fault_contract.sh
+	sh ./test_axvisor_contract.sh
 
 test_docs:
 	sh ./test_docs_contract.sh

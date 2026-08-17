@@ -21,7 +21,7 @@ for text in feat/task3-ai-control ddf52e2cdd977f14fc04035c88672ac204aec713 \
     'make fault-test' 'make report' 'git rev-parse HEAD' \
     '-smp 2' '-m 256M' '-smp 1' '-m 128M' virtio-net-device \
     52:54:00:77:00:11 52:54:00:77:00:30 192.168.77.11/24 \
-    192.168.77.30/24 UDP/9876 '60 秒' 'FIXED' 'AI' \
+    192.168.77.30/24 UDP/9877 '60 秒' 'FIXED' 'AI' \
     build/runs build/fault-runs 'CPU 负载' '自有 PID' '无 NAT' '防火墙'; do
     grep -F -- "$text" "$README" >/dev/null || {
         echo "README missing: $text" >&2
@@ -30,7 +30,7 @@ for text in feat/task3-ai-control ddf52e2cdd977f14fc04035c88672ac204aec713 \
 done
 
 for text in 'RT-IPC header' 'offset 0' 'offset 1' 'offset 2' 'offset 4' \
-    'offset 8' 'offset 10' CTRL_CMD STATUS_REP ERROR_NOTIFY ACK SYN SYNACK \
+    'offset 8' 'offset 16' 'offset 18' session_id CTRL_CMD STATUS_REP ERROR_NOTIFY ACK SYN SYNACK \
     HEARTBEAT 'CRC16-CCITT' 'big-endian' '50 ms' '5 次' '500 ms' \
     '30 s' '1 s' '5 s' '乱序' '重复' '幂等' '不使用 vsock'; do
     grep -F -- "$text" "$PROTOCOL" >/dev/null || {
@@ -62,6 +62,10 @@ fault_source=$(sed -n 's/^故障证据来自 \([^ ]*\) .*/\1/p' "$REPORT")
 case "$normal_source" in
     /*) ;;
     *) normal_source="$TASK3_ROOT/$normal_source" ;;
+esac
+case "$fault_source" in
+    /*) ;;
+    *) fault_source="$TASK3_ROOT/$fault_source" ;;
 esac
 test -d "$normal_source" || { echo 'report normal source does not exist' >&2; exit 1; }
 test -f "$fault_source" || { echo 'report fault source does not exist' >&2; exit 1; }

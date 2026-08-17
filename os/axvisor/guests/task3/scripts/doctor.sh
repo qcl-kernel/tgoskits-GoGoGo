@@ -66,8 +66,8 @@ fi
 printf 'numpy=%s\n' "$numpy_status"
 [ "$numpy_status" != missing ] || die "Python NumPy is required"
 
-verify_sha256 "$RTIPC_DIR/include/rt_ipc.h" "$RTIPC_HEADER_SHA256"
-verify_sha256 "$RTIPC_DIR/src/rt_ipc.c" "$RTIPC_SOURCE_SHA256"
+verify_sha256 "$RTIPC_DIR/rt_ipc.h" "$RTIPC_HEADER_SHA256"
+verify_sha256 "$RTIPC_DIR/rt_ipc.c" "$RTIPC_SOURCE_SHA256"
 
 if [ "$print_only" -eq 1 ]; then
     exit 0

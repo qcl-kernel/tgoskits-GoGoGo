@@ -39,7 +39,7 @@ for file in \
     src/common/task3_protocol.c src/common/task3_protocol.h; do
     cp "$TASK3_ROOT/$file" "$staging/"
 done
-cp "$RTIPC_DIR/src/rt_ipc.c" "$RTIPC_DIR/include/rt_ipc.h" "$staging/"
+cp "$RTIPC_DIR/rt_ipc.c" "$RTIPC_DIR/rt_ipc.h" "$staging/"
 cp "$BUILD_DIR/model/model_weights.h" "$BUILD_DIR/model/line-follow.y4m" \
     "$BUILD_DIR/model/truth.csv" "$staging/"
 

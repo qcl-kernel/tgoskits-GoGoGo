@@ -26,19 +26,6 @@ static uint64_t retry_count(const rtipc_connection_t *connection)
     return count;
 }
 
-static bool is_valid_syn(const uint8_t *bytes, size_t length)
-{
-    rtipc_header_t header;
-
-    if (length != RTIPC_HEADER_SIZE ||
-        rtipc_header_parse(bytes, length, &header) != 0) {
-        return false;
-    }
-    return header.version == RTIPC_PROTOCOL_VERSION &&
-           header.msg_type == RTIPC_MSG_SYN && header.payload_len == 0 &&
-           rtipc_verify_packet(&header, bytes + RTIPC_HEADER_SIZE, 0);
-}
-
 static bool is_valid_datagram(const uint8_t *bytes, size_t length)
 {
     rtipc_header_t header;
@@ -145,6 +132,7 @@ static int pump_actions(task3_session_t *session, uint64_t now_ms,
 }
 
 void task3_session_init(task3_session_t *session, task3_session_role_t role,
+                        uint64_t session_id_seed,
                         task3_session_send_fn send_datagram,
                         task3_session_deliver_fn deliver_message,
                         void *callback_context)
@@ -159,6 +147,7 @@ void task3_session_init(task3_session_t *session, task3_session_role_t role,
     configuration.heartbeat_timeout_ms = 5000;
     configuration.connect_timeout_ms = 500;
     configuration.auto_reconnect = true;
+    configuration.session_id_seed = session_id_seed;
     session->role = role;
     session->send_datagram = send_datagram;
     session->deliver_message = deliver_message;
@@ -198,11 +187,6 @@ int task3_session_on_datagram(task3_session_t *session, const uint8_t *bytes,
             (int32_t)(header.seq_num - session->connection.expected_seq) > 0) {
             return 0;
         }
-    }
-    if (session->role == TASK3_SESSION_SERVER &&
-        rtipc_connection_is_connected(&session->connection) &&
-        is_valid_syn(bytes, length)) {
-        rtipc_connection_reset(&session->connection);
     }
     retries_before = retry_count(&session->connection);
     rtipc_connection_on_recv(&session->connection, bytes, length, now_ms);

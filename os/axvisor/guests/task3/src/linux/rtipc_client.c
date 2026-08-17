@@ -39,6 +39,15 @@ int task3_client_validate_ipv4(const char *peer_ipv4)
                : -1;
 }
 
+static uint64_t make_session_id_seed(const task3_client_t *client)
+{
+    uint64_t seed = task3_monotonic_raw_ns();
+
+    seed ^= (uint64_t)(uint32_t)getpid() << 32;
+    seed ^= (uint64_t)(uintptr_t)client;
+    return seed != 0 ? seed : UINT64_C(1);
+}
+
 static int send_datagram(void *context, const uint8_t *bytes, size_t length)
 {
     task3_client_t *client = context;
@@ -126,7 +135,8 @@ int task3_client_open(task3_client_t *client, const char *peer_ipv4,
         return -1;
     }
     client->drop_tx_seq = drop_tx_seq;
-    task3_session_init(&client->session, TASK3_SESSION_CLIENT, send_datagram,
+    task3_session_init(&client->session, TASK3_SESSION_CLIENT,
+                       make_session_id_seed(client), send_datagram,
                        deliver_message, client);
     return 0;
 }

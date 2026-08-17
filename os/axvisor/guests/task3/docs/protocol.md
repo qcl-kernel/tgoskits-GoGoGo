@@ -2,7 +2,7 @@
 
 ## 传输边界
 
-主通道是 virtio-net 上的 IPv4/UDP：Linux `192.168.77.11` 向 RT-Thread `192.168.77.30:9876` 发起 RT-IPC 会话。RT-IPC datagram 由固定 12 字节头和 0..1400 字节载荷组成；本应用只使用 24 字节 CTRL_CMD、24 字节 STATUS_REP 和 12 字节 ERROR_NOTIFY。不使用 vsock，也不使用共享内存、HyperCall 或 MMIO 传送应用数据。
+主通道是 virtio-net 上的 IPv4/UDP：Linux `192.168.77.11` 向 RT-Thread `192.168.77.30:9877` 发起 RT-IPC v2 会话。RT-IPC datagram 由固定 20 字节头和 0..1400 字节载荷组成；本应用只使用 24 字节 CTRL_CMD、24 字节 STATUS_REP 和 12 字节 ERROR_NOTIFY。不使用 vsock，也不使用共享内存、HyperCall 或 MMIO 传送应用数据。Task 2 使用独立的 UDP/9876 服务。
 
 所有多字节整数使用网络字节序 `big-endian`。有符号 16 位量按二进制补码编码。
 
@@ -10,12 +10,13 @@
 
 | offset | 大小 | 字段 | 约束 |
 |---:|---:|---|---|
-| offset 0 | 1 | version | 固定 `0x01` |
+| offset 0 | 1 | version | 固定 `0x02` |
 | offset 1 | 1 | msg_type | 下表消息类型 |
 | offset 2 | 2 | payload_len | 0..1400，必须与 UDP datagram 实际长度一致 |
 | offset 4 | 4 | seq_num | 发送方向独立的 32 位序号，按模 2^32 比较 |
-| offset 8 | 2 | error_code | 正常为 0；RT-IPC 错误码保留在传输层 |
-| offset 10 | 2 | checksum | header checksum 置零后连同载荷计算 `CRC16-CCITT` |
+| offset 8 | 8 | session_id | 每次连接唯一，重连递增；拒绝已退休会话的数据包 |
+| offset 16 | 2 | error_code | 正常为 0；RT-IPC 错误码保留在传输层 |
+| offset 18 | 2 | checksum | header checksum 置零后连同载荷计算 `CRC16-CCITT` |
 
 消息类型：
 

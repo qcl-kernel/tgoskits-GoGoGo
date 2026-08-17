@@ -4,7 +4,7 @@ set -eu
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname "$0")" && pwd)
 TASK3_ROOT=$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd)
 BUILD_DIR="$TASK3_ROOT/build"
-RTIPC_DIR=${RTIPC_DIR:-"$TASK3_ROOT/../protocol/c"}
+RTIPC_DIR=${RTIPC_DIR:-"$TASK3_ROOT/../rt-ipc/common"}
 qemu=$(command -v qemu-system-aarch64 || true)
 if [ -x "$HOME/.local/qemu-arm/bin/qemu-system-aarch64" ]; then
     qemu="$HOME/.local/qemu-arm/bin/qemu-system-aarch64"
@@ -63,7 +63,7 @@ for image in "$linux_image" "$linux_initrd" "$rtthread_image"; do
     [ -s "$image" ] || { echo "missing image: $image" >&2; exit 1; }
 done
 [ -x "$qemu" ] || { echo "qemu-system-aarch64 not found" >&2; exit 1; }
-[ -s "$RTIPC_DIR/include/rt_ipc.h" ] && [ -s "$RTIPC_DIR/src/rt_ipc.c" ] || {
+[ -s "$RTIPC_DIR/rt_ipc.h" ] && [ -s "$RTIPC_DIR/rt_ipc.c" ] || {
     echo "RT-IPC C source not found: $RTIPC_DIR" >&2
     exit 1
 }
@@ -105,8 +105,8 @@ printf 'git_sha=%s\ngit_status=%s\n' \
     "$(test -z "$(git -C "$TASK3_ROOT" status --porcelain)" && printf clean || printf dirty)" \
     >>"$run_dir/versions.txt"
 sha256sum "$linux_image" "$linux_initrd" "$rtthread_image" \
-    "$BUILD_DIR/model/model_weights.h" "$RTIPC_DIR/include/rt_ipc.h" \
-    "$RTIPC_DIR/src/rt_ipc.c" >>"$run_dir/versions.txt"
+    "$BUILD_DIR/model/model_weights.h" "$RTIPC_DIR/rt_ipc.h" \
+    "$RTIPC_DIR/rt_ipc.c" >>"$run_dir/versions.txt"
 python3 -c 'import numpy; print("numpy=" + numpy.__version__)' \
     >>"$run_dir/versions.txt"
 uname -a >>"$run_dir/versions.txt"

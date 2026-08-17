@@ -88,15 +88,17 @@ def render_report(run_dir: Path, fault_summary_path: Path) -> str:
     )
     indented_commands = "\n".join("    " + line for line in commands.splitlines())
     indented_versions = "\n".join("    " + line for line in versions.splitlines())
-    return f"""# QEMU Linux/RT-Thread AI 控制闭环结果
+    return f"""# 双 QEMU 迁移基线：Linux/RT-Thread AI 控制闭环结果
 
 本报告由 {run_dir} 中的原始数据生成。每种模式 {frames} 帧，输入帧率 10 FPS，计划有效运行时长 {runtime_seconds:.1f} 秒，Linux 同侧实测为 {measured_seconds:.6f} 秒。
+
+本报告不属于 AxVisor 最终证据；最终结果必须使用 `os/axvisor/scripts/run_task123.sh` 采集。
 
 故障证据来自 {fault_summary_path} ，五类场景均由真实双 QEMU 客户机运行并通过校验。
 
 ## 网络拓扑
 
-Linux 客户机使用 192.168.77.11/24、MAC 52:54:00:77:00:11；RT-Thread 客户机使用 192.168.77.30/24、MAC 52:54:00:77:00:30。两端通过 QEMU multicast socket LAN 直连，应用主通道为 RT-IPC over UDP/9876，无 NAT、宿主桥接或 vsock 数据通道。
+Linux 客户机使用 192.168.77.11/24、MAC 52:54:00:77:00:11；RT-Thread 客户机使用 192.168.77.30/24、MAC 52:54:00:77:00:30。两端通过 QEMU multicast socket LAN 直连，应用主通道为 RT-IPC over UDP/9877，无 NAT、宿主桥接或 vsock 数据通道。
 
 ## 构建与启动命令
 

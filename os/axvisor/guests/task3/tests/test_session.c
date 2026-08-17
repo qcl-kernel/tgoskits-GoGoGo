@@ -42,6 +42,9 @@ struct peer {
     uint32_t last_status_frame;
     int drop_ctrl_once;
     int drop_status_once;
+    int drop_synack_once;
+    size_t first_syn_length;
+    uint8_t first_syn[RTIPC_MAX_PACKET];
 };
 
 static uint8_t packet_type(const uint8_t *bytes, size_t length)
@@ -65,6 +68,14 @@ static int fake_send(void *context, const uint8_t *bytes, size_t length)
     }
     if (type == RTIPC_MSG_STATUS_REP && peer->drop_status_once) {
         peer->drop_status_once = 0;
+        return 0;
+    }
+    if (type == RTIPC_MSG_SYN && peer->first_syn_length == 0) {
+        peer->first_syn_length = length;
+        memcpy(peer->first_syn, bytes, length);
+    }
+    if (type == RTIPC_MSG_SYNACK && peer->drop_synack_once) {
+        peer->drop_synack_once = 0;
         return 0;
     }
     if (network->count >= QUEUE_CAPACITY) {
@@ -166,10 +177,13 @@ int main(void)
 
     client.other = &server;
     server.other = &client;
+    server.drop_synack_once = 1;
     task3_controller_init(&server.controller);
-    task3_session_init(&client.session, TASK3_SESSION_CLIENT, fake_send,
+    task3_session_init(&client.session, TASK3_SESSION_CLIENT,
+                       UINT64_C(0x1111222233334444), fake_send,
                        deliver_message, &client);
-    task3_session_init(&server.session, TASK3_SESSION_SERVER, fake_send,
+    task3_session_init(&server.session, TASK3_SESSION_SERVER,
+                       UINT64_C(0x5555666677778888), fake_send,
                        deliver_message, &server);
 
     ASSERT_TRUE(client.session.connection.config.rto_ms == 50);
@@ -178,11 +192,22 @@ int main(void)
     ASSERT_TRUE(client.session.connection.config.heartbeat_timeout_ms == 5000);
     ASSERT_TRUE(client.session.connection.config.connect_timeout_ms == 500);
     ASSERT_TRUE(client.session.connection.config.auto_reconnect);
+    ASSERT_TRUE(client.session.connection.config.session_id_seed ==
+                UINT64_C(0x1111222233334444));
+    ASSERT_TRUE(client.session.connection.next_session_id ==
+                UINT64_C(0x1111222233334444));
 
     ASSERT_TRUE(task3_session_connect(&client.session, network.now_ms) == 0);
     ASSERT_TRUE(drain_network(&network) == 0);
-    ASSERT_TRUE(task3_session_is_connected(&client.session));
+    ASSERT_TRUE(!task3_session_is_connected(&client.session));
     ASSERT_TRUE(task3_session_is_connected(&server.session));
+    ASSERT_TRUE(client.first_syn_length == RTIPC_HEADER_SIZE);
+    network.now_ms += 50;
+    ASSERT_TRUE(task3_session_tick(&client.session, network.now_ms) == 0);
+    ASSERT_TRUE(drain_network(&network) == 0);
+    ASSERT_TRUE(task3_session_is_connected(&client.session));
+    ASSERT_TRUE(client.session.connection.session_id ==
+                UINT64_C(0x1111222233334444));
 
     {
         task3_control_t control = {
@@ -275,6 +300,14 @@ int main(void)
     ASSERT_TRUE(client.last_status_frame == 9);
     ASSERT_TRUE(!task3_session_has_outstanding(&client.session));
     ASSERT_TRUE(client.session.counters.reconnects == 1);
+    ASSERT_TRUE(client.session.connection.session_id ==
+                UINT64_C(0x1111222233334445));
+    ASSERT_TRUE(task3_session_on_datagram(&server.session, client.first_syn,
+                                          client.first_syn_length,
+                                          network.now_ms) == 0);
+    ASSERT_TRUE(task3_session_is_connected(&server.session));
+    ASSERT_TRUE(server.session.connection.session_id ==
+                UINT64_C(0x1111222233334445));
 
     puts("test_session: PASS");
     return 0;

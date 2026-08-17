@@ -57,8 +57,8 @@ cp "$TASK3_ROOT/src/rtthread/task3_server.c" \
     "$TASK3_ROOT/src/common/task3_protocol.h" \
     "$TASK3_ROOT/src/common/session.c" \
     "$TASK3_ROOT/src/common/session.h" \
-    "$RTIPC_DIR/src/rt_ipc.c" \
-    "$RTIPC_DIR/include/rt_ipc.h" \
+    "$RTIPC_DIR/rt_ipc.c" \
+    "$RTIPC_DIR/rt_ipc.h" \
     "$app/"
 
 python3 "$TASK3_ROOT/scripts/set_kconfig.py" "$bsp/.config" \

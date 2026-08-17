@@ -47,6 +47,7 @@ typedef struct {
 } task3_session_t;
 
 void task3_session_init(task3_session_t *session, task3_session_role_t role,
+                        uint64_t session_id_seed,
                         task3_session_send_fn send_datagram,
                         task3_session_deliver_fn deliver_message,
                         void *callback_context);
