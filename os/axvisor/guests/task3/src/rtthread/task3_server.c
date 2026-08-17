@@ -163,6 +163,7 @@ enum {
     TASK3_SERVER_PORT = 9877,
     TASK3_SERVER_STACK_SIZE = 16384,
     TASK3_SERVER_PRIORITY = 15,
+    TASK3_SERVER_RECV_TIMEOUT_MS = 10,
     TASK3_SERVER_TICK = 5,
 };
 
@@ -247,11 +248,20 @@ static int wait_for_network(void)
     return -1;
 }
 
+static int configure_receive_timeout(int socket_fd)
+{
+    struct timeval timeout = {
+        .tv_sec = 0,
+        .tv_usec = TASK3_SERVER_RECV_TIMEOUT_MS * 1000,
+    };
+
+    return setsockopt(socket_fd, SOL_SOCKET, SO_RCVTIMEO, &timeout,
+                      sizeof(timeout));
+}
+
 static void task3_server_entry(void *parameter)
 {
     struct sockaddr_in local_address;
-    struct timeval timeout = {.tv_sec = 0, .tv_usec = 10000};
-    uint64_t next_report;
 
     (void)parameter;
     memset(&runtime, 0, sizeof(runtime));
@@ -270,8 +280,12 @@ static void task3_server_entry(void *parameter)
         rt_kprintf("TASK3_RTOS_ERROR socket\n");
         return;
     }
-    setsockopt(runtime.socket_fd, SOL_SOCKET, SO_RCVTIMEO, &timeout,
-               sizeof(timeout));
+    if (configure_receive_timeout(runtime.socket_fd) != 0) {
+        rt_kprintf("TASK3_RTOS_ERROR receive-timeout\n");
+        closesocket(runtime.socket_fd);
+        runtime.socket_fd = -1;
+        return;
+    }
     memset(&local_address, 0, sizeof(local_address));
     local_address.sin_family = AF_INET;
     local_address.sin_port = htons(TASK3_SERVER_PORT);
@@ -289,7 +303,6 @@ static void task3_server_entry(void *parameter)
                        send_datagram,
                        deliver_message, &runtime);
     rt_kprintf("TASK3_RTOS_READY ip=192.168.77.30 port=9877\n");
-    next_report = now_ms() + 5000;
     while (!runtime.app.stop_requested) {
         struct sockaddr_in peer;
         socklen_t peer_length = sizeof(peer);
@@ -309,16 +322,6 @@ static void task3_server_entry(void *parameter)
             runtime.app.errors++;
         }
         (void)task3_session_tick(&runtime.session, timestamp);
-        if (timestamp >= next_report) {
-            rt_kprintf("TASK3_RTOS_STATS requests=%llu errors=%llu duplicates=%llu "
-                       "retries=%llu\n",
-                       (unsigned long long)runtime.app.requests,
-                       (unsigned long long)runtime.app.errors,
-                       (unsigned long long)runtime.app.duplicate_requests,
-                       (unsigned long long)
-                           runtime.session.counters.transport_retries);
-            next_report = timestamp + 5000;
-        }
     }
     rt_kprintf("TASK3_RTOS_FINAL requests=%llu errors=%llu duplicates=%llu "
                "applied_steps=%llu retries=%llu\n",

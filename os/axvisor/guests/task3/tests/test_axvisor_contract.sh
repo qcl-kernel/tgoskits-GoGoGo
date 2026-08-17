@@ -8,6 +8,7 @@ GUESTS_ROOT=$(CDPATH= cd -- "$TASK3_ROOT/.." && pwd)
 RTIPC_COMMON="$GUESTS_ROOT/rt-ipc/common"
 TASK123_INIT="$GUESTS_ROOT/linux-net/init-task123"
 TASK3_SERVICE="$TASK3_ROOT/buildroot/rootfs-overlay/etc/init.d/S99task3"
+TASK3_SERVER="$TASK3_ROOT/src/rtthread/task3_server.c"
 
 grep -Eq '^#define[[:space:]]+RTIPC_HEADER_SIZE[[:space:]]+20$' \
     "$RTIPC_COMMON/rt_ipc.h"
@@ -23,9 +24,38 @@ grep -Eq 'TASK3_DEFAULT_PORT[[:space:]]*=[[:space:]]*9877,' \
 grep -Eq 'TASK3_SERVER_PORT[[:space:]]*=[[:space:]]*9877,' \
     "$TASK3_ROOT/src/linux/rtipc_client.h"
 grep -Eq 'TASK3_SERVER_PORT[[:space:]]*=[[:space:]]*9877,' \
-    "$TASK3_ROOT/src/rtthread/task3_server.c"
+    "$TASK3_SERVER"
 grep -F 'TASK3_RTOS_READY ip=192.168.77.30 port=9877' \
-    "$TASK3_ROOT/src/rtthread/task3_server.c" >/dev/null
+    "$TASK3_SERVER" >/dev/null
+grep -Eq 'TASK3_SERVER_RECV_TIMEOUT_MS[[:space:]]*=[[:space:]]*10,' \
+    "$TASK3_SERVER" >/dev/null
+timeout_config=$(sed -n \
+    '/^static int configure_receive_timeout(/,/^}/p' "$TASK3_SERVER")
+printf '%s\n' "$timeout_config" |
+    grep -Eq '^static int configure_receive_timeout\(int socket_fd\)'
+printf '%s\n' "$timeout_config" |
+    grep -Eq '\.tv_usec[[:space:]]*=[[:space:]]*TASK3_SERVER_RECV_TIMEOUT_MS[[:space:]]*\*[[:space:]]*1000,'
+printf '%s\n' "$timeout_config" |
+    grep -Eq 'setsockopt\(socket_fd,[[:space:]]*SOL_SOCKET,[[:space:]]*SO_RCVTIMEO,[[:space:]]*&timeout,'
+printf '%s\n' "$timeout_config" |
+    grep -Eq 'return[[:space:]]+setsockopt\(socket_fd,'
+grep -Eq 'if[[:space:]]*\([[:space:]]*configure_receive_timeout\(runtime\.socket_fd\)[[:space:]]*!=[[:space:]]*0[[:space:]]*\)' "$TASK3_SERVER"
+grep -F 'TASK3_RTOS_ERROR receive-timeout' "$TASK3_SERVER" >/dev/null
+timeout_failure_block=$(sed -n \
+    '/if[[:space:]]*(configure_receive_timeout(runtime.socket_fd) != 0)/,/^    }/p' "$TASK3_SERVER")
+printf '%s\n' "$timeout_failure_block" | grep -F 'closesocket(runtime.socket_fd)' >/dev/null
+printf '%s\n' "$timeout_failure_block" | grep -F 'runtime.socket_fd = -1' >/dev/null
+printf '%s\n' "$timeout_failure_block" | grep -F 'return;' >/dev/null
+timeout_failure_line=$(grep -n 'TASK3_RTOS_ERROR receive-timeout' "$TASK3_SERVER" | cut -d: -f1)
+bind_line=$(grep -n 'if (bind(runtime.socket_fd' "$TASK3_SERVER" | cut -d: -f1)
+ready_line=$(grep -n 'TASK3_RTOS_READY' "$TASK3_SERVER" | cut -d: -f1)
+[ "$timeout_failure_line" -lt "$bind_line" ]
+[ "$timeout_failure_line" -lt "$ready_line" ]
+if grep -F 'TASK3_RTOS_STATS' \
+    "$TASK3_SERVER" >/dev/null; then
+    echo 'Task 3 server still emits periodic debug telemetry' >&2
+    exit 1
+fi
 test -x "$TASK123_INIT"
 for token in \
     '--port 9877' \

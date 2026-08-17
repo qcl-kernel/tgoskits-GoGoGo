@@ -160,7 +160,7 @@ trap 'handle_signal 143' TERM
 set -eu
 
 if [ "$#" -lt 5 ]; then
-    echo "usage: $0 TIMEOUT_S LOG MARKER [MARKER ...] -- COMMAND [ARG ...]" >&2
+    echo "usage: $0 TIMEOUT_S LOG MARKER [MARKER ...] [--failure-marker MARKER ...] -- COMMAND [ARG ...]" >&2
     exit 2
 fi
 
@@ -168,12 +168,23 @@ timeout_s=$1
 log=$2
 shift 2
 markers=()
-while [ "$#" -gt 0 ] && [ "$1" != "--" ]; do
+failure_markers=()
+while [ "$#" -gt 0 ] && [ "$1" != "--" ] &&
+      [ "$1" != "--failure-marker" ]; do
     markers+=("$1")
     shift
 done
+while [ "$#" -gt 0 ] && [ "$1" = "--failure-marker" ]; do
+    shift
+    if [ "$#" -eq 0 ] || [ "$1" = "--" ]; then
+        echo 'missing value for --failure-marker' >&2
+        exit 2
+    fi
+    failure_markers+=("$1")
+    shift
+done
 if [ "${#markers[@]}" -eq 0 ] || [ "$#" -lt 2 ] || [ "$1" != "--" ]; then
-    echo "usage: $0 TIMEOUT_S LOG MARKER [MARKER ...] -- COMMAND [ARG ...]" >&2
+    echo "usage: $0 TIMEOUT_S LOG MARKER [MARKER ...] [--failure-marker MARKER ...] -- COMMAND [ARG ...]" >&2
     exit 2
 fi
 shift
@@ -198,7 +209,16 @@ if { [ -n "${RUN_UNTIL_LAUNCH_READY_FILE:-}" ] &&
 fi
 
 launch_in_progress=1
-setsid -- "$@" <&0 &
+if [ -n "${RUN_UNTIL_CHILD_TIMERSLACK_NS:-}" ]; then
+    setsid -- bash -c '
+        timerslack_ns=$1
+        shift
+        printf "%s\n" "$timerslack_ns" > /proc/self/timerslack_ns || exit 1
+        exec "$@"
+    ' run-until-child "$RUN_UNTIL_CHILD_TIMERSLACK_NS" "$@" <&0 &
+else
+    setsid -- "$@" <&0 &
+fi
 child_pid=$!
 child_pgid=$child_pid
 if [ -n "${RUN_UNTIL_CHILD_PID_FILE:-}" ]; then
@@ -234,6 +254,17 @@ while :; do
     if [ ! -f "$log" ]; then
         all_markers_present=0
     else
+        for failure_marker in "${failure_markers[@]}"; do
+            if grep -aFq -- "$failure_marker" "$log"; then
+                terminate_child_group
+                failure_status=${child_rc:-1}
+                if [ "$failure_status" -eq 0 ]; then
+                    failure_status=1
+                fi
+                record_completion failure-marker "$failure_status" || true
+                exit 1
+            fi
+        done
         for marker in "${markers[@]}"; do
             if ! grep -aFq -- "$marker" "$log"; then
                 all_markers_present=0

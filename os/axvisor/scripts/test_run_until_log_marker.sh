@@ -211,6 +211,30 @@ if [ "$(cat "$marker_reason_file")" != marker-complete ]; then
     exit 1
 fi
 
+failure_marker_log="$TMP_DIR/failure-marker.log"
+failure_marker_status_file="$TMP_DIR/failure-marker.status"
+failure_marker_reason_file="$TMP_DIR/failure-marker.reason"
+failure_marker_start_ns=$(date +%s%N)
+set +e
+RUN_UNTIL_CHILD_STATUS_FILE="$failure_marker_status_file" \
+RUN_UNTIL_TERMINATION_REASON_FILE="$failure_marker_reason_file" \
+"$RUN_UNTIL" 2 "$failure_marker_log" 'NEVER WRITTEN' \
+    --failure-marker 'TASK123_LINUX_END status=FAIL' -- sh -c '
+    echo "TASK123_LINUX_END status=FAIL" >> "$1"
+    sleep 10
+' sh "$failure_marker_log"
+failure_marker_rc=$?
+set -e
+failure_marker_elapsed_ms=$(( ($(date +%s%N) - failure_marker_start_ns) / 1000000 ))
+if [ "$failure_marker_rc" -eq 0 ] || [ "$failure_marker_elapsed_ms" -ge 1800 ]; then
+    echo "FAIL: failure marker did not stop the child promptly" >&2
+    exit 1
+fi
+if [ "$(cat "$failure_marker_reason_file" 2>/dev/null)" != failure-marker ]; then
+    echo "FAIL: failure marker termination reason was not recorded" >&2
+    exit 1
+fi
+
 multi_log="$TMP_DIR/multi.log"
 multi_pid_file="$TMP_DIR/multi.pid"
 "$RUN_UNTIL" 5 "$multi_log" 'CLIENT COMPLETE' 'STABILITY COMPLETE' -- sh -c '
@@ -226,6 +250,36 @@ if ! grep -Fq 'STABILITY COMPLETE' "$multi_log"; then
 fi
 if kill -0 "$(cat "$multi_pid_file")" 2>/dev/null; then
     echo "FAIL: multi-marker command is still running" >&2
+    exit 1
+fi
+
+timerslack_log="$TMP_DIR/timerslack.log"
+timerslack_value_file="$TMP_DIR/timerslack.value"
+RUN_UNTIL_CHILD_TIMERSLACK_NS=1 \
+"$RUN_UNTIL" 5 "$timerslack_log" 'TIMERSLACK APPLIED' -- sh -c '
+    cat /proc/self/timerslack_ns > "$1"
+    echo "TIMERSLACK APPLIED" >> "$2"
+    sleep 10
+' sh "$timerslack_value_file" "$timerslack_log"
+if [ "$(cat "$timerslack_value_file")" != 1 ]; then
+    echo "FAIL: child timer slack was not applied before exec" >&2
+    exit 1
+fi
+
+timerslack_failure_log="$TMP_DIR/timerslack-failure.log"
+timerslack_failure_exec_file="$TMP_DIR/timerslack-failure.exec"
+set +e
+RUN_UNTIL_CHILD_TIMERSLACK_NS=not-a-number \
+"$RUN_UNTIL" 5 "$timerslack_failure_log" 'NEVER WRITTEN' -- \
+    sh -c ': > "$1"' sh "$timerslack_failure_exec_file"
+timerslack_failure_rc=$?
+set -e
+if [ "$timerslack_failure_rc" -eq 0 ]; then
+    echo "FAIL: timer-slack write failure returned success" >&2
+    exit 1
+fi
+if [ -e "$timerslack_failure_exec_file" ]; then
+    echo "FAIL: command was executed after timer-slack write failure" >&2
     exit 1
 fi
 

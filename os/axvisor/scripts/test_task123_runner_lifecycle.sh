@@ -127,6 +127,7 @@ set -euo pipefail
 printf '%q ' "$@" >> "$FAKE_QEMU_LOG"
 printf '\n' >> "$FAKE_QEMU_LOG"
 printf '%s\n' "$$" > "$FAKE_QEMU_PID_FILE"
+cat /proc/self/timerslack_ns >> "$FAKE_QEMU_TIMERSLACK_LOG"
 case "${FAKE_QEMU_BEHAVIOR:-pass}" in
     build-only) exit 0 ;;
     fail) exit 17 ;;
@@ -202,6 +203,14 @@ esac
 }
 
 emit_linux_finals() {
+    if [[ "${FAKE_QEMU_BEHAVIOR:-pass}" == linux-fail ]]; then
+        cat <<'LOG'
+[VM 1] TASK2_LINUX_END status=PASS
+[VM 1] TASK3_LINUX_END status=FAIL
+[VM 1] TASK123_LINUX_END status=FAIL
+LOG
+        return
+    fi
     cat <<'LOG'
 [VM 1] TASK2_LINUX_END status=PASS
 [VM 1] TASK3_LINUX_END status=PASS
@@ -236,7 +245,11 @@ emit_benchmark() {
             printf 'RTBENCH metric=%s run=1 expected=%s collected=%s missing=0 p50_ns=1 p95_ns=2 p99_ns=3 p99_9_ns=4 max_ns=5 miss_100us=0 miss_500us=0 miss_1ms=0 mean_ns=2\n' \
                 "$metric" "$expected" "$expected"
         done
-        printf 'RTBENCH_STABILITY_END status=PASS expected=%s collected=%s missing=0\n' "$expected" "$expected"
+        if [[ "${FAKE_QEMU_BEHAVIOR:-pass}" == stability-fail ]]; then
+            printf 'RTBENCH_STABILITY_END status=FAIL expected=%s collected=%s missing=0\n' "$expected" "$expected"
+        else
+            printf 'RTBENCH_STABILITY_END status=PASS expected=%s collected=%s missing=0\n' "$expected" "$expected"
+        fi
         echo 'RTBENCH_STABILITY_DONE'
     fi
 }
@@ -267,14 +280,29 @@ if [[ -n "${FAKE_QEMU_EXPECT_COMMAND:-}" ]]; then
     done
     [[ "$benchmark_command" == "$FAKE_QEMU_EXPECT_COMMAND" ]]
     printf 'command=%s\n' "$benchmark_command" >> "$FAKE_QEMU_STDIN_LOG"
-    if [[ "${FAKE_QEMU_BEHAVIOR:-pass}" != missing-benchmark ]]; then
+    if [[ "${FAKE_QEMU_BENCHMARK_AFTER_LINUX:-0}" == 1 ]]; then
+        wait_for_control '['
+        echo 'select-vm1' >> "$FAKE_QEMU_STDIN_LOG"
+        emit_linux_finals
+        wait_for_control ']'
+        echo 'select-vm3-final' >> "$FAKE_QEMU_STDIN_LOG"
+        emit_benchmark "$benchmark_command"
+        printf 'TASK3_RTOS_FINAL requests=%s errors=%s duplicates=%s applied_steps=%s retries=%s\n' \
+            "$records" "$rtos_errors" "$rtos_duplicates" "$records" "$rtos_retries"
+        linux_finals_emitted=1
+    elif [[ "${FAKE_QEMU_BEHAVIOR:-pass}" != missing-benchmark ]]; then
         emit_benchmark "$benchmark_command"
     fi
-    wait_for_control '['
-    echo 'select-vm1' >> "$FAKE_QEMU_STDIN_LOG"
+    if [[ "${FAKE_QEMU_BENCHMARK_AFTER_LINUX:-0}" != 1 ]]; then
+        wait_for_control '['
+        echo 'select-vm1' >> "$FAKE_QEMU_STDIN_LOG"
+    fi
 fi
-emit_linux_finals
-if [[ -n "${FAKE_QEMU_EXPECT_COMMAND:-}" ]]; then
+if [[ "${linux_finals_emitted:-0}" != 1 ]]; then
+    emit_linux_finals
+fi
+if [[ -n "${FAKE_QEMU_EXPECT_COMMAND:-}" &&
+      "${FAKE_QEMU_BENCHMARK_AFTER_LINUX:-0}" != 1 ]]; then
     wait_for_control ']'
     echo 'select-vm3-final' >> "$FAKE_QEMU_STDIN_LOG"
     printf 'TASK3_RTOS_FINAL requests=%s errors=%s duplicates=%s applied_steps=%s retries=%s\n' \
@@ -312,6 +340,7 @@ common_env=(
     FAKE_AXVISOR_ELF="$fixtures/generated/axvisor"
     FAKE_QEMU_LOG="$records/qemu.log"
     FAKE_QEMU_PID_FILE="$records/qemu.pid"
+    FAKE_QEMU_TIMERSLACK_LOG="$records/qemu-timerslack.log"
     FAKE_QEMU_STDIN_LOG="$records/qemu-stdin.log"
     FAKE_CONTROL_LOG="$records/control.log"
 )
@@ -375,6 +404,10 @@ fi
     fail "runner did not launch exactly one QEMU"
 qemu_pid="$(cat "$records/qemu.pid")"
 assert_reaped "$qemu_pid"
+[[ "$(sed -n '1p' "$records/qemu-timerslack.log")" == 1 ]] ||
+    fail "runner did not apply 1 ns timer slack before QEMU exec"
+grep -Fxq 'qemu_timer_slack_ns=1' "$normal_output/manifest.txt" ||
+    fail "manifest did not record the QEMU timer slack"
 
 grep -Fq -- "-kernel $normal_output/axvisor.bin" "$records/qemu.log" ||
     fail "QEMU did not boot the generated AxVisor binary"
@@ -428,6 +461,20 @@ for realtime_case in 'realtime-suite:benchmark 2' 'stability:rtbench_stability 1
         "$fixtures/rtthread-normal.bin"
     assert_reaped "$(cat "$records/qemu.pid")"
 done
+
+: > "$records/qemu.log"
+: > "$records/qemu-stdin.log"
+linux_first_output="$tmp/linux-first-output"
+if ! env "${common_env[@]}" FAKE_QEMU_BENCHMARK_AFTER_LINUX=1 \
+    FAKE_QEMU_EXPECT_COMMAND='rtbench_stability 1' TASK123_TIMEOUT_S=2 \
+    "$RUNNER" --mode stability --seconds 1 --task2-count 2 \
+    --output "$linux_first_output" >/dev/null; then
+    fail "runner did not drain Linux before waiting for benchmark completion"
+fi
+[[ "$(cat "$records/qemu-stdin.log")" == \
+   $'select-vm3\ncommand=rtbench_stability 1\nselect-vm1\nselect-vm3-final' ]] ||
+    fail "Linux-first run used the wrong console drain order"
+assert_reaped "$(cat "$records/qemu.pid")"
 
 : > "$records/cargo.log"
 : > "$records/qemu.log"
@@ -658,6 +705,58 @@ feeder_timeout_pid="$(cat "$records/qemu.pid")"
 assert_reaped "$feeder_timeout_pid"
 
 : > "$records/qemu.log"
+for no_feeder_case in smoke task3 task3-fault; do
+    no_feeder_output="$tmp/linux-failure-$no_feeder_case"
+    no_feeder_start_ns=$(date +%s%N)
+    case "$no_feeder_case" in
+        smoke)
+            expect_failure "Linux failure in smoke mode returned success" \
+                run_runner "$no_feeder_output" \
+                FAKE_QEMU_BEHAVIOR=linux-fail TASK123_TIMEOUT_S=3
+            ;;
+        task3)
+            expect_failure "Linux failure in task3 mode returned success" \
+                env "${common_env[@]}" FAKE_QEMU_BEHAVIOR=linux-fail \
+                TASK123_TIMEOUT_S=3 "$RUNNER" --mode task3 --task3-frames 3 \
+                --output "$no_feeder_output"
+            ;;
+        task3-fault)
+            expect_failure "Linux failure in task3-fault mode returned success" \
+                env "${common_env[@]}" FAKE_QEMU_BEHAVIOR=linux-fail \
+                TASK123_TIMEOUT_S=3 "$RUNNER" --mode task3-fault \
+                --task3-fault drop-status --task3-frames 3 \
+                --output "$no_feeder_output"
+            ;;
+    esac
+    no_feeder_elapsed_ms=$(( ($(date +%s%N) - no_feeder_start_ns) / 1000000 ))
+    [[ "$no_feeder_elapsed_ms" -lt 2000 ]] ||
+        fail "Linux failure in $no_feeder_case mode waited for the full timeout"
+    grep -Fq 'TASK123_LINUX_END status=FAIL' \
+        "$no_feeder_output/console.log" ||
+        fail "Linux failure in $no_feeder_case mode was not preserved"
+    grep -Fq 'failure-marker' "$no_feeder_output/runner.log" ||
+        fail "Linux failure in $no_feeder_case mode lacked failure-marker diagnostics"
+    assert_reaped "$(cat "$records/qemu.pid")"
+done
+
+: > "$records/qemu.log"
+: > "$records/qemu-stdin.log"
+linux_failure_output="$tmp/linux-failure"
+linux_failure_start_ns=$(date +%s%N)
+expect_failure "explicit Linux failure returned success" \
+    env "${common_env[@]}" FAKE_QEMU_BEHAVIOR=linux-fail \
+    FAKE_QEMU_EXPECT_COMMAND='rtbench_stability 1' TASK123_TIMEOUT_S=3 \
+    "$RUNNER" --mode stability --seconds 1 --task2-count 2 \
+    --output "$linux_failure_output"
+linux_failure_elapsed_ms=$(( ($(date +%s%N) - linux_failure_start_ns) / 1000000 ))
+[[ "$linux_failure_elapsed_ms" -lt 2000 ]] ||
+    fail "explicit Linux failure waited for the full timeout"
+grep -Fq 'TASK123_LINUX_END status=FAIL' \
+    "$linux_failure_output/console.log" ||
+    fail "explicit Linux failure was not preserved"
+assert_reaped "$(cat "$records/qemu.pid")"
+
+: > "$records/qemu.log"
 : > "$records/qemu-stdin.log"
 benchmark_failure_output="$tmp/benchmark-failure"
 benchmark_failure_start_ns=$(date +%s%N)
@@ -671,6 +770,29 @@ benchmark_failure_elapsed_ms=$(( ($(date +%s%N) - benchmark_failure_start_ns) / 
     fail "explicit benchmark failure did not fail promptly"
 grep -Fq 'RTBENCH_END status=FAIL' "$benchmark_failure_output/console.log" ||
     fail "explicit benchmark failure was not preserved"
+grep -Fq 'failure-marker' \
+    "$benchmark_failure_output/runner.log" ||
+    fail "explicit benchmark failure did not retain a focused diagnostic"
+assert_reaped "$(cat "$records/qemu.pid")"
+
+: > "$records/qemu.log"
+: > "$records/qemu-stdin.log"
+stability_failure_output="$tmp/stability-failure"
+stability_failure_start_ns=$(date +%s%N)
+expect_failure "explicit stability failure waited for the full timeout" \
+    env "${common_env[@]}" FAKE_QEMU_BEHAVIOR=stability-fail \
+    FAKE_QEMU_EXPECT_COMMAND='rtbench_stability 1' TASK123_TIMEOUT_S=3 \
+    "$RUNNER" --mode stability --seconds 1 --task2-count 2 \
+    --output "$stability_failure_output"
+stability_failure_elapsed_ms=$(( ($(date +%s%N) - stability_failure_start_ns) / 1000000 ))
+[[ "$stability_failure_elapsed_ms" -lt 2000 ]] ||
+    fail "explicit stability failure followed by DONE did not fail promptly"
+grep -Fq 'RTBENCH_STABILITY_END status=FAIL' \
+    "$stability_failure_output/console.log" ||
+    fail "explicit stability failure was not preserved"
+grep -Fq 'failure-marker' \
+    "$stability_failure_output/runner.log" ||
+    fail "explicit stability failure did not retain a focused diagnostic"
 assert_reaped "$(cat "$records/qemu.pid")"
 
 : > "$records/qemu.log"

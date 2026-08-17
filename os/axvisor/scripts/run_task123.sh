@@ -163,6 +163,7 @@ validate_mode_options() {
     require_integer "${TASK123_BUILD_TIMEOUT_S:-1800}" 1 86400 TASK123_BUILD_TIMEOUT_S
     require_integer "${TASK123_PHASE_TIMEOUT_S:-600}" 1 86400 TASK123_PHASE_TIMEOUT_S
     require_integer "${QEMU_UCLAMP_MIN:-1024}" 0 1024 QEMU_UCLAMP_MIN
+    require_integer "${QEMU_TIMER_SLACK_NS:-1}" 1 1000000000 QEMU_TIMER_SLACK_NS
 }
 
 canonical_existing_file() {
@@ -560,8 +561,9 @@ record_artifact() {
 prepare_manifest() {
     MANIFEST_TMP="$OUTPUT/.manifest.txt.tmp"
     : > "$MANIFEST_TMP"
-    printf 'schema=1\nmode=%s\ntask2_count=%s\ntask3_frames=%s\ntask3_fault=%s\n' \
-        "$mode" "$task2_count" "$task3_frames" "${task3_fault:-normal}" >> "$MANIFEST_TMP"
+    printf 'schema=1\nmode=%s\ntask2_count=%s\ntask3_frames=%s\ntask3_fault=%s\nqemu_timer_slack_ns=%s\n' \
+        "$mode" "$task2_count" "$task3_frames" "${task3_fault:-normal}" \
+        "$QEMU_TIMER_SLACK_NS" >> "$MANIFEST_TMP"
     record_artifact qemu "$QEMU"
     record_artifact axvisor "$AXVISOR_BIN"
     record_artifact linux-kernel "$LINUX_KERNEL_IMAGE"
@@ -580,15 +582,11 @@ prepare_manifest() {
 
 wait_for_console_marker() {
     local marker=$1
-    local failure_marker=${2:-}
     local deadline=$(( $(date +%s) + TASK123_TIMEOUT_S ))
 
-    while ! grep -aFq -- "$marker" "$CONSOLE_LOG"; do
+    while :; do
+        grep -aFq -- "$marker" "$CONSOLE_LOG" && return 0
         kill -0 "$watcher_pid" 2>/dev/null || return 1
-        if [[ -n "$failure_marker" ]] &&
-           grep -aFq -- "$failure_marker" "$CONSOLE_LOG"; then
-            return 1
-        fi
         [[ "$(date +%s)" -lt "$deadline" ]] || return 124
         sleep 0.05
     done
@@ -596,28 +594,29 @@ wait_for_console_marker() {
 
 feed_benchmark_command() {
     local ready='[VM 3] msh />'
-    local failure=
+    local command=
     wait_for_console_marker "$ready"
     printf '\030]' >&3
     sleep 0.1
     if [[ "$mode" == realtime-suite ]]; then
-        printf 'benchmark %s\r' "$rtbench_samples" >&3
+        command="benchmark $rtbench_samples"
         ready='RTBENCH_END status=PASS'
-        failure='RTBENCH_END status=FAIL'
     else
-        printf 'rtbench_stability %s\r' "$stability_seconds" >&3
+        command="rtbench_stability $stability_seconds"
         ready='RTBENCH_STABILITY_DONE'
-        failure='RTBENCH_STABILITY_END status=FAIL'
     fi
-    if ! wait_for_console_marker "$ready" "$failure"; then
-        kill -TERM "$watcher_pid" 2>/dev/null || true
+    printf '%s\r' "$command" >&3
+    # Keep Linux in the foreground until it emits its final evidence. Stopped
+    # guests are removed from the mux together with any buffered output.
+    printf '\030[' >&3
+    if ! wait_for_console_marker 'TASK123_LINUX_END status=PASS'; then
         return 1
     fi
-    # Replay VM 1's buffered console so Linux completion evidence is visible.
-    printf '\030[' >&3
-    wait_for_console_marker 'TASK123_LINUX_END status=PASS'
-    # Replay VM 3's buffered final counters before the marker watcher stops QEMU.
+    # Replay VM 3's benchmark output and final counters.
     printf '\030]' >&3
+    if ! wait_for_console_marker "$ready"; then
+        return 1
+    fi
     wait_for_console_marker 'TASK3_RTOS_FINAL requests='
 }
 
@@ -659,6 +658,9 @@ read_qemu_completion() {
         timeout)
             normalized_qemu_exit=124
             ;;
+        failure-marker)
+            normalized_qemu_exit=1
+            ;;
         signal)
             normalized_qemu_exit=$watcher_rc
             ;;
@@ -693,11 +695,19 @@ launch_one_qemu() {
         'TASK123_LINUX_END status=PASS'
         'TASK3_RTOS_FINAL requests='
     )
+    local failure_markers=('TASK123_LINUX_END status=FAIL')
     if [[ "$mode" == realtime-suite ]]; then
         markers+=('RTBENCH_END status=PASS')
+        failure_markers+=('RTBENCH_END status=FAIL')
     elif [[ "$mode" == stability ]]; then
         markers+=('RTBENCH_STABILITY_END status=PASS')
+        failure_markers+=('RTBENCH_STABILITY_END status=FAIL')
     fi
+    local failure_marker_args=()
+    local failure_marker
+    for failure_marker in "${failure_markers[@]}"; do
+        failure_marker_args+=(--failure-marker "$failure_marker")
+    done
 
     local qemu_args=(
         -display none
@@ -724,7 +734,9 @@ launch_one_qemu() {
     RUN_UNTIL_CHILD_PID_FILE="$qemu_pid_file" \
     RUN_UNTIL_CHILD_STATUS_FILE="$qemu_status_file" \
     RUN_UNTIL_TERMINATION_REASON_FILE="$qemu_reason_file" \
-        "$RUN_UNTIL" "$TASK123_TIMEOUT_S" "$CONSOLE_LOG" "${markers[@]}" -- \
+    RUN_UNTIL_CHILD_TIMERSLACK_NS="$QEMU_TIMER_SLACK_NS" \
+        "$RUN_UNTIL" "$TASK123_TIMEOUT_S" "$CONSOLE_LOG" "${markers[@]}" \
+        "${failure_marker_args[@]}" -- \
         "$QEMU" "${qemu_args[@]}" <&3 >> "$CONSOLE_LOG" 2>&1 &
     watcher_pid=$!
     wait_for_qemu_pid "$qemu_pid_file"
@@ -761,7 +773,10 @@ launch_one_qemu() {
         fail "unexpected QEMU exit code $raw_qemu_exit (reason=$termination_reason)"
         return 1
     }
-    [[ "$feeder_rc" -eq 0 ]] || return "$feeder_rc"
+    if [[ "$feeder_rc" -ne 0 ]]; then
+        fail "benchmark command reported failure (see $CONSOLE_LOG)"
+        return "$feeder_rc"
+    fi
 }
 
 run_result_gate() {
@@ -804,6 +819,7 @@ main() {
     TASK123_BUILD_TIMEOUT_S=${TASK123_BUILD_TIMEOUT_S:-1800}
     TASK123_PHASE_TIMEOUT_S=${TASK123_PHASE_TIMEOUT_S:-600}
     QEMU_UCLAMP_MIN=${QEMU_UCLAMP_MIN:-1024}
+    QEMU_TIMER_SLACK_NS=${QEMU_TIMER_SLACK_NS:-1}
     mkdir -p -- "$ROOT/tmp"
     RUNTIME_DIR="$(mktemp -d "$ROOT/tmp/task123-runtime.XXXXXX")"
     trap cleanup EXIT

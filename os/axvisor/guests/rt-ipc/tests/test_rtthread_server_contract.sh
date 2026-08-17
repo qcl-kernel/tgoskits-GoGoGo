@@ -44,6 +44,11 @@ require_pattern 'rtipc_peer_guard_retire\(' \
 require_pattern 'rtipc_peer_guard_accepts_closed_fin\(' \
     'a duplicate FIN must reach the protocol core after its first ACK is lost'
 
+if grep -Eq 'stats: msgs=|proto: state=' "$server"; then
+    echo 'FAIL: server still emits periodic debug telemetry' >&2
+    exit 1
+fi
+
 awk '
     /if \(bind\(/ { bind_line = NR }
     /if \(setsockopt\(/ { timeout_line = NR }
