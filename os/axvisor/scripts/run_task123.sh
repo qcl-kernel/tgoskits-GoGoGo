@@ -348,8 +348,13 @@ handle_signal() {
     exit "$status"
 }
 
+progress() {
+    printf '%s\n' "$*" >&6
+    printf '%s\n' "$*" >&4
+}
+
 phase() {
-    printf 'PHASE %s\n' "$1"
+    progress "PHASE $1"
 }
 
 run_timed() {
@@ -358,6 +363,7 @@ run_timed() {
     local phase_rc
     shift 2
 
+    progress "STEP $phase_name timeout_s=$timeout_s"
     if timeout --signal TERM --kill-after 5s \
         "$timeout_s" "$@"; then
         return 0
@@ -811,7 +817,7 @@ main() {
     parse_arguments "$@"
     validate_mode_options
     prepare_output_directory
-    exec 4>&1 5>&2
+    exec 4>&1 5>&2 6>> "$RUNNER_LOG"
     exec >> "$RUNNER_LOG" 2>&1
     cd "$ROOT"
 

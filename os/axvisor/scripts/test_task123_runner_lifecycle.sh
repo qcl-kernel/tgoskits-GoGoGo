@@ -396,10 +396,14 @@ assert_mode_contract() {
 [[ -x "$RUNNER" ]] || fail "run_task123.sh is missing or not executable"
 
 normal_output="$tmp/normal-output"
-if ! run_runner "$normal_output" >/dev/null; then
+if ! run_runner "$normal_output" > "$tmp/normal.stdout"; then
     [[ ! -f "$normal_output/runner.log" ]] || cat "$normal_output/runner.log" >&2
     fail "normal fake run failed"
 fi
+grep -Fq 'PHASE dependency-check' "$tmp/normal.stdout" ||
+    fail "runner did not stream phase progress to stdout"
+grep -Fq 'STEP cargo-xtask-axvisor-build' "$tmp/normal.stdout" ||
+    fail "runner did not stream timed-step progress to stdout"
 [[ "$(wc -l < "$records/qemu.log")" -eq 1 ]] ||
     fail "runner did not launch exactly one QEMU"
 qemu_pid="$(cat "$records/qemu.pid")"
