@@ -118,7 +118,7 @@ if [ "${TASK123_CONTRACT_STATIC_ONLY:-0}" = 1 ]; then
     exit 0
 fi
 
-for command in cpio readelf file cmp awk sed; do
+for command in cpio readelf file cmp awk sed realpath; do
     command -v "$command" >/dev/null 2>&1 ||
         fail "$command is required for the dynamic image contract"
 done
@@ -129,6 +129,12 @@ test -s "$EXPECTED_TASK2_BIN" ||
     fail "canonical Task 2 binary not found: $EXPECTED_TASK2_BIN"
 test -s "$EXPECTED_TASK3_BIN" ||
     fail "canonical Task 3 binary not found: $EXPECTED_TASK3_BIN"
+INITRAMFS=$(realpath -e -- "$INITRAMFS") ||
+    fail "cannot resolve generated initramfs: $INITRAMFS"
+EXPECTED_TASK2_BIN=$(realpath -e -- "$EXPECTED_TASK2_BIN") ||
+    fail "cannot resolve canonical Task 2 binary: $EXPECTED_TASK2_BIN"
+EXPECTED_TASK3_BIN=$(realpath -e -- "$EXPECTED_TASK3_BIN") ||
+    fail "cannot resolve canonical Task 3 binary: $EXPECTED_TASK3_BIN"
 
 tmp_dir=$(mktemp -d)
 trap 'rm -rf "$tmp_dir"' EXIT HUP INT TERM
