@@ -338,3 +338,50 @@ cargo starry test board --board visionfive2 --server "${OSTOOL_SERVER:?set OSTOO
 ```
 
 详细说明见：[StarryOS 测试套件设计](/docs/build/starry/test)
+
+## 5. AxVisor Task123 StarryOS 替换 Linux
+
+`starryos-replace` worktree 中提供了一个 AxVisor 双 guest 配置：StarryOS
+作为原 Linux 应用 guest 的替代品，RT-Thread 保持为独立的 RTOS guest。StarryOS
+使用 2 个 vCPU，运行在物理 CPU 0/1；RT-Thread 使用 1 个 vCPU，固定到物理 CPU 2。
+两个 guest 之间只使用 AxVisor 提供的 `virtio-net` 网络链路，地址分别为
+`192.168.77.11` 和 `192.168.77.30`。
+
+构建 StarryOS guest：
+
+```bash
+os/axvisor/guests/starryos-task123/build.sh \
+  --source-cpio /path/to/task123-linux/rootfs.cpio
+```
+
+构建 AxVisor：
+
+```bash
+cargo xtask axvisor build \
+  --config os/axvisor/configs/board/qemu-aarch64-starryos-task123.toml \
+  --vmconfigs os/axvisor/configs/vms/qemu/aarch64/starryos-task123.toml \
+  --vmconfigs /path/to/rtthread-net.toml
+```
+
+QEMU 启动时需要两个连接到同一个 hub 的 `virtio-net` 端点，具体参数见
+`os/axvisor/configs/qemu/qemu-aarch64-starryos-task123.toml`。运行期间，
+StarryOS 的 `/init` 会从 `/proc/cmdline` 读取 AxVisor guest bootargs；该接口由
+`os/StarryOS/kernel/src/pseudofs/proc.rs` 提供。
+
+最近一次实际 QEMU 验证使用 `task2.count=1000 task3.frames=3 task3.fault=normal`，
+日志保存在：
+
+```text
+tmp/starryos-task123/run/axvisor-cmdline-console.log
+```
+
+结果摘要：
+
+- StarryOS 两个 vCPU 均上线：`online=0-1 nproc=2`。
+- StarryOS virtio-net 初始化成功：`192.168.77.11`。
+- Task2 通过 RT-Thread `192.168.77.30:9876` 完成 `1000/1000` 请求响应，包含一次故障注入后的 TCP 重连恢复。
+- Task3 通过 UDP `9877` 完成 `FIXED 3 + AI 3` 共 6 条控制事务，应用层成功率为 `1.0`，RT-Thread 报告 `errors=0`。
+- 日志出现 `TASK3_STARRY_END status=PASS`、`TASK123_STARRY_END status=PASS` 和 `TASK123_STARRY_EXIT status=0`。
+
+本次验证证明 StarryOS 已替代 Linux 完成 Task123 的启动、网络通信和 AI 控制闭环。
+实时性长时间稳定性测试以及完整 600 帧结果仍应使用专门的测试入口单独执行，不能由这次 3 帧 smoke 结果代替。

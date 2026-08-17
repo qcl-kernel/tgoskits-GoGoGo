@@ -10,6 +10,7 @@ KERNEL_MANIFEST="$ROOT/os/StarryOS/kernel/Cargo.toml"
 AXSTD_MANIFEST="$ROOT/os/arceos/ulib/axstd/Cargo.toml"
 RUNTIME_MANIFEST="$ROOT/os/arceos/modules/axruntime/Cargo.toml"
 RUNTIME_FS="$ROOT/os/arceos/modules/axruntime/src/fs/mod.rs"
+STARRY_PROCFS="$ROOT/os/StarryOS/kernel/src/pseudofs/proc.rs"
 GUEST_ROOT="$ROOT/os/axvisor/guests/starryos-task123"
 ROOTFS_BUILDER="$GUEST_ROOT/build_rootfs.sh"
 GUEST_BUILDER="$GUEST_ROOT/build.sh"
@@ -101,6 +102,26 @@ if "block::online_smp()" in embedded.group("body"):
     raise SystemExit(
         "FAIL: embedded-rootfs must not expand the uninstalled block runtime after SMP online"
     )
+PY
+
+python3 - "$STARRY_PROCFS" <<'PY'
+import re
+import sys
+from pathlib import Path
+
+source = Path(sys.argv[1]).read_text(encoding="utf-8")
+builder = re.search(
+    r"fn builder\(fs: Arc<SimpleFs>\) -> DirMaker \{(?P<body>.*)\n\}",
+    source,
+    re.DOTALL,
+)
+if builder is None:
+    raise SystemExit("FAIL: StarryOS procfs builder is missing")
+body = builder.group("body")
+if not re.search(r'root\.add\(\s*"cmdline"', body):
+    raise SystemExit("FAIL: StarryOS procfs must expose root /proc/cmdline")
+if "ax_runtime::hal::boot::bootargs()" not in body:
+    raise SystemExit("FAIL: /proc/cmdline must read the guest bootargs")
 PY
 
 grep -Fq 'STARRY_SMP_READY' "$GUEST_INIT" ||
