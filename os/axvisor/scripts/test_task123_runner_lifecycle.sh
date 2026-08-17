@@ -73,8 +73,9 @@ if [[ "${FAKE_CARGO_BEHAVIOR:-pass}" == hang ]]; then
     wait "$child_pid"
 fi
 [[ "${FAKE_BUILD_FAIL:-0}" != 1 ]] || exit 41
-mkdir -p "$CARGO_TARGET_DIR/aarch64-unknown-linux-musl/release"
-printf 'fake axvisor elf\n' > "$CARGO_TARGET_DIR/aarch64-unknown-linux-musl/release/axvisor"
+mkdir -p "$(dirname -- "$FAKE_AXVISOR_ELF")"
+printf 'fake axvisor elf\n' > "$FAKE_AXVISOR_ELF"
+printf '[axbuild] cargo build elf=%s\n' "$FAKE_AXVISOR_ELF"
 index=0
 while [[ $# -gt 0 ]]; do
     if [[ "$1" == --vmconfigs ]]; then
@@ -90,6 +91,14 @@ while [[ $# -gt 0 ]]; do
     shift
 done
 EOF
+
+cat > "$tools/cargo-multicall" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+[[ "$(basename -- "$0")" == cargo-shim ]] || exit 97
+exec "$(dirname -- "$0")/cargo" "$@"
+EOF
+ln -s cargo-multicall "$tools/cargo-shim"
 
 cat > "$tools/aarch64-linux-gnu-strip" <<'EOF'
 #!/usr/bin/env bash
@@ -288,6 +297,7 @@ common_env=(
     FAKE_CARGO_PID_FILE="$records/fake-cargo.pid"
     FAKE_CARGO_CHILD_PID_FILE="$records/fake-cargo-child.pid"
     FAKE_CARGO_VMCONFIG_DIR="$records"
+    FAKE_AXVISOR_ELF="$fixtures/generated/axvisor"
     FAKE_QEMU_LOG="$records/qemu.log"
     FAKE_QEMU_PID_FILE="$records/qemu.pid"
     FAKE_QEMU_STDIN_LOG="$records/qemu-stdin.log"
@@ -682,5 +692,8 @@ set -e
 [[ "$term_rc" -ne 0 ]] || fail "TERM returned success"
 assert_reaped "$term_qemu_pid"
 [[ -e "$term_output/console.log" ]] || fail "TERM discarded console log"
+
+: > "$records/qemu.log"
+run_runner "$tmp/cargo-symlink" CARGO="$tools/cargo-shim"
 
 echo "PASS: Task 1/2/3 runner owns and reaps one AxVisor QEMU"

@@ -46,6 +46,7 @@ for marker in \
     'LINUX_SMP_READY configured=2 online=%s nproc=%s' \
     'TASK123_LINUX_NET_READY ip=192.168.77.11 peer=192.168.77.30' \
     'TASK2_LINUX_BEGIN port=9876' \
+    'RT-IPC client exited with rc=%s' \
     'TASK2_LINUX_END status=PASS' \
     'TASK3_LINUX_READY ip=192.168.77.11 peer=192.168.77.30:9877' \
     'TASK3_LINUX_END status=PASS' \
@@ -320,6 +321,7 @@ IP <link> <set> <dev> <eth0> <up>
 TASK123_LINUX_NET_READY ip=192.168.77.11 peer=192.168.77.30
 TASK2_LINUX_BEGIN port=9876
 $task2_args
+RT-IPC client exited with rc=0
 TASK2_LINUX_END status=PASS
 TASK3_LINUX_READY ip=192.168.77.11 peer=192.168.77.30:9877
 $task3_args$task3_extra
@@ -347,6 +349,7 @@ IP <link> <set> <dev> <eth0> <up>
 TASK123_LINUX_NET_READY ip=192.168.77.11 peer=192.168.77.30
 TASK2_LINUX_BEGIN port=9876
 TASK2_ARGS <--host> <192.168.77.30> <--port> <9876> <--count> <23> <--fault-profile> <none>
+RT-IPC client exited with rc=7
 TASK2_LINUX_END status=FAIL exit_status=7
 TASK3_LINUX_READY ip=192.168.77.11 peer=192.168.77.30:9877
 $task3_args
@@ -366,6 +369,7 @@ IP <link> <set> <dev> <eth0> <up>
 TASK123_LINUX_NET_READY ip=192.168.77.11 peer=192.168.77.30
 TASK2_LINUX_BEGIN port=9876
 TASK2_ARGS <--host> <192.168.77.30> <--port> <9876> <--count> <23> <--fault-profile> <none>
+RT-IPC client exited with rc=0
 TASK2_LINUX_END status=PASS
 TASK3_LINUX_READY ip=192.168.77.11 peer=192.168.77.30:9877
 $task3_args
@@ -395,6 +399,7 @@ IP <link> <set> <dev> <eth0> <up>
 TASK123_LINUX_NET_READY ip=192.168.77.11 peer=192.168.77.30
 TASK2_LINUX_BEGIN port=9876
 TASK2_ARGS <--host> <192.168.77.30> <--port> <9876> <--count> <23> <--fault-profile> <none>
+RT-IPC client exited with rc=0
 TASK2_LINUX_END status=PASS
 TASK3_LINUX_READY ip=192.168.77.11 peer=192.168.77.30:9877
 $task3_args

@@ -184,15 +184,17 @@ canonical_tool() {
     local label=$1
     local candidate=$2
     local resolved
+    local resolved_directory
     if [[ "$candidate" == */* ]]; then
-        resolved="$(realpath -e -- "$candidate")" || return 1
+        resolved=$candidate
     else
         resolved="$(command -v -- "$candidate")" || {
             fail "required command not found: $label=$candidate"
             return 1
         }
-        resolved="$(realpath -e -- "$resolved")"
     fi
+    resolved_directory="$(realpath -e -- "$(dirname -- "$resolved")")" || return 1
+    resolved="$resolved_directory/$(basename -- "$resolved")"
     [[ -f "$resolved" && -x "$resolved" ]] || {
         fail "$label is not executable: $resolved"
         return 1
@@ -370,7 +372,7 @@ run_timed() {
 resolve_dependencies() {
     phase dependency-check
     local command_name
-    for command_name in realpath sha256sum awk sed grep find mktemp cp chmod date python3 timeout; do
+    for command_name in realpath sha256sum awk sed grep find mktemp cp chmod date python3 timeout tee; do
         command -v "$command_name" >/dev/null || fail "required command not found: $command_name"
     done
     RUN_UNTIL="$(canonical_tool run-until "$RUN_UNTIL")"
@@ -518,11 +520,20 @@ generate_vmconfigs() {
 build_axvisor() {
     phase cargo-xtask-axvisor-build
     export CARGO_TARGET_DIR="$RUNTIME_DIR/cargo-target"
+    local build_evidence="$RUNTIME_DIR/axbuild-output.log"
     run_timed "$TASK123_BUILD_TIMEOUT_S" cargo-xtask-axvisor-build \
         "$CARGO" xtask axvisor build --config qemu-aarch64-two-guest-net \
         --vmconfigs "$LINUX_VMCONFIG" \
-        --vmconfigs "$RTTHREAD_VMCONFIG"
-    local axvisor_elf="$CARGO_TARGET_DIR/aarch64-unknown-linux-musl/release/axvisor"
+        --vmconfigs "$RTTHREAD_VMCONFIG" 2>&1 | tee "$build_evidence"
+    local axvisor_artifacts=()
+    mapfile -t axvisor_artifacts < <(
+        sed -n 's/^\[axbuild\] cargo build elf=//p' "$build_evidence"
+    )
+    [[ "${#axvisor_artifacts[@]}" -eq 1 ]] || {
+        fail "AxVisor build must report exactly one ELF artifact (found ${#axvisor_artifacts[@]})"
+        return 1
+    }
+    local axvisor_elf="${axvisor_artifacts[0]}"
     axvisor_elf="$(canonical_existing_file axvisor-elf "$axvisor_elf")"
 
     phase strip-objcopy

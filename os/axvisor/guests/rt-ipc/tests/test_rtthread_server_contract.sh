@@ -15,6 +15,8 @@ require_pattern() {
 
 require_pattern 'RTIPC_SERVER_ERROR stage=' \
     'server errors need a machine-readable status marker'
+require_pattern 'RTIPC_SERVER_READY ip=%s port=%d' \
+    'the bound server needs a machine-readable readiness marker'
 require_pattern 'inet_aton\([^;]+\)[[:space:]]*!=[[:space:]]*1' \
     'static IP parsing failures must be checked'
 require_pattern 'netdev_set_ipaddr\([^;]+\)[[:space:]]*!=[[:space:]]*RT_EOK' \
@@ -41,5 +43,15 @@ require_pattern 'rtipc_peer_guard_retire\(' \
     'closed sessions must retain a bounded FIN retransmission tombstone'
 require_pattern 'rtipc_peer_guard_accepts_closed_fin\(' \
     'a duplicate FIN must reach the protocol core after its first ACK is lost'
+
+awk '
+    /if \(bind\(/ { bind_line = NR }
+    /if \(setsockopt\(/ { timeout_line = NR }
+    /RTIPC_SERVER_READY ip=%s port=%d/ { ready_line = NR }
+    END { exit !(ready_line > bind_line && ready_line > timeout_line) }
+' "$server" || {
+    echo 'FAIL: readiness must be published after bind and timeout setup' >&2
+    exit 1
+}
 
 echo 'PASS: RT-Thread server startup contract'

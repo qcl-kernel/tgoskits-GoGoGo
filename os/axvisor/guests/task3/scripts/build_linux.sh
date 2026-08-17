@@ -58,10 +58,13 @@ cp "$TASK2_COMMON_ROOT/rt_ipc.c" "$TASK2_COMMON_ROOT/rt_ipc.h" \
 cp "$TASK123_INIT" "$staging/init-task123"
 
 make -C "$source_tree" O="$output" BR2_EXTERNAL="$TASK3_ROOT/buildroot" \
+    TASK3_LINUX_SITE="$staging" \
     BR2_DEFCONFIG="$TASK3_ROOT/configs/buildroot_defconfig" defconfig
 make -C "$source_tree" O="$output" BR2_EXTERNAL="$TASK3_ROOT/buildroot" \
+    TASK3_LINUX_SITE="$staging" \
     BR2_DL_DIR="$downloads" task3-linux-dirclean
 make -C "$source_tree" O="$output" BR2_EXTERNAL="$TASK3_ROOT/buildroot" \
+    TASK3_LINUX_SITE="$staging" \
     BR2_DL_DIR="$downloads" -j"$(getconf _NPROCESSORS_ONLN)"
 
 test -s "$output/images/Image"

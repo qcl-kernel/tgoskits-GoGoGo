@@ -215,6 +215,7 @@ static void rtipc_server_entry(void *param)
     cfg.heartbeat_timeout_ms = 2000;
     cfg.session_id_seed = (now_ms() << 32) ^ (uint64_t)(uintptr_t)&s_conn;
     rtipc_connection_init(&s_conn, &cfg);
+    rt_kprintf("RTIPC_SERVER_READY ip=%s port=%d\n", SERVER_IP, RTIPC_PORT);
 
     struct sockaddr_in peer = {0};
     socklen_t peer_len = sizeof(peer);

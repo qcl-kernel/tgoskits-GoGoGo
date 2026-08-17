@@ -84,21 +84,22 @@ fi
 early_signal_log="$TMP_DIR/early-signal.log"
 early_signal_status_file="$TMP_DIR/early-signal.status"
 early_signal_reason_file="$TMP_DIR/early-signal.reason"
+early_signal_ready_file="$TMP_DIR/early-signal.ready"
 early_markers=()
 for early_marker_index in $(seq 1 50000); do
     early_markers+=("marker-$early_marker_index")
 done
 RUN_UNTIL_CHILD_STATUS_FILE="$early_signal_status_file" \
 RUN_UNTIL_TERMINATION_REASON_FILE="$early_signal_reason_file" \
+RUN_UNTIL_PRE_CHILD_READY_FILE="$early_signal_ready_file" \
     "$RUN_UNTIL" 30 "$early_signal_log" "${early_markers[@]}" -- sleep 10 &
 early_signal_pid=$!
 early_signal_deadline_ns=$(( $(date +%s%N) + 3000000000 ))
-while ! tr '\0' '\n' < "/proc/$early_signal_pid/environ" 2>/dev/null | \
-    grep -Fxq 'RUN_UNTIL_SIGNALS_RESET=1'; do
+while [ ! -s "$early_signal_ready_file" ]; do
     if ! kill -0 "$early_signal_pid" 2>/dev/null || \
        [ "$(date +%s%N)" -ge "$early_signal_deadline_ns" ]; then
         kill -KILL "$early_signal_pid" 2>/dev/null || true
-        echo "FAIL: early-signal helper did not enter its reset-signal phase" >&2
+        echo "FAIL: early-signal helper did not publish its pre-child ready marker" >&2
         exit 1
     fi
     sleep 0.01
@@ -117,6 +118,60 @@ if [ "$(cat "$early_signal_status_file" 2>/dev/null)" != 143 ] ||
     echo "FAIL: early TERM did not publish valid signal completion" >&2
     exit 1
 fi
+
+launch_signal_log="$TMP_DIR/launch-signal.log"
+launch_signal_status_file="$TMP_DIR/launch-signal.status"
+launch_signal_reason_file="$TMP_DIR/launch-signal.reason"
+launch_signal_pid_file="$TMP_DIR/launch-signal.pid"
+launch_signal_ready_file="$TMP_DIR/launch-signal.ready"
+launch_signal_release_file="$TMP_DIR/launch-signal.release"
+launch_signal_tools="$TMP_DIR/launch-signal-tools"
+mkdir "$launch_signal_tools"
+real_setsid=$(command -v setsid)
+cat > "$launch_signal_tools/setsid" <<'EOF'
+#!/bin/sh
+sleep 0.5
+exec "$RUN_UNTIL_REAL_SETSID" "$@"
+EOF
+chmod +x "$launch_signal_tools/setsid"
+RUN_UNTIL_CHILD_PID_FILE="$launch_signal_pid_file" \
+RUN_UNTIL_CHILD_STATUS_FILE="$launch_signal_status_file" \
+RUN_UNTIL_TERMINATION_REASON_FILE="$launch_signal_reason_file" \
+RUN_UNTIL_LAUNCH_READY_FILE="$launch_signal_ready_file" \
+RUN_UNTIL_LAUNCH_RELEASE_FILE="$launch_signal_release_file" \
+RUN_UNTIL_REAL_SETSID="$real_setsid" \
+PATH="$launch_signal_tools:$PATH" \
+    "$RUN_UNTIL" 30 "$launch_signal_log" 'NEVER WRITTEN' -- sleep 2 &
+launch_signal_helper_pid=$!
+launch_signal_deadline_ns=$(( $(date +%s%N) + 3000000000 ))
+while [ ! -s "$launch_signal_ready_file" ]; do
+    if ! kill -0 "$launch_signal_helper_pid" 2>/dev/null ||
+       [ "$(date +%s%N)" -ge "$launch_signal_deadline_ns" ]; then
+        kill -TERM "$launch_signal_helper_pid" 2>/dev/null || true
+        wait "$launch_signal_helper_pid" 2>/dev/null || true
+        echo "FAIL: helper did not expose its child-launch ownership window" >&2
+        exit 1
+    fi
+    sleep 0.01
+done
+launch_signal_child_pid=$(cat "$launch_signal_pid_file")
+kill -TERM "$launch_signal_helper_pid"
+touch "$launch_signal_release_file"
+set +e
+wait "$launch_signal_helper_pid"
+launch_signal_rc=$?
+set -e
+if [ "$launch_signal_rc" -ne 143 ]; then
+    echo "FAIL: launch-window TERM returned $launch_signal_rc instead of 143" >&2
+    exit 1
+fi
+if [ "$(cat "$launch_signal_status_file" 2>/dev/null)" != 143 ] ||
+   [ "$(cat "$launch_signal_reason_file" 2>/dev/null)" != signal ]; then
+    echo "FAIL: launch-window TERM did not publish valid signal completion" >&2
+    exit 1
+fi
+assert_process_stopped "$launch_signal_child_pid" \
+    'launch-window child process group leader'
 
 marker_log="$TMP_DIR/marker.log"
 child_pid_file="$TMP_DIR/marker.pid"

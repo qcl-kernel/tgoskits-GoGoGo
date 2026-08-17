@@ -99,6 +99,8 @@ main() {
         --count "$task2_count" \
         --fault-profile "$task2_fault" > /dev/console 2>&1
     task2_status=$?
+    printf 'RT-IPC client exited with rc=%s\n' \
+        "$task2_status" > /dev/console
     if [ "$task2_status" -eq 0 ]; then
         console 'TASK2_LINUX_END status=PASS'
     else

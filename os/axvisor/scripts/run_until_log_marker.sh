@@ -9,6 +9,8 @@ child_pid=
 child_pgid=
 child_rc=
 completion_recorded=0
+launch_in_progress=0
+pending_signal_rc=
 
 atomic_write_completion() {
     local destination=$1
@@ -59,6 +61,17 @@ child_group_is_running() {
     [ -n "$child_pgid" ] && kill -0 -- "-$child_pgid" 2>/dev/null
 }
 
+wait_for_child_group() {
+    local deadline_ns=$(( $(date +%s%N) + 5000000000 ))
+
+    while child_is_running; do
+        child_group_is_running && return 0
+        [ "$(date +%s%N)" -lt "$deadline_ns" ] || return 1
+        sleep 0.01
+    done
+    return 0
+}
+
 reap_child() {
     if [ -z "$child_pid" ]; then
         return
@@ -68,6 +81,23 @@ reap_child() {
     child_rc=$?
     set -e
     child_pid=
+}
+
+terminate_unowned_child() {
+    local deadline_ns
+
+    [ -n "$child_pid" ] || return
+    if child_is_running; then
+        kill -TERM "$child_pid" 2>/dev/null || true
+        deadline_ns=$(( $(date +%s%N) + 1000000000 ))
+        while child_is_running && [ "$(date +%s%N)" -lt "$deadline_ns" ]; do
+            sleep 0.01
+        done
+    fi
+    if child_is_running; then
+        kill -KILL "$child_pid" 2>/dev/null || true
+    fi
+    reap_child
 }
 
 terminate_child_group() {
@@ -111,6 +141,10 @@ handle_signal() {
     local signal_rc=$1
     local raw_status
 
+    if [ "$launch_in_progress" -eq 1 ]; then
+        [ -n "$pending_signal_rc" ] || pending_signal_rc=$signal_rc
+        return
+    fi
     trap - HUP INT TERM
     terminate_child_group
     raw_status=${child_rc:-$signal_rc}
@@ -151,11 +185,47 @@ case "$timeout_s" in
         ;;
 esac
 
+if [ -n "${RUN_UNTIL_PRE_CHILD_READY_FILE:-}" ]; then
+    atomic_write_completion "$RUN_UNTIL_PRE_CHILD_READY_FILE" ready
+fi
+
+if { [ -n "${RUN_UNTIL_LAUNCH_READY_FILE:-}" ] &&
+     [ -z "${RUN_UNTIL_LAUNCH_RELEASE_FILE:-}" ]; } ||
+   { [ -z "${RUN_UNTIL_LAUNCH_READY_FILE:-}" ] &&
+     [ -n "${RUN_UNTIL_LAUNCH_RELEASE_FILE:-}" ]; }; then
+    echo 'launch ready and release files must be configured together' >&2
+    exit 2
+fi
+
+launch_in_progress=1
 setsid -- "$@" <&0 &
 child_pid=$!
 child_pgid=$child_pid
 if [ -n "${RUN_UNTIL_CHILD_PID_FILE:-}" ]; then
     printf '%s\n' "$child_pid" > "$RUN_UNTIL_CHILD_PID_FILE"
+fi
+if [ -n "${RUN_UNTIL_LAUNCH_READY_FILE:-}" ]; then
+    atomic_write_completion "$RUN_UNTIL_LAUNCH_READY_FILE" ready
+    while [ ! -e "$RUN_UNTIL_LAUNCH_RELEASE_FILE" ]; do
+        sleep 0.01
+    done
+fi
+if ! wait_for_child_group; then
+    terminate_unowned_child
+    launch_in_progress=0
+    if [ -n "$pending_signal_rc" ]; then
+        deferred_signal_rc=$pending_signal_rc
+        pending_signal_rc=
+        handle_signal "$deferred_signal_rc"
+    fi
+    echo 'child did not establish its process group' >&2
+    exit 1
+fi
+launch_in_progress=0
+if [ -n "$pending_signal_rc" ]; then
+    deferred_signal_rc=$pending_signal_rc
+    pending_signal_rc=
+    handle_signal "$deferred_signal_rc"
 fi
 deadline_ns=$(( $(date +%s%N) + timeout_s * 1000000000 ))
 

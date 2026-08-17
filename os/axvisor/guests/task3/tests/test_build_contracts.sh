@@ -61,6 +61,15 @@ grep -F 'scons --pyconfig-silent' "$TASK3_ROOT/scripts/build_rtthread.sh" >/dev/
 grep -F 'check_elf_entry.py' "$TASK3_ROOT/scripts/build_rtthread.sh" >/dev/null
 grep -F 'flock -n 9' "$TASK3_ROOT/scripts/build_linux.sh" >/dev/null
 grep -F 'task3-linux-dirclean' "$TASK3_ROOT/scripts/build_linux.sh" >/dev/null
+grep -F 'TASK3_LINUX_SITE="$staging"' \
+    "$TASK3_ROOT/scripts/build_linux.sh" >/dev/null
+grep -F 'TASK3_LINUX_SITE = $(BR2_EXTERNAL_TASK3_PATH)/../build/staging/linux-app' \
+    "$TASK3_ROOT/buildroot/package/task3-linux/task3-linux.mk" >/dev/null
+if grep -F 'TASK3_LINUX_SITE ?=' \
+    "$TASK3_ROOT/buildroot/package/task3-linux/task3-linux.mk" >/dev/null; then
+    echo 'TASK3_LINUX_SITE must not accept an ambient environment override' >&2
+    exit 1
+fi
 grep -F 'flock -n 9' "$TASK3_ROOT/scripts/build_rtthread.sh" >/dev/null
 if grep -F 'rtconfig.h' "$TASK3_ROOT/scripts/build_rtthread.sh" >/dev/null; then
     echo 'build_rtthread.sh must not write rtconfig.h' >&2
