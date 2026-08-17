@@ -26,7 +26,12 @@ fixture="$tmp/project"
 tools="$tmp/tools"
 mkdir -p "$fixture/os/axvisor/scripts" "$fixture/tmp/task123-native-inputs" "$tools"
 cp "$SOURCE_RUNNER" "$fixture/run-native.sh"
+cp "$ROOT/os/axvisor/scripts/task123_artifacts.py" \
+    "$fixture/os/axvisor/scripts/task123_artifacts.py"
 chmod +x "$fixture/run-native.sh"
+mkdir -p "$fixture/os/axvisor/guests/task3/configs"
+printf 'fixture-lock=1\n' > \
+    "$fixture/os/axvisor/guests/task3/configs/dependencies.lock"
 
 cat > "$tools/qemu-system-aarch64" <<'EOF'
 #!/usr/bin/env bash
@@ -152,6 +157,31 @@ for mode in smoke suite stability; do
     grep -Fxq "RTTHREAD_REPOSITORY=$rtthread" "$call" ||
         fail "$mode did not discover complete RT-Thread source"
 done
+
+evidence="$fixture/tmp/task123-results/accepted"
+mkdir -p "$evidence"
+for artifact in qemu linux-kernel linux-initramfs model rootfs \
+    rtthread-normal rtthread-drop-status rtthread-delayed-server; do
+    printf 'evidence-%s\n' "$artifact" > "$evidence/$artifact"
+done
+{
+    printf 'schema=1\nresult_gate=PASS\n'
+    for artifact in qemu linux-kernel linux-initramfs model rootfs \
+        rtthread-normal rtthread-drop-status rtthread-delayed-server; do
+        printf 'ARTIFACT name=%s path=%s sha256=%s\n' \
+            "$artifact" "$evidence/$artifact" \
+            "$(sha256sum "$evidence/$artifact" | awk '{print $1}')"
+    done
+} > "$evidence/manifest.txt"
+mv "$inputs" "$fixture/tmp/task123-native-inputs.hidden"
+FAKE_CALL_LOG="$tmp/evidence.call" PATH="$tools:$PATH" \
+NATIVE_RTTHREAD_COMMIT="$rtthread_commit" \
+    "$fixture/run-native.sh" smoke --output "$tmp/output-evidence" >/dev/null
+grep -Fxq "LINUX_KERNEL_IMAGE=$evidence/linux-kernel" "$tmp/evidence.call" ||
+    fail "accepted evidence was not used after conventional inputs were absent"
+grep -Fxq "ROOTFS_IMAGE=$evidence/rootfs" "$tmp/evidence.call" ||
+    fail "accepted evidence rootfs was not selected"
+mv "$fixture/tmp/task123-native-inputs.hidden" "$inputs"
 
 explicit="$tmp/explicit-inputs"
 mkdir -p "$explicit"

@@ -111,6 +111,15 @@ workspace_root() {
     fi
 }
 
+primary_repository() {
+    local common_dir
+    common_dir="$(git -C "$ROOT" rev-parse --git-common-dir 2>/dev/null)" ||
+        return 1
+    [[ "$common_dir" == /* ]] || common_dir="$ROOT/$common_dir"
+    common_dir="$(realpath -e -- "$common_dir")" || return 1
+    dirname -- "$common_dir"
+}
+
 prepare_output() {
     local output_parent
     if [[ -z "$output_candidate" ]]; then
@@ -154,7 +163,8 @@ resolve_explicit_inputs() {
 
 resolve_local_inputs() {
     local workspace=$1
-    local primary_repository="$workspace/$(basename -- "$(dirname -- "$(git -C "$ROOT" rev-parse --git-common-dir 2>/dev/null || printf '.git')")")"
+    local primary_repository
+    primary_repository="$(primary_repository 2>/dev/null || true)"
     local local_inputs="$ROOT/tmp/task123-native-inputs"
 
     LINUX_KERNEL_IMAGE="$(first_file linux-kernel \
@@ -179,8 +189,51 @@ resolve_local_inputs() {
         2>/dev/null || true)"
 }
 
+resolve_evidence_inputs() {
+    [[ -z "${LINUX_KERNEL_IMAGE:-}" || \
+       -z "${LINUX_INITRAMFS_IMAGE:-}" || \
+       -z "${TASK123_MODEL_IMAGE:-}" || \
+       -z "${ROOTFS_IMAGE:-}" ]] || return 0
+
+    local resolver="$ROOT/os/axvisor/scripts/task123_artifacts.py"
+    local lock_file="$ROOT/os/axvisor/guests/task3/configs/dependencies.lock"
+    [[ -f "$resolver" && -f "$lock_file" ]] || return 0
+    local resolution
+    resolution="$(mktemp "$ROOT/tmp/.native-resolution.XXXXXX.json")"
+    if ! python3 "$resolver" resolve \
+        --root "$ROOT" \
+        --cache "$ROOT/tmp/task123-cache" \
+        --evidence-root "$ROOT/tmp/task123-results" \
+        --output "$resolution" \
+        --lock-file "$lock_file" \
+        --rtthread-commit "$RTTHREAD_COMMIT"; then
+        rm -f -- "$resolution"
+        return 1
+    fi
+
+    local resolved=()
+    mapfile -d '' -t resolved < <(python3 - "$resolution" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+data = json.loads(Path(sys.argv[1]).read_text(encoding="ascii"))
+for name in ("linux_kernel", "linux_initramfs", "model", "rootfs"):
+    artifact = data["artifacts"].get(name, {})
+    sys.stdout.write(artifact.get("path", "") + "\0")
+PY
+    )
+    rm -f -- "$resolution"
+    [[ -z "${LINUX_KERNEL_IMAGE:-}" ]] && LINUX_KERNEL_IMAGE=${resolved[0]:-}
+    [[ -z "${LINUX_INITRAMFS_IMAGE:-}" ]] &&
+        LINUX_INITRAMFS_IMAGE=${resolved[1]:-}
+    [[ -z "${TASK123_MODEL_IMAGE:-}" ]] && TASK123_MODEL_IMAGE=${resolved[2]:-}
+    [[ -z "${ROOTFS_IMAGE:-}" ]] && ROOTFS_IMAGE=${resolved[3]:-}
+}
+
 valid_rtthread_repository() {
     local repository=$1
+    local missing_objects
     [[ -d "$repository" ]] || return 1
     GIT_NO_LAZY_FETCH=1 git -C "$repository" cat-file -e \
         "$RTTHREAD_COMMIT^{commit}" 2>/dev/null || return 1
@@ -191,9 +244,10 @@ valid_rtthread_repository() {
         [[ "$(GIT_NO_LAZY_FETCH=1 git -C "$repository" cat-file -t \
             "$RTTHREAD_COMMIT:$required_path" 2>/dev/null)" == tree ]] || return 1
     done
-    ! GIT_NO_LAZY_FETCH=1 git -C "$repository" rev-list --objects \
-        --missing=print "$RTTHREAD_COMMIT" 2>/dev/null |
-        grep -q '^?' || return 1
+    missing_objects="$(GIT_NO_LAZY_FETCH=1 git -C "$repository" \
+        rev-list --objects --missing=print "$RTTHREAD_COMMIT" 2>/dev/null |
+        sed -n '/^?/p')" || return 1
+    [[ -z "$missing_objects" ]] || return 1
     GIT_NO_LAZY_FETCH=1 git -C "$repository" archive --format=tar \
         "$RTTHREAD_COMMIT" >/dev/null 2>&1
 }
@@ -279,6 +333,7 @@ main() {
         resolve_explicit_inputs
     else
         resolve_local_inputs "$workspace"
+        resolve_evidence_inputs
     fi
     resolve_rtthread_repository "$workspace"
     runner_arguments
