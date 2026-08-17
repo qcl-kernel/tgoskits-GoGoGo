@@ -7,6 +7,11 @@ export TASK3_ROOT
 . "$SCRIPT_DIR/common.sh"
 . "$TASK3_ROOT/configs/dependencies.lock"
 
+REPO_ROOT=$(CDPATH= cd -- "$TASK3_ROOT/../../../.." && pwd)
+TASK2_LINUX_ROOT="$REPO_ROOT/os/axvisor/guests/rt-ipc/linux"
+TASK2_COMMON_ROOT="$REPO_ROOT/os/axvisor/guests/rt-ipc/common"
+TASK123_INIT="$REPO_ROOT/os/axvisor/guests/linux-net/init-task123"
+
 output="$BUILD_DIR/buildroot"
 mkdir -p "$BUILD_DIR"
 require_command flock
@@ -30,7 +35,8 @@ downloads="$BUILD_DIR/downloads/buildroot"
 [ -z "$(git -C "$source_tree" symbolic-ref -q HEAD)" ] ||
     die "Buildroot source is not detached"
 rm -rf "$staging"
-mkdir -p "$staging" "$output" "$images" "$downloads"
+mkdir -p "$staging/task2/linux" "$staging/task2/common" \
+    "$output" "$images" "$downloads"
 for file in \
     src/linux/main.c src/linux/rtipc_client.c src/linux/rtipc_client.h \
     src/linux/deadline.c src/linux/deadline.h \
@@ -42,6 +48,14 @@ done
 cp "$RTIPC_DIR/rt_ipc.c" "$RTIPC_DIR/rt_ipc.h" "$staging/"
 cp "$BUILD_DIR/model/model_weights.h" "$BUILD_DIR/model/line-follow.y4m" \
     "$BUILD_DIR/model/truth.csv" "$staging/"
+for file in \
+    Makefile rtipc_client.c rtipc_client_report.c rtipc_client_report.h \
+    rtipc_fault.c rtipc_fault.h rtipc_shutdown.c rtipc_shutdown.h; do
+    cp "$TASK2_LINUX_ROOT/$file" "$staging/task2/linux/"
+done
+cp "$TASK2_COMMON_ROOT/rt_ipc.c" "$TASK2_COMMON_ROOT/rt_ipc.h" \
+    "$staging/task2/common/"
+cp "$TASK123_INIT" "$staging/init-task123"
 
 make -C "$source_tree" O="$output" BR2_EXTERNAL="$TASK3_ROOT/buildroot" \
     BR2_DEFCONFIG="$TASK3_ROOT/configs/buildroot_defconfig" defconfig
