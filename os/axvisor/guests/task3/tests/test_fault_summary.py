@@ -3,7 +3,13 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from scripts.summarize_faults import CASES, _last_rtos_final, parse_events, summarize_events
+from scripts.summarize_faults import (
+    CASES,
+    _last_rtos_final,
+    parse_events,
+    summarize_events,
+    validate_event,
+)
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -20,6 +26,9 @@ class FaultSummaryTests(unittest.TestCase):
 
     def test_known_events(self):
         events = parse_events(ROOT / "tests/fixtures/fault_events.csv")
+        for event in events:
+            with self.subTest(case=event["case"]):
+                validate_event(event)
         summary = summarize_events(events)
         self.assertEqual(summary["schema"], 1)
         self.assertEqual(set(summary["cases"]), set(CASES))
@@ -44,6 +53,64 @@ class FaultSummaryTests(unittest.TestCase):
             self._write(path, bad)
             with self.assertRaisesRegex(ValueError, "applied"):
                 summarize_events(parse_events(path))
+
+    def test_unsafe_single_events_are_rejected(self):
+        events = {
+            event["case"]: event
+            for event in parse_events(ROOT / "tests/fixtures/fault_events.csv")
+        }
+        unsafe_events = (
+            (
+                "drop-control retries",
+                self._changed(events["drop-control"], transport_retries=0),
+                "drop-control",
+            ),
+            (
+                "drop-status retries",
+                self._changed(events["drop-status"], transport_retries=0),
+                "drop-status",
+            ),
+            (
+                "duplicate count",
+                self._changed(events["duplicate-frame"], duplicates=0),
+                "duplicate-frame",
+            ),
+            (
+                "duplicate applied delta",
+                self._changed(events["duplicate-frame"], applied_delta=1),
+                "applied",
+            ),
+            (
+                "malformed errors",
+                self._changed(events["malformed"], application_errors=1),
+                "malformed",
+            ),
+            (
+                "malformed applied delta",
+                self._changed(events["malformed"], applied_delta=1),
+                "applied",
+            ),
+            (
+                "recovery result",
+                self._changed(events["delayed-server"], result="rejected"),
+                "result",
+            ),
+            (
+                "rejection result",
+                self._changed(events["malformed"], result="recovered"),
+                "result",
+            ),
+        )
+        for label, event, message in unsafe_events:
+            with self.subTest(label=label):
+                with self.assertRaisesRegex(ValueError, message):
+                    validate_event(event)
+
+    @staticmethod
+    def _changed(event, **changes):
+        changed = dict(event)
+        changed.update(changes)
+        return changed
 
     @staticmethod
     def _write(path, rows):

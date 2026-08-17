@@ -355,7 +355,7 @@ run_timed() {
     local phase_rc
     shift 2
 
-    if timeout --foreground --signal TERM --kill-after 5s \
+    if timeout --signal TERM --kill-after 5s \
         "$timeout_s" "$@"; then
         return 0
     else

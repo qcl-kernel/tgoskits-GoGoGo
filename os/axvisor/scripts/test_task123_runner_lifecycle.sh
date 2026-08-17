@@ -29,7 +29,10 @@ assert_reaped() {
         sleep 0.01
         attempts=$((attempts + 1))
     done
-    ! kill -0 "$pid" 2>/dev/null || fail "owned fake PID was not reaped: $pid"
+    if kill -0 "$pid" 2>/dev/null; then
+        kill -TERM "$pid" 2>/dev/null || true
+        fail "owned fake PID was not reaped: $pid"
+    fi
 }
 
 fixtures="$tmp/fixtures"
@@ -63,8 +66,11 @@ if [[ "$*" == "xtask image pull qemu-aarch64 -o "* ]]; then
 fi
 if [[ "${FAKE_CARGO_BEHAVIOR:-pass}" == hang ]]; then
     printf '%s\n' "$$" > "$FAKE_CARGO_PID_FILE"
+    sleep 30 &
+    child_pid=$!
+    printf '%s\n' "$child_pid" > "$FAKE_CARGO_CHILD_PID_FILE"
     trap 'exit 143' TERM
-    while :; do sleep 1; done
+    wait "$child_pid"
 fi
 [[ "${FAKE_BUILD_FAIL:-0}" != 1 ]] || exit 41
 mkdir -p "$CARGO_TARGET_DIR/aarch64-unknown-linux-musl/release"
@@ -280,6 +286,7 @@ common_env=(
     TASK123_MODEL_IMAGE="$fixtures/model.bin"
     FAKE_CARGO_LOG="$records/cargo.log"
     FAKE_CARGO_PID_FILE="$records/fake-cargo.pid"
+    FAKE_CARGO_CHILD_PID_FILE="$records/fake-cargo-child.pid"
     FAKE_CARGO_VMCONFIG_DIR="$records"
     FAKE_QEMU_LOG="$records/qemu.log"
     FAKE_QEMU_PID_FILE="$records/qemu.pid"
@@ -630,7 +637,9 @@ assert_reaped "$feeder_timeout_pid"
 
 : > "$records/qemu.log"
 build_timeout_output="$tmp/build-timeout"
-rm -f -- "$records/fake-cargo.pid"
+rm -f -- "$records/fake-cargo.pid" "$records/fake-cargo-child.pid"
+sleep 30 &
+unrelated_pid=$!
 build_timeout_start_ns=$(date +%s%N)
 expect_failure "cargo build timeout returned success" \
     timeout -k 2 5 env "${common_env[@]}" \
@@ -647,9 +656,14 @@ grep -Fq 'cargo-xtask-axvisor-build timed out after 1s' \
     fail "cargo build timeout did not preserve timeout diagnostics"
 [[ ! -s "$records/qemu.log" ]] ||
     fail "QEMU started after cargo build timeout"
-[[ -s "$records/fake-cargo.pid" ]] ||
-    fail "fake cargo did not record its PID"
+kill -0 "$unrelated_pid" 2>/dev/null ||
+    fail "cargo build timeout terminated an unrelated process"
+kill -TERM "$unrelated_pid"
+wait "$unrelated_pid" 2>/dev/null || true
+[[ -s "$records/fake-cargo.pid" && -s "$records/fake-cargo-child.pid" ]] ||
+    fail "fake cargo did not record its process tree"
 assert_reaped "$(cat "$records/fake-cargo.pid")"
+assert_reaped "$(cat "$records/fake-cargo-child.pid")"
 
 : > "$records/qemu.log"
 term_output="$tmp/term"

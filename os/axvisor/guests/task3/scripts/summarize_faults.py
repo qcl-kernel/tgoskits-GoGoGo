@@ -72,21 +72,36 @@ def parse_events(path: Path) -> list[dict[str, object]]:
     return events
 
 
+def validate_event(event: dict[str, object]) -> None:
+    case_name = event.get("case")
+    if case_name not in CASES:
+        raise ValueError(f"unknown fault case: {case_name}")
+    expected_result = "rejected" if case_name == "malformed" else "recovered"
+    if event.get("result") != expected_result:
+        raise ValueError(f"invalid result for {case_name}: {event.get('result')}")
+
+    if case_name == "drop-control" and event.get("transport_retries", 0) < 1:
+        raise ValueError("drop-control did not exercise retransmission")
+    if case_name == "drop-status" and event.get("transport_retries", 0) < 1:
+        raise ValueError("drop-status did not exercise retransmission")
+    if case_name == "duplicate-frame":
+        if event.get("duplicates", 0) < 1:
+            raise ValueError("duplicate-frame was not observed")
+        if event.get("applied_delta") != 0:
+            raise ValueError("unsafe applied delta: duplicate-frame")
+    if case_name == "malformed":
+        if event.get("application_errors", 0) < 2:
+            raise ValueError("malformed application errors were not observed")
+        if event.get("applied_delta") != 0:
+            raise ValueError("unsafe applied delta: malformed")
+
+
 def summarize_events(events: list[dict[str, object]]) -> dict[str, object]:
+    for event in events:
+        validate_event(event)
     by_case = {str(event["case"]): dict(event) for event in events}
     if set(by_case) != set(CASES):
         raise ValueError("missing or duplicate fault cases")
-    for case_name in ("duplicate-frame", "malformed"):
-        if by_case[case_name]["applied_delta"] != 0:
-            raise ValueError(f"unsafe applied delta: {case_name}")
-    if by_case["drop-control"]["transport_retries"] < 1:
-        raise ValueError("drop-control did not exercise retransmission")
-    if by_case["drop-status"]["transport_retries"] < 1:
-        raise ValueError("drop-status did not exercise retransmission")
-    if by_case["duplicate-frame"]["duplicates"] < 1:
-        raise ValueError("duplicate-frame was not observed")
-    if by_case["malformed"]["application_errors"] < 2:
-        raise ValueError("malformed application errors were not observed")
     return {
         "schema": 1,
         "all_passed": True,

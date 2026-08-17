@@ -195,6 +195,53 @@ PY
         fail "task3-fault synthesized suite-level evidence: $profile"
 done
 
+while read -r profile unsafe_condition; do
+    unsafe_dir="$tmp/unsafe-$profile-$unsafe_condition"
+    make_fixture "$unsafe_dir" "$profile"
+    case "$profile/$unsafe_condition" in
+        drop-control/retries)
+            sed -i 's/,30000,10,1,0,0,100,/,30000,10,0,0,0,100,/' \
+                "$unsafe_dir/console.log"
+            ;;
+        drop-status/retries)
+            sed -i 's/applied_steps=6 retries=1/applied_steps=6 retries=0/' \
+                "$unsafe_dir/console.log"
+            ;;
+        duplicate-frame/duplicates)
+            sed -i 's/errors=0 duplicates=1/errors=0 duplicates=0/' \
+                "$unsafe_dir/console.log"
+            ;;
+        duplicate-frame/applied-delta)
+            sed -i '/TASK3_FAULT_DUPLICATE/s/applied_delta=0/applied_delta=1/' \
+                "$unsafe_dir/console.log"
+            ;;
+        delayed-server/marker)
+            sed -i '/TASK3_FAULT_DELAYED_SERVER/d' "$unsafe_dir/console.log"
+            ;;
+        malformed/application-errors)
+            sed -i 's/errors=3 duplicates=0/errors=1 duplicates=0/' \
+                "$unsafe_dir/console.log"
+            ;;
+        malformed/applied-delta)
+            sed -i '/TASK3_FAULT_MALFORMED/s/applied_delta=0/applied_delta=1/' \
+                "$unsafe_dir/console.log"
+            ;;
+        *) fail "unknown unsafe fault fixture: $profile/$unsafe_condition" ;;
+    esac
+    expect_failure "unsafe $profile event was accepted: $unsafe_condition" \
+        run_gate "$unsafe_dir" task3-fault --task3-fault "$profile"
+    [[ ! -e "$unsafe_dir/fault-event.json" ]] ||
+        fail "unsafe $profile event was published: $unsafe_condition"
+done <<'EOF'
+drop-control retries
+drop-status retries
+duplicate-frame duplicates
+duplicate-frame applied-delta
+delayed-server marker
+malformed application-errors
+malformed applied-delta
+EOF
+
 make_fixture "$tmp/unprefixed-rtthread"
 emit_suite 2 >> "$tmp/unprefixed-rtthread/console.log"
 sed -i 's/^\[VM 3\] //' "$tmp/unprefixed-rtthread/console.log"

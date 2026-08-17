@@ -189,6 +189,7 @@ if spec is None or spec.loader is None:
 module = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(module)
 event = module.collect_event(profile, run_dir)
+module.validate_event(event)
 module.write_json_atomic(run_dir / "fault-event.json", event)
 PY
 fi
