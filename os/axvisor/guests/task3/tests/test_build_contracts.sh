@@ -3,6 +3,9 @@ set -eu
 
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname "$0")" && pwd)
 TASK3_ROOT=${TASK3_ROOT:-$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd)}
+TASK123_INIT="$TASK3_ROOT/../linux-net/init-task123"
+TASK3_SERVICE="$TASK3_ROOT/buildroot/rootfs-overlay/etc/init.d/S99task3"
+TASK2_MAKEFILE="$TASK3_ROOT/../rt-ipc/linux/Makefile"
 . "$TASK3_ROOT/configs/dependencies.lock"
 
 required_files='
@@ -64,17 +67,27 @@ if grep -F 'rtconfig.h' "$TASK3_ROOT/scripts/build_rtthread.sh" >/dev/null; then
     exit 1
 fi
 
-grep -F 'TASK3_LINUX_FAILED status=%s' \
-    "$TASK3_ROOT/buildroot/rootfs-overlay/etc/init.d/S99task3" >/dev/null
-awk '
-    /if \[ "\$result" -eq 0 \]; then/ { success_branch = 1; next }
-    success_branch && /^[[:space:]]*fi$/ { success_branch = 0 }
-    /poweroff -f/ {
-        poweroff_count++
-        if (success_branch) poweroff_in_success = 1
-    }
-    END { exit !(poweroff_count == 1 && poweroff_in_success) }
-' "$TASK3_ROOT/buildroot/rootfs-overlay/etc/init.d/S99task3"
+test -x "$TASK123_INIT"
+for marker in TASK2_LINUX_BEGIN TASK2_LINUX_END TASK3_LINUX_READY \
+    TASK3_LINUX_END TASK123_LINUX_END; do
+    grep -F "$marker" "$TASK123_INIT" >/dev/null
+done
+for token in \
+    '--port 9877' \
+    'TASK2_LINUX_END status=FAIL exit_status=%s' \
+    'TASK3_LINUX_END status=FAIL exit_status=%s' \
+    'TASK123_LINUX_END status=FAIL'; do
+    grep -F -- "$token" "$TASK123_INIT" >/dev/null
+done
+test "$(grep -Fc '/bin/busybox poweroff -f' "$TASK123_INIT")" -eq 1
+service_commands=$(sed -e '/^#!/d' -e '/^[[:space:]]*#/d' \
+    -e '/^[[:space:]]*$/d' "$TASK3_SERVICE")
+test "$service_commands" = 'exec /init'
+if grep -F 'poweroff -f' "$TASK3_SERVICE" >/dev/null; then
+    echo 'S99task3 must not power off independently' >&2
+    exit 1
+fi
+grep -Fx 'all: target/rtipic-client' "$TASK2_MAKEFILE" >/dev/null
 
 for setting in \
     'BR2_aarch64=y' \

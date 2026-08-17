@@ -10,6 +10,8 @@ CLIENT_SOURCES = rtipc_client.c rtipc_client_report.c rtipc_fault.c \
 CLIENT_HEADERS = rtipc_client_report.h rtipc_fault.h rtipc_shutdown.h \
 	../common/rt_ipc.h
 
+all: target/rtipic-client
+
 target/rtipic-client: $(CLIENT_SOURCES) $(CLIENT_HEADERS)
 	mkdir -p target
 	$(CC) $(CFLAGS) -o $@ $(CLIENT_SOURCES)
@@ -27,4 +29,4 @@ target/rtipic-client-clock-fail: $(CLIENT_SOURCES) $(CLIENT_HEADERS) \
 clean:
 	rm -rf target
 
-.PHONY: clean
+.PHONY: all clean
