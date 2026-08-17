@@ -49,7 +49,16 @@ printf '\n' >> "$FAKE_CARGO_LOG"
 if [[ "$*" == "xtask image pull qemu-aarch64 -o "* ]]; then
     output_dir=${@: -1}
     mkdir -p "$output_dir/pulled"
-    printf 'pulled rootfs\n' > "$output_dir/pulled/rootfs.img"
+    case "${FAKE_ROOTFS_BEHAVIOR:-one}" in
+        zero) ;;
+        one) printf 'pulled rootfs\n' > "$output_dir/pulled/rootfs.img" ;;
+        multiple)
+            printf 'rootfs one\n' > "$output_dir/pulled/rootfs.img"
+            mkdir -p "$output_dir/second"
+            printf 'rootfs two\n' > "$output_dir/second/rootfs.img"
+            ;;
+        *) exit 93 ;;
+    esac
     exit 0
 fi
 if [[ "${FAKE_CARGO_BEHAVIOR:-pass}" == hang ]]; then
@@ -237,7 +246,9 @@ if [[ -n "${FAKE_QEMU_EXPECT_COMMAND:-}" ]]; then
     done
     [[ "$benchmark_command" == "$FAKE_QEMU_EXPECT_COMMAND" ]]
     printf 'command=%s\n' "$benchmark_command" >> "$FAKE_QEMU_STDIN_LOG"
-    emit_benchmark "$benchmark_command"
+    if [[ "${FAKE_QEMU_BEHAVIOR:-pass}" != missing-benchmark ]]; then
+        emit_benchmark "$benchmark_command"
+    fi
     wait_for_control '['
     echo 'select-vm1' >> "$FAKE_QEMU_STDIN_LOG"
 fi
@@ -403,6 +414,22 @@ grep -Eq '^ARTIFACT name=rootfs path=/.*task123-runtime\.[^/]+/rootfs/pulled/roo
 [[ "$(wc -l < "$records/qemu.log")" -eq 1 ]] ||
     fail "default rootfs run did not reach exactly one QEMU"
 assert_reaped "$(cat "$records/qemu.pid")"
+
+for rootfs_behavior in zero multiple; do
+    : > "$records/cargo.log"
+    : > "$records/qemu.log"
+    bad_rootfs_output="$tmp/rootfs-$rootfs_behavior-output"
+    expect_failure "rootfs pull with $rootfs_behavior candidates returned success" \
+        env "${common_env[@]}" ROOTFS_IMAGE= \
+        FAKE_ROOTFS_BEHAVIOR="$rootfs_behavior" \
+        "$RUNNER" --mode smoke --task2-count 2 --task3-frames 3 \
+        --output "$bad_rootfs_output"
+    grep -Fq 'image pull must produce exactly one rootfs.img' \
+        "$bad_rootfs_output/runner.log" ||
+        fail "rootfs $rootfs_behavior candidate failure was not diagnosed"
+    [[ ! -s "$records/qemu.log" ]] ||
+        fail "QEMU started after rootfs $rootfs_behavior candidate failure"
+done
 
 : > "$records/cargo.log"
 : > "$records/qemu.log"
@@ -585,6 +612,21 @@ expect_failure "timeout returned success" \
 [[ -e "$timeout_output/console.log" ]] || fail "timeout discarded console log"
 timeout_pid="$(cat "$records/qemu.pid")"
 assert_reaped "$timeout_pid"
+
+: > "$records/qemu.log"
+: > "$records/qemu-stdin.log"
+feeder_timeout_output="$tmp/feeder-timeout"
+expect_failure "missing benchmark completion marker returned success" \
+    env "${common_env[@]}" FAKE_QEMU_BEHAVIOR=missing-benchmark \
+    FAKE_QEMU_EXPECT_COMMAND='benchmark 2' TASK123_TIMEOUT_S=1 \
+    "$RUNNER" --mode realtime-suite --rtbench-samples 2 --task2-count 2 \
+    --output "$feeder_timeout_output"
+[[ -s "$feeder_timeout_output/console.log" ]] ||
+    fail "feeder timeout discarded console log"
+grep -Fxq 'command=benchmark 2' "$records/qemu-stdin.log" ||
+    fail "feeder timeout did not send the realtime command"
+feeder_timeout_pid="$(cat "$records/qemu.pid")"
+assert_reaped "$feeder_timeout_pid"
 
 : > "$records/qemu.log"
 build_timeout_output="$tmp/build-timeout"
