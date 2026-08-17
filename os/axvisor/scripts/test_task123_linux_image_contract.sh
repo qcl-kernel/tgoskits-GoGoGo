@@ -11,7 +11,7 @@ BUILD="$TASK3_ROOT/scripts/build_linux.sh"
 TASK2_MAKE="$ROOT/os/axvisor/guests/rt-ipc/linux/Makefile"
 MODEL_DIR="$TASK3_ROOT/build/model"
 INITRAMFS=${TASK123_INITRAMFS:-"$TASK3_ROOT/build/images/linux/rootfs.cpio"}
-EXPECTED_TASK2_BIN="$ROOT/os/axvisor/guests/rt-ipc/linux/target/rtipic-client"
+EXPECTED_TASK2_BIN=${TASK123_EXPECTED_TASK2_BIN:-"$TASK3_ROOT/build/buildroot/target/bin/rtipic-client"}
 EXPECTED_TASK3_BIN=${TASK123_EXPECTED_TASK3_BIN:-"$TASK3_ROOT/build/buildroot/target/usr/bin/task3-linux"}
 
 fail() {
@@ -55,6 +55,7 @@ done
 
 require_line '/proc/cmdline' "$INIT"
 require_line '[ "$value" -gt 0 ]' "$INIT"
+require_line '[ "$value" -le 2147483647 ]' "$INIT"
 require_line '[ "$value" -ge 1 ]' "$INIT"
 require_line '[ "$value" -le 600 ]' "$INIT"
 require_line '[ "$linux_online_cpus" != 0-1 ]' "$INIT"
@@ -360,6 +361,7 @@ assert_invalid 'task2.count=0' task2.count
 assert_invalid 'task2.count=-1' task2.count
 assert_invalid 'task2.count=nope' task2.count
 assert_invalid 'task2.count=999999999999999999999999999999999999' task2.count
+assert_invalid 'task2.count=2147483648' task2.count
 assert_invalid 'task2.fault=bad' task2.fault
 assert_invalid 'task3.frames=' task3.frames
 assert_invalid 'task3.frames=0' task3.frames

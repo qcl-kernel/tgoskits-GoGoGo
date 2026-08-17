@@ -30,6 +30,7 @@ parse_command_line() {
                 value=${argument#*=}
                 is_decimal "$value" || invalid_control 'task2.count'
                 [ "$value" -gt 0 ] 2>/dev/null || invalid_control 'task2.count'
+                [ "$value" -le 2147483647 ] 2>/dev/null || invalid_control 'task2.count'
                 task2_count=$value
                 ;;
             task2.fault=*)
