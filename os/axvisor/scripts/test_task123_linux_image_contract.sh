@@ -165,6 +165,10 @@ for path in \
     [ -f "$extracted" ] && [ ! -L "$extracted" ] && [ -s "$extracted" ] ||
         fail "image path is not a non-empty regular file: /$path"
 done
+for path in bin/rtipic-client usr/bin/task3-linux init; do
+    [ -x "$rootfs/$path" ] ||
+        fail "image path is not executable: /$path"
+done
 
 assert_aarch64_elf() {
     binary=$1
