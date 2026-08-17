@@ -105,11 +105,11 @@ grep -Fxq "[task123] LOG    $quick/reproduction.log" "$tmp/quick.stdout" ||
     fail "reproducer did not print the live log path"
 grep -Fq 'FAKE_RUNNER_PROGRESS' "$tmp/quick.stdout" ||
     fail "reproducer did not stream runner progress to stdout"
-cat > "$tmp/quick.expected" <<EOF
---mode smoke --task2-count 100 --task3-frames 3 --output $quick/smoke 
---mode realtime-suite --rtbench-samples 100 --task2-count 100 --output $quick/realtime-suite 
---mode task3 --task3-frames 30 --output $quick/task3-normal 
-EOF
+printf '%s \n' \
+    "--mode smoke --task2-count 100 --task3-frames 3 --output $quick/smoke" \
+    "--mode realtime-suite --rtbench-samples 100 --task2-count 100 --output $quick/realtime-suite" \
+    "--mode task3 --task3-frames 30 --output $quick/task3-normal" \
+    > "$tmp/quick.expected"
 cmp -s "$tmp/quick.expected" "$tmp/calls.log" || {
     diff -u "$tmp/quick.expected" "$tmp/calls.log" >&2 || true
     fail "default quick mode invoked an unexpected phase sequence"
