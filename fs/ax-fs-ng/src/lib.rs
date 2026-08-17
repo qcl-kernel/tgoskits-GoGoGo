@@ -18,6 +18,7 @@ use axfs_ng_vfs::{Filesystem, Location};
 
 pub mod api;
 pub mod block;
+pub mod embedded;
 pub mod file;
 pub mod fops;
 mod fs;
