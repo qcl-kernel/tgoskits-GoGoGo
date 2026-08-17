@@ -6,6 +6,10 @@ ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/../../.." && pwd)"
 REALTIME="$ROOT/docs/docs/build/axvisor/rtthread-realtime-report.md"
 REPORT="$ROOT/docs/docs/build/axvisor/task123-test-report.md"
 GUIDE="$ROOT/docs/docs/build/axvisor/task123-reproduction-cn.md"
+REPRODUCER="$ROOT/os/axvisor/scripts/reproduce_task123.sh"
+REPRODUCER_TEST="$ROOT/os/axvisor/scripts/test_reproduce_task123.sh"
+NATIVE_RUNNER="$ROOT/run-native.sh"
+NATIVE_RUNNER_TEST="$ROOT/os/axvisor/scripts/test_run_native.sh"
 failures=0
 
 fail() {
@@ -54,9 +58,15 @@ verify_hash_if_present() {
         fail "$relative_path hash mismatch: expected $expected, got $actual"
 }
 
-for file in "$REALTIME" "$REPORT" "$GUIDE"; do
+for file in "$REALTIME" "$REPORT" "$GUIDE" "$REPRODUCER" "$REPRODUCER_TEST" \
+    "$NATIVE_RUNNER" "$NATIVE_RUNNER_TEST"; do
     require_file "$file"
 done
+[[ -x "$REPRODUCER" ]] || fail "os/axvisor/scripts/reproduce_task123.sh is not executable"
+[[ -x "$REPRODUCER_TEST" ]] || fail "os/axvisor/scripts/test_reproduce_task123.sh is not executable"
+[[ -x "$NATIVE_RUNNER" ]] || fail "run-native.sh is not executable"
+[[ -x "$NATIVE_RUNNER_TEST" ]] ||
+    fail "os/axvisor/scripts/test_run_native.sh is not executable"
 
 # Pinned source and host identities.
 for file in "$REPORT" "$GUIDE"; do
@@ -163,6 +173,26 @@ for token in \
     'Docker 会增加调度噪声' '不是权威实时环境' 'QEMU TCG' \
     '故障诊断'; do
     require_literal "$GUIDE" "$token"
+done
+
+for token in \
+    'reproduce_task123.sh' '--quick' '--full' '100 样本实时性 suite' \
+    '1000 样本实时性 suite' '300 秒长稳' '600+600 帧 Task 3' \
+    'task123-quick-evidence.tar.gz' 'task123-full-evidence.tar.gz' \
+    'PASS_WITH_QEMU_TIMER_LIMIT' 'miss_1ms' '默认直接在宿主运行'; do
+    require_literal "$GUIDE" "$token"
+done
+for token in \
+    './run-native.sh smoke' './run-native.sh suite' './run-native.sh stability' \
+    'tmp/native-runs' '--output' 'NATIVE_INPUT_DIR' 'RTTHREAD_SRC' \
+    'qemu-system-aarch64' '不需要预先设置环境变量'; do
+    require_literal "$GUIDE" "$token"
+done
+for token in \
+    'profile=quick' 'profile=${1#--}' 'RTBENCH_STABILITY_END status=FAIL' \
+    'TASK123_LINUX_END status=PASS' 'PASS_WITH_QEMU_TIMER_LIMIT' \
+    'task123-${profile}-evidence.tar.gz'; do
+    require_literal "$REPRODUCER" "$token"
 done
 
 for token in \

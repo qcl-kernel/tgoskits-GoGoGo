@@ -149,6 +149,68 @@ cargo xtask axvisor build --config qemu-aarch64-two-guest-net \
 `cargo xtask axvisor build`、strip、objcopy、单 QEMU 启动、marker 门禁和哈希记录，
 并在退出时删除临时 VM 配置目录。
 
+## 7.1 一键复现（推荐）
+
+日常复现只需要在仓库根目录执行一条命令，不需要预先设置环境变量：
+
+```bash
+# Linux 2-vCPU + RT-Thread + virtio-net/RT-IPC 快速验证
+./run-native.sh smoke
+
+# 1000 样本实时性测试
+./run-native.sh suite
+
+# 300 秒长时间稳定性测试
+./run-native.sh stability
+```
+
+脚本直接使用 `PATH` 中的 `qemu-system-aarch64`，自动选择本地 Linux
+kernel、initramfs、rootfs、模型和固定提交的完整 RT-Thread 源码。默认结果写到
+`tmp/native-runs/<mode>-<UTC 时间>`，终端会持续显示底层 runner 的
+`PHASE`/`STEP` 进度。需要指定结果目录时使用：
+
+```bash
+./run-native.sh smoke --output tmp/my-task123-smoke
+```
+
+只有调试非默认输入时才需要可选覆盖：`NATIVE_INPUT_DIR` 指定包含
+`linux-kernel`、initramfs 和 `rootfs.img` 的目录，`RTTHREAD_SRC` 指定固定版本、
+对象完整且工作树干净的 RT-Thread Git 仓库。显式输入无效时脚本直接失败，
+不会静默改用其他路径。正式实时性数据应直接在宿主运行；Docker 结果仅用于
+构建和功能复现。
+
+需要一次执行 smoke、短实时性、Task 3 或完整故障矩阵时，使用聚合复现脚本：
+
+```bash
+# 默认 quick：smoke、100 样本实时性 suite、30+30 帧 Task 3
+os/axvisor/scripts/reproduce_task123.sh
+
+# 完整验收：1000 样本实时性 suite、300 秒长稳、600+600 帧 Task 3、五种故障场景
+os/axvisor/scripts/reproduce_task123.sh --full \
+  --output tmp/task123-reproduction-full
+```
+
+`--quick` 是默认模式；镜像已准备时，适合几分钟级功能和短时实时性验证；
+`--full` 执行完整验收。脚本继承第 4 节的镜像和工具环境变量；未提供预构建镜像时，底层
+`run_task123.sh` 会下载固定版本源码并构建所需镜像。每个阶段仍由统一 runner
+负责 QEMU 生命周期、marker 和结果门禁，一键脚本不复制这些逻辑。
+
+成功后输出目录包含 `reproduction-summary.txt`、`system-info.txt`、各阶段原始
+结果、`task123-quick-evidence.tar.gz` 或 `task123-full-evidence.tar.gz`，以及对应
+`.sha256` 文件。除已确认的 QEMU/TCG 1 ms 长稳限制外，任一依赖、构建、网络、
+协议、Task 3、结果格式或归档错误都会立即失败。完整模式只有在 Linux、Task 2
+和 Task 3 均已通过且日志明确记录非零 `miss_1ms` 时才继续，并将最终状态写为
+`PASS_WITH_QEMU_TIMER_LIMIT`，不会把该结果伪装成无条件 PASS。
+
+运行期间，终端会实时显示输出目录、总日志路径以及底层 runner 的 `PHASE`/`STEP`
+进度。首次下载或构建可能在某个 `STEP` 停留数分钟；详细输出同时保存在
+`reproduction.log` 和各阶段的 `runner.log` 中，可在另一个终端使用 `tail -f`
+观察，不需要等待阶段结束。
+
+Docker 可以执行构建和功能复现，但容器调度噪声会影响延迟尾部。因此一键脚本
+默认直接在宿主运行；实时性报告只接受宿主机运行结果，Docker 结果不得作为
+300 秒确定性结论。
+
 ## 8. 统一运行命令
 
 先创建输出父目录：
