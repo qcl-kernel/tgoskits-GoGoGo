@@ -58,10 +58,10 @@ index 3791a1bf..0e7c4dc2 100644
  Export('RTT_ROOT')
  Export('rtconfig')
 diff --git a/bsp/qemu-virt64-aarch64/applications/SConscript b/bsp/qemu-virt64-aarch64/applications/SConscript
-index c583d301..410e4727 100644
+index c583d301..df07af34 100644
 --- a/bsp/qemu-virt64-aarch64/applications/SConscript
 +++ b/bsp/qemu-virt64-aarch64/applications/SConscript
-@@ -1,7 +1,7 @@
+@@ -1,9 +1,10 @@
  from building import *
 
  cwd     = GetCurrentDir()
@@ -70,6 +70,9 @@ index c583d301..410e4727 100644
  CPPPATH = [cwd]
 
  group = DefineGroup('Applications', src, depend = [''], CPPPATH = CPPPATH)
++group += SConscript('task3/SConscript')
+
+ Return('group')
 diff --git a/bsp/qemu-virt64-aarch64/applications/console.c b/bsp/qemu-virt64-aarch64/applications/console.c
 deleted file mode 100644
 index b69b9b3b..00000000

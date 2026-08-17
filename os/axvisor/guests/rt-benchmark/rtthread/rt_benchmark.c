@@ -755,7 +755,7 @@ static int benchmark(int argc, char **argv)
 }
 MSH_CMD_EXPORT(benchmark, run jitter preemption and SGI benchmarks);
 
-static int rtbench_stability(int argc, char **argv)
+int rtbench_stability(int argc, char **argv)
 {
     uint64_t seconds = RTBENCH_DEFAULT_STABILITY_SECONDS;
 

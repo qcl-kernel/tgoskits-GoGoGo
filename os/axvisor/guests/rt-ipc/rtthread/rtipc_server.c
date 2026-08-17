@@ -308,7 +308,7 @@ static void rtipc_server_entry(void *param)
     closesocket(sock);
 }
 
-static int rtipc_server_init(void)
+int rtipc_server_start(void)
 {
     rt_thread_t tid = rt_thread_create("rtipic_srv", rtipc_server_entry, NULL,
                                        65536, 15, 10);
@@ -321,4 +321,4 @@ static int rtipc_server_init(void)
         report_server_error("thread_startup", startup_result);
     return startup_result;
 }
-INIT_APP_EXPORT(rtipc_server_init);
+INIT_APP_EXPORT(rtipc_server_start);

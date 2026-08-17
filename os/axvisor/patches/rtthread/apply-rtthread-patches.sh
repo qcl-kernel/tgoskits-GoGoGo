@@ -14,6 +14,7 @@ PATCHDIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
 BASE_PORT_PATCH="$PATCHDIR/0000-axvisor-aarch64-port.patch"
 RTCONFIG="$BSPDIR/rtconfig.h"
 RTBENCH="$(cd "$PATCHDIR/../../guests/rt-benchmark/rtthread" && pwd)"
+TASK3DIR="$(cd "$PATCHDIR/../../guests/task3" && pwd)"
 BENCHMARK_APPDIR="$BSPDIR/applications"
 
 # shellcheck source=patch_helpers.sh
@@ -127,6 +128,23 @@ cp "$GUESTDIR/common/rt_ipc.h" "$APPDIR/"
 cp "$GUESTDIR/rtthread/SConscript" "$APPDIR/"
 echo "Installed RT-IPC server into $APPDIR"
 
+# Task 3 reuses the RT-IPC implementation compiled by rt-ipc-test. Install
+# only its application sources and the shared v2 header to avoid duplicate
+# protocol symbols in the final image.
+TASK3_APPDIR="$BSPDIR/applications/task3"
+mkdir -p "$TASK3_APPDIR"
+cp "$TASK3DIR/src/rtthread/task3_server.c" "$TASK3_APPDIR/"
+cp "$TASK3DIR/src/rtthread/SConscript" "$TASK3_APPDIR/"
+cp "$TASK3DIR/src/common/controller.c" "$TASK3_APPDIR/"
+cp "$TASK3DIR/src/common/controller.h" "$TASK3_APPDIR/"
+cp "$TASK3DIR/src/common/task3_protocol.c" "$TASK3_APPDIR/"
+cp "$TASK3DIR/src/common/task3_protocol.h" "$TASK3_APPDIR/"
+cp "$TASK3DIR/src/common/session.c" "$TASK3_APPDIR/"
+cp "$TASK3DIR/src/common/session.h" "$TASK3_APPDIR/"
+cp "$GUESTDIR/common/rt_ipc.h" "$TASK3_APPDIR/"
+rm -f -- "$TASK3_APPDIR/rt_ipc.c"
+echo "Installed Task 3 server into $TASK3_APPDIR"
+
 # 6. Install the canonical benchmark source.  Keeping this in tgoskits makes
 # benchmark fixes reviewable and prevents a previously generated RT-Thread
 # source tree from silently supplying stale measurement code.
@@ -145,4 +163,5 @@ echo "  - GICv3: local SGI/PPI pending state uses redistributor registers"
 echo "  - AArch64 GIC: interrupt enable state is queryable for benchmark cleanup"
 echo "  - AArch64 timer: absolute CNTV deadlines with elapsed-tick compensation"
 echo "  - applications/rt-ipc-test/: RT-IPC UDP server installed"
+echo "  - applications/task3/: Task 3 UDP/9877 control server installed"
 echo "  - applications/rt_benchmark.c: canonical real-time benchmark installed"

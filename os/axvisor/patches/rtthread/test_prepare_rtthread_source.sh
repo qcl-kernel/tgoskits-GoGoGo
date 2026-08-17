@@ -18,6 +18,26 @@ if [[ ! -x "$PREPARE" ]]; then
     echo "FAIL: RT-Thread source preparation script is missing or not executable" >&2
     exit 1
 fi
+if ! grep -Eq 'git[[:space:]]+-C[[:space:]].*fetch.*--depth=1' "$PREPARE"; then
+    echo "FAIL: RT-Thread source preparation must shallow-fetch the pinned commit" >&2
+    exit 1
+fi
+if ! grep -Eq 'fetch.*--filter=blob:none' "$PREPARE"; then
+    echo "FAIL: RT-Thread source preparation must omit unneeded blobs" >&2
+    exit 1
+fi
+if ! grep -Eq 'sparse-checkout[[:space:]]+set' "$PREPARE"; then
+    echo "FAIL: RT-Thread source preparation must select the AArch64 virt build tree" >&2
+    exit 1
+fi
+if grep -Eq 'git[[:space:]]+clone' "$PREPARE"; then
+    echo "FAIL: RT-Thread source preparation must not clone complete history" >&2
+    exit 1
+fi
+if ! grep -Eq 'flock[[:space:]]+"?\$lock_fd"?' "$PREPARE"; then
+    echo "FAIL: RT-Thread source preparation must serialize destination publication" >&2
+    exit 1
+fi
 if [[ ! -d "$SEED_REPOSITORY/.git" ]]; then
     echo "FAIL: test seed repository is unavailable: $SEED_REPOSITORY" >&2
     exit 1
@@ -59,8 +79,45 @@ if [[ -n "$(git -C "$DESTINATION" status --short)" ]]; then
     echo "FAIL: freshly prepared RT-Thread source is dirty" >&2
     exit 1
 fi
+if [[ "$(git -C "$DESTINATION" rev-list --count --all)" != 1 ]]; then
+    echo "FAIL: freshly prepared RT-Thread source is not a one-commit shallow checkout" >&2
+    exit 1
+fi
+if [[ ! -f "$DESTINATION/.git/shallow" ]] ||
+   ! grep -Fxq "$EXPECTED_COMMIT" "$DESTINATION/.git/shallow"; then
+    echo "FAIL: freshly prepared RT-Thread source does not record the pinned shallow boundary" >&2
+    exit 1
+fi
+for required_path in \
+    bsp/qemu-virt64-aarch64 components include libcpu/aarch64 src tools; do
+    if [[ ! -e "$DESTINATION/$required_path" ]]; then
+        echo "FAIL: sparse RT-Thread source is missing $required_path" >&2
+        exit 1
+    fi
+done
+if [[ -e "$DESTINATION/bsp/stm32" ]]; then
+    echo "FAIL: sparse RT-Thread source contains unrelated board support" >&2
+    exit 1
+fi
 
 prepare_source "$DESTINATION"
+
+CONCURRENT_DESTINATION="$TEST_ROOT/rt-thread-concurrent"
+prepare_source "$CONCURRENT_DESTINATION" &
+first_pid=$!
+prepare_source "$CONCURRENT_DESTINATION" &
+second_pid=$!
+wait "$first_pid"
+wait "$second_pid"
+if [[ -e "$CONCURRENT_DESTINATION/source" ]]; then
+    echo "FAIL: concurrent preparation nested a source tree in the destination" >&2
+    exit 1
+fi
+if [[ "$(git -C "$CONCURRENT_DESTINATION" rev-parse HEAD)" != "$EXPECTED_COMMIT" ]] ||
+   [[ -n "$(git -C "$CONCURRENT_DESTINATION" status --short)" ]]; then
+    echo "FAIL: concurrent preparation did not publish one clean pinned checkout" >&2
+    exit 1
+fi
 
 TRACKED_DESTINATION="$TEST_ROOT/rt-thread-tracked"
 prepare_source "$TRACKED_DESTINATION"

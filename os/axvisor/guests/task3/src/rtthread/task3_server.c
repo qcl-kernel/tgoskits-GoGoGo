@@ -229,22 +229,17 @@ static int deliver_message(void *context, uint8_t message_type,
 static int wait_for_network(void)
 {
     struct netdev *device;
+    ip_addr_t address;
     int attempts;
 
+    if (inet_aton("192.168.77.30", &address) != 1) {
+        return -1;
+    }
     for (attempts = 0; attempts < 300; attempts++) {
         device = netdev_get_by_family(AF_INET);
         if (device != RT_NULL && netdev_is_up(device) &&
-            netdev_is_link_up(device)) {
-            ip_addr_t address;
-            ip_addr_t netmask;
-            ip_addr_t gateway;
-
-            inet_aton("192.168.77.30", &address);
-            inet_aton("255.255.255.0", &netmask);
-            inet_aton("0.0.0.0", &gateway);
-            netdev_set_ipaddr(device, &address);
-            netdev_set_netmask(device, &netmask);
-            netdev_set_gw(device, &gateway);
+            netdev_is_link_up(device) &&
+            ip_addr_cmp(&device->ip_addr, &address)) {
             return 0;
         }
         rt_thread_mdelay(100);
@@ -261,6 +256,9 @@ static void task3_server_entry(void *parameter)
     (void)parameter;
     memset(&runtime, 0, sizeof(runtime));
     runtime.socket_fd = -1;
+#ifdef TASK3_FAULT_DELAY_START_MS
+    rt_thread_mdelay(TASK3_FAULT_DELAY_START_MS);
+#endif
     if (wait_for_network() != 0) {
         rt_kprintf("TASK3_RTOS_ERROR network-timeout\n");
         return;

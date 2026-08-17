@@ -23,6 +23,9 @@ GTIMER_PATCH="$ROOT/os/axvisor/patches/rtthread/0008-aarch64-gtimer-use-absolute
 LEGACY_NO_POLL_PATCH="$ROOT/os/axvisor/patches/rtthread/0001-virtio-net-remove-rx-polling.patch"
 BENCHMARK="$ROOT/os/axvisor/guests/rt-benchmark/rtthread/rt_benchmark.c"
 INSTALLED_BENCHMARK="$RTDIR/bsp/qemu-virt64-aarch64/applications/rt_benchmark.c"
+APPLICATION_SCONSCRIPT="$RTDIR/bsp/qemu-virt64-aarch64/applications/SConscript"
+TASK3_SOURCE="$ROOT/os/axvisor/guests/task3"
+TASK3_APPDIR="$RTDIR/bsp/qemu-virt64-aarch64/applications/task3"
 
 if [[ ! -f "$DRIVER" ]]; then
     echo "FAIL: RT-Thread source not available: $DRIVER" >&2
@@ -368,6 +371,14 @@ else
         'MSH_CMD_EXPORT\(benchmark,' \
         "$BENCHMARK"
     require_pattern \
+        "stability benchmark exposes a stable ELF entry symbol" \
+        '^int[[:space:]]+rtbench_stability\(int argc, char \*\*argv\)' \
+        "$BENCHMARK"
+    reject_pattern \
+        "stability benchmark entry is not private to one translation unit" \
+        '^static[[:space:]]+int[[:space:]]+rtbench_stability\(' \
+        "$BENCHMARK"
+    require_pattern \
         "benchmark worker rejects overlapping jobs" \
         'RTBENCH_ERROR metric=suite reason=busy' \
         "$BENCHMARK"
@@ -497,6 +508,70 @@ if [[ ! -f "$INSTALLED_BENCHMARK" ]]; then
 elif [[ -f "$BENCHMARK" ]] && ! cmp -s "$BENCHMARK" "$INSTALLED_BENCHMARK"; then
     echo "FAIL: installed RT benchmark differs from canonical source" >&2
     failures=$((failures + 1))
+fi
+
+require_pattern \
+    "RT-Thread applications include the Task 3 SCons group" \
+    "group[[:space:]]*\+=[[:space:]]*SConscript\('task3/SConscript'\)" \
+    "$APPLICATION_SCONSCRIPT"
+for task3_file in \
+    task3_server.c SConscript controller.c controller.h task3_protocol.c \
+    task3_protocol.h session.c session.h rt_ipc.h; do
+    if [[ ! -f "$TASK3_APPDIR/$task3_file" ]]; then
+        echo "FAIL: installed Task 3 file is missing: $task3_file" >&2
+        failures=$((failures + 1))
+    fi
+done
+if [[ -e "$TASK3_APPDIR/rt_ipc.c" ]]; then
+    echo "FAIL: Task 3 must reuse the RT-IPC server's protocol implementation" >&2
+    failures=$((failures + 1))
+fi
+for mapping in \
+    "src/rtthread/task3_server.c:task3_server.c" \
+    "src/rtthread/SConscript:SConscript" \
+    "src/common/controller.c:controller.c" \
+    "src/common/controller.h:controller.h" \
+    "src/common/task3_protocol.c:task3_protocol.c" \
+    "src/common/task3_protocol.h:task3_protocol.h" \
+    "src/common/session.c:session.c" \
+    "src/common/session.h:session.h"; do
+    source_file="${mapping%%:*}"
+    installed_file="${mapping#*:}"
+    if [[ -f "$TASK3_APPDIR/$installed_file" ]] && \
+       ! cmp -s "$TASK3_SOURCE/$source_file" "$TASK3_APPDIR/$installed_file"; then
+        echo "FAIL: installed Task 3 file differs from canonical source: $installed_file" >&2
+        failures=$((failures + 1))
+    fi
+done
+if [[ -f "$TASK3_APPDIR/rt_ipc.h" ]] && \
+   ! cmp -s "$ROOT/os/axvisor/guests/rt-ipc/common/rt_ipc.h" \
+       "$TASK3_APPDIR/rt_ipc.h"; then
+    echo "FAIL: installed Task 3 RT-IPC header differs from v2 common header" >&2
+    failures=$((failures + 1))
+fi
+if [[ -f "$TASK3_APPDIR/SConscript" ]]; then
+    require_pattern \
+        "Task 3 SCons supports one dropped status packet" \
+        'TASK3_FAULT_DROP_STATUS_ONCE' \
+        "$TASK3_APPDIR/SConscript"
+    require_pattern \
+        "Task 3 SCons supports delayed server startup" \
+        'TASK3_FAULT_DELAY_START_MS' \
+        "$TASK3_APPDIR/SConscript"
+fi
+if [[ -f "$TASK3_APPDIR/task3_server.c" ]]; then
+    require_pattern \
+        "Task 3 delayed startup stays in the server application thread" \
+        'rt_thread_mdelay\(TASK3_FAULT_DELAY_START_MS\);' \
+        "$TASK3_APPDIR/task3_server.c"
+    require_pattern \
+        "Task 3 waits for the shared static address" \
+        'ip_addr_cmp\(&device->ip_addr, &address\)' \
+        "$TASK3_APPDIR/task3_server.c"
+    reject_pattern \
+        "Task 3 does not compete with Task 2 for netdev configuration" \
+        'netdev_set_(ipaddr|netmask|gw)\(' \
+        "$TASK3_APPDIR/task3_server.c"
 fi
 
 if (( failures != 0 )); then

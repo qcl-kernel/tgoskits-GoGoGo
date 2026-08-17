@@ -31,6 +31,10 @@ require_pattern 'rt_thread_startup\(tid\)[[:space:]]*;' \
     'thread startup must be attempted explicitly'
 require_pattern 'return[[:space:]]+startup_result[[:space:]]*;' \
     'thread startup status must propagate to INIT_APP_EXPORT'
+require_pattern '^int[[:space:]]+rtipc_server_start\(void\)' \
+    'the combined image needs a stable RT-IPC server entry symbol'
+require_pattern 'INIT_APP_EXPORT\(rtipc_server_start\);' \
+    'the stable RT-IPC server entry must start automatically'
 require_pattern 'cfg\.auto_reconnect[[:space:]]*=[[:space:]]*false' \
     'the fixed UDP server must release dead ephemeral client peers'
 require_pattern 'rtipc_peer_guard_retire\(' \
