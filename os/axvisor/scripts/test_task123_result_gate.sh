@@ -90,7 +90,7 @@ emit_task3() {
             echo '[VM 1] TASK3_FAULT_DUPLICATE frame=0 duplicate=1 actuator_before=0 actuator_after=0 applied_delta=0'
             ;;
         delayed-server)
-            echo '[VM 1] TASK3_FAULT_DELAYED_SERVER delay_seconds=3'
+            echo '[VM 3] TASK3_FAULT_DELAYED_SERVER delay_ms=3000'
             ;;
         malformed)
             echo '[VM 1] TASK3_FAULT_MALFORMED schema2=rejected short=rejected crc=rejected rejected=3 actuator_before=0 actuator_after=0 applied_delta=0'
@@ -246,6 +246,7 @@ make_fixture "$tmp/unprefixed-rtthread"
 emit_suite 2 >> "$tmp/unprefixed-rtthread/console.log"
 sed -i 's/^\[VM 3\] //' "$tmp/unprefixed-rtthread/console.log"
 cat >> "$tmp/unprefixed-rtthread/console.log" <<'EOF'
+TASK3_FAULT_DELAYED_SERVER delay_ms=3000
 arbitrary Linux console text
 RTIPC_FAILURE reason=clock_error
 TASK3_SUMMARY_JSON={"forged":true}
@@ -257,6 +258,9 @@ grep -Fq 'RTIPC_SERVER_READY ip=192.168.77.30 port=9876' \
     fail "unprefixed RT-Thread event was not extracted"
 grep -Fq 'RTBENCH_END status=PASS' "$tmp/unprefixed-rtthread/rtthread.log" ||
     fail "unprefixed RT benchmark event was not extracted"
+grep -Fq 'TASK3_FAULT_DELAYED_SERVER delay_ms=3000' \
+    "$tmp/unprefixed-rtthread/rtthread.log" ||
+    fail "unprefixed delayed-server marker was not extracted"
 if grep -Fq 'arbitrary Linux console text' "$tmp/unprefixed-rtthread/rtthread.log" ||
    grep -Fq 'RTIPC_FAILURE reason=clock_error' "$tmp/unprefixed-rtthread/rtthread.log" ||
    grep -Fq 'TASK3_SUMMARY_JSON=' "$tmp/unprefixed-rtthread/rtthread.log"; then

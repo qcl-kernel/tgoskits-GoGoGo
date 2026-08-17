@@ -185,7 +185,7 @@ printf '[VM 3] TASK3_RTOS_FINAL requests=%s errors=%s duplicates=%s applied_step
 case "$task3_fault" in
     drop-status) echo '[VM 3] TASK3_FAULT_DROP_STATUS dropped=1' ;;
     duplicate-frame) echo '[VM 1] TASK3_FAULT_DUPLICATE frame=0 duplicate=1 actuator_before=0 actuator_after=0 applied_delta=0' ;;
-    delayed-server) echo '[VM 1] TASK3_FAULT_DELAYED_SERVER delay_seconds=3' ;;
+    delayed-server) echo '[VM 3] TASK3_FAULT_DELAYED_SERVER delay_ms=3000' ;;
     malformed) echo '[VM 1] TASK3_FAULT_MALFORMED schema2=rejected short=rejected crc=rejected rejected=3 actuator_before=0 actuator_after=0 applied_delta=0' ;;
 esac
 }

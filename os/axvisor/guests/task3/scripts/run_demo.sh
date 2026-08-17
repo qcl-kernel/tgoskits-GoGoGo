@@ -144,10 +144,6 @@ else
 fi
 "$SCRIPT_DIR/wait_for_marker.sh" "$linux_log" TASK3_SUMMARY_JSON= 180 "$linux_pid"
 "$SCRIPT_DIR/wait_for_marker.sh" "$rtthread_log" TASK3_RTOS_FINAL 10 "$rtthread_pid"
-if [ "$linux_first_delay" -gt 0 ]; then
-    printf 'TASK3_FAULT_DELAYED_SERVER delay_seconds=%s\n' \
-        "$linux_first_delay" >>"$linux_log"
-fi
 
 cleanup
 expected=$((frames * 2))

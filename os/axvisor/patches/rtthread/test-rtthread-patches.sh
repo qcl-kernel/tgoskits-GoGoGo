@@ -561,7 +561,16 @@ if [[ -f "$TASK3_APPDIR/SConscript" ]]; then
 fi
 if [[ -f "$TASK3_APPDIR/task3_server.c" ]]; then
     require_pattern \
+        "Task 3 delayed startup emits RT-Thread evidence" \
+        'TASK3_FAULT_DELAYED_SERVER delay_ms=%d' \
+        "$TASK3_APPDIR/task3_server.c"
+    require_pattern \
         "Task 3 delayed startup stays in the server application thread" \
+        'rt_thread_mdelay\(TASK3_FAULT_DELAY_START_MS\);' \
+        "$TASK3_APPDIR/task3_server.c"
+    require_order \
+        "Task 3 delayed startup evidence precedes the application-thread delay" \
+        'TASK3_FAULT_DELAYED_SERVER delay_ms=%d' \
         'rt_thread_mdelay\(TASK3_FAULT_DELAY_START_MS\);' \
         "$TASK3_APPDIR/task3_server.c"
     require_pattern \

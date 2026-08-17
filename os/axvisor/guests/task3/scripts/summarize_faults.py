@@ -130,6 +130,20 @@ def _marker_delta(log: str, marker: str) -> int:
     return int(match.group(1), 10)
 
 
+def _delayed_server_delay_ms(log: str) -> int:
+    matches = re.findall(
+        r"^(?:msh />)?TASK3_FAULT_DELAYED_SERVER delay_ms=([0-9]+)\r?$",
+        log,
+        re.MULTILINE,
+    )
+    if len(matches) != 1:
+        raise ValueError("delayed-server marker missing or invalid")
+    delay_ms = int(matches[0], 10)
+    if delay_ms <= 0:
+        raise ValueError("delayed-server delay_ms must be positive")
+    return delay_ms
+
+
 def collect_event(case_name: str, case_dir: Path) -> dict[str, object]:
     summary = json.loads((case_dir / "summary.json").read_text(encoding="ascii"))
     raw_summary = json.loads(
@@ -157,8 +171,7 @@ def collect_event(case_name: str, case_dir: Path) -> dict[str, object]:
     elif case_name == "duplicate-frame":
         event["applied_delta"] = _marker_delta(linux_log, "TASK3_FAULT_DUPLICATE")
     elif case_name == "delayed-server":
-        if "TASK3_FAULT_DELAYED_SERVER" not in linux_log:
-            raise ValueError("delayed-server marker missing")
+        _delayed_server_delay_ms(rtos_log)
     elif case_name == "malformed":
         event["applied_delta"] = _marker_delta(linux_log, "TASK3_FAULT_MALFORMED")
         if "schema2=rejected short=rejected crc=rejected" not in linux_log:

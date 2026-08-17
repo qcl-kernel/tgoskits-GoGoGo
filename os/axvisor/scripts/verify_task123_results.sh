@@ -140,7 +140,7 @@ awk '
         print
         next
     }
-    /^(RTIPC_SERVER_|TASK3_RTOS_|TASK3_FAULT_DROP_STATUS([[:space:]]|$)|RTBENCH([_[:space:]]|$))/ {
+    /^(RTIPC_SERVER_|TASK3_RTOS_|TASK3_FAULT_(DROP_STATUS|DELAYED_SERVER)([[:space:]]|$)|RTBENCH([_[:space:]]|$))/ {
         print
     }
 ' "$log" > "$rtthread_tmp"

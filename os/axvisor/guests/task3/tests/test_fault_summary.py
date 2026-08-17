@@ -1,4 +1,5 @@
 import csv
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -6,6 +7,7 @@ from pathlib import Path
 from scripts.summarize_faults import (
     CASES,
     _last_rtos_final,
+    collect_event,
     parse_events,
     summarize_events,
     validate_event,
@@ -35,6 +37,37 @@ class FaultSummaryTests(unittest.TestCase):
         self.assertEqual(summary["cases"]["drop-control"]["transport_retries"], 1)
         self.assertEqual(summary["cases"]["duplicate-frame"]["applied_delta"], 0)
         self.assertEqual(summary["cases"]["malformed"]["application_errors"], 2)
+
+    def test_delayed_server_requires_positive_rtos_delay_marker(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            case_dir = Path(temporary)
+            self._write_delayed_case(case_dir, "TASK3_FAULT_DELAYED_SERVER delay_ms=3000\n")
+            event = collect_event("delayed-server", case_dir)
+            self.assertEqual(event["result"], "recovered")
+
+            invalid_markers = (
+                "",
+                "TASK3_FAULT_DELAYED_SERVER delay_ms=0\n",
+                "TASK3_FAULT_DELAYED_SERVER delay_ms=-1\n",
+                "TASK3_FAULT_DELAYED_SERVER delay_ms=three\n",
+                "TASK3_FAULT_DELAYED_SERVER delay_ms=3000 forged=1\n",
+            )
+            for marker in invalid_markers:
+                with self.subTest(marker=marker):
+                    self._write_delayed_case(case_dir, marker)
+                    with self.assertRaisesRegex(ValueError, "delayed-server"):
+                        collect_event("delayed-server", case_dir)
+
+    def test_delayed_server_rejects_linux_host_marker(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            case_dir = Path(temporary)
+            self._write_delayed_case(
+                case_dir,
+                "",
+                linux_log="TASK3_FAULT_DELAYED_SERVER delay_ms=3000\n",
+            )
+            with self.assertRaisesRegex(ValueError, "delayed-server"):
+                collect_event("delayed-server", case_dir)
 
     def test_missing_duplicate_and_unsafe_application_are_rejected(self):
         source = ROOT / "tests/fixtures/fault_events.csv"
@@ -118,6 +151,21 @@ class FaultSummaryTests(unittest.TestCase):
             writer = csv.DictWriter(stream, fieldnames=rows[0].keys())
             writer.writeheader()
             writer.writerows(rows)
+
+    @staticmethod
+    def _write_delayed_case(case_dir, rtos_marker, linux_log="linux\n"):
+        (case_dir / "summary.json").write_text(
+            json.dumps({"success_rate": 1.0, "transport_retries": 0}),
+            encoding="ascii",
+        )
+        (case_dir / "summary.raw.json").write_text("{}", encoding="ascii")
+        (case_dir / "linux.log").write_text(linux_log, encoding="ascii")
+        (case_dir / "rtthread.log").write_text(
+            rtos_marker
+            + "TASK3_RTOS_FINAL requests=6 errors=0 duplicates=0 "
+            "applied_steps=6 retries=0\n",
+            encoding="ascii",
+        )
 
 
 if __name__ == "__main__":

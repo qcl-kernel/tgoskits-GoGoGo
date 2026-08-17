@@ -257,6 +257,8 @@ static void task3_server_entry(void *parameter)
     memset(&runtime, 0, sizeof(runtime));
     runtime.socket_fd = -1;
 #ifdef TASK3_FAULT_DELAY_START_MS
+    rt_kprintf("TASK3_FAULT_DELAYED_SERVER delay_ms=%d\n",
+               TASK3_FAULT_DELAY_START_MS);
     rt_thread_mdelay(TASK3_FAULT_DELAY_START_MS);
 #endif
     if (wait_for_network() != 0) {
