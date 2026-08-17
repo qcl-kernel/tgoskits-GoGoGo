@@ -22,7 +22,7 @@ The root script accepts exactly one mode and an optional output directory:
 `tmp/native-runs/<mode>-<UTC timestamp>`. An explicit output directory must be
 empty, matching the underlying runner contract.
 
-Advanced overrides remain optional rather than required: `QEMU`,
+Advanced input overrides remain optional rather than required:
 `NATIVE_INPUT_DIR`, `RTTHREAD_SRC`, and `NATIVE_OUTPUT_DIR`.
 
 ## Artifact Discovery
@@ -34,9 +34,11 @@ The script resolves inputs in this order:
 3. Accepted local evidence discovered by the existing structured resolver.
 4. The existing runner's build/download fallback.
 
-QEMU is resolved from `QEMU` or `PATH`. Linux kernel, initramfs, model, and
-rootfs candidates are validated as readable nonempty files and canonicalized.
-No workstation-specific path is encoded in the script.
+The script requires `qemu-system-aarch64` in `PATH` and leaves QEMU selection to
+the existing runner; it does not scan the filesystem or export a separate QEMU
+path. Linux kernel, initramfs, model, and rootfs candidates are validated as
+readable nonempty files and canonicalized. No workstation-specific path is
+encoded in the script.
 
 RT-Thread source candidates are restricted to repositories under the project
 parent's known local workspaces and the current repository `tmp` directory. A

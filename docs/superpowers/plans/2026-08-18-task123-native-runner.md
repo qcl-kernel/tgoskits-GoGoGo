@@ -29,8 +29,8 @@
 
 - [ ] **Step 1: Write failing command-contract tests**
 
-Create a fixture root containing executable fake `run_task123.sh`, fake QEMU,
-Linux Image, initramfs, model and rootfs. Invoke `run-native.sh` with test-only
+Create a fixture root containing executable fake `run_task123.sh`, a fake
+`qemu-system-aarch64` in `PATH`, Linux Image, initramfs, model and rootfs. Invoke `run-native.sh` with test-only
 path overrides and assert these exact mappings:
 
 ```text
@@ -111,7 +111,8 @@ Run the Task 1 contract. Expected: FAIL on automatic discovery cases.
 
 - [ ] **Step 3: Implement validated discovery**
 
-Resolve QEMU from an explicit `QEMU` or `PATH`. Resolve artifacts from optional
+Require `qemu-system-aarch64` in `PATH` and leave its execution to the existing
+runner without exporting `QEMU`. Resolve artifacts from optional
 `NATIVE_INPUT_DIR`, repository-relative conventional paths and the existing
 `task123_artifacts.py resolve` output. Validate each selected file as readable,
 regular and nonempty before exporting it.
@@ -177,7 +178,7 @@ Place this first in the reproduction section:
 ```
 
 Document output files, live log path, automatic local selection and the optional
-`--output`, `NATIVE_INPUT_DIR`, `RTTHREAD_SRC`, and `QEMU` overrides. Explain that
+`--output`, `NATIVE_INPUT_DIR`, and `RTTHREAD_SRC` overrides. Explain that
 formal realtime evidence must run directly on the host.
 
 - [ ] **Step 4: Run focused verification**
