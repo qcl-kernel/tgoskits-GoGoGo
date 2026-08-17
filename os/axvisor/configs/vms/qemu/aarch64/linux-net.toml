@@ -5,7 +5,7 @@ guest_type = "virtualized"
 cpu_num = 2
 guest_tlbi_policy = "vm_scoped"
 phys_cpu_ids = [0, 1]
-phys_cpu_sets = [0b11, 0b11]
+phys_cpu_sets = [0b1011, 0b1011]
 
 [kernel]
 entry_point = 0x8020_0000
@@ -15,6 +15,7 @@ kernel_load_addr = 0x8020_0000
 dtb_load_addr = 0x8f00_0000
 ramdisk_path = "linux-1-initramfs.cpio"
 ramdisk_load_addr = 0x8c00_0000
+cmdline = "console=ttyAMA0 rdinit=/init"
 memory_regions = [
   [0x8000_0000, 0x2000_0000, 0x7, 2],
 ]
@@ -63,4 +64,4 @@ disabled = [
 [[devices.virtual]]
 id = "net0"
 model = "virtio-net"
-guest_mac = [52, 84, 0, 77, 0, 1]
+guest_mac = [0x52, 0x54, 0x00, 0x77, 0x00, 0x01]
