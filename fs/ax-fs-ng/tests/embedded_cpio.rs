@@ -1,4 +1,5 @@
-use ax_fs_ng::embedded::{EmbeddedEntryKind, parse_newc};
+use ax_fs_ng::embedded::{EmbeddedArchiveError, EmbeddedEntryKind, new_filesystem, parse_newc};
+use axfs_ng_vfs::{MetadataUpdate, NodePermission, NodeType, VfsError};
 
 fn align4(value: usize) -> usize {
     (value + 3) & !3
@@ -74,4 +75,83 @@ fn rejects_truncated_and_malformed_archives() {
     let mut bad_magic = valid;
     bad_magic[0] = b'1';
     assert!(parse_newc(&bad_magic).is_err());
+}
+
+#[test]
+fn exposes_archive_as_read_only_filesystem() {
+    let bytes = Box::leak(
+        archive(&[
+            ("bin", 0o040755, &[]),
+            ("bin/init", 0o100755, b"ELF payload"),
+            ("bin/sh", 0o120777, b"init"),
+        ])
+        .into_boxed_slice(),
+    );
+
+    let fs = new_filesystem(bytes).unwrap();
+    assert!(fs.is_readonly());
+    assert_eq!(fs.name(), "embedded-cpio");
+
+    let root = fs.root_dir();
+    let bin = root.as_dir().unwrap().lookup("bin").unwrap();
+    assert_eq!(bin.node_type(), NodeType::Directory);
+    assert_eq!(bin.metadata().unwrap().mode.bits(), 0o755);
+
+    let init = bin.as_dir().unwrap().lookup("init").unwrap();
+    assert_eq!(init.node_type(), NodeType::RegularFile);
+    assert_eq!(init.metadata().unwrap().mode.bits(), 0o755);
+    let mut payload = [0u8; 16];
+    let read = init.as_file().unwrap().read_at(&mut payload, 4).unwrap();
+    assert_eq!(&payload[..read], b"payload");
+
+    let sh = bin.as_dir().unwrap().lookup("sh").unwrap();
+    assert_eq!(sh.node_type(), NodeType::Symlink);
+    let mut target = [0u8; 8];
+    let read = sh.as_file().unwrap().read_at(&mut target, 0).unwrap();
+    assert_eq!(&target[..read], b"init");
+
+    assert_eq!(
+        init.update_metadata(MetadataUpdate {
+            mode: Some(NodePermission::from_bits_truncate(0o700)),
+            ..MetadataUpdate::default()
+        }),
+        Err(VfsError::ReadOnlyFilesystem)
+    );
+    assert_eq!(
+        init.as_file().unwrap().write_at(b"x", 0),
+        Err(VfsError::ReadOnlyFilesystem)
+    );
+    assert!(matches!(
+        root.as_dir().unwrap().create(
+            "tmp",
+            NodeType::Directory,
+            NodePermission::from_bits_truncate(0o755),
+            0,
+            0,
+        ),
+        Err(VfsError::ReadOnlyFilesystem)
+    ));
+}
+
+#[test]
+fn creates_implicit_directories_and_rejects_path_conflicts() {
+    let implicit = Box::leak(
+        archive(&[("usr/bin/tool", 0o100755, b"tool")]).into_boxed_slice(),
+    );
+    let fs = new_filesystem(implicit).unwrap();
+    let usr = fs.root_dir().as_dir().unwrap().lookup("usr").unwrap();
+    let bin = usr.as_dir().unwrap().lookup("bin").unwrap();
+    assert!(bin.as_dir().unwrap().lookup("tool").is_ok());
+
+    let conflict = Box::leak(
+        archive(&[
+            ("usr", 0o100755, b"file"),
+            ("usr/bin/tool", 0o100755, b"tool"),
+        ])
+        .into_boxed_slice(),
+    );
+    assert!(matches!(
+        new_filesystem(conflict),
+        Err(EmbeddedArchiveError::PathConflict)
+    ));
 }

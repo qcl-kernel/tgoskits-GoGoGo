@@ -215,6 +215,15 @@ static TASK_OPS: RuntimeTaskOps = RuntimeTaskOps;
 static IRQ_REGISTRAR: RuntimeBlockIrqRegistrar = RuntimeBlockIrqRegistrar;
 
 pub(super) fn init(bootargs: Option<&str>) {
+    install_runtime();
+    ax_fs_ng::root::init_root_from_rdif_sources(
+        take_rdif_block_devices(),
+        take_rdif_block_groups(),
+        bootargs,
+    );
+}
+
+pub(super) fn install_runtime() {
     ONLINE_BLOCK_CPUS.store(1, Ordering::Release);
     ax_fs_ng::os::install(
         &TIME_PROVIDER,
@@ -222,11 +231,6 @@ pub(super) fn init(bootargs: Option<&str>) {
         &TASK_OPS,
         axklib::dma::op(),
         irq_registrar(),
-    );
-    ax_fs_ng::root::init_root_from_rdif_sources(
-        take_rdif_block_devices(),
-        take_rdif_block_groups(),
-        bootargs,
     );
 }
 

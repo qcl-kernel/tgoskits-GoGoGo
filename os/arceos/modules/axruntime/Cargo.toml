@@ -41,7 +41,7 @@ stack-protector = []
 tls = ["ax-hal/tls", "ax-task/tls"]
 
 display = ["paging", "dep:ax-display", "ax-driver/display"]
-fs = [
+fs-base = [
   "irq",
   "multitask",
   "paging",
@@ -52,6 +52,8 @@ fs = [
   "dep:rdif-block",
   "ax-driver/block",
 ]
+fs = ["fs-base"]
+embedded-rootfs = ["fs-base"]
 ext4fs = ["fs", "ax-fs-ng/ext4"]
 fatfs = ["fs", "ax-fs-ng/fat"]
 input = ["paging", "dep:ax-input", "ax-driver/input"]
