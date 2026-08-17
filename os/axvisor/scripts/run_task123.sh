@@ -578,31 +578,47 @@ prepare_manifest() {
     record_artifact rootfs "$ROOTFS_IMAGE"
 }
 
-feed_benchmark_command() {
-    local ready='[VM 3] msh />'
+wait_for_console_marker() {
+    local marker=$1
+    local failure_marker=${2:-}
     local deadline=$(( $(date +%s) + TASK123_TIMEOUT_S ))
-    while ! grep -aFq -- "$ready" "$CONSOLE_LOG"; do
+
+    while ! grep -aFq -- "$marker" "$CONSOLE_LOG"; do
         kill -0 "$watcher_pid" 2>/dev/null || return 1
+        if [[ -n "$failure_marker" ]] &&
+           grep -aFq -- "$failure_marker" "$CONSOLE_LOG"; then
+            return 1
+        fi
         [[ "$(date +%s)" -lt "$deadline" ]] || return 124
         sleep 0.05
     done
+}
+
+feed_benchmark_command() {
+    local ready='[VM 3] msh />'
+    local failure=
+    wait_for_console_marker "$ready"
     printf '\030]' >&3
     sleep 0.1
     if [[ "$mode" == realtime-suite ]]; then
         printf 'benchmark %s\r' "$rtbench_samples" >&3
         ready='RTBENCH_END status=PASS'
+        failure='RTBENCH_END status=FAIL'
     else
         printf 'rtbench_stability %s\r' "$stability_seconds" >&3
         ready='RTBENCH_STABILITY_DONE'
+        failure='RTBENCH_STABILITY_END status=FAIL'
     fi
-    deadline=$(( $(date +%s) + TASK123_TIMEOUT_S ))
-    while ! grep -aFq -- "$ready" "$CONSOLE_LOG"; do
-        kill -0 "$watcher_pid" 2>/dev/null || return 1
-        [[ "$(date +%s)" -lt "$deadline" ]] || return 124
-        sleep 0.05
-    done
+    if ! wait_for_console_marker "$ready" "$failure"; then
+        kill -TERM "$watcher_pid" 2>/dev/null || true
+        return 1
+    fi
     # Replay VM 1's buffered console so Linux completion evidence is visible.
     printf '\030[' >&3
+    wait_for_console_marker 'TASK123_LINUX_END status=PASS'
+    # Replay VM 3's buffered final counters before the marker watcher stops QEMU.
+    printf '\030]' >&3
+    wait_for_console_marker 'TASK3_RTOS_FINAL requests='
 }
 
 wait_for_qemu_pid() {
@@ -675,6 +691,7 @@ launch_one_qemu() {
         'TASK2_LINUX_END status=PASS'
         'TASK3_LINUX_END status=PASS'
         'TASK123_LINUX_END status=PASS'
+        'TASK3_RTOS_FINAL requests='
     )
     if [[ "$mode" == realtime-suite ]]; then
         markers+=('RTBENCH_END status=PASS')

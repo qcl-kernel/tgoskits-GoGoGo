@@ -189,8 +189,10 @@ done
 records=$((task3_frames * 2))
 printf '[VM 1] TASK3_SUMMARY_JSON={"schema":1,"frames_per_mode":%s,"records":%s,"requests":%s,"successes":%s,"success_rate":1.0,"application_errors":0,"application_timeouts":0,"reconnects":0,"injected_drops":%s,"elapsed_us":1000,"settling":{"fixed":{},"ai":{}}}\n' \
     "$task3_frames" "$records" "$records" "$records" "$injected_drops"
-printf '[VM 3] TASK3_RTOS_FINAL requests=%s errors=%s duplicates=%s applied_steps=%s retries=%s\n' \
-    "$records" "$rtos_errors" "$rtos_duplicates" "$records" "$rtos_retries"
+if [[ -z "${FAKE_QEMU_EXPECT_COMMAND:-}" ]]; then
+    printf '[VM 3] TASK3_RTOS_FINAL requests=%s errors=%s duplicates=%s applied_steps=%s retries=%s\n' \
+        "$records" "$rtos_errors" "$rtos_duplicates" "$records" "$rtos_retries"
+fi
 case "$task3_fault" in
     drop-status) echo '[VM 3] TASK3_FAULT_DROP_STATUS dropped=1' ;;
     duplicate-frame) echo '[VM 1] TASK3_FAULT_DUPLICATE frame=0 duplicate=1 actuator_before=0 actuator_after=0 applied_delta=0' ;;
@@ -222,7 +224,11 @@ emit_benchmark() {
             printf 'RTBENCH metric=%s run=1 expected=%s collected=%s missing=0 p50_ns=1 p95_ns=2 p99_ns=3 p99_9_ns=4 max_ns=5 miss_100us=0 miss_500us=0 miss_1ms=0 mean_ns=2\n' \
                 "$metric" "$value" "$value"
         done
-        echo 'RTBENCH_END status=PASS'
+        if [[ "${FAKE_QEMU_BEHAVIOR:-pass}" == benchmark-fail ]]; then
+            echo 'RTBENCH_END status=FAIL'
+        else
+            echo 'RTBENCH_END status=PASS'
+        fi
     else
         local expected=$((value * 1000 - 1))
         printf 'RTBENCH_STABILITY_BEGIN seconds=%s expected=%s\n' "$value" "$expected"
@@ -268,6 +274,12 @@ if [[ -n "${FAKE_QEMU_EXPECT_COMMAND:-}" ]]; then
     echo 'select-vm1' >> "$FAKE_QEMU_STDIN_LOG"
 fi
 emit_linux_finals
+if [[ -n "${FAKE_QEMU_EXPECT_COMMAND:-}" ]]; then
+    wait_for_control ']'
+    echo 'select-vm3-final' >> "$FAKE_QEMU_STDIN_LOG"
+    printf 'TASK3_RTOS_FINAL requests=%s errors=%s duplicates=%s applied_steps=%s retries=%s\n' \
+        "$records" "$rtos_errors" "$rtos_duplicates" "$records" "$rtos_retries"
+fi
 if [[ "${FAKE_QEMU_BEHAVIOR:-pass}" == duplicate ]]; then
     echo '[VM 1] TASK2_LINUX_END status=PASS'
 fi
@@ -409,8 +421,8 @@ for realtime_case in 'realtime-suite:benchmark 2' 'stability:rtbench_stability 1
             cat "$realtime_output/console.log" >&2
         fail "$realtime_mode feeder run failed"
     fi
-    [[ "$(cat "$records/qemu-stdin.log")" == $'select-vm3\ncommand='"$realtime_command"$'\nselect-vm1' ]] ||
-        fail "$realtime_mode did not perform the exact VM3 command/VM1 replay sequence"
+    [[ "$(cat "$records/qemu-stdin.log")" == $'select-vm3\ncommand='"$realtime_command"$'\nselect-vm1\nselect-vm3-final' ]] ||
+        fail "$realtime_mode did not drain the VM1 and VM3 replay buffers"
     assert_mode_contract "$realtime_mode" \
         'console=ttyAMA0 rdinit=/init task2.count=2 task2.fault=none task3.frames=3 task3.fault=normal' \
         "$fixtures/rtthread-normal.bin"
@@ -644,6 +656,22 @@ grep -Fxq 'command=benchmark 2' "$records/qemu-stdin.log" ||
     fail "feeder timeout did not send the realtime command"
 feeder_timeout_pid="$(cat "$records/qemu.pid")"
 assert_reaped "$feeder_timeout_pid"
+
+: > "$records/qemu.log"
+: > "$records/qemu-stdin.log"
+benchmark_failure_output="$tmp/benchmark-failure"
+benchmark_failure_start_ns=$(date +%s%N)
+expect_failure "explicit benchmark failure waited for the full timeout" \
+    env "${common_env[@]}" FAKE_QEMU_BEHAVIOR=benchmark-fail \
+    FAKE_QEMU_EXPECT_COMMAND='benchmark 2' TASK123_TIMEOUT_S=3 \
+    "$RUNNER" --mode realtime-suite --rtbench-samples 2 --task2-count 2 \
+    --output "$benchmark_failure_output"
+benchmark_failure_elapsed_ms=$(( ($(date +%s%N) - benchmark_failure_start_ns) / 1000000 ))
+[[ "$benchmark_failure_elapsed_ms" -lt 2000 ]] ||
+    fail "explicit benchmark failure did not fail promptly"
+grep -Fq 'RTBENCH_END status=FAIL' "$benchmark_failure_output/console.log" ||
+    fail "explicit benchmark failure was not preserved"
+assert_reaped "$(cat "$records/qemu.pid")"
 
 : > "$records/qemu.log"
 build_timeout_output="$tmp/build-timeout"

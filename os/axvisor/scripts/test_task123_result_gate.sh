@@ -157,6 +157,24 @@ run_gate "$tmp/smoke" smoke >/dev/null || fail "smoke fixture was rejected"
 [[ -s "$tmp/smoke/frames.csv" && -s "$tmp/smoke/summary.json" ]] ||
     fail "smoke gate did not preserve structured Task 3 results"
 
+make_fixture "$tmp/attached-linux-replay"
+awk '
+    !attached && /^\[VM 1\] TASK3_FRAME_CSV=/ {
+        print "[Axvisor] attached VM[1] console; use Ctrl+X, then h to return to the shell"
+        attached = 1
+    }
+    attached && /^\[VM 1\] / { sub(/^\[VM 1\] /, "") }
+    { print }
+' "$tmp/attached-linux-replay/console.log" \
+    > "$tmp/attached-linux-replay/console.replayed.log"
+mv "$tmp/attached-linux-replay/console.replayed.log" \
+    "$tmp/attached-linux-replay/console.log"
+run_gate "$tmp/attached-linux-replay" smoke >/dev/null ||
+    fail "attached VM1 replay fixture was rejected"
+[[ -s "$tmp/attached-linux-replay/frames.csv" &&
+   -s "$tmp/attached-linux-replay/summary.json" ]] ||
+    fail "attached VM1 replay did not preserve structured Task 3 results"
+
 make_fixture "$tmp/realtime-suite"
 emit_suite 2 >> "$tmp/realtime-suite/console.log"
 run_gate "$tmp/realtime-suite" realtime-suite --rtbench-samples 2 >/dev/null ||

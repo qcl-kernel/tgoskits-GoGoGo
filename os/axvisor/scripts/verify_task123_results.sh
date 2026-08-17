@@ -133,7 +133,23 @@ frames_tmp="$output/.frames.csv.tmp"
 summary_tmp="$output/.summary.raw.json.tmp"
 trap 'rm -f -- "$linux_tmp" "$rtthread_tmp" "$frames_tmp" "$summary_tmp"' EXIT
 
-sed -n 's/^\[VM 1\] //p' "$log" > "$linux_tmp"
+awk '
+    /^\[VM 1\] / {
+        sub(/^\[VM 1\] /, "")
+        print
+        next
+    }
+    /^\[Axvisor\] attached VM\[1\] console;/ {
+        attached_linux = 1
+        next
+    }
+    /^\[Axvisor\] attached VM\[[0-9]+\] console;/ ||
+    /^Welcome to AxVisor Shell!/ {
+        attached_linux = 0
+        next
+    }
+    attached_linux { print }
+' "$log" > "$linux_tmp"
 awk '
     /^\[VM 3\] / {
         sub(/^\[VM 3\] /, "")
@@ -146,7 +162,7 @@ awk '
 ' "$log" > "$rtthread_tmp"
 summary_count="$(grep -c '^TASK3_SUMMARY_JSON=' "$linux_tmp" || true)"
 [[ "$summary_count" -eq 1 ]] ||
-    die "prefixed Task 3 summary must occur exactly once (found $summary_count)"
+    die "authenticated Linux Task 3 summary must occur exactly once (found $summary_count)"
 frame_count="$(grep -c '^TASK3_FRAME_CSV=' "$linux_tmp" || true)"
 [[ "$frame_count" -eq $((task3_frames * 2)) ]] ||
     die "Task 3 frame rows are missing or duplicated (found $frame_count)"
