@@ -1,0 +1,1 @@
+source "$BR2_EXTERNAL_TASK3_PATH/package/task3-linux/Config.in"

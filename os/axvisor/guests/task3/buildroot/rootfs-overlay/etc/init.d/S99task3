@@ -1,0 +1,52 @@
+#!/bin/sh
+
+mountpoint -q /proc || mount -t proc proc /proc
+mountpoint -q /sys || mount -t sysfs sysfs /sys
+mountpoint -q /dev || mount -t devtmpfs devtmpfs /dev
+ifconfig eth0 192.168.77.11 netmask 255.255.255.0 up
+printf '%s\n' 'TASK3_LINUX_READY ip=192.168.77.11 peer=192.168.77.30:9876'
+frames=600
+drop_tx_seq=
+duplicate_frame_once=0
+malformed_once=0
+for argument in $(cat /proc/cmdline); do
+    case "$argument" in
+        task3.frames=*)
+            frames=$(printf '%s\n' "$argument" | cut -d= -f2)
+            ;;
+        task3.drop_tx_seq=*)
+            drop_tx_seq=$(printf '%s\n' "$argument" | cut -d= -f2)
+            ;;
+        task3.duplicate_frame_once=1)
+            duplicate_frame_once=1
+            ;;
+        task3.malformed_once=1)
+            malformed_once=1
+            ;;
+    esac
+done
+set --
+case "$drop_tx_seq" in
+    '') ;;
+    *[!0-9]*) printf '%s\n' 'invalid task3.drop_tx_seq' >&2; exit 2 ;;
+    *) set -- "$@" --drop-tx-seq "$drop_tx_seq" ;;
+esac
+[ "$duplicate_frame_once" -eq 0 ] || set -- "$@" --duplicate-frame-once
+[ "$malformed_once" -eq 0 ] || set -- "$@" --malformed-once
+/usr/bin/task3-linux \
+    --video /opt/task3/line-follow.y4m \
+    --truth /opt/task3/truth.csv \
+    --peer 192.168.77.30 \
+    --port 9876 \
+    --frames "$frames" \
+    --csv /tmp/task3-frames.csv \
+    "$@"
+result=$?
+if [ "$result" -eq 0 ]; then
+    sync
+    poweroff -f
+    exit 0
+fi
+printf 'TASK3_LINUX_FAILED status=%s\n' "$result"
+sync
+exit "$result"

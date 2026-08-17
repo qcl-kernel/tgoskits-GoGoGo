@@ -1,0 +1,17 @@
+from building import *
+import os
+
+cwd = GetCurrentDir()
+src = Glob('*.c')
+defines = []
+if os.environ.get('TASK3_FAULT_DROP_STATUS_ONCE') == '1':
+    defines += ['TASK3_FAULT_DROP_STATUS_ONCE=1']
+group = DefineGroup(
+    'task3-server',
+    src,
+    depend=['RT_USING_LWIP'],
+    CPPPATH=[cwd],
+    CPPDEFINES=defines,
+)
+
+Return('group')
