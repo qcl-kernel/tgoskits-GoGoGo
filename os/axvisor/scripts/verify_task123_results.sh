@@ -134,7 +134,16 @@ summary_tmp="$output/.summary.raw.json.tmp"
 trap 'rm -f -- "$linux_tmp" "$rtthread_tmp" "$frames_tmp" "$summary_tmp"' EXIT
 
 sed -n 's/^\[VM 1\] //p' "$log" > "$linux_tmp"
-sed -n 's/^\[VM 3\] //p' "$log" > "$rtthread_tmp"
+awk '
+    /^\[VM 3\] / {
+        sub(/^\[VM 3\] /, "")
+        print
+        next
+    }
+    /^(RTIPC_SERVER_|TASK3_RTOS_|TASK3_FAULT_DROP_STATUS([[:space:]]|$)|RTBENCH([_[:space:]]|$))/ {
+        print
+    }
+' "$log" > "$rtthread_tmp"
 summary_count="$(grep -c '^TASK3_SUMMARY_JSON=' "$linux_tmp" || true)"
 [[ "$summary_count" -eq 1 ]] ||
     die "prefixed Task 3 summary must occur exactly once (found $summary_count)"
@@ -180,20 +189,7 @@ if spec is None or spec.loader is None:
 module = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(module)
 event = module.collect_event(profile, run_dir)
-events = [
-    {"case": "drop-control", "result": "recovered", "transport_retries": 1,
-     "duplicates": 0, "application_errors": 0, "applied_delta": None},
-    {"case": "drop-status", "result": "recovered", "transport_retries": 1,
-     "duplicates": 0, "application_errors": 0, "applied_delta": None},
-    {"case": "duplicate-frame", "result": "recovered", "transport_retries": 0,
-     "duplicates": 1, "application_errors": 0, "applied_delta": 0},
-    {"case": "delayed-server", "result": "recovered", "transport_retries": 0,
-     "duplicates": 0, "application_errors": 0, "applied_delta": None},
-    {"case": "malformed", "result": "rejected", "transport_retries": 0,
-     "duplicates": 0, "application_errors": 2, "applied_delta": 0},
-]
-events = [event if item["case"] == profile else item for item in events]
-module.summarize_events(events)
+module.write_json_atomic(run_dir / "fault-event.json", event)
 PY
 fi
 

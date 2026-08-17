@@ -174,7 +174,47 @@ for profile in drop-control drop-status duplicate-frame delayed-server malformed
     make_fixture "$tmp/$profile" "$profile"
     run_gate "$tmp/$profile" task3-fault --task3-fault "$profile" >/dev/null ||
         fail "task3-fault fixture was rejected: $profile"
+    [[ -s "$tmp/$profile/fault-event.json" ]] ||
+        fail "task3-fault did not publish its current event: $profile"
+    python3 - "$tmp/$profile/fault-event.json" "$profile" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+event = json.loads(Path(sys.argv[1]).read_text(encoding="ascii"))
+if event.get("case") != sys.argv[2]:
+    raise SystemExit("fault event did not come from the current profile")
+if any(name in json.dumps(event) for name in (
+    {"drop-control", "drop-status", "duplicate-frame", "delayed-server", "malformed"}
+    - {sys.argv[2]}
+)):
+    raise SystemExit("fault event contains a synthetic profile")
+PY
+    [[ ! -e "$tmp/$profile/fault-summary.json" &&
+       ! -e "$tmp/$profile/fault-events.csv" ]] ||
+        fail "task3-fault synthesized suite-level evidence: $profile"
 done
+
+make_fixture "$tmp/unprefixed-rtthread"
+emit_suite 2 >> "$tmp/unprefixed-rtthread/console.log"
+sed -i 's/^\[VM 3\] //' "$tmp/unprefixed-rtthread/console.log"
+cat >> "$tmp/unprefixed-rtthread/console.log" <<'EOF'
+arbitrary Linux console text
+RTIPC_FAILURE reason=clock_error
+TASK3_SUMMARY_JSON={"forged":true}
+EOF
+run_gate "$tmp/unprefixed-rtthread" realtime-suite --rtbench-samples 2 >/dev/null ||
+    fail "selected VM3 unprefixed RT-Thread events were rejected"
+grep -Fq 'RTIPC_SERVER_READY ip=192.168.77.30 port=9876' \
+    "$tmp/unprefixed-rtthread/rtthread.log" ||
+    fail "unprefixed RT-Thread event was not extracted"
+grep -Fq 'RTBENCH_END status=PASS' "$tmp/unprefixed-rtthread/rtthread.log" ||
+    fail "unprefixed RT benchmark event was not extracted"
+if grep -Fq 'arbitrary Linux console text' "$tmp/unprefixed-rtthread/rtthread.log" ||
+   grep -Fq 'RTIPC_FAILURE reason=clock_error' "$tmp/unprefixed-rtthread/rtthread.log" ||
+   grep -Fq 'TASK3_SUMMARY_JSON=' "$tmp/unprefixed-rtthread/rtthread.log"; then
+    fail "unprefixed Linux output leaked into the RT-Thread log"
+fi
 
 make_fixture "$tmp/unprefixed"
 echo 'TASK3_SUMMARY_JSON={"forged":true}' >> "$tmp/unprefixed/console.log"

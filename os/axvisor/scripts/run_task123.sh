@@ -291,6 +291,9 @@ prepare_output_directory() {
 watcher_pid=
 feeder_pid=
 qemu_pid=
+raw_qemu_exit=
+termination_reason=
+normalized_qemu_exit=
 RUNTIME_DIR=
 LINUX_RUNTIME_DIR=
 RTTHREAD_RUNTIME_DIR=
@@ -347,7 +350,7 @@ phase() {
 resolve_dependencies() {
     phase dependency-check
     local command_name
-    for command_name in realpath sha256sum awk sed grep mktemp cp chmod date python3; do
+    for command_name in realpath sha256sum awk sed grep find mktemp cp chmod date python3; do
         command -v "$command_name" >/dev/null || fail "required command not found: $command_name"
     done
     RUN_UNTIL="$(canonical_tool run-until "$RUN_UNTIL")"
@@ -361,6 +364,23 @@ resolve_dependencies() {
     AARCH64_OBJCOPY="$(canonical_tool objcopy "${AARCH64_OBJCOPY:-aarch64-linux-gnu-objcopy}")"
     PROTOCOL_SOURCE="$(canonical_existing_file protocol-source "$PROTOCOL_SOURCE")"
     PROTOCOL_HEADER="$(canonical_existing_file protocol-header "$PROTOCOL_HEADER")"
+}
+
+resolve_rootfs_image() {
+    if [[ -n "${ROOTFS_IMAGE:-}" ]]; then
+        ROOTFS_IMAGE="$(canonical_existing_file rootfs "$ROOTFS_IMAGE")"
+        return
+    fi
+
+    local rootfs_dir="$RUNTIME_DIR/rootfs"
+    local rootfs_candidates=()
+    "$CARGO" xtask image pull qemu-aarch64 -o "$rootfs_dir"
+    mapfile -t rootfs_candidates < <(find "$rootfs_dir" -type f -name rootfs.img -print)
+    [[ "${#rootfs_candidates[@]}" -eq 1 ]] || {
+        fail "image pull must produce exactly one rootfs.img (found ${#rootfs_candidates[@]})"
+        return 1
+    }
+    ROOTFS_IMAGE="$(canonical_existing_file rootfs "${rootfs_candidates[0]}")"
 }
 
 build_linux_images_if_needed() {
@@ -418,7 +438,7 @@ resolve_or_build_images() {
     RTTHREAD_NORMAL_IMAGE="$(canonical_existing_file rtthread-normal "$RTTHREAD_NORMAL_IMAGE")"
     RTTHREAD_DROP_STATUS_IMAGE="$(canonical_existing_file rtthread-drop-status "$RTTHREAD_DROP_STATUS_IMAGE")"
     RTTHREAD_DELAYED_SERVER_IMAGE="$(canonical_existing_file rtthread-delayed-server "$RTTHREAD_DELAYED_SERVER_IMAGE")"
-    ROOTFS_IMAGE="$(canonical_existing_file rootfs "${ROOTFS_IMAGE:-$ROOT/tmp/vmconfigs/two-guest-net/current/rootfs.img}")"
+    resolve_rootfs_image
 
     if [[ -z "${TASK123_MODEL_IMAGE:-}" ]]; then
         if [[ -f "$TASK3_ROOT/build/model/model_weights.h" ]]; then
@@ -527,9 +547,19 @@ feed_benchmark_command() {
     sleep 0.1
     if [[ "$mode" == realtime-suite ]]; then
         printf 'benchmark %s\r' "$rtbench_samples" >&3
+        ready='RTBENCH_END status=PASS'
     else
         printf 'rtbench_stability %s\r' "$stability_seconds" >&3
+        ready='RTBENCH_STABILITY_DONE'
     fi
+    deadline=$(( $(date +%s) + TASK123_TIMEOUT_S ))
+    while ! grep -aFq -- "$ready" "$CONSOLE_LOG"; do
+        kill -0 "$watcher_pid" 2>/dev/null || return 1
+        [[ "$(date +%s)" -lt "$deadline" ]] || return 124
+        sleep 0.05
+    done
+    # Replay VM 1's buffered console so Linux completion evidence is visible.
+    printf '\030[' >&3
 }
 
 wait_for_qemu_pid() {
@@ -545,10 +575,51 @@ wait_for_qemu_pid() {
     kill -0 "$qemu_pid" 2>/dev/null || fail "recorded QEMU PID is not running: $qemu_pid"
 }
 
+read_qemu_completion() {
+    local watcher_rc=$1
+    local status_file=$2
+    local reason_file=$3
+
+    [[ -s "$status_file" && -s "$reason_file" ]] || {
+        fail "run-until did not publish QEMU completion evidence"
+        return 1
+    }
+    raw_qemu_exit="$(<"$status_file")"
+    termination_reason="$(<"$reason_file")"
+    require_integer "$raw_qemu_exit" 0 255 raw-qemu-exit
+    case "$termination_reason" in
+        marker-complete)
+            case "$raw_qemu_exit" in
+                0|137|143) normalized_qemu_exit=0 ;;
+                *) normalized_qemu_exit=$raw_qemu_exit ;;
+            esac
+            ;;
+        child-exit)
+            normalized_qemu_exit=$raw_qemu_exit
+            ;;
+        timeout)
+            normalized_qemu_exit=124
+            ;;
+        signal)
+            normalized_qemu_exit=$watcher_rc
+            ;;
+        *)
+            fail "invalid QEMU termination reason: $termination_reason"
+            return 1
+            ;;
+    esac
+    [[ "$watcher_rc" -eq "$normalized_qemu_exit" ]] || {
+        fail "run-until status mismatch: returned=$watcher_rc normalized=$normalized_qemu_exit"
+        return 1
+    }
+}
+
 launch_one_qemu() {
     phase one-qemu
     local serial_fifo="$RUNTIME_DIR/serial.in"
     local qemu_pid_file="$RUNTIME_DIR/qemu.pid"
+    local qemu_status_file="$RUNTIME_DIR/qemu.raw-status"
+    local qemu_reason_file="$RUNTIME_DIR/qemu.termination-reason"
     mkfifo -- "$serial_fifo"
     exec 3<> "$serial_fifo"
     serial_fd_open=1
@@ -578,6 +649,7 @@ launch_one_qemu() {
         -smp 4
         -device nvme,drive=disk0,serial=tgoskits,max_ioqpairs=64,msix_qsize=65
         -drive "id=disk0,if=none,format=raw,file=$ROOTFS_IMAGE"
+        # This is the AxVisor host cmdline; Linux workload controls live only in its VM config.
         -append 'root=/dev/nvme0n1 rw init=/bin/sh'
         -m 8g
         -netdev hubport,id=net0,hubid=77
@@ -590,6 +662,8 @@ launch_one_qemu() {
     )
 
     RUN_UNTIL_CHILD_PID_FILE="$qemu_pid_file" \
+    RUN_UNTIL_CHILD_STATUS_FILE="$qemu_status_file" \
+    RUN_UNTIL_TERMINATION_REASON_FILE="$qemu_reason_file" \
         "$RUN_UNTIL" "$TASK123_TIMEOUT_S" "$CONSOLE_LOG" "${markers[@]}" -- \
         "$QEMU" "${qemu_args[@]}" <&3 >> "$CONSOLE_LOG" 2>&1 &
     watcher_pid=$!
@@ -610,19 +684,23 @@ launch_one_qemu() {
         watcher_rc=$?
     fi
     watcher_pid=
+    local feeder_rc=0
     if [[ -n "$feeder_pid" ]]; then
-        local feeder_rc=0
         if wait "$feeder_pid"; then
             feeder_rc=0
         else
             feeder_rc=$?
         fi
         feeder_pid=
-        [[ "$feeder_rc" -eq 0 ]] || return "$feeder_rc"
     fi
     exec 3>&-
     serial_fd_open=0
-    [[ "$watcher_rc" -eq 0 ]] || return "$watcher_rc"
+    read_qemu_completion "$watcher_rc" "$qemu_status_file" "$qemu_reason_file"
+    [[ "$normalized_qemu_exit" -eq 0 ]] || {
+        fail "unexpected QEMU exit code $raw_qemu_exit (reason=$termination_reason)"
+        return 1
+    }
+    [[ "$feeder_rc" -eq 0 ]] || return "$feeder_rc"
 }
 
 run_result_gate() {
@@ -633,7 +711,7 @@ run_result_gate() {
         --output "$OUTPUT"
         --task2-count "$task2_count"
         --task3-frames "$task3_frames"
-        --qemu-exit 0
+        --qemu-exit "$normalized_qemu_exit"
     )
     if [[ "$mode" == realtime-suite ]]; then
         arguments+=(--rtbench-samples "$rtbench_samples")
@@ -647,7 +725,8 @@ run_result_gate() {
 
 publish_manifest() {
     phase manifest
-    printf 'qemu_exit=0\nresult_gate=PASS\n' >> "$MANIFEST_TMP"
+    printf 'raw_qemu_exit=%s\ntermination_reason=%s\nqemu_exit=%s\nresult_gate=PASS\n' \
+        "$raw_qemu_exit" "$termination_reason" "$normalized_qemu_exit" >> "$MANIFEST_TMP"
     mv -- "$MANIFEST_TMP" "$MANIFEST"
 }
 

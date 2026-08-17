@@ -37,6 +37,17 @@ child_pid=
 child_pgid=
 child_rc=
 
+record_completion() {
+    local reason=$1
+
+    if [ -n "${RUN_UNTIL_CHILD_STATUS_FILE:-}" ]; then
+        printf '%s\n' "$child_rc" > "$RUN_UNTIL_CHILD_STATUS_FILE"
+    fi
+    if [ -n "${RUN_UNTIL_TERMINATION_REASON_FILE:-}" ]; then
+        printf '%s\n' "$reason" > "$RUN_UNTIL_TERMINATION_REASON_FILE"
+    fi
+}
+
 child_is_running() {
     local state
 
@@ -94,6 +105,7 @@ handle_signal() {
 
     trap - EXIT HUP INT TERM
     terminate_child_group
+    record_completion signal
     exit "$signal_rc"
 }
 
@@ -102,7 +114,7 @@ trap 'handle_signal 129' HUP
 trap 'handle_signal 130' INT
 trap 'handle_signal 143' TERM
 
-setsid -- "$@" &
+setsid -- "$@" <&0 &
 child_pid=$!
 child_pgid=$child_pid
 if [ -n "${RUN_UNTIL_CHILD_PID_FILE:-}" ]; then
@@ -128,6 +140,7 @@ while :; do
             terminated_by_helper=1
         fi
         terminate_child_group
+        record_completion marker-complete
         if [ "$child_rc" -eq 0 ] || \
            { [ "$terminated_by_helper" -eq 1 ] && \
              { [ "$child_rc" -eq 143 ] || [ "$child_rc" -eq 137 ]; }; }; then
@@ -141,11 +154,13 @@ while :; do
         exited_child_rc=$child_rc
         terminate_child_group
         child_rc=$exited_child_rc
+        record_completion child-exit
         exit "$child_rc"
     fi
 
     if [ "$(date +%s%N)" -ge "$deadline_ns" ]; then
         terminate_child_group
+        record_completion timeout
         exit 124
     fi
 

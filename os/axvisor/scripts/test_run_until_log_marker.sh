@@ -45,8 +45,12 @@ EOF
 marker_log="$TMP_DIR/marker.log"
 child_pid_file="$TMP_DIR/marker.pid"
 reported_pid_file="$TMP_DIR/reported.pid"
+marker_status_file="$TMP_DIR/marker.status"
+marker_reason_file="$TMP_DIR/marker.reason"
 start=$(date +%s)
 RUN_UNTIL_CHILD_PID_FILE="$reported_pid_file" \
+RUN_UNTIL_CHILD_STATUS_FILE="$marker_status_file" \
+RUN_UNTIL_TERMINATION_REASON_FILE="$marker_reason_file" \
 "$RUN_UNTIL" 5 "$marker_log" 'CLIENT COMPLETE' -- sh -c '
     echo $$ > "$1"
     sleep 0.1
@@ -65,6 +69,14 @@ if kill -0 "$(cat "$child_pid_file")" 2>/dev/null; then
 fi
 if [ "$(cat "$reported_pid_file")" != "$(cat "$child_pid_file")" ]; then
     echo "FAIL: helper did not report the exact child PID" >&2
+    exit 1
+fi
+if [ "$(cat "$marker_status_file")" -ne 143 ]; then
+    echo "FAIL: marker completion did not preserve raw child status 143" >&2
+    exit 1
+fi
+if [ "$(cat "$marker_reason_file")" != marker-complete ]; then
+    echo "FAIL: marker completion reason was not recorded" >&2
     exit 1
 fi
 
@@ -88,11 +100,15 @@ fi
 
 timeout_log="$TMP_DIR/timeout.log"
 timeout_pid_file="$TMP_DIR/timeout.pid"
+timeout_status_file="$TMP_DIR/timeout.status"
+timeout_reason_file="$TMP_DIR/timeout.reason"
 while [ "$(date +%N)" -lt 700000000 ]; do
     sleep 0.01
 done
 timeout_start_ns=$(date +%s%N)
 set +e
+RUN_UNTIL_CHILD_STATUS_FILE="$timeout_status_file" \
+RUN_UNTIL_TERMINATION_REASON_FILE="$timeout_reason_file" \
 "$RUN_UNTIL" 1 "$timeout_log" 'NEVER WRITTEN' -- sh -c '
     echo $$ > "$1"
     sleep 10
@@ -112,14 +128,28 @@ if kill -0 "$(cat "$timeout_pid_file")" 2>/dev/null; then
     echo "FAIL: timed-out command is still running" >&2
     exit 1
 fi
+if [ "$(cat "$timeout_status_file")" -ne 143 ] ||
+   [ "$(cat "$timeout_reason_file")" != timeout ]; then
+    echo "FAIL: timeout child status/reason evidence is incorrect" >&2
+    exit 1
+fi
 
 exit_log="$TMP_DIR/exit.log"
+exit_status_file="$TMP_DIR/exit.status"
+exit_reason_file="$TMP_DIR/exit.reason"
 set +e
+RUN_UNTIL_CHILD_STATUS_FILE="$exit_status_file" \
+RUN_UNTIL_TERMINATION_REASON_FILE="$exit_reason_file" \
 "$RUN_UNTIL" 5 "$exit_log" 'NEVER WRITTEN' -- sh -c 'exit 7'
 exit_rc=$?
 set -e
 if [ "$exit_rc" -ne 7 ]; then
     echo "FAIL: child exit status changed from 7 to $exit_rc" >&2
+    exit 1
+fi
+if [ "$(cat "$exit_status_file")" -ne 7 ] ||
+   [ "$(cat "$exit_reason_file")" != child-exit ]; then
+    echo "FAIL: child exit status/reason evidence is incorrect" >&2
     exit 1
 fi
 
@@ -202,7 +232,11 @@ for signal_case in HUP:129 INT:130 TERM:143; do
     signal_log="$TMP_DIR/stubborn-signal-$signal_name.log"
     signal_child="$TMP_DIR/stubborn-signal-$signal_name-child.pid"
     signal_grandchild="$TMP_DIR/stubborn-signal-$signal_name-grandchild.pid"
+    signal_status_file="$TMP_DIR/stubborn-signal-$signal_name.status"
+    signal_reason_file="$TMP_DIR/stubborn-signal-$signal_name.reason"
 
+    RUN_UNTIL_CHILD_STATUS_FILE="$signal_status_file" \
+    RUN_UNTIL_TERMINATION_REASON_FILE="$signal_reason_file" \
     setsid bash -c 'trap - HUP INT TERM; exec "$@"' bash \
         "$RUN_UNTIL" 30 "$signal_log" 'NEVER WRITTEN' -- \
         bash "$stubborn_command" "$signal_child" "$signal_grandchild" '' "$signal_log" &
@@ -240,6 +274,17 @@ for signal_case in HUP:129 INT:130 TERM:143; do
         "$signal_name-path child"
     assert_process_stopped "$(cat "$signal_grandchild")" \
         "$signal_name-path grandchild"
+    case "$(cat "$signal_status_file")" in
+        137|143) ;;
+        *)
+            echo "FAIL: $signal_name raw child status was not termination status" >&2
+            exit 1
+            ;;
+    esac
+    if [ "$(cat "$signal_reason_file")" != signal ]; then
+        echo "FAIL: $signal_name termination reason was not recorded" >&2
+        exit 1
+    fi
 done
 
 echo "PASS: run-until-log-marker lifecycle"
