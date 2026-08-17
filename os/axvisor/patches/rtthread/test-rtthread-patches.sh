@@ -75,6 +75,28 @@ require_order() {
         failures=$((failures + 1))
     fi
 }
+extract_function() {
+    local function_name="$1"
+    local file="$2"
+
+    awk -v function_name="$function_name" '
+        !in_function && $0 ~ "^[[:space:]]*static[[:space:]].*[[:space:]]" function_name "[[:space:]]*\\(" {
+            in_function = 1
+        }
+        in_function {
+            print
+            line = $0
+            opens = gsub(/\{/, "{", line)
+            line = $0
+            closes = gsub(/\}/, "}", line)
+            depth += opens - closes
+            if (opens > 0)
+                saw_body = 1
+            if (saw_body && depth == 0)
+                exit
+        }
+    ' "$file"
+}
 require_function_pattern() {
     local description="$1"
     local function_name="$2"
@@ -82,7 +104,7 @@ require_function_pattern() {
     local file="$4"
     local body
 
-    body="$(sed -n "/^static .* ${function_name}(/,/^}/p" "$file")"
+    body="$(extract_function "$function_name" "$file")"
     if [[ -z "$body" ]] || ! grep -Eq -- "$pattern" <<<"$body"; then
         echo "FAIL: $description" >&2
         failures=$((failures + 1))
@@ -95,9 +117,25 @@ reject_function_pattern() {
     local file="$4"
     local body
 
-    body="$(sed -n "/^static .* ${function_name}(/,/^}/p" "$file")"
+    body="$(extract_function "$function_name" "$file")"
     if [[ -z "$body" ]] || grep -Eq -- "$pattern" <<<"$body"; then
         echo "FAIL: $description" >&2
+        failures=$((failures + 1))
+    fi
+}
+require_function_count() {
+    local description="$1"
+    local function_name="$2"
+    local pattern="$3"
+    local expected="$4"
+    local file="$5"
+    local body
+    local actual
+
+    body="$(extract_function "$function_name" "$file")"
+    actual="$( { grep -Eo -- "$pattern" <<<"$body" || true; } | wc -l)"
+    if [[ -z "$body" || "$actual" -ne "$expected" ]]; then
+        echo "FAIL: $description (expected $expected, found $actual)" >&2
         failures=$((failures + 1))
     fi
 }
@@ -166,13 +204,62 @@ require_pattern \
     "AArch64 tick timer advances an absolute virtual deadline" \
     'timer_deadline \+= timer_step;' \
     "$GTIMER"
-require_pattern \
-    "AArch64 tick timer programs CNTV_CVAL rather than a relative TVAL" \
+require_function_pattern \
+    "AArch64 tick ISR programs CNTV_CVAL rather than a relative TVAL" \
+    'rt_hw_timer_isr' \
     'rt_hw_sysreg_write\(CNTV_CVAL_EL0, timer_deadline\);' \
     "$GTIMER"
 require_pattern \
-    "AArch64 tick timer compensates every elapsed period" \
-    'while \(timer_deadline <= now\)' \
+    "AArch64 tick timer computes elapsed periods arithmetically" \
+    '\(rt_uint64_t\)lateness / timer_step' \
+    "$GTIMER"
+require_pattern \
+    "AArch64 tick timer handles generic-counter wrap with a signed delta" \
+    'lateness = \(rt_int64_t\)\(now - timer_deadline\);' \
+    "$GTIMER"
+require_pattern \
+    "AArch64 tick timer bounds one kernel tick jump below half the tick range" \
+    'GTIMER_MAX_ELAPSED_TICKS.*RT_TICK_MAX / 2 - 1' \
+    "$GTIMER"
+require_pattern \
+    "AArch64 tick timer detects an out-of-range elapsed tick count" \
+    'elapsed_ticks >= GTIMER_MAX_ELAPSED_TICKS' \
+    "$GTIMER"
+require_pattern \
+    "AArch64 tick timer saturates elapsed ticks before the kernel update" \
+    'elapsed_ticks = GTIMER_MAX_ELAPSED_TICKS;' \
+    "$GTIMER"
+require_order \
+    "AArch64 tick saturation precedes the bulk kernel tick update" \
+    'elapsed_ticks = GTIMER_MAX_ELAPSED_TICKS;' \
+    'rt_tick_increase_tick\(\(rt_tick_t\)elapsed_ticks\);' \
+    "$GTIMER"
+require_pattern \
+    "AArch64 tick timer resynchronizes after an out-of-range pause" \
+    'timer_deadline = now \+ timer_step;' \
+    "$GTIMER"
+require_pattern \
+    "AArch64 tick timer advances the deadline in one bounded operation" \
+    'timer_deadline \+= elapsed_ticks \* timer_step;' \
+    "$GTIMER"
+require_function_count \
+    "AArch64 tick ISR accounts elapsed periods in exactly one kernel call" \
+    'rt_hw_timer_isr' \
+    'rt_tick_increase_tick\(\(rt_tick_t\)elapsed_ticks\);' \
+    1 \
+    "$GTIMER"
+reject_function_pattern \
+    "AArch64 tick ISR contains no loop proportional to delayed work" \
+    'rt_hw_timer_isr' \
+    '(^|[[:space:]])(while|for)[[:space:]]*\(' \
+    "$GTIMER"
+reject_pattern \
+    "AArch64 tick timer does not use a non-wrap-safe raw counter comparison" \
+    'if \(now >= timer_deadline\)' \
+    "$GTIMER"
+require_pattern \
+    "AArch64 tick timer establishes a nonzero timer-step invariant" \
+    'RT_ASSERT\(timer_step > 0\);' \
     "$GTIMER"
 require_pattern \
     "AArch64 virtual timer disable writes CNTV_CTL" \

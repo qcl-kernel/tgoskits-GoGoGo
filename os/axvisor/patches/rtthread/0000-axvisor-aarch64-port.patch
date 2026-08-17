@@ -2606,15 +2606,16 @@ index 0ddc3b99..9f8ecac3 100644
      /* Trigger level for PPI interrupts*/
      GIC_RDISTSGI_ICFGR1(redist_base) = 0;
 diff --git a/libcpu/aarch64/common/gtimer.c b/libcpu/aarch64/common/gtimer.c
-index 514ec4e0..561b4a86 100644
+index 514ec4e0..5d9a4ee4 100644
 --- a/libcpu/aarch64/common/gtimer.c
 +++ b/libcpu/aarch64/common/gtimer.c
-@@ -17,19 +17,34 @@
+@@ -17,31 +17,63 @@
  #include <ktime.h>
  #endif
 
 -#define EL1_PHY_TIMER_IRQ_NUM 30
 +#define EL1_VIR_TIMER_IRQ_NUM 27
++#define GTIMER_MAX_ELAPSED_TICKS ((rt_uint64_t)(RT_TICK_MAX / 2 - 1))
 
  static volatile rt_uint64_t timer_step;
 +static volatile rt_uint64_t timer_deadline;
@@ -2625,20 +2626,33 @@ index 514ec4e0..561b4a86 100644
 -    rt_tick_increase();
 +    rt_uint64_t now;
 +    rt_uint64_t elapsed_ticks = 1;
++    rt_int64_t lateness;
 +
-+    timer_deadline += timer_step;
 +    rt_hw_sysreg_read(CNTVCT_EL0, now);
-+    while (timer_deadline <= now)
++    lateness = (rt_int64_t)(now - timer_deadline);
++    if (lateness >= 0)
++    {
++        elapsed_ticks = (rt_uint64_t)lateness / timer_step;
++        if (elapsed_ticks >= GTIMER_MAX_ELAPSED_TICKS)
++        {
++            elapsed_ticks = GTIMER_MAX_ELAPSED_TICKS;
++            timer_deadline = now + timer_step;
++        }
++        else
++        {
++            elapsed_ticks++;
++            timer_deadline += elapsed_ticks * timer_step;
++        }
++    }
++    else
 +    {
 +        timer_deadline += timer_step;
-+        elapsed_ticks++;
 +    }
-+    rt_hw_sysreg_write(CNTV_CVAL_EL0, timer_deadline);
 +
-+    while (elapsed_ticks-- > 0)
-+    {
-+        rt_tick_increase();
-+    }
++    rt_hw_sysreg_write(CNTV_CVAL_EL0, timer_deadline);
++    /* Bulk accounting removes work proportional to missed ticks. RT-Thread
++     * still performs its normal expired-timer scan once. */
++    rt_tick_increase_tick((rt_tick_t)elapsed_ticks);
  }
 
  void rt_hw_gtimer_init(void)
@@ -2648,7 +2662,11 @@ index 514ec4e0..561b4a86 100644
      rt_hw_isb();
      timer_step = rt_hw_get_gtimer_frq();
      rt_hw_dsb();
-@@ -40,8 +55,10 @@ void rt_hw_gtimer_init(void)
+     timer_step /= RT_TICK_PER_SECOND;
++    RT_ASSERT(timer_step > 0);
+     rt_hw_gtimer_local_enable();
+ }
+
  void rt_hw_gtimer_local_enable(void)
  {
      rt_hw_gtimer_disable();
@@ -2661,7 +2679,7 @@ index 514ec4e0..561b4a86 100644
  #ifdef RT_USING_KTIME
      rt_ktime_cputimer_init();
  #endif
-@@ -51,5 +68,5 @@ void rt_hw_gtimer_local_enable(void)
+@@ -51,5 +83,5 @@ void rt_hw_gtimer_local_enable(void)
  void rt_hw_gtimer_local_disable(void)
  {
      rt_hw_gtimer_disable();

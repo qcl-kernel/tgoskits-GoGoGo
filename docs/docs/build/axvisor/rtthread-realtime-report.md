@@ -392,6 +392,7 @@ bash os/axvisor/scripts/test_host_realtime_contract.sh
 bash os/axvisor/scripts/test_qemu_realtime_controls.sh
 
 # 验证并构建 RT-Thread 5.2.2
+# 目标目录必须不存在或保持 pinned commit 的完全干净状态。
 bash os/axvisor/patches/rtthread/prepare_rtthread_source.sh \
   tmp/rt-thread-5.2.2-full
 bash os/axvisor/patches/rtthread/apply-rtthread-patches.sh \
@@ -1027,3 +1028,37 @@ cleanup。实测 cleanup 首轮 P50 比控制低 `0.848 us`（`-8.2683%`），re
 
 原始证据均位于 `docs/docs/build/axvisor/`；`.artifacts` 记录实际输入路径和 image hash，
 `.timing` 记录 benchmark 时钟区间，`.qemu` 保留 QEMU 启停信息，CPU 日志保留逐秒分布。
+
+## 2026-08-17 Task 1 关键路径质量迭代
+
+本轮在独立 worktree 的 `feat/axvisor-task123` 分支完成以下改造：
+
+- AxVisor virtio-net RX 增加事件资格位。没有 ingress notification 或有效 RX queue kick 时，
+  vCPU 常规 run-loop 的 DMA poll 立即返回，不再反复访问 guest RX ring；no-buffer、处理中
+  kick 和重复 kick 状态机保持不变。
+- RT-Thread source preparation 对 pinned commit 之外，再拒绝 staged、unstaged 和 untracked
+  内容；失败时不重置、不清理、不替换已有目录。
+- `0000`、`0002` 到 `0008` 只通过完整 forward/reverse `git apply --check` 判定状态；
+  partially-applied 或漂移状态 fail-closed。已删除格式损坏且与 `0000` 重复的历史 `0001`
+  polling/debug cleanup patch。
+- AArch64 virtual timer ISR 删除两个按 missed ticks 增长的循环。它使用 wrap-safe signed
+  counter delta 算术计算 elapsed ticks，单次推进绝对 deadline，并通过
+  `rt_tick_increase_tick` 批量记账。单次 tick 跳变限制为 `< RT_TICK_MAX/2`；超界暂停会
+  饱和记账并把硬件 deadline 重同步到 `now + timer_step`，避免截断和中断追赶风暴。
+
+本轮验证结果：
+
+| 验证 | 结果 |
+|------|------|
+| AxVisor AArch64 axtest | `84 passed, 0 failed` |
+| `cargo test -p axvirtio-net` | `31 passed, 0 failed` |
+| RT-Thread clean-source contract | PASS，覆盖 clean/tracked/staged/untracked |
+| exact patch helper | PASS，覆盖 pristine/idempotent/two-hunk partial/apply failure |
+| fresh pinned patchset，连续 apply 两次 | PASS |
+| fresh RT-Thread 5.2.2 AArch64 SCons build | PASS，生成 `rtthread.elf`/`rtthread.bin` |
+
+这轮尚未执行整机 suite、300 秒稳定性和同 QEMU A/B，因此没有新增 jitter、最大延迟或
+网络 RTT 数字，也不能据此宣称运行时性能无退化。`rt_tick_increase_tick` 已消除按 missed
+ticks 重复调用内核的循环，但它仍按 RT-Thread 原生语义执行一次 expired-timer 扫描并调用
+到期 hard-timer callback；其 WCET 仍受同一时刻到期 timer 数量和 callback 实现影响。最终
+性能结论必须以后续 integrated 300 秒/长时测试数据为准。
