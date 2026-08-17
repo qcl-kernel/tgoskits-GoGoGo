@@ -20,7 +20,7 @@ psci: SMC Calling Convention v1.0
 percpu: Embedded 14 pages/cpu s28248 r0 d29096 u57344
 Detected VIPT I-cache on CPU0
 alternatives: applying boot alternatives
-Kernel command line: console=ttyAMA0 rdinit=/sbin/init task3.frames=600 
+Kernel command line: console=ttyAMA0 rdinit=/sbin/init task3.frames=600
 Dentry cache hash table entries: 32768 (order: 6, 262144 bytes, linear)
 Inode-cache hash table entries: 16384 (order: 5, 131072 bytes, linear)
 Built 1 zonelists, mobility grouping on.  Total pages: 65536
