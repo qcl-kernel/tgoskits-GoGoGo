@@ -9,6 +9,7 @@ STARRY_MANIFEST="$ROOT/os/StarryOS/starryos/Cargo.toml"
 KERNEL_MANIFEST="$ROOT/os/StarryOS/kernel/Cargo.toml"
 AXSTD_MANIFEST="$ROOT/os/arceos/ulib/axstd/Cargo.toml"
 RUNTIME_MANIFEST="$ROOT/os/arceos/modules/axruntime/Cargo.toml"
+RUNTIME_FS="$ROOT/os/arceos/modules/axruntime/src/fs/mod.rs"
 GUEST_ROOT="$ROOT/os/axvisor/guests/starryos-task123"
 ROOTFS_BUILDER="$GUEST_ROOT/build_rootfs.sh"
 GUEST_BUILDER="$GUEST_ROOT/build.sh"
@@ -82,6 +83,26 @@ if "embedded-rootfs" not in runtime.get("features", {}):
     raise SystemExit("FAIL: ax-runtime has no embedded-rootfs feature")
 PY
 
+python3 - "$RUNTIME_FS" <<'PY'
+import re
+import sys
+from pathlib import Path
+
+source = Path(sys.argv[1]).read_text(encoding="utf-8")
+embedded = re.search(
+    r'if #\[cfg\(feature = "embedded-rootfs"\)\] \{(?P<body>.*?)'
+    r'\} else if #\[cfg\(feature = "fs"\)\]',
+    source,
+    re.DOTALL,
+)
+if embedded is None:
+    raise SystemExit("FAIL: embedded-rootfs runtime branch is missing")
+if "block::online_smp()" in embedded.group("body"):
+    raise SystemExit(
+        "FAIL: embedded-rootfs must not expand the uninstalled block runtime after SMP online"
+    )
+PY
+
 grep -Fq 'STARRY_SMP_READY' "$GUEST_INIT" ||
     fail "StarryOS init must report the two-vCPU gate"
 grep -Fq 'STARRY_NET_READY' "$GUEST_INIT" ||
@@ -94,6 +115,10 @@ grep -Fq 'STARRY_EMBEDDED_ROOTFS=' "$GUEST_BUILDER" ||
     fail "StarryOS build must pass the generated CPIO explicitly"
 grep -Fq -- '--reproducible' "$ROOTFS_BUILDER" ||
     fail "StarryOS rootfs generation must be reproducible"
+for mountpoint in dev proc sys tmp; do
+    grep -Fq "mkdir -p \"\$stage/\$mountpoint\"" "$ROOTFS_BUILDER" ||
+        fail "StarryOS rootfs must pre-create /$mountpoint for pseudofs mounting"
+done
 ! grep -Eq '(curl|wget|git clone)' "$ROOTFS_BUILDER" ||
     fail "StarryOS rootfs builder must not download sources"
 

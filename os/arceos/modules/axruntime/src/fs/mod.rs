@@ -21,9 +21,7 @@ cfg_if::cfg_if! {
         }
 
         #[cfg(all(feature = "smp", feature = "ipi"))]
-        pub(crate) fn online_smp() {
-            block::online_smp();
-        }
+        pub(crate) fn online_smp() {}
     } else if #[cfg(feature = "fs")] {
 
         pub(crate) fn init(bootargs: Option<&str>) {

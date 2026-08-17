@@ -43,7 +43,7 @@ while (($#)); do
     esac
 done
 
-for command in cpio find sort touch install readelf sha256sum; do
+for command in cpio find sort touch install readelf sha256sum realpath; do
     command -v "$command" >/dev/null 2>&1 || {
         printf 'missing required command: %s\n' "$command" >&2
         exit 1
@@ -55,6 +55,8 @@ done
     printf 'build it first or pass --source-cpio PATH\n' >&2
     exit 1
 }
+source_cpio=$(realpath -e -- "$source_cpio")
+output=$(realpath -m -- "$output")
 
 output_dir=$(dirname -- "$output")
 mkdir -p "$output_dir"
@@ -70,6 +72,9 @@ cpio --list --quiet < "$source_cpio" |
     cpio --extract --make-directories --no-absolute-filenames --no-preserve-owner \
         --pattern-file="$patterns" --quiet < "$source_cpio"
 )
+for mountpoint in dev proc sys tmp; do
+    mkdir -p "$stage/$mountpoint"
+done
 
 install -m 0755 "$SCRIPT_DIR/rootfs/init" "$stage/init"
 
