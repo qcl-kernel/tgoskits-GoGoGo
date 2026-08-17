@@ -1045,12 +1045,20 @@ cleanup。实测 cleanup 首轮 P50 比控制低 `0.848 us`（`-8.2683%`），re
   counter delta 算术计算 elapsed ticks，单次推进绝对 deadline，并通过
   `rt_tick_increase_tick` 批量记账。单次 tick 跳变限制为 `< RT_TICK_MAX/2`；超界暂停会
   饱和记账并把硬件 deadline 重同步到 `now + timer_step`，避免截断和中断追赶风暴。
+- PSCI `CPU_ON` 保持异步，避免在持有 vCPU CPU pin/preemption guard 的 HVC 路径中等待；
+  ack 和 ack map 改用 non-sleeping IRQ-safe lock。secondary startup wait 现在观察 VM 终止
+  状态，bind、在线计数和 ACK 提交在 VM lifecycle lock 下与 stop 串行化，`stop()` 自身
+  负责唤醒 runtime waiter；并发 pause 会延后提交到 resume，`resume()` 同样主动唤醒，
+  不会把正常暂停误判为 bind 故障。异步架构 bind 失败会清理 ack、vCPU reservation 和
+  task registration，以 `StopReason::Fault` 请求停止整台 VM，并唤醒其余 vCPU，不再在
+  PSCI 已返回成功后 fail-open。
 
 本轮验证结果：
 
 | 验证 | 结果 |
 |------|------|
 | AxVisor AArch64 axtest | `84 passed, 0 failed` |
+| `cargo test -p axvm --features host-test` | `268 unit tests + 1 integration test passed` |
 | `cargo test -p axvirtio-net` | `31 passed, 0 failed` |
 | RT-Thread clean-source contract | PASS，覆盖 clean/tracked/staged/untracked |
 | exact patch helper | PASS，覆盖 pristine/idempotent/two-hunk partial/apply failure |
