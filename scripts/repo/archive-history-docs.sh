@@ -9,6 +9,16 @@ ARCHIVE_STAGE_TMP=""
 ARCHIVE_PUBLISH_BACKUP=""
 ARCHIVE_PUBLISH_DESTINATION=""
 ARCHIVE_PUBLISH_COMMITTED=0
+ARCHIVE_DELETE_TRANSACTION_ACTIVE=0
+ARCHIVE_DELETE_TEST_TARGET=""
+ARCHIVE_DELETE_TEST_TARGET_BACKUP=""
+declare -gA ARCHIVE_DELETE_QUARANTINE_ROOTS=()
+declare -gA ARCHIVE_DELETE_QUARANTINE_PATHS=()
+declare -gA ARCHIVE_DELETE_SOURCE_IDENTITIES=()
+declare -gA ARCHIVE_DELETE_SOURCE_HASHES=()
+declare -gA ARCHIVE_DELETE_ARCHIVE_IDENTITIES=()
+declare -gA ARCHIVE_DELETE_ARCHIVE_HASHES=()
+declare -gA ARCHIVE_DELETE_MOVED=()
 
 cleanup() {
     if [[ -n "$ARCHIVE_PUBLISH_BACKUP" && -e "$ARCHIVE_PUBLISH_BACKUP" ]]; then
@@ -17,6 +27,10 @@ cleanup() {
         elif [[ -n "$ARCHIVE_PUBLISH_DESTINATION" && ! -e "$ARCHIVE_PUBLISH_DESTINATION" ]]; then
             mv -- "$ARCHIVE_PUBLISH_BACKUP" "$ARCHIVE_PUBLISH_DESTINATION"
         fi
+    fi
+    if ((ARCHIVE_DELETE_TRANSACTION_ACTIVE == 1)); then
+        archive_delete_rollback ||
+            echo "archive-history-docs.sh: delete rollback incomplete; quarantine remains" >&2
     fi
     [[ -z "$ARCHIVE_TMP_DIR" ]] || rm -rf -- "$ARCHIVE_TMP_DIR"
     [[ -z "$ARCHIVE_OUTPUT_TMP" ]] || rm -f -- "$ARCHIVE_OUTPUT_TMP"
@@ -1446,19 +1460,196 @@ check_archive_delete_parent_directories() {
     done < "$ARCHIVE_RECORDS_FILE"
 }
 
+archive_delete_quarantine_cleanup() {
+    local source_name source_root original_path source_path qroot qpath parent
+    local remove_entries="${1:-0}" cleanup_failed=0
+
+    if ((remove_entries)); then
+        while IFS=$'\t' read -r source_name source_root _ _ _ original_path _; do
+            [[ -n "$source_name" ]] || continue
+            source_path="$source_root/$original_path"
+            qpath="${ARCHIVE_DELETE_QUARANTINE_PATHS[$source_path]-}"
+            [[ -n "$qpath" ]] || continue
+            [[ -f "$qpath" && ! -L "$qpath" ]] || {
+                echo "archive-history-docs.sh: quarantine entry is not removable: $qpath" >&2
+                cleanup_failed=1
+                continue
+            }
+            if ! rm -- "$qpath"; then
+                echo "archive-history-docs.sh: could not remove quarantine entry: $qpath" >&2
+                cleanup_failed=1
+                continue
+            fi
+        done < "$ARCHIVE_RECORDS_FILE"
+    fi
+
+    while IFS=$'\t' read -r source_name source_root _ _ _ original_path _; do
+        [[ -n "$source_name" ]] || continue
+        source_path="$source_root/$original_path"
+        qroot="${ARCHIVE_DELETE_QUARANTINE_ROOTS[$source_name]-}"
+        qpath="${ARCHIVE_DELETE_QUARANTINE_PATHS[$source_path]-}"
+        [[ -n "$qroot" && -n "$qpath" ]] || continue
+        parent="$(dirname -- "$qpath")"
+        while [[ "$parent" != "$qroot" && "$parent" == "$qroot/"* ]]; do
+            if [[ ! -d "$parent" ]]; then
+                parent="$(dirname -- "$parent")"
+                continue
+            fi
+            if ! rmdir -- "$parent" 2>/dev/null; then
+                echo "archive-history-docs.sh: quarantine directory is not empty or not removable: $parent" >&2
+                cleanup_failed=1
+                break
+            fi
+            parent="$(dirname -- "$parent")"
+        done
+    done < "$ARCHIVE_RECORDS_FILE"
+
+    for source_name in "${ARCHIVE_SOURCE_NAMES[@]}"; do
+        qroot="${ARCHIVE_DELETE_QUARANTINE_ROOTS[$source_name]-}"
+        [[ -z "$qroot" ]] && continue
+        if ! rmdir -- "$qroot" 2>/dev/null; then
+            echo "archive-history-docs.sh: quarantine root is not empty or not removable: $qroot" >&2
+            cleanup_failed=1
+        fi
+    done
+    ((cleanup_failed == 0))
+}
+
+archive_delete_rollback() {
+    local source_name source_root original_path source_path qpath qroot parent
+    local current_identity current_sha rollback_failed=0
+
+    ((ARCHIVE_DELETE_TRANSACTION_ACTIVE == 1)) || return 0
+    ARCHIVE_DELETE_TRANSACTION_ACTIVE=0
+
+    if [[ -n "$ARCHIVE_DELETE_TEST_TARGET_BACKUP" ]]; then
+        if [[ -f "$ARCHIVE_DELETE_TEST_TARGET_BACKUP" && ! -L "$ARCHIVE_DELETE_TEST_TARGET_BACKUP" &&
+            -f "$ARCHIVE_DELETE_TEST_TARGET" && ! -L "$ARCHIVE_DELETE_TEST_TARGET" ]]; then
+            if ! rm -- "$ARCHIVE_DELETE_TEST_TARGET" ||
+                ! mv -- "$ARCHIVE_DELETE_TEST_TARGET_BACKUP" "$ARCHIVE_DELETE_TEST_TARGET"; then
+                rollback_failed=1
+            fi
+        else
+            rollback_failed=1
+        fi
+    fi
+
+    while IFS=$'\t' read -r source_name source_root _ _ _ original_path _; do
+        [[ -n "$source_name" ]] || continue
+        source_path="$source_root/$original_path"
+        [[ "${ARCHIVE_DELETE_MOVED[$source_path]-0}" == 1 ]] || continue
+        qpath="${ARCHIVE_DELETE_QUARANTINE_PATHS[$source_path]-}"
+        [[ -f "$qpath" && ! -L "$qpath" ]] || {
+            rollback_failed=1
+            continue
+        }
+        [[ ! -e "$source_path" && ! -L "$source_path" ]] || {
+            rollback_failed=1
+            continue
+        }
+        parent="$(dirname -- "$source_path")"
+        [[ -d "$parent" && ! -L "$parent" ]] || {
+            rollback_failed=1
+            continue
+        }
+        if ! mv -- "$qpath" "$source_path"; then
+            rollback_failed=1
+            continue
+        fi
+        current_identity="$(stat -c '%F:%d:%i:%h:%a:%s' -- "$source_path")"
+        current_sha="$(sha256sum -b -- "$source_path")"
+        current_sha="${current_sha%% *}"
+        [[ "$current_identity" == "${ARCHIVE_DELETE_SOURCE_IDENTITIES[$source_path]}" &&
+            "$current_sha" == "${ARCHIVE_DELETE_SOURCE_HASHES[$source_path]}" ]] ||
+            rollback_failed=1
+        ARCHIVE_DELETE_MOVED["$source_path"]=0
+    done < "$ARCHIVE_RECORDS_FILE"
+
+    if ! archive_delete_quarantine_cleanup; then
+        rollback_failed=1
+    fi
+
+    for source_name in "${ARCHIVE_SOURCE_NAMES[@]}"; do
+        source_root="${ARCHIVE_SOURCE_ROOTS[$source_name]}"
+        if ! capture_archive_source_tree "$source_root" "$ARCHIVE_TMP_DIR/$source_name.tree.delete-rollback" ||
+            ! cmp -s "$ARCHIVE_TMP_DIR/$source_name.tree.delete-before" \
+                "$ARCHIVE_TMP_DIR/$source_name.tree.delete-rollback"; then
+            rollback_failed=1
+        fi
+    done
+
+    if ((rollback_failed)); then
+        echo "archive-history-docs.sh: delete rollback incomplete; quarantine locations:" >&2
+        for source_name in "${ARCHIVE_SOURCE_NAMES[@]}"; do
+            qroot="${ARCHIVE_DELETE_QUARANTINE_ROOTS[$source_name]-}"
+            [[ -n "$qroot" ]] && echo "  source=$source_name quarantine=$qroot" >&2
+        done
+        return 1
+    fi
+    return 0
+}
+
+archive_delete_fail() {
+    local message="$*"
+    if ! archive_delete_rollback; then
+        message="$message; delete rollback incomplete; inspect quarantine paths above"
+    fi
+    die "$message"
+}
+
+prepare_archive_delete_quarantine() {
+    local source_name source_root source_parent original_path source_path qroot qpath qparent rel_parent
+
+    ARCHIVE_DELETE_TRANSACTION_ACTIVE=1
+    ARCHIVE_DELETE_QUARANTINE_ROOTS=()
+    ARCHIVE_DELETE_QUARANTINE_PATHS=()
+    ARCHIVE_DELETE_MOVED=()
+    for source_name in "${ARCHIVE_SOURCE_NAMES[@]}"; do
+        source_root="${ARCHIVE_SOURCE_ROOTS[$source_name]}"
+        source_parent="$(dirname -- "$source_root")"
+        [[ "$ARCHIVE_DESTINATION" != "$source_parent" ]] ||
+            archive_delete_fail "destination must not be the source root parent when quarantine is required: $ARCHIVE_DESTINATION"
+        if ! qroot="$(mktemp -d "$source_parent/.archive-history-docs-quarantine.$(basename -- "$source_root").XXXXXX")"; then
+            archive_delete_fail "could not create source quarantine beside: $source_root"
+        fi
+        ARCHIVE_DELETE_QUARANTINE_ROOTS["$source_name"]="$qroot"
+    done
+
+    while IFS=$'\t' read -r source_name source_root _ _ _ original_path _; do
+        [[ -n "$source_name" ]] || continue
+        source_path="$source_root/$original_path"
+        qroot="${ARCHIVE_DELETE_QUARANTINE_ROOTS[$source_name]}"
+        qpath="$qroot/$original_path"
+        qparent="$(dirname -- "$qpath")"
+        rel_parent="${original_path%/*}"
+        if [[ "$rel_parent" == "$original_path" ]]; then
+            rel_parent=""
+        fi
+        if [[ -n "$rel_parent" ]]; then
+            path_has_symlink_component "$qroot" "$rel_parent" ||
+                archive_delete_fail "quarantine path traverses a symlink: $qpath"
+        fi
+        if ! mkdir -p -- "$qparent"; then
+            archive_delete_fail "could not prepare source quarantine path: $qpath"
+        fi
+        [[ -d "$qparent" && ! -L "$qparent" ]] ||
+            archive_delete_fail "quarantine parent is not a regular directory: $qparent"
+        ARCHIVE_DELETE_QUARANTINE_PATHS["$source_path"]="$qpath"
+        ARCHIVE_DELETE_MOVED["$source_path"]=0
+    done < "$ARCHIVE_RECORDS_FILE"
+}
+
 delete_archive_sources() {
     local source_name source_root branch commit tracked original_path phase type date date_source size sha256 archived_path
-    local source_path target_path actual_size actual_sha source_identity current_identity
-    local archive_identity current_archive_identity test_target test_replacement test_mode
+    local source_path target_path actual_size actual_sha source_hash source_identity current_identity
+    local archive_identity current_archive_identity test_target test_replacement test_mode qpath qroot
     local -A deleted_paths=()
-    local -A verified_identities=()
-    local -A verified_archive_identities=()
-    local -A verified_archive_hashes=()
 
     verify_archive_contents
     strict_archive_source_preflight
     check_archive_delete_parent_directories
     capture_archive_source_trees delete-before
+    prepare_archive_delete_quarantine
     while IFS=$'\t' read -r source_name source_root branch commit tracked original_path phase type date date_source size sha256 archived_path; do
         [[ -n "$source_name" ]] || continue
         source_path="$(validate_archive_source_file "$source_name" "$source_root" "$original_path")"
@@ -1468,7 +1659,8 @@ delete_archive_sources() {
         actual_size="$(stat -c '%s' -- "$source_path")"
         actual_sha="$(sha256sum -b -- "$source_path")"
         actual_sha="${actual_sha%% *}"
-        [[ "$actual_size" == "$size" && "$actual_sha" == "$sha256" ]] ||
+        source_hash="$actual_sha"
+        [[ "$actual_size" == "$size" && "$source_hash" == "$sha256" ]] ||
             die "source and archive differ before delete: $source_path"
         actual_size="$(stat -c '%s' -- "$target_path")"
         actual_sha="$(sha256sum -b -- "$target_path")"
@@ -1482,9 +1674,10 @@ delete_archive_sources() {
             die "source path is not a regular file before delete: $source_path"
         [[ -z "${deleted_paths[$source_path]+set}" ]] || die "source path is duplicated before delete: $source_path"
         deleted_paths["$source_path"]=1
-        verified_identities["$source_path"]="$source_identity"
-        verified_archive_identities["$target_path"]="$archive_identity"
-        verified_archive_hashes["$target_path"]="$actual_sha"
+        ARCHIVE_DELETE_SOURCE_IDENTITIES["$source_path"]="$source_identity"
+        ARCHIVE_DELETE_SOURCE_HASHES["$source_path"]="$source_hash"
+        ARCHIVE_DELETE_ARCHIVE_IDENTITIES["$target_path"]="$archive_identity"
+        ARCHIVE_DELETE_ARCHIVE_HASHES["$target_path"]="$actual_sha"
     done < "$ARCHIVE_RECORDS_FILE"
 
     capture_archive_source_trees delete-ready
@@ -1492,7 +1685,7 @@ delete_archive_sources() {
 
     test_target="${ARCHIVE_HISTORY_DOCS_TEST_REPLACE_ARCHIVE_TARGET_AFTER_PREFLIGHT:-}"
     if [[ -n "$test_target" ]]; then
-        [[ -n "${verified_archive_identities[$test_target]+set}" ]] ||
+        [[ -n "${ARCHIVE_DELETE_ARCHIVE_IDENTITIES[$test_target]+set}" ]] ||
             die "test archive target is not selected: $test_target"
         [[ -f "$test_target" && ! -L "$test_target" ]] ||
             die "test archive target is not a regular file: $test_target"
@@ -1502,38 +1695,97 @@ delete_archive_sources() {
         mv -- "$test_replacement" "$test_target"
     fi
 
-    # Shell cannot atomically combine lstat and unlink; identity/tree checks minimize the race window.
+    # Shell cannot atomically combine lstat and move; identity/tree checks minimize the race window.
     while IFS=$'\t' read -r source_name source_root _ _ _ original_path _ _ _ _ size sha256 archived_path; do
         [[ -n "$source_name" ]] || continue
         source_path="$(validate_archive_source_file "$source_name" "$source_root" "$original_path")"
         target_path="$ARCHIVE_DESTINATION/$archived_path"
         [[ -f "$source_path" && ! -L "$source_path" ]] || die "source path changed before delete: $source_path"
         current_identity="$(stat -c '%F:%d:%i:%h:%a:%s' -- "$source_path")"
-        [[ "$current_identity" == "${verified_identities[$source_path]}" ]] ||
-            die "source file identity changed during delete: $source_path"
+        [[ "$current_identity" == "${ARCHIVE_DELETE_SOURCE_IDENTITIES[$source_path]}" ]] ||
+            archive_delete_fail "source file identity changed during delete: $source_path"
         [[ "$current_identity" == regular\ file:*:*:1:* ]] ||
-            die "source file has unexpected hard links during delete: $source_path"
+            archive_delete_fail "source file has unexpected hard links during delete: $source_path"
         [[ -f "$target_path" && ! -L "$target_path" ]] ||
-            die "archive target changed before delete: $target_path"
+            archive_delete_fail "archive target changed before delete: $target_path"
         current_archive_identity="$(stat -c '%d:%i:%h:%a:%s' -- "$target_path")"
-        [[ "$current_archive_identity" == "${verified_archive_identities[$target_path]}" ]] ||
-            die "archive target identity changed before delete: $target_path"
+        [[ "$current_archive_identity" == "${ARCHIVE_DELETE_ARCHIVE_IDENTITIES[$target_path]}" ]] ||
+            archive_delete_fail "archive target identity changed before delete: $target_path"
         actual_size="$(stat -c '%s' -- "$target_path")"
         actual_sha="$(sha256sum -b -- "$target_path")"
         actual_sha="${actual_sha%% *}"
         [[ "$actual_size" == "$size" && "$actual_sha" == "$sha256" &&
-            "$actual_sha" == "${verified_archive_hashes[$target_path]}" ]] ||
-            die "archive target changed before delete: $target_path"
+            "$actual_sha" == "${ARCHIVE_DELETE_ARCHIVE_HASHES[$target_path]}" ]] ||
+            archive_delete_fail "archive target changed before delete: $target_path"
         actual_size="$(stat -c '%s' -- "$source_path")"
         actual_sha="$(sha256sum -b -- "$source_path")"
         actual_sha="${actual_sha%% *}"
         [[ "$actual_size" == "$size" && "$actual_sha" == "$sha256" ]] ||
-            die "source target changed before delete: $source_path"
-        rm --one-file-system -- "$source_path"
+            archive_delete_fail "source target changed before delete: $source_path"
+        qpath="${ARCHIVE_DELETE_QUARANTINE_PATHS[$source_path]}"
+        [[ ! -e "$qpath" && ! -L "$qpath" ]] ||
+            archive_delete_fail "quarantine target already exists: $qpath"
+        if ! mv -- "$source_path" "$qpath"; then
+            archive_delete_fail "could not move source into quarantine: $source_path"
+        fi
+        ARCHIVE_DELETE_MOVED["$source_path"]=1
         [[ ! -e "$source_path" && ! -L "$source_path" ]] ||
-            die "source path still exists after delete: $source_path"
+            archive_delete_fail "source path still exists after quarantine move: $source_path"
+        [[ -f "$qpath" && ! -L "$qpath" ]] ||
+            archive_delete_fail "quarantine entry is not a regular file: $qpath"
+        current_identity="$(stat -c '%F:%d:%i:%h:%a:%s' -- "$qpath")"
+        actual_sha="$(sha256sum -b -- "$qpath")"
+        actual_sha="${actual_sha%% *}"
+        [[ "$current_identity" == "${ARCHIVE_DELETE_SOURCE_IDENTITIES[$source_path]}" &&
+            "$actual_sha" == "$sha256" ]] ||
+            archive_delete_fail "quarantine entry verification failed: $qpath"
     done < "$ARCHIVE_RECORDS_FILE"
-    verify_archive_deleted_source_trees
+
+    test_target="${ARCHIVE_HISTORY_DOCS_TEST_REPLACE_ARCHIVE_TARGET_AFTER_MOVES:-}"
+    if [[ -n "$test_target" ]]; then
+        [[ -n "${ARCHIVE_DELETE_ARCHIVE_IDENTITIES[$test_target]+set}" ]] ||
+            archive_delete_fail "test archive target is not selected: $test_target"
+        test_mode="$(stat -c '%a' -- "$test_target")"
+        ARCHIVE_DELETE_TEST_TARGET="$test_target"
+        ARCHIVE_DELETE_TEST_TARGET_BACKUP="$ARCHIVE_TMP_DIR/archive-target-original"
+        if ! install -m "$test_mode" -- "$test_target" "$ARCHIVE_DELETE_TEST_TARGET_BACKUP" ||
+            ! install -m "$test_mode" -- "$test_target" "$ARCHIVE_TMP_DIR/archive-target-replacement" ||
+            ! mv -- "$ARCHIVE_TMP_DIR/archive-target-replacement" "$test_target"; then
+            archive_delete_fail "could not inject post-move archive target mutation: $test_target"
+        fi
+    fi
+
+    while IFS=$'\t' read -r source_name source_root _ _ _ original_path _ _ _ _ size sha256 archived_path; do
+        [[ -n "$source_name" ]] || continue
+        source_path="$source_root/$original_path"
+        target_path="$ARCHIVE_DESTINATION/$archived_path"
+        qpath="${ARCHIVE_DELETE_QUARANTINE_PATHS[$source_path]}"
+        [[ ! -e "$source_path" && ! -L "$source_path" ]] ||
+            archive_delete_fail "source path reappeared after quarantine move: $source_path"
+        [[ -f "$qpath" && ! -L "$qpath" ]] ||
+            archive_delete_fail "quarantine entry is missing: $qpath"
+        current_identity="$(stat -c '%F:%d:%i:%h:%a:%s' -- "$qpath")"
+        actual_sha="$(sha256sum -b -- "$qpath")"
+        actual_sha="${actual_sha%% *}"
+        [[ "$current_identity" == "${ARCHIVE_DELETE_SOURCE_IDENTITIES[$source_path]}" &&
+            "$actual_sha" == "$sha256" ]] ||
+            archive_delete_fail "quarantine entry changed: $qpath"
+        [[ -f "$target_path" && ! -L "$target_path" ]] ||
+            archive_delete_fail "archive target changed after source moves: $target_path"
+        current_archive_identity="$(stat -c '%d:%i:%h:%a:%s' -- "$target_path")"
+        actual_sha="$(sha256sum -b -- "$target_path")"
+        actual_sha="${actual_sha%% *}"
+        [[ "$current_archive_identity" == "${ARCHIVE_DELETE_ARCHIVE_IDENTITIES[$target_path]}" &&
+            "$actual_sha" == "$sha256" ]] ||
+            archive_delete_fail "archive target changed after source moves: $target_path"
+    done < "$ARCHIVE_RECORDS_FILE"
+    if ! verify_archive_deleted_source_trees || ! verify_archive_contents; then
+        archive_delete_fail "post-move archive/source verification failed"
+    fi
+    if ! archive_delete_quarantine_cleanup 1; then
+        archive_delete_fail "could not clean source quarantine; restore is required"
+    fi
+    ARCHIVE_DELETE_TRANSACTION_ACTIVE=0
     verify_archive_contents
     echo "delete: removed only verified inventory files from source worktrees" >&2
 }
