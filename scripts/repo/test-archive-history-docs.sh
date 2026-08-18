@@ -988,6 +988,26 @@ run_required_command archive-success/verify-after-migration-report-symlink \
     bash "$ARCHIVER" verify \
     --inventory "$archive_inventory" \
     --destination "$archive_destination"
+chmod 0600 -- "$archive_report"
+archive_report_mode_snapshot="$archive_fixture/destination-before-report-mode-verify"
+snapshot_directory_tree "$archive_destination" "$archive_report_mode_snapshot"
+run_expected_failure archive-success/migration-report-mode/verify \
+    bash "$ARCHIVER" verify \
+    --inventory "$archive_inventory" \
+    --destination "$archive_destination"
+assert_expected_failure_contains archive-success/migration-report-mode/verify 0644
+snapshot_directory_tree \
+    "$archive_destination" \
+    "$archive_fixture/destination-after-report-mode-verify"
+assert_snapshot_equal \
+    "$archive_report_mode_snapshot" \
+    "$archive_fixture/destination-after-report-mode-verify" \
+    archive-success/migration-report-mode/verify destination
+chmod 0644 -- "$archive_report"
+run_required_command archive-success/verify-after-migration-report-mode \
+    bash "$ARCHIVER" verify \
+    --inventory "$archive_inventory" \
+    --destination "$archive_destination"
 
 assert_inventory_sources_exist "$archive_inventory" "$archive_fixture"
 [[ -f "$archive_destination/manifest.json" ]] ||
@@ -1198,7 +1218,8 @@ run_required_command archive-source-mutation/stage \
     bash "$ARCHIVER" stage \
     --inventory "$mutation_inventory" \
     --destination "$mutation_destination"
-printf '%s\n' 'changed after stage' >> "$mutation_source_path"
+mutation_source_size="$(stat -c '%s' -- "$mutation_source_path")"
+printf '%*s' "$mutation_source_size" '' | tr ' ' X > "$mutation_source_path"
 mutation_source_digest="$(sha256sum -b -- "$mutation_source_path")"
 mutation_source_digest="${mutation_source_digest%% *}"
 mutation_destination_snapshot="$mutation_fixture/destination-tree.before-delete"
@@ -1220,6 +1241,44 @@ assert_snapshot_equal \
     "$mutation_destination_snapshot" \
     "$mutation_destination_after" \
     archive-source-mutation/delete destination
+
+permission_fixture="$(make_archive_fixture archive-delete-parent-permission)"
+permission_inventory="$permission_fixture/inventory.tsv"
+permission_destination="$permission_fixture/archive"
+permission_source_root="$(awk -F '\t' 'NR == 3 { print $2 }' "$permission_inventory")"
+permission_original_path="$(awk -F '\t' 'NR == 3 { print $6 }' "$permission_inventory")"
+permission_source_path="$(resolve_inventory_source_path \
+    "$permission_fixture" \
+    "$permission_source_root" \
+    "$permission_original_path" \
+    archive-delete-parent-permission)"
+permission_parent="$(dirname -- "$permission_source_path")"
+run_required_command archive-delete-parent-permission/stage \
+    bash "$ARCHIVER" stage \
+    --inventory "$permission_inventory" \
+    --destination "$permission_destination"
+chmod 0555 -- "$permission_parent"
+permission_source_snapshot="$permission_fixture/source-tree.before-delete"
+permission_destination_snapshot="$permission_fixture/destination-tree.before-delete"
+snapshot_fixture_sources "$permission_fixture" "$permission_source_snapshot"
+snapshot_directory_tree "$permission_destination" "$permission_destination_snapshot"
+run_expected_failure archive-delete-parent-permission/delete \
+    bash "$ARCHIVER" delete \
+    --inventory "$permission_inventory" \
+    --destination "$permission_destination"
+assert_expected_failure_contains archive-delete-parent-permission/delete writable
+assert_fixture_sources_unchanged \
+    "$permission_fixture" \
+    "$permission_source_snapshot" \
+    archive-delete-parent-permission/delete
+snapshot_directory_tree \
+    "$permission_destination" \
+    "$permission_fixture/destination-tree.after-delete"
+assert_snapshot_equal \
+    "$permission_destination_snapshot" \
+    "$permission_fixture/destination-tree.after-delete" \
+    archive-delete-parent-permission/delete destination
+chmod 0755 -- "$permission_parent"
 
 missing_target_fixture="$(make_archive_fixture archive-missing-target)"
 missing_target_inventory="$missing_target_fixture/inventory.tsv"

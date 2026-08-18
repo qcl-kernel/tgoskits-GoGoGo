@@ -1172,6 +1172,14 @@ verify_archive_tree() {
         die "archive is missing manifest.json"
     [[ -f "$ARCHIVE_DESTINATION/INDEX.md" && ! -L "$ARCHIVE_DESTINATION/INDEX.md" ]] ||
         die "archive is missing INDEX.md"
+    if [[ -e "$ARCHIVE_DESTINATION/migration-report.md" ||
+        -L "$ARCHIVE_DESTINATION/migration-report.md" ]]; then
+        [[ -f "$ARCHIVE_DESTINATION/migration-report.md" &&
+            ! -L "$ARCHIVE_DESTINATION/migration-report.md" ]] ||
+            die "archive migration-report.md is not a regular file"
+        [[ "$(stat -c '%a' -- "$ARCHIVE_DESTINATION/migration-report.md")" == 644 ]] ||
+            die "archive migration-report.md mode is not 0644"
+    fi
     cmp -s "$ARCHIVE_INVENTORY_FILE" "$ARCHIVE_DESTINATION/migration-inventory.tsv" ||
         die "archive migration-inventory.tsv differs from inventory"
     cmp -s "$ARCHIVE_INVENTORY_SIDECAR" "$ARCHIVE_DESTINATION/rules.sha256" ||
@@ -1410,6 +1418,34 @@ cleanup_known_history_directories() {
     done
 }
 
+check_archive_delete_parent_directories() {
+    local source_name source_root original_path source_path parent mode mode_number
+    local -A checked_directories=()
+
+    while IFS=$'\t' read -r source_name source_root _ _ _ original_path _; do
+        [[ -n "$source_name" ]] || continue
+        source_path="$(validate_archive_source_file "$source_name" "$source_root" "$original_path")"
+        parent="$(dirname -- "$source_path")"
+        while :; do
+            if [[ -z "${checked_directories[$parent]+set}" ]]; then
+                [[ -d "$parent" && ! -L "$parent" ]] ||
+                    die "source=$source_name parent directory is not a regular directory: $parent"
+                mode="$(stat -c '%a' -- "$parent")"
+                mode_number=$((8#$mode))
+                ((mode_number & 0222)) ||
+                    die "source=$source_name parent directory is not writable (mode=$mode): $parent"
+                ((mode_number & 0111)) ||
+                    die "source=$source_name parent directory is not executable (mode=$mode): $parent"
+                checked_directories["$parent"]=1
+            fi
+            [[ "$parent" == "$source_root" ]] && break
+            [[ "$parent" == "$source_root/"* ]] ||
+                die "source=$source_name parent directory escaped source root: $parent"
+            parent="$(dirname -- "$parent")"
+        done
+    done < "$ARCHIVE_RECORDS_FILE"
+}
+
 delete_archive_sources() {
     local source_name source_root branch commit tracked original_path phase type date date_source size sha256 archived_path
     local source_path target_path actual_size actual_sha source_identity current_identity
@@ -1418,6 +1454,7 @@ delete_archive_sources() {
 
     verify_archive_contents
     strict_archive_source_preflight
+    check_archive_delete_parent_directories
     capture_archive_source_trees delete-before
     while IFS=$'\t' read -r source_name source_root branch commit tracked original_path phase type date date_source size sha256 archived_path; do
         [[ -n "$source_name" ]] || continue
@@ -1443,15 +1480,28 @@ delete_archive_sources() {
     compare_archive_source_trees delete-before delete-ready
 
     # Shell cannot atomically combine lstat and unlink; identity/tree checks minimize the race window.
-    while IFS=$'\t' read -r source_name source_root _ _ _ original_path _ _ _ _ _ _; do
+    while IFS=$'\t' read -r source_name source_root _ _ _ original_path _ _ _ _ size sha256 archived_path; do
         [[ -n "$source_name" ]] || continue
         source_path="$(validate_archive_source_file "$source_name" "$source_root" "$original_path")"
+        target_path="$ARCHIVE_DESTINATION/$archived_path"
         [[ -f "$source_path" && ! -L "$source_path" ]] || die "source path changed before delete: $source_path"
         current_identity="$(stat -c '%F:%d:%i:%h:%s' -- "$source_path")"
         [[ "$current_identity" == "${verified_identities[$source_path]}" ]] ||
             die "source file identity changed during delete: $source_path"
         [[ "$current_identity" == regular\ file:*:*:1:* ]] ||
             die "source file has unexpected hard links during delete: $source_path"
+        [[ -f "$target_path" && ! -L "$target_path" ]] ||
+            die "archive target changed before delete: $target_path"
+        actual_size="$(stat -c '%s' -- "$target_path")"
+        actual_sha="$(sha256sum -b -- "$target_path")"
+        actual_sha="${actual_sha%% *}"
+        [[ "$actual_size" == "$size" && "$actual_sha" == "$sha256" ]] ||
+            die "archive target changed before delete: $target_path"
+        actual_size="$(stat -c '%s' -- "$source_path")"
+        actual_sha="$(sha256sum -b -- "$source_path")"
+        actual_sha="${actual_sha%% *}"
+        [[ "$actual_size" == "$size" && "$actual_sha" == "$sha256" ]] ||
+            die "source target changed before delete: $source_path"
         rm --one-file-system -- "$source_path"
         [[ ! -e "$source_path" && ! -L "$source_path" ]] ||
             die "source path still exists after delete: $source_path"
