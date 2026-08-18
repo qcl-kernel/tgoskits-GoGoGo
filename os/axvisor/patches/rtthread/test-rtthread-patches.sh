@@ -163,6 +163,21 @@ require_pattern \
 require_pattern \
     "RX completion copies the matching receive buffer" \
     'rt_memcpy\(p->payload, virtio_net_dev->info\[id / 2\]\.rx_buffer, len\);'
+require_function_pattern \
+    "TX copies each frame into TX-owned storage" \
+    'virtio_net_tx' \
+    'pbuf_copy_partial\(p, virtio_net_dev->info\[id\]\.tx_buffer, p->tot_len, 0\);' \
+    "$DRIVER"
+require_function_pattern \
+    "TX data descriptors reference TX-owned storage" \
+    'virtio_net_tx' \
+    'VIRTIO_VA2PA\(virtio_net_dev->info\[id\]\.tx_buffer\), p->tot_len' \
+    "$DRIVER"
+reject_function_pattern \
+    "TX must not alias buffers owned by the RX queue" \
+    'virtio_net_tx' \
+    'info\[id\]\.rx_buffer' \
+    "$DRIVER"
 require_pattern \
     "UDP receive mailbox size is configurable per BSP" \
     '#define DEFAULT_UDP_RECVMBOX_SIZE[[:space:]]+RT_LWIP_UDP_RECVMBOX_SIZE' \

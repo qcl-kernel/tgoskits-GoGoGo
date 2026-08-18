@@ -385,3 +385,47 @@ tmp/starryos-task123/run/axvisor-cmdline-console.log
 
 本次验证证明 StarryOS 已替代 Linux 完成 Task123 的启动、网络通信和 AI 控制闭环。
 实时性长时间稳定性测试以及完整 600 帧结果仍应使用专门的测试入口单独执行，不能由这次 3 帧 smoke 结果代替。
+
+### 5.1 Linux/StarryOS 稳定性对比
+
+在 `starryos-replace` worktree 的仓库根目录执行下面的命令。脚本会依次使用相同的
+AxVisor、QEMU、RT-Thread 镜像、协议源码和模型运行 Linux 与 StarryOS，并在最后生成
+机器可读的 `comparison.json` 和 Markdown 汇总。
+
+```bash
+# 300 秒快速回归：每种 Task2 载荷 30000 次
+os/axvisor/scripts/run_task123_guest_comparison.sh \
+  --quick \
+  --allow-qemu-timer-limit \
+  --output "$PWD/tmp/task123-guest-comparison-quick"
+
+# 3600 秒正式运行：每种 Task2 载荷 240000 次
+os/axvisor/scripts/run_task123_guest_comparison.sh \
+  --full \
+  --allow-qemu-timer-limit \
+  --cache "$PWD/tmp/task123-comparison-cache" \
+  --output "$PWD/tmp/task123-guest-comparison-full"
+```
+
+`--cache` 保存可复用的 AxVisor、guest 和测试输入构建产物，避免 Linux 与 StarryOS
+两次运行分别重建输入。`--output` 必须为空目录；运行完成后重点查看：
+
+```text
+tmp/task123-guest-comparison-*/comparison/comparison.json
+tmp/task123-guest-comparison-*/comparison/comparison-report.md
+tmp/task123-guest-comparison-*/linux/summary.json
+tmp/task123-guest-comparison-*/starryos/summary.json
+tmp/task123-guest-comparison-*/linux/rtthread.log
+tmp/task123-guest-comparison-*/starryos/rtthread.log
+```
+
+结果状态分为两类：严格模式要求 RTBench `miss_1ms=0`；`--allow-qemu-timer-limit` 只
+允许在普通 x86_64 主机上的 AArch64 QEMU TCG 长测出现周期定时器超限时保留其余证据，
+并将结果标记为 `PASS_WITH_QEMU_TIMER_LIMIT`。该状态不等价于物理硬实时通过，报告中
+必须同时保留 `miss_1ms`、最大延迟、宿主 CPU/RSS 和原始日志。
+
+比较结果包含以下指标：64/256/1024 字节 Task2 请求的成功数、RTT 分位数、有效吞吐量、
+应用层错误、超时、重传、重复包和乱序包；Task3 推理、控制往返、RTOS 处理时延和成功率；
+RT-Thread 稳定性 jitter 与 callback execution 的 P50/P95/P99/P99.9/max；以及 QEMU
+墙钟、CPU 时间、峰值 RSS、最大线程数和采样数。完整测试报告见
+`docs/reports/starryos-linux-stability-comparison.md`。

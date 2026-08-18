@@ -35,7 +35,7 @@
      virtio_net_dev->info[id].hdr.flags = 0;
      virtio_net_dev->info[id].hdr.gso_type = 0;
 @@ -43,12 +64,10 @@
-             VIRTIO_VA2PA(virtio_net_dev->info[id].rx_buffer), p->tot_len, 0, 0);
+             VIRTIO_VA2PA(virtio_net_dev->info[id].tx_buffer), p->tot_len, 0, 0);
 
      virtio_submit_chain(virtio_dev, VIRTIO_NET_QUEUE_TX, id);
 +    rt_hw_dsb();

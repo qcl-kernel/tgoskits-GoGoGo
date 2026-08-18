@@ -2116,7 +2116,8 @@ index d92421b6..29e0de1b 100644
      virtio_net_dev->info[id].hdr.gso_type = 0;
 @@ -36,9 +57,6 @@ static rt_err_t virtio_net_tx(rt_device_t dev, struct pbuf *p)
 
-     pbuf_copy_partial(p, virtio_net_dev->info[id].rx_buffer, p->tot_len, 0);
+-    pbuf_copy_partial(p, virtio_net_dev->info[id].rx_buffer, p->tot_len, 0);
++    pbuf_copy_partial(p, virtio_net_dev->info[id].tx_buffer, p->tot_len, 0);
 
 -    virtio_free_desc(virtio_dev, VIRTIO_NET_QUEUE_TX, id);
 -    virtio_free_desc(virtio_dev, VIRTIO_NET_QUEUE_TX, id + 1);
@@ -2125,7 +2126,8 @@ index d92421b6..29e0de1b 100644
              VIRTIO_VA2PA(&virtio_net_dev->info[id].hdr), VIRTIO_NET_HDR_SIZE, VIRTQ_DESC_F_NEXT, id + 1);
 
 @@ -46,12 +64,10 @@ static rt_err_t virtio_net_tx(rt_device_t dev, struct pbuf *p)
-             VIRTIO_VA2PA(virtio_net_dev->info[id].rx_buffer), p->tot_len, 0, 0);
+-            VIRTIO_VA2PA(virtio_net_dev->info[id].rx_buffer), p->tot_len, 0, 0);
++            VIRTIO_VA2PA(virtio_net_dev->info[id].tx_buffer), p->tot_len, 0, 0);
 
      virtio_submit_chain(virtio_dev, VIRTIO_NET_QUEUE_TX, id);
 +    rt_hw_dsb();
