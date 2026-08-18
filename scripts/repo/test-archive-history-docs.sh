@@ -45,7 +45,7 @@ commit_fixture_repo() {
 init_fixture_repo "$task12_source"
 init_fixture_repo "$task123_source"
 
-shared_evidence='qemu-system-aarch64 shared evidence content'
+shared_evidence='qemu-system-aarch64: shared evidence content'
 
 write_fixture_file \
     "$task12_source/docs/README.md" \
@@ -58,7 +58,7 @@ write_fixture_file \
     'task1 task2 plan'
 write_fixture_file \
     "$task12_source/docs/docs/build/axvisor/task1-2026-08-15-run.log" \
-    'RTBENCH TASK1 qemu-system-aarch64 evidence log'
+    'RTBENCH_RUN task1 evidence log'
 write_fixture_file \
     "$task12_source/docs/docs/build/axvisor/task12-shared-evidence.log" \
     "$shared_evidence"
@@ -68,6 +68,9 @@ write_fixture_file \
 write_fixture_file \
     "$task12_source/docs/docs/build/axvisor/network-maintenance.log" \
     'network guest timer maintenance notes'
+write_fixture_file \
+    "$task12_source/docs/docs/build/axvisor/task12-pseudo-marker.log" \
+    'notes mention RTBENCH_RUN and TASK1_START in prose'
 write_fixture_file \
     "$task12_source/docs/docs/build/axvisor/_category_.json" \
     '{"label":"generated"}'
@@ -85,6 +88,7 @@ commit_fixture_repo "$task12_source" \
     docs/docs/build/axvisor/task12-shared-evidence.log \
     docs/docs/build/axvisor/unrelated.log \
     docs/docs/build/axvisor/network-maintenance.log \
+    docs/docs/build/axvisor/task12-pseudo-marker.log \
     docs/docs/build/axvisor/_category_.json \
     docs/docs/architecture/axvisor/overview.md \
     apps/demo/validation/baseline.txt
@@ -132,14 +136,24 @@ if ! bash "$ARCHIVER" inventory \
     echo "archive-history-docs.sh inventory is unavailable or failed" >&2
     exit 1
 fi
-grep -Fq 'inventory: source=task12-source selected=4 excluded=4 unmatched=2 skipped=0' \
+grep -Fq 'inventory: source=task12-source selected=4 excluded=4 unmatched=3 skipped=0' \
     "$FIXTURE_ROOT/initial.stderr" ||
-    fail 'task12 unsigned build logs were not reported as unmatched'
+    fail 'task12 unsigned or explanatory build logs were not reported as unmatched'
 grep -Fq 'inventory: source=task123-source selected=6 excluded=0 unmatched=2 skipped=0' \
     "$FIXTURE_ROOT/initial.stderr" ||
     fail 'task123 unrelated build logs were not reported as unmatched'
 
 [[ -s "$inventory" ]] || fail 'inventory.tsv was not created'
+rules_sidecar="$inventory.rules.sha256"
+[[ -s "$rules_sidecar" ]] || fail 'rules sidecar was not created'
+rules_digest="$(sha256sum -b -- "$RULES")"
+rules_digest="${rules_digest%% *}"
+grep -Fq $'rules_path\t' "$rules_sidecar" ||
+    fail 'rules sidecar did not record the rules path'
+grep -Fq 'rules_sha256'$'\t'"$rules_digest" "$rules_sidecar" ||
+    fail 'rules sidecar did not record the rules digest'
+grep -Fq $'rules_commit\t' "$rules_sidecar" ||
+    fail 'rules sidecar did not record rules commit provenance'
 
 header_file="$FIXTURE_ROOT/header.tsv"
 printf '%s\n' \
@@ -219,6 +233,7 @@ assert_excluded docs/docs/architecture/axvisor/overview.md
 assert_excluded docs/docs/build/axvisor/_category_.json
 assert_excluded docs/docs/build/axvisor/unrelated.log
 assert_excluded docs/docs/build/axvisor/network-maintenance.log
+assert_excluded docs/docs/build/axvisor/task12-pseudo-marker.log
 assert_excluded docs/docs/build/axvisor/task123-shared-evidence.log
 assert_excluded docs/docs/build/axvisor/task123-unrelated.log
 assert_excluded apps/demo/validation/baseline.txt
@@ -399,6 +414,23 @@ bash "$ARCHIVER" inventory \
 [[ -s "$empty_exclude_inventory" ]] ||
     fail 'empty exclude rule did not produce an inventory header'
 
+invalid_exclude_rules="$FIXTURE_ROOT/invalid-exclude-rules.tsv"
+invalid_exclude_inventory="$FIXTURE_ROOT/invalid-exclude-inventory.tsv"
+printf '%s\n' $'exclude\t^docs/superpowers/specs/.*\\.md$\texcluded\t\tinvalid exclude metadata' \
+    > "$invalid_exclude_rules"
+if bash "$ARCHIVER" inventory \
+    --rules "$invalid_exclude_rules" \
+    --source "invalid-exclude-source=$task12_source" \
+    --output "$invalid_exclude_inventory" \
+    > "$FIXTURE_ROOT/invalid-exclude.stdout" 2> "$FIXTURE_ROOT/invalid-exclude.stderr"; then
+    fail 'inventory accepted non-empty phase/type metadata on an exclude rule'
+fi
+[[ ! -e "$invalid_exclude_inventory" ]] ||
+    fail 'invalid exclude metadata produced an inventory file'
+grep -Fq 'exclude rule must have empty phase and type' \
+    "$FIXTURE_ROOT/invalid-exclude.stderr" ||
+    fail 'invalid exclude metadata failure was not reported'
+
 malicious_source_inventory="$FIXTURE_ROOT/malicious-source-inventory.tsv"
 if bash "$ARCHIVER" inventory \
     --rules "$RULES" \
@@ -479,6 +511,25 @@ awk -F '\t' \
     END { exit found ? 0 : 1 }' "$date_inventory" ||
     fail 'only invalid filename date did not fall back to filesystem mtime'
 
+tz_date_path="$task12_source/docs/superpowers/specs/tz-mtime-design.md"
+write_fixture_file "$tz_date_path" 'timezone-independent mtime fixture'
+touch -d '2026-08-09T23:30:00Z' "$tz_date_path"
+for tz_name in UTC Asia/Shanghai; do
+    tz_inventory="$FIXTURE_ROOT/tz-${tz_name//\//-}.tsv"
+    TZ="$tz_name" bash "$ARCHIVER" inventory \
+        --rules "$RULES" \
+        --source "tz-source=$task12_source" \
+        --output "$tz_inventory" \
+        > "$FIXTURE_ROOT/tz-${tz_name//\//-}.stdout" \
+        2> "$FIXTURE_ROOT/tz-${tz_name//\//-}.stderr"
+    awk -F '\t' \
+        '$1 == "tz-source" && $6 == "docs/superpowers/specs/tz-mtime-design.md" {
+            found = ($9 == "2026-08-09" && $10 == "filesystem_mtime")
+        }
+        END { exit found ? 0 : 1 }' "$tz_inventory" ||
+        fail "filesystem mtime date changed under TZ=$tz_name"
+done
+
 ambiguous_date="$task12_source/docs/superpowers/specs/2026-08-01-2026-08-02-ambiguous.md"
 write_fixture_file "$ambiguous_date" 'ambiguous dates'
 if bash "$ARCHIVER" inventory \
@@ -551,6 +602,49 @@ fi
 if ! grep -Fq 'changed during inventory' "$FIXTURE_ROOT/final-state.stderr"; then
     fail 'final source state failure was not reported'
 fi
+
+final_untracked_source="$(mktemp -d "$FIXTURE_ROOT/final-untracked-source.XXXXXX")"
+init_fixture_repo "$final_untracked_source"
+write_fixture_file "$final_untracked_source/docs/README.md" 'final untracked metadata'
+commit_fixture_repo "$final_untracked_source" docs/README.md
+final_untracked_path="$final_untracked_source/docs/docs/build/axvisor/task12-untracked.log"
+write_fixture_file "$final_untracked_path" 'qemu-system-aarch64: initial untracked evidence'
+touch -d '2026-08-15T12:00:00Z' "$final_untracked_path"
+final_untracked_hook_bin="$FIXTURE_ROOT/final-untracked-hook-bin"
+final_untracked_hook_state="$FIXTURE_ROOT/final-untracked-hook-state"
+mkdir -p -- "$final_untracked_hook_bin"
+write_fixture_file "$final_untracked_hook_bin/git" "#!/usr/bin/env bash
+set -euo pipefail
+real_git='$real_git'
+state='$final_untracked_hook_state'
+mutation='$final_untracked_path'
+if [[ \"\$1\" == '-C' && \"\$3\" == 'ls-files' && \"\$4\" == '--others' ]]; then
+    count=0
+    if [[ -f \"\$state\" ]]; then
+        count=\"\$(<\"\$state\")\"
+    fi
+    count=\$((count + 1))
+    printf '%s\\n' \"\$count\" > \"\$state\"
+    if [[ \"\$count\" == 2 ]]; then
+        printf '%s\\n' 'qemu-system-aarch64: final untracked mutation' >> \"\$mutation\"
+    fi
+fi
+exec \"\$real_git\" \"\$@\"
+"
+chmod +x -- "$final_untracked_hook_bin/git"
+final_untracked_inventory="$FIXTURE_ROOT/final-untracked-inventory.tsv"
+if PATH="$final_untracked_hook_bin:$PATH" bash "$ARCHIVER" inventory \
+    --rules "$RULES" \
+    --source "final-untracked-source=$final_untracked_source" \
+    --output "$final_untracked_inventory" \
+    > "$FIXTURE_ROOT/final-untracked.stdout" 2> "$FIXTURE_ROOT/final-untracked.stderr"; then
+    fail 'inventory published output after an untracked selected file changed'
+fi
+[[ ! -e "$final_untracked_inventory" ]] ||
+    fail 'untracked content change produced an inventory file'
+grep -Fq 'selected file changed during inventory' \
+    "$FIXTURE_ROOT/final-untracked.stderr" ||
+    fail 'untracked content change failure was not reported'
 
 printf '%s\n' 'staged tracked change' >> "$task12_source/docs/README.md"
 git -C "$task12_source" add -- docs/README.md

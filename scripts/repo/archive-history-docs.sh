@@ -4,10 +4,12 @@ set -euo pipefail
 
 ARCHIVE_TMP_DIR=""
 ARCHIVE_OUTPUT_TMP=""
+ARCHIVE_SIDECAR_TMP=""
 
 cleanup() {
     [[ -z "$ARCHIVE_TMP_DIR" ]] || rm -rf -- "$ARCHIVE_TMP_DIR"
     [[ -z "$ARCHIVE_OUTPUT_TMP" ]] || rm -f -- "$ARCHIVE_OUTPUT_TMP"
+    [[ -z "$ARCHIVE_SIDECAR_TMP" ]] || rm -f -- "$ARCHIVE_SIDECAR_TMP"
 }
 
 trap cleanup EXIT
@@ -130,6 +132,18 @@ check_tracked_index_flags() {
     ((flagged == 0))
 }
 
+capture_candidate_snapshot() {
+    local repo="$1"
+    local tracked_file="$2"
+    local untracked_file="$3"
+    local candidates_file="$4"
+
+    git -C "$repo" ls-files -z | LC_ALL=C sort -z > "$tracked_file"
+    git -C "$repo" ls-files --others --exclude-standard -z |
+        LC_ALL=C sort -z > "$untracked_file"
+    LC_ALL=C sort -z -u "$tracked_file" "$untracked_file" > "$candidates_file"
+}
+
 valid_date() {
     local candidate="$1"
     [[ "$candidate" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]] || return 1
@@ -184,6 +198,9 @@ load_rules() {
             [[ -n "$phase" && -n "$type" ]] || die "include rule has an empty phase or type"
             validate_path_component rule_phase "$phase" rules
             validate_path_component rule_type "$type" rules
+        else
+            [[ -z "$phase" && -z "$type" ]] ||
+                die "exclude rule must have empty phase and type"
         fi
 
         RULE_ACTIONS+=("$action")
@@ -224,7 +241,7 @@ has_task12_evidence_signature() {
     local path="$1"
 
     LC_ALL=C grep -aEq \
-        'qemu-system-aarch64|VM[[:space:]]+Load[[:space:]]+@PA|RTBENCH|TASK[[:space:]_-]*[0-9]+' \
+        '^(qemu-system-aarch64:|VM Load @PA:|RTBENCH_[A-Z_]+|TASK[0-9]+_[A-Z_]+|RTIPC_[A-Z_]+)' \
         -- "$path"
 }
 
@@ -265,7 +282,7 @@ file_date() {
         fi
     fi
 
-    candidate="$(date -r "$full_path" +%F)"
+    candidate="$(date -u -r "$full_path" +%F)"
     valid_date "$candidate" || die "invalid filesystem date for $full_path"
     printf '%s\tfilesystem_mtime\n' "$candidate"
 }
@@ -277,7 +294,8 @@ inventory() {
     local tracked_file untracked_file candidates_file rel full_path target_path
     local tracked base phase type date date_source size digest archived
     local selected excluded unmatched skipped tracked_status odd_display
-    local output_tmp source_index
+    local output_tmp sidecar_file source_index
+    local sidecar_tmp rules_digest rules_repo_root rules_commit
     local -a source_specs=()
     local -a source_names=()
     local -a source_roots=()
@@ -293,10 +311,60 @@ inventory() {
         for check_index in "${!source_roots[@]}"; do
             check_root="${source_roots[check_index]}"
             if [[ "$check_root" == / || "$output_file" == "$check_root" ||
-                "$output_file" == "$check_root/"* ]]; then
+                "$output_file" == "$check_root/"* || "$sidecar_file" == "$check_root" ||
+                "$sidecar_file" == "$check_root/"* ]]; then
                 die "output must be outside source root: $output_file (source=${source_names[check_index]} root=$check_root)"
             fi
         done
+    }
+
+    check_candidate_snapshots() {
+        local check_index check_name check_root
+        local final_tracked final_untracked final_candidates
+
+        for check_index in "${!source_names[@]}"; do
+            check_name="${source_names[check_index]}"
+            check_root="${source_roots[check_index]}"
+            final_tracked="$tmp_dir/$check_name.final.tracked"
+            final_untracked="$tmp_dir/$check_name.final.untracked"
+            final_candidates="$tmp_dir/$check_name.final.candidates"
+            capture_candidate_snapshot "$check_root" "$final_tracked" "$final_untracked" "$final_candidates"
+            if ! cmp -s "$tmp_dir/$check_name.candidates" "$final_candidates"; then
+                die "source=$check_name candidate set changed during inventory"
+            fi
+        done
+    }
+
+    check_selected_records() {
+        local record_source record_source_root record_branch record_commit record_tracked
+        local record_path record_phase record_type record_date record_date_source
+        local record_size record_digest record_archived
+        local check_index check_index_candidate check_root selected_path current_size current_digest
+
+        while IFS=$'\t' read -r record_source record_source_root record_branch record_commit \
+            record_tracked record_path record_phase record_type record_date record_date_source \
+            record_size record_digest record_archived; do
+            [[ -n "$record_source" ]] || continue
+            check_index=-1
+            for check_index_candidate in "${!source_names[@]}"; do
+                if [[ "${source_names[check_index_candidate]}" == "$record_source" ]]; then
+                    check_index="$check_index_candidate"
+                    break
+                fi
+            done
+            [[ "$check_index" != -1 ]] ||
+                die "source=$record_source selected record has unknown source during inventory"
+            check_root="${source_roots[check_index]}"
+            selected_path="$(realpath -e -- "$check_root/$record_path" 2>/dev/null || true)"
+            if [[ -z "$selected_path" || "$selected_path" != "$check_root"/* || ! -f "$selected_path" ]]; then
+                die "source=$record_source selected file changed during inventory: $record_path"
+            fi
+            current_size="$(stat -c '%s' -- "$selected_path")"
+            current_digest="$(sha256sum -b -- "$selected_path")"
+            current_digest="${current_digest%% *}"
+            [[ "$current_size" == "$record_size" && "$current_digest" == "$record_digest" ]] ||
+                die "source=$record_source selected file changed during inventory: $record_path"
+        done < "$tmp_dir/records.tsv"
     }
 
     check_final_state() {
@@ -306,10 +374,17 @@ inventory() {
         validate_output_path "$output_file"
         [[ "$VALIDATED_OUTPUT_PATH" == "$output_file" ]] ||
             die "output path changed during inventory: $output_file"
+        validate_output_path "$sidecar_file"
+        [[ "$VALIDATED_OUTPUT_PATH" == "$sidecar_file" ]] ||
+            die "rules sidecar path changed during inventory: $sidecar_file"
         [[ -e "$output_file" && ! -f "$output_file" ]] &&
             die "output path is not a regular file: $output_file"
+        [[ -e "$sidecar_file" && ! -f "$sidecar_file" ]] &&
+            die "rules sidecar path is not a regular file: $sidecar_file"
         check_output_outside_sources
 
+        check_candidate_snapshots
+        check_selected_records
         for check_index in "${!source_roots[@]}"; do
             check_name="${source_names[check_index]}"
             check_root="${source_roots[check_index]}"
@@ -361,8 +436,25 @@ inventory() {
     [[ -n "$rules_file" && -n "$output_file" && ${#source_specs[@]} -gt 0 ]] || usage
     validate_output_path "$output_file"
     output_file="$VALIDATED_OUTPUT_PATH"
+    sidecar_file="$output_file.rules.sha256"
+    validate_output_path "$sidecar_file"
+    sidecar_file="$VALIDATED_OUTPUT_PATH"
     rules_file="$(canonical_existing_path "$rules_file")"
     load_rules "$rules_file"
+    rules_digest="$(sha256sum -b -- "$rules_file")"
+    rules_digest="${rules_digest%% *}"
+    rules_repo_root="$(git -C "$(dirname -- "$rules_file")" rev-parse --show-toplevel 2>/dev/null || true)"
+    if [[ -n "$rules_repo_root" ]]; then
+        rules_repo_root="$(canonical_existing_path "$rules_repo_root")"
+        rules_commit="$(git -C "$rules_repo_root" rev-parse --verify HEAD 2>/dev/null || true)"
+    else
+        rules_repo_root="untracked"
+        rules_commit="untracked"
+    fi
+    validate_tsv_field rules_path "$rules_file" rules
+    validate_tsv_field rules_sha256 "$rules_digest" rules
+    validate_tsv_field rules_repo_root "$rules_repo_root" rules
+    validate_tsv_field rules_commit "$rules_commit" rules
 
     tmp_dir="$(mktemp -d "${TMPDIR:-/tmp}/archive-history-docs.XXXXXX")"
     ARCHIVE_TMP_DIR="$tmp_dir"
@@ -425,9 +517,7 @@ inventory() {
         tracked_file="$tmp_dir/$name.tracked"
         untracked_file="$tmp_dir/$name.untracked"
         candidates_file="$tmp_dir/$name.candidates"
-        git -C "$repo_root" ls-files -z > "$tracked_file"
-        git -C "$repo_root" ls-files --others --exclude-standard -z > "$untracked_file"
-        sort -z -u "$tracked_file" "$untracked_file" > "$candidates_file"
+        capture_candidate_snapshot "$repo_root" "$tracked_file" "$untracked_file" "$candidates_file"
 
         declare -A tracked_paths=()
         while IFS= read -r -d '' rel; do
@@ -515,10 +605,18 @@ inventory() {
     done
 
     LC_ALL=C sort -t $'\t' -k13,13 "$tmp_dir/records.tsv" >> "$output_tmp"
+    printf 'rules_path\t%s\nrules_sha256\t%s\nrules_repo_root\t%s\nrules_commit\t%s\n' \
+        "$rules_file" "$rules_digest" "$rules_repo_root" "$rules_commit" \
+        > "$tmp_dir/rules.sidecar"
     check_final_state
+    sidecar_tmp="$(mktemp "$(dirname -- "$sidecar_file")/.$(basename -- "$sidecar_file").tmp.XXXXXX")"
+    ARCHIVE_SIDECAR_TMP="$sidecar_tmp"
+    cp -- "$tmp_dir/rules.sidecar" "$sidecar_tmp"
     output_tmp_target="$(mktemp "$(dirname -- "$output_file")/.$(basename -- "$output_file").tmp.XXXXXX")"
     ARCHIVE_OUTPUT_TMP="$output_tmp_target"
     cp -- "$output_tmp" "$output_tmp_target"
+    mv -f -- "$sidecar_tmp" "$sidecar_file"
+    ARCHIVE_SIDECAR_TMP=""
     mv -f -- "$output_tmp_target" "$output_file"
     ARCHIVE_OUTPUT_TMP=""
 }

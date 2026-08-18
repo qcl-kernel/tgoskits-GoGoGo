@@ -120,12 +120,12 @@ include\t^docs/superpowers/specs/.*(task123|starryos|native-runner|one-click|loc
 include\t^docs/superpowers/plans/.*(task123|starryos|native-runner|one-click|local-first|stability|history-docs).*\.md$\ttask123\tplan\ttask123 plan
 include\t^docs/superpowers/specs/.*\.md$\ttask12\tdesign\ttask12 design
 include\t^docs/superpowers/plans/.*\.md$\ttask12\tplan\ttask12 plan
-include\t^docs/docs/build/axvisor/task123.*(reproduction|复现).*\.md$\ttask123\tguide\tintegrated reproduction guide
+include\t^docs/docs/build/axvisor/task123-test-report\.md$\ttask123\treport\ttask123 test report
+include\t^docs/docs/build/axvisor/task123-reproduction-cn\.md$\ttask123\tguide\ttask123 reproduction guide
 include\t^docs/docs/build/axvisor/rtthread-reproduction\.md$\ttask12\tguide\ttask12 reproduction guide
-include\t^docs/docs/build/axvisor/task123.*\.md$\ttask123\treport\tintegrated report
 include\t^docs/docs/build/axvisor/.*(report|progress|status).*\.md$\ttask12\treport\ttask12 report
 include\t^docs/docs/build/axvisor/rtos-realtime-iterations\.(csv|png)$\ttask12\tresult\trealtime result data
-include\t^docs/docs/build/axvisor/.*\.(log|csv|json|tsv|txt)$\ttask12\tevidence\ttask12 evidence
+include\t^docs/docs/build/axvisor/(task1|task2|task12|rtthread|rtos-realtime|rtipc|rtbench|v[0-9]+)([-_.][^/]*)?\.(log|csv|json|tsv|txt)$\ttask12\tevidence\ttask12 evidence filename plus line-start runtime marker
 ```
 
 规则还要显式包含已盘点的 `docs/design/axvisor-virtio-net.md`、`docs/qperf-virtio-optimization-report.md`、`docs/qperf-starryos-integration-report.md` 和 `docs/spin-migration-tracking.md`，分别映射到与内容一致的阶段和类型。`docs/blog`、`docs/community`、一般构建指南以及未命中规则的文件默认保留，不进行隐式全目录归档。
@@ -150,8 +150,9 @@ archive-history-docs.sh delete --inventory FILE --destination DIR
 - 规则只处理 `.md`、`.txt`、`.log`、`.json`、`.csv`、`.tsv`，以及被 Markdown 历史报告明确引用的 `.png` 结果图；
 - 从文件名收集全部 `YYYY-MM-DD` token；恰好一个合法日期时使用文件名，多个合法日期失败，无合法日期时
   `git log -1 --format=%cs -- "$relative_path"`，untracked 文件用
-  `date -r "$path" +%F`；
+  `date -u -r "$path" +%F`；
 - inventory 使用制表符分隔并包含：source、source_root、branch、commit、tracked、original_path、phase、type、date、date_source、size、sha256、archived_path；
+- inventory 同时生成 `${output}.rules.sha256`，记录规范化 rules 路径、规则 SHA-256 和规则所在 Git commit；后续 manifest/report 从该 sidecar 读取规则 provenance；
 - 包含文件的目标路径固定为
   `<phase>/<type>/<date>/<source>/<original_path>`；
 - 未命中的文件写入 stderr 的保留摘要，但不进入 inventory；
