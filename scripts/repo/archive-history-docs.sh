@@ -898,6 +898,10 @@ load_archive_inventory() {
     LC_ALL=C sort -t $'\t' -k13,13 "$ARCHIVE_RECORDS_RAW" > "$ARCHIVE_RECORDS_FILE"
 
     inventory_sidecar="${ARCHIVE_INVENTORY_FILE}.rules.sha256"
+    if [[ ! -e "$inventory_sidecar" && ! -L "$inventory_sidecar" &&
+        "$(basename -- "$ARCHIVE_INVENTORY_FILE")" == migration-inventory.tsv ]]; then
+        inventory_sidecar="$(dirname -- "$ARCHIVE_INVENTORY_FILE")/rules.sha256"
+    fi
     [[ ! -L "$inventory_sidecar" ]] || die "rules sidecar is symlink: $inventory_sidecar"
     inventory_sidecar="$(canonical_existing_path "$inventory_sidecar")"
     ARCHIVE_INVENTORY_SIDECAR="$inventory_sidecar"

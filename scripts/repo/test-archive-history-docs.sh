@@ -964,6 +964,10 @@ run_required_command archive-success/verify-with-migration-report \
     bash "$ARCHIVER" verify \
     --inventory "$archive_inventory" \
     --destination "$archive_destination"
+run_required_command archive-success/verify-with-archived-inventory \
+    bash "$ARCHIVER" verify \
+    --inventory "$archive_destination/migration-inventory.tsv" \
+    --destination "$archive_destination"
 rm -- "$archive_report"
 ln -s -- manifest.json "$archive_report"
 archive_report_symlink_snapshot="$archive_fixture/destination-before-report-symlink-verify"
