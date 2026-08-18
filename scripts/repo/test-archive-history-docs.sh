@@ -169,8 +169,8 @@ diff -u "$expected_projection" "$actual_projection" \
     || fail 'inventory phase/type/date/tracked mappings differ'
 
 selected_count="$(awk -F '\t' 'NR > 1 && NF { count++ } END { print count + 0 }' "$inventory")"
-[[ "$selected_count" == 8 ]] ||
-    fail "expected 8 selected inventory entries, got $selected_count"
+[[ "$selected_count" == 9 ]] ||
+    fail "expected 9 selected inventory entries, got $selected_count"
 
 assert_excluded() {
     local path="$1"
