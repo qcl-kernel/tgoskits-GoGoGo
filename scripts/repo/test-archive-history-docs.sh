@@ -1280,6 +1280,45 @@ assert_snapshot_equal \
     archive-delete-parent-permission/delete destination
 chmod 0755 -- "$permission_parent"
 
+archive_target_identity_fixture="$(make_archive_fixture archive-target-identity-mutation)"
+archive_target_identity_inventory="$archive_target_identity_fixture/inventory.tsv"
+archive_target_identity_destination="$archive_target_identity_fixture/archive"
+archive_target_identity_source_snapshot="$archive_target_identity_fixture/source-tree.before-delete"
+archive_target_identity_destination_snapshot="$archive_target_identity_fixture/destination-tree.before-delete"
+archive_target_identity_archived_path="$(awk -F '\t' 'NR == 2 { print $13 }' \
+    "$archive_target_identity_inventory")"
+run_required_command archive-target-identity-mutation/stage \
+    bash "$ARCHIVER" stage \
+    --inventory "$archive_target_identity_inventory" \
+    --destination "$archive_target_identity_destination"
+archive_target_identity_path="$(resolve_inventory_archive_path \
+    "$archive_target_identity_destination" \
+    "$archive_target_identity_archived_path" \
+    archive-target-identity-mutation)"
+snapshot_fixture_sources \
+    "$archive_target_identity_fixture" \
+    "$archive_target_identity_source_snapshot"
+snapshot_directory_tree \
+    "$archive_target_identity_destination" \
+    "$archive_target_identity_destination_snapshot"
+run_expected_failure archive-target-identity-mutation/delete \
+    env ARCHIVE_HISTORY_DOCS_TEST_REPLACE_ARCHIVE_TARGET_AFTER_PREFLIGHT="$archive_target_identity_path" \
+    bash "$ARCHIVER" delete \
+    --inventory "$archive_target_identity_inventory" \
+    --destination "$archive_target_identity_destination"
+assert_expected_failure_contains archive-target-identity-mutation/delete 'archive target identity changed'
+assert_fixture_sources_unchanged \
+    "$archive_target_identity_fixture" \
+    "$archive_target_identity_source_snapshot" \
+    archive-target-identity-mutation/delete
+snapshot_directory_tree \
+    "$archive_target_identity_destination" \
+    "$archive_target_identity_fixture/destination-tree.after-delete"
+assert_snapshot_equal \
+    "$archive_target_identity_destination_snapshot" \
+    "$archive_target_identity_fixture/destination-tree.after-delete" \
+    archive-target-identity-mutation/delete destination
+
 missing_target_fixture="$(make_archive_fixture archive-missing-target)"
 missing_target_inventory="$missing_target_fixture/inventory.tsv"
 missing_target_destination="$missing_target_fixture/archive"

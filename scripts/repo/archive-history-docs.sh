@@ -1449,8 +1449,11 @@ check_archive_delete_parent_directories() {
 delete_archive_sources() {
     local source_name source_root branch commit tracked original_path phase type date date_source size sha256 archived_path
     local source_path target_path actual_size actual_sha source_identity current_identity
+    local archive_identity current_archive_identity test_target test_replacement test_mode
     local -A deleted_paths=()
     local -A verified_identities=()
+    local -A verified_archive_identities=()
+    local -A verified_archive_hashes=()
 
     verify_archive_contents
     strict_archive_source_preflight
@@ -1461,23 +1464,43 @@ delete_archive_sources() {
         source_path="$(validate_archive_source_file "$source_name" "$source_root" "$original_path")"
         target_path="$ARCHIVE_DESTINATION/$archived_path"
         [[ -f "$target_path" && ! -L "$target_path" ]] || die "archive target is not a regular file: $target_path"
+        archive_identity="$(stat -c '%d:%i:%h:%a:%s' -- "$target_path")"
         actual_size="$(stat -c '%s' -- "$source_path")"
         actual_sha="$(sha256sum -b -- "$source_path")"
         actual_sha="${actual_sha%% *}"
         [[ "$actual_size" == "$size" && "$actual_sha" == "$sha256" ]] ||
             die "source and archive differ before delete: $source_path"
+        actual_size="$(stat -c '%s' -- "$target_path")"
+        actual_sha="$(sha256sum -b -- "$target_path")"
+        actual_sha="${actual_sha%% *}"
+        [[ "$actual_size" == "$size" && "$actual_sha" == "$sha256" ]] ||
+            die "archive target differs before delete: $target_path"
         [[ "$(stat -c '%h' -- "$source_path")" == 1 ]] ||
             die "source file has unexpected hard links before delete: $source_path"
-        source_identity="$(stat -c '%F:%d:%i:%h:%s' -- "$source_path")"
+        source_identity="$(stat -c '%F:%d:%i:%h:%a:%s' -- "$source_path")"
         [[ "$source_identity" == regular\ file:* ]] ||
             die "source path is not a regular file before delete: $source_path"
         [[ -z "${deleted_paths[$source_path]+set}" ]] || die "source path is duplicated before delete: $source_path"
         deleted_paths["$source_path"]=1
         verified_identities["$source_path"]="$source_identity"
+        verified_archive_identities["$target_path"]="$archive_identity"
+        verified_archive_hashes["$target_path"]="$actual_sha"
     done < "$ARCHIVE_RECORDS_FILE"
 
     capture_archive_source_trees delete-ready
     compare_archive_source_trees delete-before delete-ready
+
+    test_target="${ARCHIVE_HISTORY_DOCS_TEST_REPLACE_ARCHIVE_TARGET_AFTER_PREFLIGHT:-}"
+    if [[ -n "$test_target" ]]; then
+        [[ -n "${verified_archive_identities[$test_target]+set}" ]] ||
+            die "test archive target is not selected: $test_target"
+        [[ -f "$test_target" && ! -L "$test_target" ]] ||
+            die "test archive target is not a regular file: $test_target"
+        test_mode="$(stat -c '%a' -- "$test_target")"
+        test_replacement="$ARCHIVE_TMP_DIR/archive-target-replacement"
+        install -m "$test_mode" -- "$test_target" "$test_replacement"
+        mv -- "$test_replacement" "$test_target"
+    fi
 
     # Shell cannot atomically combine lstat and unlink; identity/tree checks minimize the race window.
     while IFS=$'\t' read -r source_name source_root _ _ _ original_path _ _ _ _ size sha256 archived_path; do
@@ -1485,17 +1508,21 @@ delete_archive_sources() {
         source_path="$(validate_archive_source_file "$source_name" "$source_root" "$original_path")"
         target_path="$ARCHIVE_DESTINATION/$archived_path"
         [[ -f "$source_path" && ! -L "$source_path" ]] || die "source path changed before delete: $source_path"
-        current_identity="$(stat -c '%F:%d:%i:%h:%s' -- "$source_path")"
+        current_identity="$(stat -c '%F:%d:%i:%h:%a:%s' -- "$source_path")"
         [[ "$current_identity" == "${verified_identities[$source_path]}" ]] ||
             die "source file identity changed during delete: $source_path"
         [[ "$current_identity" == regular\ file:*:*:1:* ]] ||
             die "source file has unexpected hard links during delete: $source_path"
         [[ -f "$target_path" && ! -L "$target_path" ]] ||
             die "archive target changed before delete: $target_path"
+        current_archive_identity="$(stat -c '%d:%i:%h:%a:%s' -- "$target_path")"
+        [[ "$current_archive_identity" == "${verified_archive_identities[$target_path]}" ]] ||
+            die "archive target identity changed before delete: $target_path"
         actual_size="$(stat -c '%s' -- "$target_path")"
         actual_sha="$(sha256sum -b -- "$target_path")"
         actual_sha="${actual_sha%% *}"
-        [[ "$actual_size" == "$size" && "$actual_sha" == "$sha256" ]] ||
+        [[ "$actual_size" == "$size" && "$actual_sha" == "$sha256" &&
+            "$actual_sha" == "${verified_archive_hashes[$target_path]}" ]] ||
             die "archive target changed before delete: $target_path"
         actual_size="$(stat -c '%s' -- "$source_path")"
         actual_sha="$(sha256sum -b -- "$source_path")"
