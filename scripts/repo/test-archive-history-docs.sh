@@ -309,6 +309,295 @@ grep -Fq "$flag_path" "$FIXTURE_ROOT/skip.stderr" ||
     fail 'skip-worktree path was not listed'
 git -C "$task123_source" update-index --no-skip-worktree "$flag_path"
 
+archive_rules="$FIXTURE_ROOT/archive-rules.tsv"
+cp -- "$RULES" "$archive_rules"
+printf '%s\n' $'include\t^docs/docs/build/axvisor/task123-shared-evidence\\.log$\ttask123\tevidence\tduplicate evidence fixture' \
+    >> "$archive_rules"
+
+make_archive_fixture() {
+    local name="$1"
+    local fixture_root="$FIXTURE_ROOT/$name"
+    local fixture_inventory="$fixture_root/inventory.tsv"
+
+    mkdir -p -- "$fixture_root"
+    cp -a -- "$task12_source" "$fixture_root/task12-source"
+    cp -a -- "$task123_source" "$fixture_root/task123-source"
+    bash "$ARCHIVER" inventory \
+        --rules "$archive_rules" \
+        --source "task12-source=$fixture_root/task12-source" \
+        --source "task123-source=$fixture_root/task123-source" \
+        --output "$fixture_inventory" \
+        > "$fixture_root/inventory.stdout" \
+        2> "$fixture_root/inventory.stderr" ||
+        fail "archive fixture inventory failed: $name"
+    printf '%s\n' "$fixture_root"
+}
+
+assert_inventory_sources_exist() {
+    local inventory_file="$1"
+    local source source_root branch commit tracked original_path phase type
+    local date date_source size sha256 archived_path
+
+    while IFS=$'\t' read -r source source_root branch commit tracked original_path \
+        phase type date date_source size sha256 archived_path; do
+        [[ -n "$source" ]] || continue
+        [[ -f "$source_root/$original_path" ]] ||
+            fail "inventory source file is missing: $source_root/$original_path"
+    done < <(tail -n +2 "$inventory_file")
+}
+
+assert_inventory_targets_exist() {
+    local inventory_file="$1"
+    local destination="$2"
+    local source source_root branch commit tracked original_path phase type
+    local date date_source size sha256 archived_path
+
+    while IFS=$'\t' read -r source source_root branch commit tracked original_path \
+        phase type date date_source size sha256 archived_path; do
+        [[ -n "$source" ]] || continue
+        [[ -f "$destination/$archived_path" ]] ||
+            fail "inventory target file is missing: $destination/$archived_path"
+    done < <(tail -n +2 "$inventory_file")
+}
+
+snapshot_source_candidates() {
+    local source_root="$1"
+    local output_file="$2"
+
+    git -C "$source_root" ls-files -co --exclude-standard |
+        while IFS= read -r path; do
+            printf '%s\t%s\n' "$source_root" "$path"
+        done >> "$output_file"
+}
+
+assert_only_inventory_sources_deleted() {
+    local inventory_file="$1"
+    local candidates_file="$2"
+    local source_root original_path
+
+    while IFS=$'\t' read -r source_root original_path; do
+        if awk -F '\t' -v expected_root="$source_root" -v expected_path="$original_path" \
+            'NR > 1 && $2 == expected_root && $6 == expected_path { found = 1 }
+             END { exit found ? 0 : 1 }' "$inventory_file"; then
+            [[ ! -e "$source_root/$original_path" ]] ||
+                fail "delete retained selected source: $source_root/$original_path"
+        else
+            [[ -e "$source_root/$original_path" ]] ||
+                fail "delete removed non-selected source: $source_root/$original_path"
+        fi
+    done < "$candidates_file"
+}
+
+assert_index_counts_match_manifest() {
+    local destination="$1"
+    local expected_counts="$FIXTURE_ROOT/expected-index-counts.tsv"
+    local actual_counts="$FIXTURE_ROOT/actual-index-counts.tsv"
+
+    jq -r '.entries | group_by([.phase, .type])[] | [.[0].phase, .[0].type, length] | @tsv' \
+        "$destination/manifest.json" | LC_ALL=C sort > "$expected_counts" ||
+        fail 'manifest phase/type aggregation failed'
+    awk -F '|' '
+        $0 ~ /^\| Phase \| Type \| Count \|$/ { in_table = 1; next }
+        in_table && $0 ~ /^\|[[:space:]]*[-]+[[:space:]]*\|/ { next }
+        in_table && $0 ~ /^\|/ {
+            phase = $2
+            type = $3
+            count = $4
+            gsub(/^[[:space:]]+|[[:space:]]+$/, "", phase)
+            gsub(/^[[:space:]]+|[[:space:]]+$/, "", type)
+            gsub(/^[[:space:]]+|[[:space:]]+$/, "", count)
+            if (phase != "" && type != "" && count ~ /^[0-9]+$/) {
+                print phase "\t" type "\t" count
+            }
+        }
+    ' "$destination/INDEX.md" | LC_ALL=C sort > "$actual_counts"
+    diff -u "$expected_counts" "$actual_counts" ||
+        fail 'INDEX phase/type counts differ from manifest aggregation'
+}
+
+archive_fixture="$(make_archive_fixture archive-success)"
+archive_inventory="$archive_fixture/inventory.tsv"
+archive_destination="$archive_fixture/archive"
+
+if ! bash "$ARCHIVER" stage \
+    --inventory "$archive_inventory" \
+    --destination "$archive_destination" \
+    > "$archive_fixture/stage.stdout" \
+    2> "$archive_fixture/stage.stderr"; then
+    if grep -Fq 'usage:' "$archive_fixture/stage.stderr" &&
+        ! grep -Fq 'stage' "$archive_fixture/stage.stderr"; then
+        fail 'stage subcommand is missing; Task 3 stage/verify/delete tests are not implemented yet'
+    fi
+    fail "stage failed unexpectedly: $(<"$archive_fixture/stage.stderr")"
+fi
+
+assert_inventory_sources_exist "$archive_inventory"
+archive_candidates="$archive_fixture/candidates.tsv"
+: > "$archive_candidates"
+snapshot_source_candidates "$archive_fixture/task12-source" "$archive_candidates"
+snapshot_source_candidates "$archive_fixture/task123-source" "$archive_candidates"
+[[ -f "$archive_destination/manifest.json" ]] ||
+    fail 'stage did not create manifest.json'
+[[ -f "$archive_destination/INDEX.md" ]] ||
+    fail 'stage did not create INDEX.md'
+assert_inventory_targets_exist "$archive_inventory" "$archive_destination"
+
+bash "$ARCHIVER" verify \
+    --inventory "$archive_inventory" \
+    --destination "$archive_destination" \
+    > "$archive_fixture/verify.stdout" \
+    2> "$archive_fixture/verify.stderr" ||
+    fail "verify failed after stage: $(<"$archive_fixture/verify.stderr")"
+
+duplicate_group_count="$(jq -r '
+    [.entries[] | select(.original_path | endswith("shared-evidence.log"))]
+    | map(.duplicate_group) | unique
+    | if length == 1 and .[0] != null then "1" else "0" end
+' "$archive_destination/manifest.json")"
+[[ "$duplicate_group_count" == 1 ]] ||
+    fail 'identical shared evidence did not produce one non-null duplicate group'
+duplicate_entry_count="$(jq -r '
+    [.entries[] | select(.original_path | endswith("shared-evidence.log"))] | length
+' "$archive_destination/manifest.json")"
+[[ "$duplicate_entry_count" == 2 ]] ||
+    fail 'both identical shared evidence entries were not retained'
+assert_index_counts_match_manifest "$archive_destination"
+
+[[ -f "$archive_fixture/task12-source/docs/README.md" ]] ||
+    fail 'stage removed task12 README'
+[[ -f "$archive_fixture/task12-source/docs/docs/architecture/axvisor/overview.md" ]] ||
+    fail 'stage removed active architecture reference'
+[[ -f "$archive_fixture/task12-source/apps/demo/validation/baseline.txt" ]] ||
+    fail 'stage removed validation baseline'
+bash "$ARCHIVER" delete \
+    --inventory "$archive_inventory" \
+    --destination "$archive_destination" \
+    > "$archive_fixture/delete.stdout" \
+    2> "$archive_fixture/delete.stderr" ||
+    fail "delete failed after verified stage: $(<"$archive_fixture/delete.stderr")"
+assert_only_inventory_sources_deleted "$archive_inventory" "$archive_candidates"
+[[ -f "$archive_fixture/task12-source/docs/README.md" ]] ||
+    fail 'delete removed task12 README'
+[[ -f "$archive_fixture/task12-source/docs/docs/architecture/axvisor/overview.md" ]] ||
+    fail 'delete removed active architecture reference'
+[[ -f "$archive_fixture/task12-source/apps/demo/validation/baseline.txt" ]] ||
+    fail 'delete removed validation baseline'
+
+mutation_fixture="$(make_archive_fixture archive-source-mutation)"
+mutation_inventory="$mutation_fixture/inventory.tsv"
+mutation_destination="$mutation_fixture/archive"
+bash "$ARCHIVER" stage \
+    --inventory "$mutation_inventory" \
+    --destination "$mutation_destination" \
+    > "$mutation_fixture/stage.stdout" \
+    2> "$mutation_fixture/stage.stderr" ||
+    fail "source mutation fixture stage failed: $(<"$mutation_fixture/stage.stderr")"
+mutation_source_path="$(awk -F '\t' 'NR == 2 { print $2 "/" $6 }' "$mutation_inventory")"
+printf '%s\n' 'changed after stage' >> "$mutation_source_path"
+if bash "$ARCHIVER" delete \
+    --inventory "$mutation_inventory" \
+    --destination "$mutation_destination" \
+    > "$mutation_fixture/delete.stdout" \
+    2> "$mutation_fixture/delete.stderr"; then
+    fail 'delete accepted a selected source changed after stage'
+fi
+grep -Fq 'changed' "$mutation_fixture/delete.stderr" ||
+    fail 'source mutation delete failure was not reported'
+assert_inventory_sources_exist "$mutation_inventory"
+
+missing_target_fixture="$(make_archive_fixture archive-missing-target)"
+missing_target_inventory="$missing_target_fixture/inventory.tsv"
+missing_target_destination="$missing_target_fixture/archive"
+bash "$ARCHIVER" stage \
+    --inventory "$missing_target_inventory" \
+    --destination "$missing_target_destination" \
+    > "$missing_target_fixture/stage.stdout" \
+    2> "$missing_target_fixture/stage.stderr" ||
+    fail "missing target fixture stage failed: $(<"$missing_target_fixture/stage.stderr")"
+missing_target_path="$(awk -F '\t' -v destination="$missing_target_destination" \
+    'NR == 2 { print destination "/" $13 }' "$missing_target_inventory")"
+rm -- "$missing_target_path"
+if bash "$ARCHIVER" verify \
+    --inventory "$missing_target_inventory" \
+    --destination "$missing_target_destination" \
+    > "$missing_target_fixture/verify.stdout" \
+    2> "$missing_target_fixture/verify.stderr"; then
+    fail 'verify accepted a missing destination file'
+fi
+if bash "$ARCHIVER" delete \
+    --inventory "$missing_target_inventory" \
+    --destination "$missing_target_destination" \
+    > "$missing_target_fixture/delete.stdout" \
+    2> "$missing_target_fixture/delete.stderr"; then
+    fail 'delete accepted a missing destination file'
+fi
+grep -Fq 'missing' "$missing_target_fixture/verify.stderr" ||
+    fail 'missing destination verify failure was not reported'
+grep -Fq 'missing' "$missing_target_fixture/delete.stderr" ||
+    fail 'missing destination delete failure was not reported'
+assert_inventory_sources_exist "$missing_target_inventory"
+
+collision_fixture="$(make_archive_fixture archive-collision)"
+collision_inventory="$collision_fixture/inventory.tsv"
+collision_destination="$collision_fixture/archive"
+collision_archived_path="$(awk -F '\t' 'NR == 2 { print $13 }' "$collision_inventory")"
+mkdir -p -- "$(dirname -- "$collision_destination/$collision_archived_path")"
+printf '%s\n' 'different collision content' > "$collision_destination/$collision_archived_path"
+if bash "$ARCHIVER" stage \
+    --inventory "$collision_inventory" \
+    --destination "$collision_destination" \
+    > "$collision_fixture/stage.stdout" \
+    2> "$collision_fixture/stage.stderr"; then
+    fail 'stage overwrote a destination collision with different content'
+fi
+grep -Fq "$collision_archived_path" "$collision_fixture/stage.stderr" ||
+    fail 'destination collision failure did not identify the target path'
+[[ "$(<"$collision_destination/$collision_archived_path")" == 'different collision content' ]] ||
+    fail 'destination collision content was modified'
+assert_inventory_sources_exist "$collision_inventory"
+
+unsafe_fixture="$(make_archive_fixture archive-unsafe-destination)"
+unsafe_inventory="$unsafe_fixture/inventory.tsv"
+unsafe_status_before="$unsafe_fixture/source-status.before"
+unsafe_status_after="$unsafe_fixture/source-status.after"
+{
+    git -C "$unsafe_fixture/task12-source" status --porcelain=v1 --untracked-files=all
+    git -C "$unsafe_fixture/task123-source" status --porcelain=v1 --untracked-files=all
+} > "$unsafe_status_before"
+unsafe_label='root'
+if bash "$ARCHIVER" stage \
+    --inventory "$unsafe_inventory" \
+    --destination / \
+    > "$unsafe_fixture/$unsafe_label.stdout" \
+    2> "$unsafe_fixture/$unsafe_label.stderr"; then
+    fail 'stage accepted filesystem root as destination'
+fi
+unsafe_label='source-root'
+if bash "$ARCHIVER" stage \
+    --inventory "$unsafe_inventory" \
+    --destination "$unsafe_fixture/task12-source" \
+    > "$unsafe_fixture/$unsafe_label.stdout" \
+    2> "$unsafe_fixture/$unsafe_label.stderr"; then
+    fail 'stage accepted source root as destination'
+fi
+unsafe_destination="$unsafe_fixture/nonempty"
+mkdir -p -- "$unsafe_destination"
+printf '%s\n' 'unrelated destination content' > "$unsafe_destination/unrelated.txt"
+if bash "$ARCHIVER" stage \
+    --inventory "$unsafe_inventory" \
+    --destination "$unsafe_destination" \
+    > "$unsafe_fixture/nonempty.stdout" \
+    2> "$unsafe_fixture/nonempty.stderr"; then
+    fail 'stage accepted non-empty destination without manifest'
+fi
+assert_inventory_sources_exist "$unsafe_inventory"
+{
+    git -C "$unsafe_fixture/task12-source" status --porcelain=v1 --untracked-files=all
+    git -C "$unsafe_fixture/task123-source" status --porcelain=v1 --untracked-files=all
+} > "$unsafe_status_after"
+diff -u "$unsafe_status_before" "$unsafe_status_after" ||
+    fail 'unsafe destination stage changed source worktrees'
+
 newline_source="$FIXTURE_ROOT/"$'source\nroot'
 init_fixture_repo "$newline_source"
 write_fixture_file \
