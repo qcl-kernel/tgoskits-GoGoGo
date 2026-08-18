@@ -182,12 +182,14 @@ only after its destination file and manifest entry both pass verification.
 
 ## Link Policy
 
-Links between archived documents are rewritten when both endpoints are moved.
-Links from retained source documentation to archived historical material are
-updated only when they are still meaningful; otherwise the retained document
-receives a direct archive link. Links to source code remain pointed at source
-locations and are reported when they cannot be made portable across the two
-repositories.
+Archived files remain byte-identical to their pre-migration source so their
+recorded size and SHA-256 digest remain valid evidence. When the phase, type,
+or date prefixes make an archived relative link invalid, `INDEX.md` provides a
+link map and the migration report records the original link and resolved
+archive target. Links from retained source documentation to archived
+historical material are updated only when they are still meaningful. Links to
+source code remain pointed at source locations and are reported when they
+cannot be made portable across the two repositories.
 
 The verification report distinguishes broken local links from external URLs.
 No network availability is required to validate this migration.
