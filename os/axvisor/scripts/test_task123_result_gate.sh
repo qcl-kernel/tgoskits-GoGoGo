@@ -224,6 +224,20 @@ emit_stability 1 >> "$tmp/stability/console.log"
 run_gate "$tmp/stability" stability --seconds 1 >/dev/null ||
     fail "stability fixture was rejected"
 
+make_fixture "$tmp/stability-qemu-timer-limit"
+emit_stability 1 >> "$tmp/stability-qemu-timer-limit/console.log"
+sed -i \
+    -e '0,/miss_1ms=0/s//miss_1ms=1/' \
+    -e 's/RTBENCH_STABILITY_END status=PASS/RTBENCH_STABILITY_END status=FAIL/' \
+    "$tmp/stability-qemu-timer-limit/console.log"
+run_gate "$tmp/stability-qemu-timer-limit" stability --seconds 1 \
+    --allow-qemu-timer-limit >/dev/null ||
+    fail "explicit QEMU timer-limit diagnostic fixture was rejected"
+if find "$tmp/stability-qemu-timer-limit" -maxdepth 1 -name '.console.*' -print -quit |
+   grep -q .; then
+    fail "diagnostic gate leaked an internal console normalization file"
+fi
+
 make_fixture "$tmp/task3"
 run_gate "$tmp/task3" task3 >/dev/null || fail "task3 fixture was rejected"
 

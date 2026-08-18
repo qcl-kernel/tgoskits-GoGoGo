@@ -45,7 +45,9 @@ def write_guest(name: str, avg: int, app_guest: str) -> None:
     (run / "rtthread.log").write_text(
         "RTBENCH_STABILITY_BEGIN seconds=1 expected=999\n"
         "RTBENCH metric=stability_jitter run=1 expected=999 collected=999 missing=0 "
-        f"p50_ns={avg} p95_ns=2 p99_ns=3 p99_9_ns=4 max_ns=5 miss_100us=0 miss_500us=0 miss_1ms=0 mean_ns=2\n"
+        f"p50_ns={avg} p95_ns={max(avg, 2)} p99_ns={max(avg, 3)} "
+        f"p99_9_ns={max(avg, 4)} max_ns={max(avg, 5)} "
+        "miss_100us=0 miss_500us=0 miss_1ms=0 mean_ns=2\n"
         "RTBENCH metric=callback_exec run=1 expected=999 collected=999 missing=0 "
         "p50_ns=1 p95_ns=2 p99_ns=3 p99_9_ns=4 max_ns=5 miss_100us=0 miss_500us=0 miss_1ms=0 mean_ns=2\n"
         "RTBENCH_STABILITY_END status=PASS expected=999 collected=999 missing=0\n",
@@ -109,6 +111,32 @@ report = Path(sys.argv[2]).read_text(encoding="utf-8")
 if "StarryOS 与 Linux" not in report or "Task2 RTT" not in report:
     raise SystemExit("comparison report is missing required sections")
 PY
+
+for guest in linux starryos; do
+    sed -i 's/^result_gate=PASS$/result_gate=PASS_WITH_QEMU_TIMER_LIMIT/' \
+        "$tmp/$guest/manifest.txt"
+done
+if "$ANALYZER" --linux-run "$tmp/linux" --starryos-run "$tmp/starryos" \
+    --output "$tmp/diagnostic-rejected" >/dev/null 2>&1; then
+    fail "analyzer accepted diagnostic gate without explicit opt-in"
+fi
+"$ANALYZER" --linux-run "$tmp/linux" --starryos-run "$tmp/starryos" \
+    --allow-qemu-timer-limit --output "$tmp/diagnostic-accepted" >/dev/null ||
+    fail "analyzer rejected explicit diagnostic gate"
+
+python3 - "$tmp/linux/linux.log" <<'PY'
+import sys
+from pathlib import Path
+
+path = Path(sys.argv[1])
+text = path.read_text(encoding="ascii")
+path.write_text(text.replace("P95=3ms", "P95=1ms", 1), encoding="ascii")
+PY
+
+if "$ANALYZER" --linux-run "$tmp/linux" --starryos-run "$tmp/starryos" \
+    --output "$tmp/invalid-percentiles" >/dev/null 2>&1; then
+    fail "analyzer accepted descending RTT percentiles"
+fi
 
 python3 - "$tmp/starryos/manifest.txt" <<'PY'
 import sys

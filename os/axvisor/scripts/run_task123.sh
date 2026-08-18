@@ -181,6 +181,11 @@ validate_mode_options() {
     require_integer "${QEMU_UCLAMP_MIN:-1024}" 0 1024 QEMU_UCLAMP_MIN
     require_integer "${QEMU_TIMER_SLACK_NS:-1}" 1 1000000000 QEMU_TIMER_SLACK_NS
     require_integer "${QEMU_RESOURCE_SAMPLE_INTERVAL_MS:-100}" 1 60000 QEMU_RESOURCE_SAMPLE_INTERVAL_MS
+    require_integer "${TASK123_ALLOW_QEMU_TIMER_LIMIT:-0}" 0 1 TASK123_ALLOW_QEMU_TIMER_LIMIT
+    if [[ "${TASK123_ALLOW_QEMU_TIMER_LIMIT:-0}" -eq 1 && "$mode" != stability ]]; then
+        fail "TASK123_ALLOW_QEMU_TIMER_LIMIT is only valid for stability mode"
+        return 2
+    fi
 }
 
 canonical_existing_file() {
@@ -414,6 +419,7 @@ APP_GUEST_TASK123_END_MARKER=
 APP_GUEST_FAILURE_MARKER=
 HOST_METRICS=
 SHARED_ARTIFACT_DIR="${TASK123_SHARED_ARTIFACT_DIR:-}"
+RESULT_GATE_STATUS=PASS
 serial_fd_open=0
 
 terminate_owned_pid() {
@@ -932,8 +938,12 @@ launch_one_qemu() {
         markers+=('RTBENCH_END status=PASS')
         failure_markers+=('RTBENCH_END status=FAIL')
     elif [[ "$mode" == stability ]]; then
-        markers+=('RTBENCH_STABILITY_END status=PASS')
-        failure_markers+=('RTBENCH_STABILITY_END status=FAIL')
+        if [[ "${TASK123_ALLOW_QEMU_TIMER_LIMIT:-0}" -eq 1 ]]; then
+            markers+=('RTBENCH_STABILITY_DONE')
+        else
+            markers+=('RTBENCH_STABILITY_END status=PASS')
+            failure_markers+=('RTBENCH_STABILITY_END status=FAIL')
+        fi
     fi
     local failure_marker_args=()
     local failure_marker
@@ -1045,14 +1055,19 @@ run_result_gate() {
     elif [[ "$mode" == task3-fault ]]; then
         arguments+=(--task3-fault "$task3_fault")
     fi
+    RESULT_GATE_STATUS=PASS
+    if [[ "$mode" == stability && "${TASK123_ALLOW_QEMU_TIMER_LIMIT:-0}" -eq 1 ]]; then
+        arguments+=(--allow-qemu-timer-limit)
+        RESULT_GATE_STATUS=PASS_WITH_QEMU_TIMER_LIMIT
+    fi
     run_timed "$TASK123_PHASE_TIMEOUT_S" result-gate \
         "$RESULT_GATE" "${arguments[@]}"
 }
 
 publish_manifest() {
     phase manifest
-    printf 'raw_qemu_exit=%s\ntermination_reason=%s\nqemu_exit=%s\nresult_gate=PASS\n' \
-        "$raw_qemu_exit" "$termination_reason" "$normalized_qemu_exit" >> "$MANIFEST_TMP"
+    printf 'raw_qemu_exit=%s\ntermination_reason=%s\nqemu_exit=%s\nresult_gate=%s\n' \
+        "$raw_qemu_exit" "$termination_reason" "$normalized_qemu_exit" "$RESULT_GATE_STATUS" >> "$MANIFEST_TMP"
     mv -- "$MANIFEST_TMP" "$MANIFEST"
 }
 

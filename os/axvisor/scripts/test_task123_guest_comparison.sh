@@ -38,8 +38,8 @@ while [[ $# -gt 0 ]]; do
         *) shift ;;
     esac
 done
-printf '%s %s %s %s %s %s\n' "$guest" "$mode" "$task2_count" "$task3_frames" "$seconds" \
-    "${TASK123_SHARED_ARTIFACT_DIR:?}" >> "${TASK123_COMPARISON_TRACE:?}"
+printf '%s %s %s %s %s %s %s\n' "$guest" "$mode" "$task2_count" "$task3_frames" "$seconds" \
+    "${TASK123_SHARED_ARTIFACT_DIR:?}" "${TASK123_TIMEOUT_S:?}" >> "${TASK123_COMPARISON_TRACE:?}"
 mkdir -p "$output"
 python3 - "$output" "$guest" "$mode" "$task2_count" "$task3_frames" "$seconds" <<'PY'
 import json
@@ -107,10 +107,12 @@ EOF
 chmod +x "$runner"
 
 output="$tmp/comparison-output"
+explicit_cache="$tmp/explicit-cache"
+mkdir -- "$explicit_cache"
 if ! TASK123_COMPARISON_RUNNER="$runner" \
     TASK123_COMPARISON_TRACE="$trace" \
     TASK123_COMPARISON_ANALYZER="$ANALYZER" \
-    "$ORCHESTRATOR" --quick --output "$output" >/dev/null; then
+    "$ORCHESTRATOR" --quick --cache "$explicit_cache" --output "$output" >/dev/null; then
     [[ ! -f "$output/orchestrator.log" ]] || cat "$output/orchestrator.log" >&2
     fail "quick guest comparison failed"
 fi
@@ -120,11 +122,13 @@ fi
 [[ -s "$output/comparison/comparison.json" ]] || fail "comparison JSON is missing"
 [[ -s "$output/comparison/comparison-report.md" ]] || fail "comparison report is missing"
 [[ "$(wc -l < "$trace")" -eq 2 ]] || fail "orchestrator did not run both guests exactly once"
-awk '$1 == "linux" && $2 == "stability" && $3 == 30000 && $4 == 3 && $5 == 300 {next} $1 == "starryos" && $2 == "stability" && $3 == 30000 && $4 == 3 && $5 == 300 {next} {exit 1}' "$trace" ||
+awk '$1 == "linux" && $2 == "stability" && $3 == 30000 && $4 == 3 && $5 == 300 && $7 == 900 {next} $1 == "starryos" && $2 == "stability" && $3 == 30000 && $4 == 3 && $5 == 300 && $7 == 900 {next} {exit 1}' "$trace" ||
     fail "quick comparison did not use the specified workload"
 cache_one="$(awk 'NR == 1 {print $6}' "$trace")"
 cache_two="$(awk 'NR == 2 {print $6}' "$trace")"
 [[ "$cache_one" == "$cache_two" ]] || fail "guests did not share one artifact cache"
+[[ "$cache_one" == "$(realpath -e -- "$explicit_cache")" ]] ||
+    fail "orchestrator did not use the explicit artifact cache"
 case "$cache_one" in
     "$output"/*) fail "shared artifact cache is nested in output" ;;
 esac
@@ -139,7 +143,7 @@ if ! TASK123_COMPARISON_RUNNER="$runner" \
     fail "full guest comparison failed"
 fi
 [[ "$(wc -l < "$full_trace")" -eq 2 ]] || fail "full comparison did not run both guests exactly once"
-awk '$1 == "linux" && $2 == "stability" && $3 == 240000 && $4 == 3 && $5 == 3600 {next} $1 == "starryos" && $2 == "stability" && $3 == 240000 && $4 == 3 && $5 == 3600 {next} {exit 1}' "$full_trace" ||
+awk '$1 == "linux" && $2 == "stability" && $3 == 240000 && $4 == 3 && $5 == 3600 && $7 == 5400 {next} $1 == "starryos" && $2 == "stability" && $3 == 240000 && $4 == 3 && $5 == 3600 && $7 == 5400 {next} {exit 1}' "$full_trace" ||
     fail "full comparison did not use the formal workload"
 [[ -s "$full_output/comparison/comparison-report.md" ]] ||
     fail "full comparison report is missing"

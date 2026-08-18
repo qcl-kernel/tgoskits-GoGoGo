@@ -48,6 +48,17 @@ def duration_to_ms(value: str, unit: str) -> float:
     return float(value) * factors[unit]
 
 
+def require_non_decreasing(
+    values: dict[str, float], keys: tuple[str, ...], context: str
+) -> None:
+    for lower, upper in zip(keys, keys[1:]):
+        if values[lower] > values[upper]:
+            fail(
+                f"{context} percentiles are descending: "
+                f"{lower}={values[lower]} > {upper}={values[upper]}"
+            )
+
+
 def parse_key_values(line: str) -> dict[str, str]:
     return dict(re.findall(r"([A-Za-z][A-Za-z0-9_.-]*)=([^\s]+)", line))
 
@@ -81,6 +92,7 @@ def parse_task2(path: Path) -> dict[str, Any]:
                 if match is None:
                     fail(f"missing RTT field {key} in {path}: {line}")
                 values[key] = duration_to_ms(match.group(1), match.group(2))
+            require_non_decreasing(values, RTT_KEYS, f"Task2 {current}B RTT in {path}")
             section["rtt_ms"] = values
             continue
         match = re.search(rf"throughput=({NUMBER})(B/s|KiB/s|MiB/s|GiB/s)", line)
@@ -134,7 +146,13 @@ def parse_rtbench(path: Path) -> dict[str, Any]:
         values = parse_key_values(match.group(2))
         if any(field not in values for field in RTBENCH_FIELDS):
             fail(f"incomplete RTBench metric {metric_name} in {path}")
-        metrics[metric_name] = {field: int(values[field]) for field in RTBENCH_FIELDS}
+        metric = {field: int(values[field]) for field in RTBENCH_FIELDS}
+        require_non_decreasing(
+            {field: float(metric[field]) for field in ("p50_ns", "p95_ns", "p99_ns", "p99_9_ns", "max_ns")},
+            ("p50_ns", "p95_ns", "p99_ns", "p99_9_ns", "max_ns"),
+            f"RTBench {metric_name} in {path}",
+        )
+        metrics[metric_name] = metric
     if "stability_jitter" not in metrics or "callback_exec" not in metrics:
         fail(f"stability_jitter and callback_exec are required in {path}")
     return metrics
@@ -153,7 +171,9 @@ def parse_summary(path: Path) -> dict[str, Any]:
     return {field: summary[field] for field in fields}
 
 
-def parse_manifest(path: Path, expected_guest: str) -> dict[str, str]:
+def parse_manifest(
+    path: Path, expected_guest: str, allow_qemu_timer_limit: bool
+) -> dict[str, str]:
     values: dict[str, str] = {}
     for line in path.read_text(encoding="ascii").splitlines():
         artifact = re.fullmatch(
@@ -170,7 +190,10 @@ def parse_manifest(path: Path, expected_guest: str) -> dict[str, str]:
             values[key] = value
     if values.get("app_guest") != expected_guest:
         fail(f"manifest app_guest does not match {expected_guest}: {path}")
-    if values.get("result_gate") != "PASS":
+    accepted_gates = {"PASS"}
+    if allow_qemu_timer_limit:
+        accepted_gates.add("PASS_WITH_QEMU_TIMER_LIMIT")
+    if values.get("result_gate") not in accepted_gates:
         fail(f"manifest is not result-gate authenticated: {path}")
     return values
 
@@ -198,11 +221,15 @@ def guest_log(run_dir: Path, guest: str) -> Path:
     return path
 
 
-def load_guest(run_dir: Path, guest: str) -> dict[str, Any]:
+def load_guest(
+    run_dir: Path, guest: str, allow_qemu_timer_limit: bool
+) -> dict[str, Any]:
     return {
         "app_guest": guest,
         "run_dir": str(run_dir.resolve()),
-        "manifest": parse_manifest(run_dir / "manifest.txt", guest),
+        "manifest": parse_manifest(
+            run_dir / "manifest.txt", guest, allow_qemu_timer_limit
+        ),
         "task2": parse_task2(guest_log(run_dir, guest)),
         "task3": parse_summary(run_dir / "summary.json"),
         "rtbench": parse_rtbench(run_dir / "rtthread.log"),
@@ -325,6 +352,8 @@ def report(data: dict[str, Any]) -> str:
         f"- StarryOS run: '{starryos['run_dir']}'",
         f"- Linux mode: '{linux['manifest'].get('mode', 'unknown')}'",
         f"- StarryOS mode: '{starryos['manifest'].get('mode', 'unknown')}'",
+        f"- Linux result gate: '{linux['manifest'].get('result_gate', 'unknown')}'",
+        f"- StarryOS result gate: '{starryos['manifest'].get('result_gate', 'unknown')}'",
         "",
         "## Task2 RTT",
         "",
@@ -376,6 +405,7 @@ def report(data: dict[str, Any]) -> str:
         "",
         "- 两次运行顺序、宿主负载和 TCG 翻译缓存状态会引入误差。",
         "- miss_1ms、panic/assert/fatal 和请求完整性仍以各自 run 的结果门禁为准。",
+        "- PASS_WITH_QEMU_TIMER_LIMIT 只表示样本完整且其他功能门禁通过，不表示满足 1 ms 实时截止期。",
         "- 本文件只汇总已通过门禁的原始结果，不把平均值替代最坏情况。",
         "",
     ]
@@ -396,10 +426,11 @@ def main() -> int:
     parser.add_argument("--linux-run", type=Path, required=True)
     parser.add_argument("--starryos-run", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--allow-qemu-timer-limit", action="store_true")
     args = parser.parse_args()
     args.output.mkdir(parents=True, exist_ok=True)
-    linux = load_guest(args.linux_run, "linux")
-    starryos = load_guest(args.starryos_run, "starryos")
+    linux = load_guest(args.linux_run, "linux", args.allow_qemu_timer_limit)
+    starryos = load_guest(args.starryos_run, "starryos", args.allow_qemu_timer_limit)
     data = {
         "schema": 1,
         "guests": {"linux": linux, "starryos": starryos},

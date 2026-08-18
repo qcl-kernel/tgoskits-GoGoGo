@@ -8,7 +8,7 @@ SUMMARIZE="$ROOT/os/axvisor/guests/task3/scripts/summarize.py"
 SUMMARIZE_FAULTS="$ROOT/os/axvisor/guests/task3/scripts/summarize_faults.py"
 
 usage() {
-    echo "usage: $0 [--app-guest linux|starryos] --mode MODE --log LOG --output DIR --task2-count N --task3-frames N --qemu-exit N [--rtbench-samples N] [--seconds N] [--task3-fault PROFILE]" >&2
+    echo "usage: $0 [--app-guest linux|starryos] --mode MODE --log LOG --output DIR --task2-count N --task3-frames N --qemu-exit N [--rtbench-samples N] [--seconds N] [--task3-fault PROFILE] [--allow-qemu-timer-limit]" >&2
     exit 2
 }
 
@@ -35,6 +35,7 @@ qemu_exit=
 rtbench_samples=
 seconds=
 task3_fault=
+allow_qemu_timer_limit=0
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -55,6 +56,10 @@ while [[ $# -gt 0 ]]; do
                 --seconds) seconds=$value ;;
                 --task3-fault) task3_fault=$value ;;
             esac
+            ;;
+        --allow-qemu-timer-limit)
+            allow_qemu_timer_limit=1
+            shift
             ;;
         *) usage ;;
     esac
@@ -112,8 +117,17 @@ case "$mode" in
     *) usage ;;
 esac
 
+[[ "$allow_qemu_timer_limit" -eq 0 || "$mode" == stability ]] || usage
+
 [[ "$qemu_exit" -eq 0 ]] || die "QEMU failed with exit code $qemu_exit"
-if grep -aEiq 'panicked at|kernel panic|assertion failed|RT-Thread[^[:cntrl:]]*assert|(^|[^[:alpha:]])fatal([^[:alpha:]]|$)|status=FAIL|TESTS FAILED' "$log"; then
+failure_log="$output/.console.failure-check.log"
+if [[ "$allow_qemu_timer_limit" -eq 1 ]]; then
+    sed '/RTBENCH_STABILITY_END status=FAIL/d' "$log" > "$failure_log"
+else
+    cp -- "$log" "$failure_log"
+fi
+trap 'rm -f -- "$normalized_log" "$failure_log"' EXIT
+if grep -aEiq 'panicked at|kernel panic|assertion failed|RT-Thread[^[:cntrl:]]*assert|(^|[^[:alpha:]])fatal([^[:alpha:]]|$)|status=FAIL|TESTS FAILED' "$failure_log"; then
     die "panic, assertion, fatal error, or failed status found in console log"
 fi
 
@@ -151,14 +165,23 @@ done
 if [[ "$mode" == realtime-suite ]]; then
     require_exact_marker 'RTBENCH_END status=PASS'
 elif [[ "$mode" == stability ]]; then
-    require_exact_marker 'RTBENCH_STABILITY_END status=PASS'
+    if [[ "$allow_qemu_timer_limit" -eq 1 ]]; then
+        [[ "$(grep -aEc 'RTBENCH_STABILITY_END status=(PASS|FAIL) expected=[0-9]+ collected=[0-9]+ missing=0[[:space:]]*$' "$log")" -eq 1 ]] ||
+            die "stability end marker is missing or duplicated"
+    else
+        require_exact_marker 'RTBENCH_STABILITY_END status=PASS'
+    fi
 fi
 
 "$SCRIPT_DIR/verify_rtipc_results.sh" "$log" "$task2_count" "$qemu_exit" none "$app_guest"
 if [[ "$mode" == realtime-suite ]]; then
     "$SCRIPT_DIR/verify_rtbench_suite.sh" "$log" "$rtbench_samples" "$qemu_exit"
 elif [[ "$mode" == stability ]]; then
-    "$SCRIPT_DIR/verify_rtbench_stability.sh" "$log" "$seconds" "$qemu_exit"
+    if [[ "$allow_qemu_timer_limit" -eq 1 ]]; then
+        "$SCRIPT_DIR/verify_rtbench_stability.sh" "$log" "$seconds" "$qemu_exit" allow-qemu-timer-limit
+    else
+        "$SCRIPT_DIR/verify_rtbench_stability.sh" "$log" "$seconds" "$qemu_exit"
+    fi
 fi
 
 app_log="$output/${app_guest}.log"
@@ -169,7 +192,7 @@ app_tmp="$output/.${app_guest}.log.tmp"
 rtthread_tmp="$output/.rtthread.log.tmp"
 frames_tmp="$output/.frames.csv.tmp"
 summary_tmp="$output/.summary.raw.json.tmp"
-trap 'rm -f -- "$normalized_log" "$app_tmp" "$rtthread_tmp" "$frames_tmp" "$summary_tmp"' EXIT
+trap 'rm -f -- "$normalized_log" "$failure_log" "$app_tmp" "$rtthread_tmp" "$frames_tmp" "$summary_tmp"' EXIT
 
 awk '
     /^\[VM 1\] / {
@@ -215,7 +238,7 @@ mv -- "$app_tmp" "$app_log"
 mv -- "$rtthread_tmp" "$rtthread_log"
 mv -- "$frames_tmp" "$frames_csv"
 mv -- "$summary_tmp" "$raw_summary"
-rm -f -- "$normalized_log"
+rm -f -- "$normalized_log" "$failure_log"
 trap - EXIT
 
 summarize_args=(

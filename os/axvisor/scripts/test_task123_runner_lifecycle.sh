@@ -261,10 +261,16 @@ emit_benchmark() {
         local expected=$((value * 1000 - 1))
         printf 'RTBENCH_STABILITY_BEGIN seconds=%s expected=%s\n' "$value" "$expected"
         for metric in stability_jitter callback_exec; do
-            printf 'RTBENCH metric=%s run=1 expected=%s collected=%s missing=0 p50_ns=1 p95_ns=2 p99_ns=3 p99_9_ns=4 max_ns=5 miss_100us=0 miss_500us=0 miss_1ms=0 mean_ns=2\n' \
-                "$metric" "$expected" "$expected"
+            local miss_1ms=0
+            if [[ "$metric" == stability_jitter &&
+                  "${FAKE_QEMU_BEHAVIOR:-pass}" == stability-timer-limit ]]; then
+                miss_1ms=1
+            fi
+            printf 'RTBENCH metric=%s run=1 expected=%s collected=%s missing=0 p50_ns=1 p95_ns=2 p99_ns=3 p99_9_ns=4 max_ns=5 miss_100us=0 miss_500us=0 miss_1ms=%s mean_ns=2\n' \
+                "$metric" "$expected" "$expected" "$miss_1ms"
         done
-        if [[ "${FAKE_QEMU_BEHAVIOR:-pass}" == stability-fail ]]; then
+        if [[ "${FAKE_QEMU_BEHAVIOR:-pass}" == stability-fail ||
+              "${FAKE_QEMU_BEHAVIOR:-pass}" == stability-timer-limit ]]; then
             printf 'RTBENCH_STABILITY_END status=FAIL expected=%s collected=%s missing=0\n' "$expected" "$expected"
         else
             printf 'RTBENCH_STABILITY_END status=PASS expected=%s collected=%s missing=0\n' "$expected" "$expected"
@@ -826,6 +832,24 @@ grep -Fq 'RTBENCH_END status=FAIL' "$benchmark_failure_output/console.log" ||
 grep -Fq 'failure-marker' \
     "$benchmark_failure_output/runner.log" ||
     fail "explicit benchmark failure did not retain a focused diagnostic"
+assert_reaped "$(cat "$records/qemu.pid")"
+
+: > "$records/qemu.log"
+: > "$records/qemu-stdin.log"
+timer_limit_output="$tmp/stability-timer-limit"
+if ! env "${common_env[@]}" FAKE_QEMU_BEHAVIOR=stability-timer-limit \
+    FAKE_QEMU_EXPECT_COMMAND='rtbench_stability 1' TASK123_TIMEOUT_S=3 \
+    TASK123_ALLOW_QEMU_TIMER_LIMIT=1 \
+    "$RUNNER" --mode stability --seconds 1 --task2-count 2 \
+    --output "$timer_limit_output" >/dev/null; then
+    [[ ! -f "$timer_limit_output/runner.log" ]] || cat "$timer_limit_output/runner.log" >&2
+    fail "explicit QEMU timer-limit mode did not preserve the completed run"
+fi
+grep -Fxq 'result_gate=PASS_WITH_QEMU_TIMER_LIMIT' \
+    "$timer_limit_output/manifest.txt" ||
+    fail "QEMU timer-limit run was not explicitly marked in the manifest"
+[[ -s "$timer_limit_output/linux.log" && -s "$timer_limit_output/rtthread.log" ]] ||
+    fail "QEMU timer-limit run did not publish authenticated guest logs"
 assert_reaped "$(cat "$records/qemu.pid")"
 
 : > "$records/qemu.log"

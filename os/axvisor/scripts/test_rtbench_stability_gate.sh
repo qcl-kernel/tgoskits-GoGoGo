@@ -56,6 +56,8 @@ deadline_miss="$TMP_DIR/deadline-miss.log"
 write_complete_log "$deadline_miss"
 sed -i '0,/miss_1ms=0/s//miss_1ms=1/' "$deadline_miss"
 expect_fail deadline_miss "$VERIFY" "$deadline_miss" 300 0
+sed -i 's/status=PASS/status=FAIL/' "$deadline_miss"
+expect_pass deadline_miss_diagnostic "$VERIFY" "$deadline_miss" 300 0 allow-qemu-timer-limit
 
 wrong_duration="$TMP_DIR/wrong-duration.log"
 write_complete_log "$wrong_duration"

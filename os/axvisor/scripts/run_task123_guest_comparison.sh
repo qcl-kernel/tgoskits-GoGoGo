@@ -10,11 +10,13 @@ ANALYZER="${TASK123_COMPARISON_ANALYZER:-$SCRIPT_DIR/compare_task123_guests.py}"
 mode=quick
 mode_set=0
 output_candidate=""
+cache_candidate=""
+allow_qemu_timer_limit=0
 
 usage() {
     cat >&2 <<EOF
 usage:
-  $0 [--quick|--full] [--output DIR]
+  $0 [--quick|--full] [--cache DIR] [--output DIR] [--allow-qemu-timer-limit]
 
 quick:  300-second stability run, 30000 Task2 requests per payload
 full:   3600-second stability run, 240000 Task2 requests per payload
@@ -25,6 +27,12 @@ EOF
 fail() {
     echo "task123 guest comparison: $*" >&2
     return 1
+}
+
+path_is_within() {
+    local child=$1
+    local parent=$2
+    [[ "$child" == "$parent" || "$child" == "$parent"/* ]]
 }
 
 parse_arguments() {
@@ -40,6 +48,16 @@ parse_arguments() {
                 [[ $# -ge 2 && -z "$output_candidate" ]] || usage
                 output_candidate=$2
                 shift 2
+                ;;
+            --cache)
+                [[ $# -ge 2 && -z "$cache_candidate" ]] || usage
+                cache_candidate=$2
+                shift 2
+                ;;
+            --allow-qemu-timer-limit)
+                [[ "$allow_qemu_timer_limit" -eq 0 ]] || usage
+                allow_qemu_timer_limit=1
+                shift
                 ;;
             -h|--help)
                 usage
@@ -94,8 +112,35 @@ prepare_output() {
         mkdir -- "$OUTPUT"
     fi
     OUTPUT="$(realpath -e -- "$OUTPUT")"
-    CACHE="$(dirname -- "$OUTPUT")/.task123-comparison-cache.$(basename -- "$OUTPUT").$$"
-    mkdir -- "$CACHE"
+    if [[ -n "$cache_candidate" ]]; then
+        CACHE="$(realpath -m -- "$cache_candidate")" || return 2
+        [[ "$CACHE" != / && "$CACHE" != "$ROOT" ]] || {
+            fail "unsafe artifact cache: $CACHE"
+            return 2
+        }
+        local cache_parent
+        cache_parent="$(dirname -- "$CACHE")"
+        [[ -d "$cache_parent" && -w "$cache_parent" ]] || {
+            fail "artifact cache parent is missing or unwritable: $cache_parent"
+            return 2
+        }
+        if [[ -e "$CACHE" ]]; then
+            [[ -d "$CACHE" && -w "$CACHE" ]] || {
+                fail "artifact cache is not a writable directory: $CACHE"
+                return 2
+            }
+        else
+            mkdir -- "$CACHE"
+        fi
+        CACHE="$(realpath -e -- "$CACHE")"
+    else
+        CACHE="$(dirname -- "$OUTPUT")/.task123-comparison-cache.$(basename -- "$OUTPUT").$$"
+        mkdir -- "$CACHE"
+    fi
+    if path_is_within "$OUTPUT" "$CACHE" || path_is_within "$CACHE" "$OUTPUT"; then
+        fail "output and artifact cache must be separate: output=$OUTPUT cache=$CACHE"
+        return 2
+    fi
     ORCHESTRATOR_LOG="$OUTPUT/orchestrator.log"
     : > "$ORCHESTRATOR_LOG"
     {
@@ -103,6 +148,11 @@ prepare_output() {
             "$mode" "$STABILITY_SECONDS" "$TASK2_COUNT"
         printf 'guest_order=linux,starryos\nshared_artifact_cache=%s\nrunner=%s\nanalyzer=%s\n' \
             "$CACHE" "$RUNNER" "$ANALYZER"
+        if [[ "$allow_qemu_timer_limit" -eq 1 ]]; then
+            printf 'stability_gate=PASS_WITH_QEMU_TIMER_LIMIT\n'
+        else
+            printf 'stability_gate=PASS\n'
+        fi
     } > "$OUTPUT/comparison-manifest.txt"
 }
 
@@ -112,9 +162,14 @@ run_guest() {
     printf 'PHASE guest-%s\n' "$guest" | tee -a "$ORCHESTRATOR_LOG"
     printf 'STEP run-%s mode=stability seconds=%s task2_count=%s\n' \
         "$guest" "$STABILITY_SECONDS" "$TASK2_COUNT" | tee -a "$ORCHESTRATOR_LOG"
-    TASK123_SHARED_ARTIFACT_DIR="$CACHE" \
-    TASK123_TIMEOUT_S="$RUN_TIMEOUT" \
-        "$RUNNER" --app-guest "$guest" --mode stability \
+    local runner_environment=(
+        "TASK123_SHARED_ARTIFACT_DIR=$CACHE"
+        "TASK123_TIMEOUT_S=$RUN_TIMEOUT"
+    )
+    if [[ "$allow_qemu_timer_limit" -eq 1 ]]; then
+        runner_environment+=(TASK123_ALLOW_QEMU_TIMER_LIMIT=1)
+    fi
+    env "${runner_environment[@]}" "$RUNNER" --app-guest "$guest" --mode stability \
         --seconds "$STABILITY_SECONDS" --task2-count "$TASK2_COUNT" \
         --output "$output" 2>&1 | tee -a "$ORCHESTRATOR_LOG"
 }
@@ -134,7 +189,13 @@ main() {
             usage
             ;;
     esac
-    RUN_TIMEOUT=$((STABILITY_SECONDS + 600))
+    if [[ "$mode" == full ]]; then
+        # StarryOS needs additional time to drain the larger Task2 workload
+        # after the shared RTBench stability window has completed.
+        RUN_TIMEOUT=$((STABILITY_SECONDS + 1800))
+    else
+        RUN_TIMEOUT=$((STABILITY_SECONDS + 600))
+    fi
     RUNNER="$(canonical_executable runner "$RUNNER")"
     ANALYZER="$(canonical_executable analyzer "$ANALYZER")"
     prepare_output
@@ -144,8 +205,15 @@ main() {
     run_guest starryos
 
     printf 'PHASE comparison-analysis\n' | tee -a "$ORCHESTRATOR_LOG"
-    "$ANALYZER" --linux-run "$OUTPUT/linux" --starryos-run "$OUTPUT/starryos" \
-        --output "$OUTPUT/comparison" 2>&1 | tee -a "$ORCHESTRATOR_LOG"
+    analyzer_arguments=(
+        --linux-run "$OUTPUT/linux"
+        --starryos-run "$OUTPUT/starryos"
+        --output "$OUTPUT/comparison"
+    )
+    if [[ "$allow_qemu_timer_limit" -eq 1 ]]; then
+        analyzer_arguments+=(--allow-qemu-timer-limit)
+    fi
+    "$ANALYZER" "${analyzer_arguments[@]}" 2>&1 | tee -a "$ORCHESTRATOR_LOG"
     [[ -s "$OUTPUT/comparison/comparison.json" &&
        -s "$OUTPUT/comparison/comparison-report.md" ]] || {
         fail "comparison analyzer did not publish both output files"
