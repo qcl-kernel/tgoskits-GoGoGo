@@ -720,7 +720,7 @@ assert_archive_tree_entries() {
                 fail "archive tree contains extra directory: $archive_path"
         elif [[ -f "$archive_path" ]]; then
             case "$relative_path" in
-                manifest.json|INDEX.md|migration-inventory.tsv|migration-report.md)
+                manifest.json|INDEX.md|migration-inventory.tsv|rules.sha256)
                     ;;
                 *)
                     grep -Fzxq -- "$relative_path" "$expected_paths" ||
@@ -766,7 +766,7 @@ assert_manifest_matches_inventory() {
 
     awk -F '\t' 'NR > 1 && NF { print $1 "\t" $2 "\t" $3 "\t" $4 }' \
         "$inventory_file" | LC_ALL=C sort -u > "$inventory_sources"
-    jq -r '.sources[] | [.source, .source_root, .branch, .commit] | @tsv' \
+    jq -r '.sources[] | [.name, .root, .branch, .commit] | @tsv' \
         "$destination/manifest.json" | LC_ALL=C sort > "$manifest_sources"
     source_rows="$(wc -l < "$inventory_sources")"
     source_count="$(jq -r '.sources | length' "$destination/manifest.json")"
@@ -845,7 +845,7 @@ assert_manifest_matches_inventory() {
         while IFS= read -r -d '' source_path; do
             case "$source_path" in
                 "$destination/manifest.json"|"$destination/INDEX.md"|\
-                "$destination/migration-inventory.tsv"|"$destination/migration-report.md")
+                "$destination/migration-inventory.tsv"|"$destination/rules.sha256")
                     continue
                     ;;
             esac
