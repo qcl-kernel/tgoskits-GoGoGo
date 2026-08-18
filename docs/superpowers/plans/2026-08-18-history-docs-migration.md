@@ -218,7 +218,7 @@ Expected: 两种情况均 FAIL，且所有尚未删除的候选源文件保持�
 
 - [ ] **Step 3: Add destination collision and unsafe-root failures**
 
-构造已存在但哈希不同的目标文件，并分别传入 `/`、源仓库根目录和非空无 manifest 的 destination。Expected: `stage` 在写入或删除前失败，诊断包含准确目标路径。
+构造已存在但哈希不同的目标文件，并验证 `stage` 拒绝源仓库根目录、fixture 内非空无 manifest 的 workspace root，以及越界的 `archived_path`。Expected: `stage` 在写入或删除前失败，诊断包含准确目标路径。
 
 - [ ] **Step 4: Run tests and observe failure before implementation**
 
