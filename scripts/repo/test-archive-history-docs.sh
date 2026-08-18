@@ -575,7 +575,9 @@ assert_failed_delete_preserved_sources() {
     local entry_type source_path expected_link expected_digest
     local actual_digest actual_link
     local actual_snapshot="$FIXTURE_ROOT/$label.source-tree.after"
-    local expected_count actual_count
+    local expected_after="$FIXTURE_ROOT/$label.source-tree.expected"
+
+    : > "$expected_after"
 
     while IFS=$'\t' read -r -d '' entry_type source_path expected_link expected_digest; do
         if [[ "$entry_type" == f ]]; then
@@ -586,6 +588,7 @@ assert_failed_delete_preserved_sources() {
             if [[ "$source_path" == "$changed_path" ]]; then
                 [[ "$actual_digest" == "$changed_digest" ]] ||
                     fail "$label changed the intentionally mutated source: $source_path"
+                expected_digest="$changed_digest"
             else
                 [[ "$actual_digest" == "$expected_digest" ]] ||
                     fail "$label changed source regular file: $source_path"
@@ -602,48 +605,40 @@ assert_failed_delete_preserved_sources() {
         else
             fail "$label snapshot has unknown entry type: $entry_type"
         fi
+        printf '%s\t%s\t%s\t%s\0' \
+            "$entry_type" "$source_path" "$expected_link" "$expected_digest" \
+            >> "$expected_after"
     done < "$expected_snapshot"
 
     mkdir -p -- "$(dirname -- "$actual_snapshot")"
     snapshot_fixture_sources "$fixture_root" "$actual_snapshot"
-    if [[ -z "$changed_path" ]]; then
-        assert_snapshot_equal "$expected_snapshot" "$actual_snapshot" "$label sources"
-    else
-        expected_count="$(tr -cd '\0' < "$expected_snapshot" | wc -c)"
-        actual_count="$(tr -cd '\0' < "$actual_snapshot" | wc -c)"
-        [[ "$actual_count" == "$expected_count" ]] ||
-            fail "$label added or removed source tree entries"
-    fi
+    assert_snapshot_equal "$expected_after" "$actual_snapshot" "$label sources"
 }
 
 assert_only_inventory_sources_deleted() {
-    local selected_paths="$1"
-    local candidates_file="$2"
-    local entry_type source_path expected_link expected_digest actual_digest
+    local fixture_root="$1"
+    local selected_paths="$2"
+    local before_snapshot="$3"
+    local label="$4"
+    local after_snapshot="$FIXTURE_ROOT/$label.source-tree.after"
+    local expected_after="$FIXTURE_ROOT/$label.source-tree.expected"
+    local entry_type source_path expected_link expected_digest
+
+    : > "$expected_after"
 
     while IFS=$'\t' read -r -d '' entry_type source_path expected_link expected_digest; do
-        if grep -Fzxq -- "$source_path" "$selected_paths"; then
-            [[ "$entry_type" == f ]] ||
-                fail "inventory selected a non-regular source entry: $source_path"
-            [[ ! -e "$source_path" ]] ||
-                fail "delete retained selected source: $source_path"
-        elif [[ "$entry_type" == l ]]; then
-            [[ -L "$source_path" ]] ||
-                fail "delete removed non-selected symlink: $source_path"
-            [[ "$(readlink -- "$source_path")" == "$expected_link" ]] ||
-                fail "delete changed non-selected symlink: $source_path"
-        elif [[ "$entry_type" == d ]]; then
-            [[ -d "$source_path" && ! -L "$source_path" ]] ||
-                fail "delete removed non-selected source directory: $source_path"
-        else
-            [[ -f "$source_path" && ! -L "$source_path" ]] ||
-                fail "delete removed non-selected source: $source_path"
-            actual_digest="$(sha256sum -b -- "$source_path")"
-            actual_digest="${actual_digest%% *}"
-            [[ "$actual_digest" == "$expected_digest" ]] ||
-                fail "delete changed non-selected source: $source_path"
+        if [[ "$entry_type" == f ]] && grep -Fzxq -- "$source_path" "$selected_paths"; then
+            [[ ! -e "$source_path" && ! -L "$source_path" ]] ||
+                fail "$label retained selected source entry: $source_path"
+            continue
         fi
-    done < "$candidates_file"
+        printf '%s\t%s\t%s\t%s\0' \
+            "$entry_type" "$source_path" "$expected_link" "$expected_digest" \
+            >> "$expected_after"
+    done < "$before_snapshot"
+
+    snapshot_fixture_sources "$fixture_root" "$after_snapshot"
+    assert_snapshot_equal "$expected_after" "$after_snapshot" "$label sources"
 }
 
 run_required_command() {
@@ -911,6 +906,10 @@ run_required_command archive-success/stage \
     bash "$ARCHIVER" stage \
     --inventory "$archive_inventory" \
     --destination "$archive_destination"
+assert_fixture_sources_unchanged \
+    "$archive_fixture" \
+    "$archive_snapshot" \
+    archive-success/stage
 
 assert_inventory_sources_exist "$archive_inventory" "$archive_fixture"
 [[ -f "$archive_destination/manifest.json" ]] ||
@@ -940,10 +939,18 @@ jq --arg archived_path "$unique_manifest_path" --arg duplicate_group "$unique_ma
     '(.entries[] | select(.archived_path == $archived_path) | .duplicate_group) = $duplicate_group' \
     "$archive_manifest_backup" > "$archive_manifest_tmp"
 mv -- "$archive_manifest_tmp" "$archive_destination/manifest.json"
+duplicate_value_destination_before="$archive_fixture/destination-before-duplicate-value-mutation"
+snapshot_directory_tree "$archive_destination" "$duplicate_value_destination_before"
 run_expected_failure archive-success/manifest-unique-duplicate-group/verify \
     bash "$ARCHIVER" verify \
     --inventory "$archive_inventory" \
     --destination "$archive_destination"
+duplicate_value_destination_after="$archive_fixture/destination-after-duplicate-value-mutation"
+snapshot_directory_tree "$archive_destination" "$duplicate_value_destination_after"
+assert_snapshot_equal \
+    "$duplicate_value_destination_before" \
+    "$duplicate_value_destination_after" \
+    archive-success/manifest-unique-duplicate-group/verify
 assert_expected_failure_contains \
     archive-success/manifest-unique-duplicate-group/verify \
     "$unique_manifest_path"
@@ -957,10 +964,18 @@ jq --arg archived_path "$unique_manifest_path" \
     'del(.entries[] | select(.archived_path == $archived_path).duplicate_group)' \
     "$archive_destination/manifest.json" > "$archive_manifest_tmp"
 mv -- "$archive_manifest_tmp" "$archive_destination/manifest.json"
+duplicate_missing_destination_before="$archive_fixture/destination-before-duplicate-missing-mutation"
+snapshot_directory_tree "$archive_destination" "$duplicate_missing_destination_before"
 run_expected_failure archive-success/manifest-unique-duplicate-group-missing/verify \
     bash "$ARCHIVER" verify \
     --inventory "$archive_inventory" \
     --destination "$archive_destination"
+duplicate_missing_destination_after="$archive_fixture/destination-after-duplicate-missing-mutation"
+snapshot_directory_tree "$archive_destination" "$duplicate_missing_destination_after"
+assert_snapshot_equal \
+    "$duplicate_missing_destination_before" \
+    "$duplicate_missing_destination_after" \
+    archive-success/manifest-unique-duplicate-group-missing/verify
 assert_expected_failure_contains \
     archive-success/manifest-unique-duplicate-group-missing/verify \
     "$unique_manifest_path"
@@ -1008,7 +1023,11 @@ run_required_command archive-success/delete \
     bash "$ARCHIVER" delete \
     --inventory "$archive_inventory" \
     --destination "$archive_destination"
-assert_only_inventory_sources_deleted "$archive_selected_sources" "$archive_snapshot"
+assert_only_inventory_sources_deleted \
+    "$archive_fixture" \
+    "$archive_selected_sources" \
+    "$archive_snapshot" \
+    archive-success/delete
 [[ -f "$archive_fixture/task12-source/docs/README.md" ]] ||
     fail 'delete removed task12 README'
 [[ -f "$archive_fixture/task12-source/docs/docs/architecture/axvisor/overview.md" ]] ||
@@ -1037,8 +1056,6 @@ run_required_command archive-source-mutation/stage \
 printf '%s\n' 'changed after stage' >> "$mutation_source_path"
 mutation_source_digest="$(sha256sum -b -- "$mutation_source_path")"
 mutation_source_digest="${mutation_source_digest%% *}"
-mutation_delete_snapshot="$mutation_fixture/source-tree.before-delete"
-snapshot_fixture_sources "$mutation_fixture" "$mutation_delete_snapshot"
 mutation_destination_snapshot="$mutation_fixture/destination-tree.before-delete"
 snapshot_directory_tree "$mutation_destination" "$mutation_destination_snapshot"
 run_expected_failure archive-source-mutation/delete \
@@ -1052,10 +1069,6 @@ assert_failed_delete_preserved_sources \
     archive-source-mutation/delete \
     "$mutation_source_path" \
     "$mutation_source_digest"
-assert_fixture_sources_unchanged \
-    "$mutation_fixture" \
-    "$mutation_delete_snapshot" \
-    archive-source-mutation/delete-command
 mutation_destination_after="$mutation_fixture/destination-tree.after-delete"
 snapshot_directory_tree "$mutation_destination" "$mutation_destination_after"
 assert_snapshot_equal \
