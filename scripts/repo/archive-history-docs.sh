@@ -1001,8 +1001,10 @@ capture_archive_source_tree() {
             elif [[ -d "$source_root/$relative" ]]; then
                 printf 'd\t%s\t-\0' "$relative"
             elif [[ -f "$source_root/$relative" ]]; then
-                digest="$(sha256sum -b -- "$source_root/$relative")"
-                digest="${digest%% *}"
+                # The selected migration files are hashed by the strict
+                # preflight. Avoid hashing the entire worktree here: a
+                # source may contain multi-gigabyte build outputs.
+                digest="$(stat -c '%d:%i:%h:%a:%s:%Y' -- "$source_root/$relative")"
                 printf 'f\t%s\t%s\0' "$relative" "$digest"
             else
                 die "source tree contains unsupported entry: $source_root/$relative"
