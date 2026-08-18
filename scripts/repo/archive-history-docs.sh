@@ -6,8 +6,18 @@ ARCHIVE_TMP_DIR=""
 ARCHIVE_OUTPUT_TMP=""
 ARCHIVE_SIDECAR_TMP=""
 ARCHIVE_STAGE_TMP=""
+ARCHIVE_PUBLISH_BACKUP=""
+ARCHIVE_PUBLISH_DESTINATION=""
+ARCHIVE_PUBLISH_COMMITTED=0
 
 cleanup() {
+    if [[ -n "$ARCHIVE_PUBLISH_BACKUP" && -e "$ARCHIVE_PUBLISH_BACKUP" ]]; then
+        if ((ARCHIVE_PUBLISH_COMMITTED == 1)); then
+            rm -rf -- "$ARCHIVE_PUBLISH_BACKUP"
+        elif [[ -n "$ARCHIVE_PUBLISH_DESTINATION" && ! -e "$ARCHIVE_PUBLISH_DESTINATION" ]]; then
+            mv -- "$ARCHIVE_PUBLISH_BACKUP" "$ARCHIVE_PUBLISH_DESTINATION"
+        fi
+    fi
     [[ -z "$ARCHIVE_TMP_DIR" ]] || rm -rf -- "$ARCHIVE_TMP_DIR"
     [[ -z "$ARCHIVE_OUTPUT_TMP" ]] || rm -f -- "$ARCHIVE_OUTPUT_TMP"
     [[ -z "$ARCHIVE_SIDECAR_TMP" ]] || rm -f -- "$ARCHIVE_SIDECAR_TMP"
@@ -752,10 +762,17 @@ read_archive_rules_sidecar() {
         die "rules_commit is not a commit or untracked: $ARCHIVE_RULES_COMMIT"
     [[ "$ARCHIVE_RULES_REPO_ROOT" == untracked || "$ARCHIVE_RULES_REPO_ROOT" == /* ]] ||
         die "rules_repo_root is not absolute or untracked: $ARCHIVE_RULES_REPO_ROOT"
+    [[ "$(realpath -ms -- "$ARCHIVE_RULES_PATH")" == "$ARCHIVE_RULES_PATH" ]] ||
+        die "rules_path is not normalized: $ARCHIVE_RULES_PATH"
+}
+
+validate_archive_rules_source() {
+    local actual_digest rules_real
+
     [[ ! -L "$ARCHIVE_RULES_PATH" ]] || die "rules file is symlink: $ARCHIVE_RULES_PATH"
-    ARCHIVE_RULES_PATH="$(canonical_existing_path "$ARCHIVE_RULES_PATH")"
-    [[ -f "$ARCHIVE_RULES_PATH" ]] || die "rules path is not a regular file: $ARCHIVE_RULES_PATH"
-    local actual_digest
+    rules_real="$(canonical_existing_path "$ARCHIVE_RULES_PATH")"
+    [[ "$rules_real" == "$ARCHIVE_RULES_PATH" && -f "$rules_real" ]] ||
+        die "rules path is not a normalized regular file: $ARCHIVE_RULES_PATH"
     actual_digest="$(sha256sum -b -- "$ARCHIVE_RULES_PATH")"
     actual_digest="${actual_digest%% *}"
     [[ "$actual_digest" == "$ARCHIVE_RULES_SHA256" ]] ||
@@ -766,7 +783,7 @@ load_archive_inventory() {
     local requested_inventory="$1"
     local line line_number=0 field_index source source_root branch commit tracked original_path
     local phase type date date_source size sha256 archived_path expected_archived
-    local source_root_real key source_path actual_tracked
+    local source_root_normalized key
     local -a fields=()
     local inventory_sidecar
 
@@ -820,10 +837,9 @@ load_archive_inventory() {
 
         validate_path_component source "$source" "$source"
         [[ "$source_root" == /* ]] || die "source=$source source_root is not absolute: $source_root"
-        [[ ! -L "$source_root" ]] || die "source=$source source_root is symlink: $source_root"
-        source_root_real="$(canonical_existing_path "$source_root")"
-        [[ "$source_root_real" == "$source_root" && -d "$source_root" ]] ||
-            die "source=$source source_root is not normalized directory: $source_root"
+        source_root_normalized="$(realpath -ms -- "$source_root")"
+        [[ "$source_root_normalized" == "$source_root" ]] ||
+            die "source=$source source_root is not normalized: $source_root"
         [[ "$branch" != *$'\n'* && "$branch" != *$'\r'* && "$branch" != *$'\t'* ]] ||
             die "source=$source branch contains a control byte"
         [[ "$commit" =~ ^[0-9a-fA-F]{40}$ ]] || die "source=$source commit is invalid: $commit"
@@ -859,13 +875,6 @@ load_archive_inventory() {
             die "archived_path is duplicated: $archived_path"
         ARCHIVE_SEEN_SOURCE_PATHS["$key"]=1
         ARCHIVE_SEEN_ARCHIVED["$archived_path"]=1
-        source_path="$(validate_archive_source_file "$source" "$source_root" "$original_path")"
-        actual_tracked=false
-        if git -C "$source_root" ls-files --error-unmatch -- "$original_path" > /dev/null 2>&1; then
-            actual_tracked=true
-        fi
-        [[ "$tracked" == "$actual_tracked" ]] ||
-            die "source=$source tracked field disagrees with git ls-files for $original_path: inventory=$tracked actual=$actual_tracked"
         printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
             "$source" "$source_root" "$branch" "$commit" "$tracked" "$original_path" \
             "$phase" "$type" "$date" "$date_source" "$size" "$sha256" "$archived_path" \
@@ -883,8 +892,8 @@ load_archive_inventory() {
 
 check_archive_source_states() {
     local source_name source_root expected_branch expected_commit current_root current_branch current_commit
-    local status_line candidate_file candidates_file record_source record_path source_path
-    local current_size current_sha candidate_present
+    local status_line candidate_file record_source record_tracked record_path source_path
+    local current_size current_sha candidate_present actual_tracked
     local -A candidate_paths=()
 
     declare -gA ARCHIVE_CANDIDATE_FILES=()
@@ -916,10 +925,16 @@ check_archive_source_states() {
         while IFS= read -r -d '' candidate_present; do
             candidate_paths["$candidate_present"]=1
         done < "$candidate_file"
-        while IFS=$'\t' read -r record_source _ _ _ _ record_path _; do
+        while IFS=$'\t' read -r record_source _ _ _ record_tracked record_path _; do
             [[ "$record_source" == "$source_name" ]] || continue
             [[ -n "${candidate_paths[$record_path]+set}" ]] ||
                 die "source=$source_name candidate snapshot is missing: $record_path"
+            actual_tracked=false
+            if git -C "$source_root" ls-files --error-unmatch -- "$record_path" > /dev/null 2>&1; then
+                actual_tracked=true
+            fi
+            [[ "$record_tracked" == "$actual_tracked" ]] ||
+                die "source=$source_name tracked field disagrees with git ls-files for $record_path: inventory=$record_tracked actual=$actual_tracked"
             source_path="$(validate_archive_source_file "$source_name" "$source_root" "$record_path")"
             current_size="$(stat -c '%s' -- "$source_path")"
             current_sha="$(sha256sum -b -- "$source_path")"
@@ -932,6 +947,11 @@ check_archive_source_states() {
                 die "source=$source_name selected file changed: $record_path"
         done < "$ARCHIVE_RECORDS_FILE"
     done
+}
+
+strict_archive_source_preflight() {
+    validate_archive_rules_source
+    check_archive_source_states
 }
 
 check_archive_candidate_stability() {
@@ -1068,21 +1088,9 @@ build_archive_manifest() {
         ' "$ARCHIVE_RECORDS_FILE" > "$output_file"
 }
 
-markdown_escape() {
-    local value="$1"
-    jq -Rn --arg value "$value" '$value | gsub("[\\\\|`\\[\\]]"; "\\\\&")'
-}
-
 build_archive_index() {
     local manifest_file="$1"
-    local rules_file="$2"
-    local output_file="$3"
-    local rules_json="$ARCHIVE_TMP_DIR/rules.json"
-
-    jq -Rn --slurpfile manifest "$manifest_file" --rawfile rules "$rules_file" \
-        '[$rules | split("\n")[] | select(length > 0 and (startswith("#") | not)) | split("\t") |
-          {action: .[0], pattern: .[1], phase: .[2], type: .[3], reason: .[4]}]' \
-        > "$rules_json"
+    local output_file="$2"
     {
         printf '%s\n\n' '# Historical Documentation Archive'
         printf '%s\n\n' 'This archive is byte-identical to the verified source files recorded in `manifest.json`.'
@@ -1090,11 +1098,9 @@ build_archive_index() {
         printf '%s\n' '| Source | Root | Branch | Commit |' '|---|---|---|---|'
         jq -r '.sources[] | "| " + (.name | gsub("[\\\\|`\\[\\]]"; "\\\\&")) + " | " + (.root | gsub("[\\\\|`\\[\\]]"; "\\\\&")) + " | " + (.branch | gsub("[\\\\|`\\[\\]]"; "\\\\&")) + " | " + (.commit | gsub("[\\\\|`\\[\\]]"; "\\\\&")) + " |"' "$manifest_file"
         printf '\n%s\n\n' '## Rules Summary'
-        printf '%s\n\n' "Rules path: \`$(markdown_escape "$ARCHIVE_RULES_PATH")\`" \
-            "Rules SHA-256: \`$ARCHIVE_RULES_SHA256\`" \
-            'The ordered rules below are the classification decisions captured by `rules.sha256`.'
-        printf '%s\n' '| Action | Pattern | Phase | Type | Reason |' '|---|---|---|---|---|'
-        jq -r '.[] | "| " + (.action | gsub("[\\\\|`\\[\\]]"; "\\\\&")) + " | " + (.pattern | gsub("[\\\\|`\\[\\]]"; "\\\\&")) + " | " + (.phase | gsub("[\\\\|`\\[\\]]"; "\\\\&")) + " | " + (.type | gsub("[\\\\|`\\[\\]]"; "\\\\&")) + " | " + (.reason | gsub("[\\\\|`\\[\\]]"; "\\\\&")) + " |"' "$rules_json"
+        jq -r '"Rules path: `" + (.rules.path | gsub("`"; "\\\\`")) + "`\n\n" +
+            "Rules SHA-256: `" + .rules.sha256 + "`\n\n" +
+            "Rules provenance sidecar: `" + .rules.sidecar + "`"' "$manifest_file"
         printf '\n%s\n\n' '## Summary'
         printf 'Total entries: %s\n\n' "$(jq -r '.entries | length' "$manifest_file")"
         printf '%s\n' '| Phase | Type | Count |' '|---|---|---|'
@@ -1103,7 +1109,7 @@ build_archive_index() {
         printf '\n%s\n\n' '## Entries'
         printf '%s\n' '| Phase | Type | Date | Source | Original Path | Archive Link |' '|---|---|---|---|---|---|'
         jq -r 'def cell: gsub("[\\\\|`\\[\\]]"; "\\\\&");
-            def destination: if test("[() <>\\\\]") then "<" + gsub("[\\\\<>]"; "\\\\&") + ">" else . end;
+            def destination: split("/") | map(@uri) | join("/");
             .entries | sort_by([.phase, .type, .date, .source, .original_path])[] |
             ("| " + (.phase | cell) + " | " + (.type | cell) + " | " + (.date | cell) +
              " | " + (.source | cell) + " | " + (.original_path | cell) +
@@ -1272,7 +1278,7 @@ verify_archive_manifest_and_index() {
     jq -cS '{rules, sources, entries}' "$expected_manifest" > "$expected_core"
     cmp -s "$actual_core" "$expected_core" || die "manifest fields do not exactly match inventory"
 
-    build_archive_index "$manifest_file" "$ARCHIVE_RULES_PATH" "$ARCHIVE_TMP_DIR/expected-INDEX.md"
+    build_archive_index "$manifest_file" "$ARCHIVE_TMP_DIR/expected-INDEX.md"
     cmp -s "$ARCHIVE_DESTINATION/INDEX.md" "$ARCHIVE_TMP_DIR/expected-INDEX.md" || die "INDEX.md is not deterministic or does not match manifest"
 }
 
@@ -1296,18 +1302,36 @@ verify_archive_contents() {
 }
 
 publish_archive_stage() {
-    local entry relative
+    local destination_parent destination_name backup_path
+
     if [[ ! -e "$ARCHIVE_DESTINATION" ]]; then
         mv -- "$ARCHIVE_STAGE_TMP" "$ARCHIVE_DESTINATION"
         ARCHIVE_STAGE_TMP=""
         return 0
     fi
-    while IFS= read -r -d '' entry; do
-        relative="${entry#"$ARCHIVE_STAGE_TMP/"}"
-        install -D -m 0644 -- "$entry" "$ARCHIVE_DESTINATION/$relative"
-    done < <(find -P "$ARCHIVE_STAGE_TMP" -type f -print0 | LC_ALL=C sort -z)
-    rm -rf -- "$ARCHIVE_STAGE_TMP"
+
+    destination_parent="$(dirname -- "$ARCHIVE_DESTINATION")"
+    destination_name="$(basename -- "$ARCHIVE_DESTINATION")"
+    [[ -d "$destination_parent" && ! -L "$destination_parent" &&
+        -w "$destination_parent" && -x "$destination_parent" ]] ||
+        die "destination parent is not controllable for atomic publication: $destination_parent"
+    backup_path="$(mktemp -d "$destination_parent/.$destination_name.previous.XXXXXX")"
+    rmdir -- "$backup_path"
+
+    ARCHIVE_PUBLISH_BACKUP="$backup_path"
+    ARCHIVE_PUBLISH_DESTINATION="$ARCHIVE_DESTINATION"
+    ARCHIVE_PUBLISH_COMMITTED=0
+    mv -- "$ARCHIVE_DESTINATION" "$ARCHIVE_PUBLISH_BACKUP"
+    if [[ "${ARCHIVE_HISTORY_DOCS_TEST_FAIL_PUBLISH_AFTER_BACKUP:-0}" == 1 ]]; then
+        die "injected publish failure after destination backup"
+    fi
+    mv -- "$ARCHIVE_STAGE_TMP" "$ARCHIVE_DESTINATION"
     ARCHIVE_STAGE_TMP=""
+    ARCHIVE_PUBLISH_COMMITTED=1
+    rm -rf -- "$ARCHIVE_PUBLISH_BACKUP"
+    ARCHIVE_PUBLISH_BACKUP=""
+    ARCHIVE_PUBLISH_DESTINATION=""
+    ARCHIVE_PUBLISH_COMMITTED=0
 }
 
 stage_archive() {
@@ -1319,7 +1343,7 @@ stage_archive() {
     load_archive_inventory "$requested_inventory"
     validate_archive_destination "$requested_destination"
     stage_destination_precheck
-    check_archive_source_states
+    strict_archive_source_preflight
     if ((ARCHIVE_REUSE_EXISTING == 1)); then
         echo "stage: existing verified archive is already current: $ARCHIVE_DESTINATION" >&2
         return 0
@@ -1351,14 +1375,14 @@ stage_archive() {
     stage_manifest="$ARCHIVE_STAGE_TMP/manifest.json"
     stage_index="$ARCHIVE_STAGE_TMP/INDEX.md"
     build_archive_manifest "$stage_manifest" "$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
-    build_archive_index "$stage_manifest" "$ARCHIVE_RULES_PATH" "$stage_index"
+    build_archive_index "$stage_manifest" "$stage_index"
     chmod 0644 -- "$stage_manifest" "$stage_index"
     ARCHIVE_DESTINATION="$ARCHIVE_STAGE_TMP"
     verify_archive_contents
     capture_archive_source_trees stage-after
     compare_archive_source_trees stage-before stage-after
     check_archive_candidate_stability
-    check_archive_source_states
+    strict_archive_source_preflight
     ARCHIVE_DESTINATION="$(realpath -m -- "$requested_destination")"
     publish_archive_stage
     echo "stage: published verified archive at $ARCHIVE_DESTINATION" >&2
@@ -1393,7 +1417,7 @@ delete_archive_sources() {
     local -A verified_identities=()
 
     verify_archive_contents
-    check_archive_source_states
+    strict_archive_source_preflight
     capture_archive_source_trees delete-before
     while IFS=$'\t' read -r source_name source_root branch commit tracked original_path phase type date date_source size sha256 archived_path; do
         [[ -n "$source_name" ]] || continue

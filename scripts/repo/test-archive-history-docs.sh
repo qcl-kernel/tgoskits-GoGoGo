@@ -324,6 +324,11 @@ make_archive_fixture() {
     cp -a -- "$task12_source" "$fixture_root/task12-source"
     cp -a -- "$task123_source" "$fixture_root/task123-source"
     write_fixture_file \
+        "$fixture_root/task123-source/docs/reports/URI 中文 #?% path.md" \
+        'URI encoding fixture'
+    commit_fixture_repo "$fixture_root/task123-source" \
+        'docs/reports/URI 中文 #?% path.md'
+    write_fixture_file \
         "$fixture_root/task12-source/ignored-archive-sentinel.txt" \
         'ignored source sentinel'
     chmod 0600 -- \
@@ -908,6 +913,7 @@ assert_archive_files_are_0644() {
 
 assert_index_links_are_markdown() {
     local destination="$1"
+    local special_archived_path special_encoded_path special_link decoded_link
     grep -Fq '[open](task12/design/2026-08-11/task12-source/docs/superpowers/specs/2026-08-11-rt-ipc-integration-design.md)' \
         "$destination/INDEX.md" || fail 'INDEX did not emit a normal Markdown archive link'
     if grep -Fq '\\(' "$destination/INDEX.md"; then
@@ -916,6 +922,21 @@ assert_index_links_are_markdown() {
     if grep -Fq '%2F' "$destination/INDEX.md"; then
         fail 'INDEX percent-encoded a path separator'
     fi
+    special_archived_path="$(jq -r '.entries[] | select(.original_path == "docs/reports/URI 中文 #?% path.md") | .archived_path' \
+        "$destination/manifest.json")"
+    [[ -n "$special_archived_path" ]] || fail 'special URI path is missing from manifest'
+    special_encoded_path="$(printf '%s' "$special_archived_path" | jq -sRr \
+        'split("/") | map(@uri) | join("/")')"
+    special_link="$(grep -F '[open](' "$destination/INDEX.md" | grep -F "$special_encoded_path" | \
+        sed -n 's/.*\[open\](\([^)]*\)).*/\1/p' || true)"
+    [[ "$special_link" == "$special_encoded_path" ]] ||
+        fail 'INDEX did not segment-encode the special archive path'
+    case "$special_link" in
+        *' '*|*'#'*|*'?'*) fail 'INDEX special link contains a raw URI delimiter or space' ;;
+    esac
+    decoded_link="$(printf '%b' "${special_link//%/\\x}")"
+    [[ "$decoded_link" == "$special_archived_path" ]] ||
+        fail 'INDEX special link does not decode to archived_path'
 }
 
 archive_fixture="$(make_archive_fixture archive-success)"
@@ -971,6 +992,24 @@ inventory_only_source_snapshot="$inventory_only_fixture/source-tree.before"
 mkdir -p -- "$inventory_only_destination"
 cp -- "$inventory_only_inventory" "$inventory_only_destination/migration-inventory.tsv"
 snapshot_fixture_sources "$inventory_only_fixture" "$inventory_only_source_snapshot"
+snapshot_directory_tree \
+    "$inventory_only_destination" \
+    "$inventory_only_fixture/destination-before-publish-failure"
+run_expected_failure archive-inventory-only-destination/injected-publish-failure \
+    env ARCHIVE_HISTORY_DOCS_TEST_FAIL_PUBLISH_AFTER_BACKUP=1 \
+    bash "$ARCHIVER" stage \
+    --inventory "$inventory_only_inventory" \
+    --destination "$inventory_only_destination"
+assert_expected_failure_contains \
+    archive-inventory-only-destination/injected-publish-failure \
+    'injected publish failure'
+snapshot_directory_tree \
+    "$inventory_only_destination" \
+    "$inventory_only_fixture/destination-after-publish-failure"
+assert_snapshot_equal \
+    "$inventory_only_fixture/destination-before-publish-failure" \
+    "$inventory_only_fixture/destination-after-publish-failure" \
+    archive-inventory-only-destination/injected-publish-failure destination
 run_required_command archive-inventory-only-destination/stage \
     bash "$ARCHIVER" stage \
     --inventory "$inventory_only_inventory" \
@@ -1086,6 +1125,10 @@ assert_index_counts_match_manifest "$archive_destination"
     fail 'stage removed validation baseline'
 run_required_command archive-success/delete \
     bash "$ARCHIVER" delete \
+    --inventory "$archive_inventory" \
+    --destination "$archive_destination"
+run_required_command archive-success/verify-after-delete \
+    bash "$ARCHIVER" verify \
     --inventory "$archive_inventory" \
     --destination "$archive_destination"
 assert_only_inventory_sources_deleted \
@@ -1308,7 +1351,7 @@ sed -n '/^stage_archive()/,/^}/p' "$ARCHIVER" > "$archive_script_stage_body"
 stage_tree_before_line="$(grep -n 'capture_archive_source_trees stage-before' "$archive_script_stage_body" | cut -d: -f1)"
 stage_install_line="$(grep -n 'install -D -m 0644 -- "$source_path"' "$archive_script_stage_body" | cut -d: -f1)"
 stage_tree_after_line="$(grep -n 'capture_archive_source_trees stage-after' "$archive_script_stage_body" | cut -d: -f1)"
-stage_state_check_count="$(grep -c 'check_archive_source_states' "$archive_script_stage_body")"
+stage_state_check_count="$(grep -c 'strict_archive_source_preflight' "$archive_script_stage_body")"
 [[ -n "$stage_tree_before_line" && -n "$stage_install_line" && -n "$stage_tree_after_line" ]] ||
     fail 'stage source tree checks or install copy are missing'
 ((stage_tree_before_line < stage_install_line && stage_install_line < stage_tree_after_line)) ||
@@ -1346,6 +1389,8 @@ tracked_delete_fixture="$(make_archive_fixture archive-tracked-delete-mutation)"
 tracked_delete_inventory="$tracked_delete_fixture/inventory.tsv"
 tracked_delete_inventory_original="$tracked_delete_fixture/inventory.original.tsv"
 tracked_delete_destination="$tracked_delete_fixture/archive"
+tracked_delete_archived_path=""
+tracked_delete_manifest_tmp="$tracked_delete_fixture/manifest.tracked-mutation.json"
 cp -- "$tracked_delete_inventory" "$tracked_delete_inventory_original"
 cp -- "$tracked_delete_inventory.rules.sha256" "$tracked_delete_inventory_original.rules.sha256"
 run_required_command archive-tracked-delete-mutation/stage \
@@ -1356,6 +1401,12 @@ tracked_delete_source_snapshot="$tracked_delete_fixture/source-tree.before-delet
 snapshot_fixture_sources "$tracked_delete_fixture" "$tracked_delete_source_snapshot"
 awk -F '\t' -v OFS='\t' 'NR == 2 { $5 = ($5 == "true" ? "false" : "true") } { print }' \
     "$tracked_delete_inventory_original" > "$tracked_delete_inventory"
+tracked_delete_archived_path="$(awk -F '\t' 'NR == 2 { print $13 }' "$tracked_delete_inventory")"
+cp -- "$tracked_delete_inventory" "$tracked_delete_destination/migration-inventory.tsv"
+jq --arg archived_path "$tracked_delete_archived_path" \
+    '(.entries[] | select(.archived_path == $archived_path) | .tracked) |= not' \
+    "$tracked_delete_destination/manifest.json" > "$tracked_delete_manifest_tmp"
+mv -- "$tracked_delete_manifest_tmp" "$tracked_delete_destination/manifest.json"
 tracked_delete_destination_snapshot="$tracked_delete_fixture/destination-tree.before-delete"
 snapshot_directory_tree "$tracked_delete_destination" "$tracked_delete_destination_snapshot"
 run_expected_failure archive-tracked-delete-mutation/delete \
