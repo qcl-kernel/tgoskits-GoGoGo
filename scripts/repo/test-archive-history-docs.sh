@@ -326,6 +326,8 @@ make_archive_fixture() {
     write_fixture_file \
         "$fixture_root/task12-source/ignored-archive-sentinel.txt" \
         'ignored source sentinel'
+    chmod 0600 -- \
+        "$fixture_root/task12-source/docs/superpowers/specs/2026-08-11-rt-ipc-integration-design.md"
     ln -s -- docs/README.md "$fixture_root/task12-source/tracked-readme.link"
     ln -s -- missing-tracked-target "$fixture_root/task12-source/tracked-dangling.link"
     ln -s -- docs/README.md "$fixture_root/task12-source/ignored-readme.link"
@@ -894,6 +896,28 @@ assert_index_counts_match_manifest() {
         fail 'INDEX phase/type counts differ from manifest aggregation'
 }
 
+assert_archive_files_are_0644() {
+    local destination="$1"
+    local archive_path mode
+
+    while IFS= read -r -d '' archive_path; do
+        mode="$(stat -c '%a' -- "$archive_path")"
+        [[ "$mode" == 644 ]] || fail "archive file mode is not 0644: $archive_path mode=$mode"
+    done < <(find -P "$destination" -type f -print0)
+}
+
+assert_index_links_are_markdown() {
+    local destination="$1"
+    grep -Fq '[open](task12/design/2026-08-11/task12-source/docs/superpowers/specs/2026-08-11-rt-ipc-integration-design.md)' \
+        "$destination/INDEX.md" || fail 'INDEX did not emit a normal Markdown archive link'
+    if grep -Fq '\\(' "$destination/INDEX.md"; then
+        fail 'INDEX contains escaped Markdown link syntax'
+    fi
+    if grep -Fq '%2F' "$destination/INDEX.md"; then
+        fail 'INDEX percent-encoded a path separator'
+    fi
+}
+
 archive_fixture="$(make_archive_fixture archive-success)"
 archive_inventory="$archive_fixture/inventory.tsv"
 archive_destination="$archive_fixture/archive"
@@ -918,6 +942,47 @@ assert_inventory_sources_exist "$archive_inventory" "$archive_fixture"
     fail 'stage did not create INDEX.md'
 assert_inventory_targets_exist "$archive_inventory" "$archive_destination"
 assert_manifest_matches_inventory "$archive_inventory" "$archive_destination"
+assert_archive_files_are_0644 "$archive_destination"
+assert_index_links_are_markdown "$archive_destination"
+
+archive_destination_before_repeat_stage="$archive_fixture/destination-before-repeat-stage"
+archive_source_before_repeat_stage="$archive_fixture/source-before-repeat-stage"
+snapshot_directory_tree "$archive_destination" "$archive_destination_before_repeat_stage"
+snapshot_fixture_sources "$archive_fixture" "$archive_source_before_repeat_stage"
+run_required_command archive-success/repeat-stage \
+    bash "$ARCHIVER" stage \
+    --inventory "$archive_inventory" \
+    --destination "$archive_destination"
+snapshot_directory_tree "$archive_destination" "$archive_fixture/destination-after-repeat-stage"
+snapshot_fixture_sources "$archive_fixture" "$archive_fixture/source-after-repeat-stage"
+assert_snapshot_equal \
+    "$archive_destination_before_repeat_stage" \
+    "$archive_fixture/destination-after-repeat-stage" \
+    archive-success/repeat-stage destination
+assert_snapshot_equal \
+    "$archive_source_before_repeat_stage" \
+    "$archive_fixture/source-after-repeat-stage" \
+    archive-success/repeat-stage sources
+
+inventory_only_fixture="$(make_archive_fixture archive-inventory-only-destination)"
+inventory_only_inventory="$inventory_only_fixture/inventory.tsv"
+inventory_only_destination="$inventory_only_fixture/archive"
+inventory_only_source_snapshot="$inventory_only_fixture/source-tree.before"
+mkdir -p -- "$inventory_only_destination"
+cp -- "$inventory_only_inventory" "$inventory_only_destination/migration-inventory.tsv"
+snapshot_fixture_sources "$inventory_only_fixture" "$inventory_only_source_snapshot"
+run_required_command archive-inventory-only-destination/stage \
+    bash "$ARCHIVER" stage \
+    --inventory "$inventory_only_inventory" \
+    --destination "$inventory_only_destination"
+run_required_command archive-inventory-only-destination/verify \
+    bash "$ARCHIVER" verify \
+    --inventory "$inventory_only_inventory" \
+    --destination "$inventory_only_destination"
+assert_fixture_sources_unchanged \
+    "$inventory_only_fixture" \
+    "$inventory_only_source_snapshot" \
+    archive-inventory-only-destination/stage
 
 run_required_command archive-success/verify-before-duplicate-mutation \
     bash "$ARCHIVER" verify \
@@ -1204,6 +1269,146 @@ assert_fixture_sources_unchanged \
     "$collision_fixture" \
     "$collision_snapshot" \
     archive-collision/stage
+
+git_destination_fixture="$(make_archive_fixture archive-git-destination)"
+git_destination_inventory="$git_destination_fixture/inventory.tsv"
+git_destination_source_snapshot="$git_destination_fixture/source-tree.before"
+git_destination="$git_destination_fixture/.git/archive"
+mkdir -p -- "$git_destination"
+snapshot_fixture_sources "$git_destination_fixture" "$git_destination_source_snapshot"
+snapshot_directory_tree "$git_destination" "$git_destination_fixture/destination-tree.before"
+run_expected_failure archive-git-destination/stage \
+    bash "$ARCHIVER" stage \
+    --inventory "$git_destination_inventory" \
+    --destination "$git_destination"
+assert_expected_failure_contains archive-git-destination/stage '.git'
+snapshot_directory_tree "$git_destination" "$git_destination_fixture/destination-tree.after"
+assert_snapshot_equal \
+    "$git_destination_fixture/destination-tree.before" \
+    "$git_destination_fixture/destination-tree.after" \
+    archive-git-destination/stage destination
+assert_fixture_sources_unchanged \
+    "$git_destination_fixture" \
+    "$git_destination_source_snapshot" \
+    archive-git-destination/stage
+snapshot_directory_tree "$git_destination_fixture/.git" "$git_destination_fixture/git-root.before"
+run_expected_failure archive-git-root-destination/stage \
+    bash "$ARCHIVER" stage \
+    --inventory "$git_destination_inventory" \
+    --destination "$git_destination_fixture/.git"
+assert_expected_failure_contains archive-git-root-destination/stage '.git'
+snapshot_directory_tree "$git_destination_fixture/.git" "$git_destination_fixture/git-root.after"
+assert_snapshot_equal \
+    "$git_destination_fixture/git-root.before" \
+    "$git_destination_fixture/git-root.after" \
+    archive-git-root-destination/stage destination
+
+archive_script_stage_body="$FIXTURE_ROOT/archive-script-stage-body"
+sed -n '/^stage_archive()/,/^}/p' "$ARCHIVER" > "$archive_script_stage_body"
+stage_tree_before_line="$(grep -n 'capture_archive_source_trees stage-before' "$archive_script_stage_body" | cut -d: -f1)"
+stage_install_line="$(grep -n 'install -D -m 0644 -- "$source_path"' "$archive_script_stage_body" | cut -d: -f1)"
+stage_tree_after_line="$(grep -n 'capture_archive_source_trees stage-after' "$archive_script_stage_body" | cut -d: -f1)"
+stage_state_check_count="$(grep -c 'check_archive_source_states' "$archive_script_stage_body")"
+[[ -n "$stage_tree_before_line" && -n "$stage_install_line" && -n "$stage_tree_after_line" ]] ||
+    fail 'stage source tree checks or install copy are missing'
+((stage_tree_before_line < stage_install_line && stage_install_line < stage_tree_after_line)) ||
+    fail 'stage source tree snapshots do not bracket archive copying'
+((stage_state_check_count >= 2)) ||
+    fail 'stage does not recheck source repository state after copying'
+
+tracked_mutation_fixture="$(make_archive_fixture archive-tracked-mutation)"
+tracked_mutation_inventory="$tracked_mutation_fixture/inventory.tsv"
+tracked_mutation_inventory_tmp="$tracked_mutation_fixture/inventory.mutated.tsv"
+tracked_mutation_destination="$tracked_mutation_fixture/archive"
+awk -F '\t' -v OFS='\t' 'NR == 2 { $5 = ($5 == "true" ? "false" : "true") } { print }' \
+    "$tracked_mutation_inventory" > "$tracked_mutation_inventory_tmp"
+mv -- "$tracked_mutation_inventory_tmp" "$tracked_mutation_inventory"
+tracked_mutation_source_snapshot="$tracked_mutation_fixture/source-tree.before"
+snapshot_fixture_sources "$tracked_mutation_fixture" "$tracked_mutation_source_snapshot"
+mkdir -p -- "$tracked_mutation_destination"
+snapshot_directory_tree "$tracked_mutation_destination" "$tracked_mutation_fixture/destination-tree.before-stage"
+run_expected_failure archive-tracked-mutation/stage \
+    bash "$ARCHIVER" stage \
+    --inventory "$tracked_mutation_inventory" \
+    --destination "$tracked_mutation_destination"
+assert_expected_failure_contains archive-tracked-mutation/stage tracked
+snapshot_directory_tree "$tracked_mutation_destination" "$tracked_mutation_fixture/destination-tree.after-stage"
+assert_snapshot_equal \
+    "$tracked_mutation_fixture/destination-tree.before-stage" \
+    "$tracked_mutation_fixture/destination-tree.after-stage" \
+    archive-tracked-mutation/stage destination
+assert_fixture_sources_unchanged \
+    "$tracked_mutation_fixture" \
+    "$tracked_mutation_source_snapshot" \
+    archive-tracked-mutation/stage
+
+tracked_delete_fixture="$(make_archive_fixture archive-tracked-delete-mutation)"
+tracked_delete_inventory="$tracked_delete_fixture/inventory.tsv"
+tracked_delete_inventory_original="$tracked_delete_fixture/inventory.original.tsv"
+tracked_delete_destination="$tracked_delete_fixture/archive"
+cp -- "$tracked_delete_inventory" "$tracked_delete_inventory_original"
+cp -- "$tracked_delete_inventory.rules.sha256" "$tracked_delete_inventory_original.rules.sha256"
+run_required_command archive-tracked-delete-mutation/stage \
+    bash "$ARCHIVER" stage \
+    --inventory "$tracked_delete_inventory_original" \
+    --destination "$tracked_delete_destination"
+tracked_delete_source_snapshot="$tracked_delete_fixture/source-tree.before-delete"
+snapshot_fixture_sources "$tracked_delete_fixture" "$tracked_delete_source_snapshot"
+awk -F '\t' -v OFS='\t' 'NR == 2 { $5 = ($5 == "true" ? "false" : "true") } { print }' \
+    "$tracked_delete_inventory_original" > "$tracked_delete_inventory"
+tracked_delete_destination_snapshot="$tracked_delete_fixture/destination-tree.before-delete"
+snapshot_directory_tree "$tracked_delete_destination" "$tracked_delete_destination_snapshot"
+run_expected_failure archive-tracked-delete-mutation/delete \
+    bash "$ARCHIVER" delete \
+    --inventory "$tracked_delete_inventory" \
+    --destination "$tracked_delete_destination"
+assert_expected_failure_contains archive-tracked-delete-mutation/delete tracked
+snapshot_directory_tree "$tracked_delete_destination" "$tracked_delete_fixture/destination-tree.after-delete"
+assert_snapshot_equal \
+    "$tracked_delete_destination_snapshot" \
+    "$tracked_delete_fixture/destination-tree.after-delete" \
+    archive-tracked-delete-mutation/delete destination
+assert_fixture_sources_unchanged \
+    "$tracked_delete_fixture" \
+    "$tracked_delete_source_snapshot" \
+    archive-tracked-delete-mutation/delete
+
+symlink_delete_fixture="$(make_archive_fixture archive-symlink-delete-mutation)"
+symlink_delete_inventory="$symlink_delete_fixture/inventory.tsv"
+symlink_delete_destination="$symlink_delete_fixture/archive"
+symlink_delete_source_root="$(awk -F '\t' 'NR == 2 { print $2 }' "$symlink_delete_inventory")"
+symlink_delete_original_path="$(awk -F '\t' 'NR == 2 { print $6 }' "$symlink_delete_inventory")"
+symlink_delete_source_path="$(resolve_inventory_source_path \
+    "$symlink_delete_fixture" \
+    "$symlink_delete_source_root" \
+    "$symlink_delete_original_path" \
+    symlink-delete-mutation)"
+run_required_command symlink-delete-mutation/stage \
+    bash "$ARCHIVER" stage \
+    --inventory "$symlink_delete_inventory" \
+    --destination "$symlink_delete_destination"
+rm -- "$symlink_delete_source_path"
+ln -s -- docs/README.md "$symlink_delete_source_path"
+symlink_delete_source_snapshot="$symlink_delete_fixture/source-tree.before-delete"
+snapshot_fixture_sources "$symlink_delete_fixture" "$symlink_delete_source_snapshot"
+symlink_delete_destination_snapshot="$symlink_delete_fixture/destination-tree.before-delete"
+snapshot_directory_tree "$symlink_delete_destination" "$symlink_delete_destination_snapshot"
+run_expected_failure symlink-delete-mutation/delete \
+    bash "$ARCHIVER" delete \
+    --inventory "$symlink_delete_inventory" \
+    --destination "$symlink_delete_destination"
+assert_expected_failure_contains symlink-delete-mutation/delete symlink
+[[ -L "$symlink_delete_source_path" ]] ||
+    fail 'delete removed or followed a replaced source symlink'
+snapshot_directory_tree "$symlink_delete_destination" "$symlink_delete_fixture/destination-tree.after-delete"
+assert_snapshot_equal \
+    "$symlink_delete_destination_snapshot" \
+    "$symlink_delete_fixture/destination-tree.after-delete" \
+    symlink-delete-mutation/delete destination
+assert_fixture_sources_unchanged \
+    "$symlink_delete_fixture" \
+    "$symlink_delete_source_snapshot" \
+    symlink-delete-mutation/delete
 
 source_root_fixture="$(make_archive_fixture archive-source-root-destination)"
 source_root_inventory="$source_root_fixture/inventory.tsv"

@@ -685,11 +685,17 @@ validate_archive_source_file() {
 
 validate_archive_destination() {
     local requested="$1"
-    local source_name source_root parent
+    local source_name source_root parent component
+    local -a destination_components=()
 
     validate_output_path "$requested"
     ARCHIVE_DESTINATION="$VALIDATED_OUTPUT_PATH"
     [[ "$ARCHIVE_DESTINATION" != / ]] || die "destination must not be /"
+    IFS='/' read -r -a destination_components <<< "${ARCHIVE_DESTINATION#/}"
+    for component in "${destination_components[@]}"; do
+        [[ "$component" != .git ]] ||
+            die "destination path contains forbidden .git component: $ARCHIVE_DESTINATION"
+    done
     parent="$(dirname -- "$ARCHIVE_DESTINATION")"
     [[ -d "$parent" && ! -L "$parent" ]] ||
         die "destination parent is not a regular directory: $parent"
@@ -760,7 +766,7 @@ load_archive_inventory() {
     local requested_inventory="$1"
     local line line_number=0 field_index source source_root branch commit tracked original_path
     local phase type date date_source size sha256 archived_path expected_archived
-    local source_root_real key source_path
+    local source_root_real key source_path actual_tracked
     local -a fields=()
     local inventory_sidecar
 
@@ -854,6 +860,12 @@ load_archive_inventory() {
         ARCHIVE_SEEN_SOURCE_PATHS["$key"]=1
         ARCHIVE_SEEN_ARCHIVED["$archived_path"]=1
         source_path="$(validate_archive_source_file "$source" "$source_root" "$original_path")"
+        actual_tracked=false
+        if git -C "$source_root" ls-files --error-unmatch -- "$original_path" > /dev/null 2>&1; then
+            actual_tracked=true
+        fi
+        [[ "$tracked" == "$actual_tracked" ]] ||
+            die "source=$source tracked field disagrees with git ls-files for $original_path: inventory=$tracked actual=$actual_tracked"
         printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
             "$source" "$source_root" "$branch" "$commit" "$tracked" "$original_path" \
             "$phase" "$type" "$date" "$date_source" "$size" "$sha256" "$archived_path" \
@@ -936,6 +948,97 @@ check_archive_candidate_stability() {
     done
 }
 
+capture_archive_source_tree() {
+    local source_root="$1"
+    local output_file="$2"
+    local entry relative link_target digest
+
+    : > "$output_file"
+    (
+        cd -- "$source_root"
+        find -P . ! -path './.git' ! -path './.git/*' -mindepth 1 \
+            \( -type d -o -type f -o -type l \) -print0
+    ) | LC_ALL=C sort -z |
+        while IFS= read -r -d '' entry; do
+            relative="${entry#./}"
+            if [[ -L "$source_root/$relative" ]]; then
+                link_target="$(readlink -- "$source_root/$relative")"
+                printf 'l\t%s\t%s\0' "$relative" "$link_target"
+            elif [[ -d "$source_root/$relative" ]]; then
+                printf 'd\t%s\t-\0' "$relative"
+            elif [[ -f "$source_root/$relative" ]]; then
+                digest="$(sha256sum -b -- "$source_root/$relative")"
+                digest="${digest%% *}"
+                printf 'f\t%s\t%s\0' "$relative" "$digest"
+            else
+                die "source tree contains unsupported entry: $source_root/$relative"
+            fi
+        done >> "$output_file"
+}
+
+capture_archive_source_trees() {
+    local suffix="$1"
+    local source_name source_root
+
+    for source_name in "${ARCHIVE_SOURCE_NAMES[@]}"; do
+        source_root="${ARCHIVE_SOURCE_ROOTS[$source_name]}"
+        capture_archive_source_tree "$source_root" "$ARCHIVE_TMP_DIR/$source_name.tree.$suffix"
+    done
+}
+
+compare_archive_source_trees() {
+    local before_suffix="$1"
+    local after_suffix="$2"
+    local source_name
+
+    for source_name in "${ARCHIVE_SOURCE_NAMES[@]}"; do
+        cmp -s \
+            "$ARCHIVE_TMP_DIR/$source_name.tree.$before_suffix" \
+            "$ARCHIVE_TMP_DIR/$source_name.tree.$after_suffix" ||
+            die "source=$source_name full tree changed between $before_suffix and $after_suffix"
+    done
+}
+
+build_archive_deleted_tree_expected() {
+    local source_name="$1"
+    local before_file="$2"
+    local expected_file="$3"
+    local selected_file="$ARCHIVE_TMP_DIR/$source_name.delete-paths"
+    local record record_source original_path kind rest path
+
+    : > "$selected_file"
+    while IFS=$'\t' read -r record_source _ _ _ _ original_path _ _ _ _ _ _ _; do
+        [[ "$record_source" == "$source_name" ]] || continue
+        printf '%s\0' "$original_path" >> "$selected_file"
+    done < "$ARCHIVE_RECORDS_FILE"
+    : > "$expected_file"
+    while IFS= read -r -d '' record; do
+        kind="${record%%$'\t'*}"
+        rest="${record#*$'\t'}"
+        path="${rest%%$'\t'*}"
+        if [[ "$kind" == f ]] && grep -Fzxq -- "$path" "$selected_file"; then
+            continue
+        fi
+        printf '%s\0' "$record" >> "$expected_file"
+    done < "$before_file"
+}
+
+verify_archive_deleted_source_trees() {
+    local source_name source_root
+    local before_file after_file expected_file
+
+    for source_name in "${ARCHIVE_SOURCE_NAMES[@]}"; do
+        source_root="${ARCHIVE_SOURCE_ROOTS[$source_name]}"
+        before_file="$ARCHIVE_TMP_DIR/$source_name.tree.delete-ready"
+        after_file="$ARCHIVE_TMP_DIR/$source_name.tree.delete-after"
+        expected_file="$ARCHIVE_TMP_DIR/$source_name.tree.delete-expected"
+        capture_archive_source_tree "$source_root" "$after_file"
+        build_archive_deleted_tree_expected "$source_name" "$before_file" "$expected_file"
+        cmp -s "$expected_file" "$after_file" ||
+            die "source=$source_name full tree after delete differs from the verified deletion set"
+    done
+}
+
 build_archive_manifest() {
     local output_file="$1"
     local generated_at="$2"
@@ -999,18 +1102,29 @@ build_archive_index() {
             "| " + (.[0] | gsub("[\\\\|`\\[\\]]"; "\\\\&")) + " | " + (.[1] | gsub("[\\\\|`\\[\\]]"; "\\\\&")) + " | " + (.[2] | tostring) + " |"' "$manifest_file"
         printf '\n%s\n\n' '## Entries'
         printf '%s\n' '| Phase | Type | Date | Source | Original Path | Archive Link |' '|---|---|---|---|---|---|'
-        jq -r '.entries | sort_by([.phase, .type, .date, .source, .original_path])[] |
-            ("| " + (.phase | gsub("[\\\\|`\\[\\]]"; "\\\\&")) + " | " + (.type | gsub("[\\\\|`\\[\\]]"; "\\\\&")) + " | " + (.date | gsub("[\\\\|`\\[\\]]"; "\\\\&")) +
-             " | " + (.source | gsub("[\\\\|`\\[\\]]"; "\\\\&")) + " | " + (.original_path | gsub("[\\\\|`\\[\\]]"; "\\\\&")) +
-             " | [open]\\(" + (.archived_path | @uri) + "\\) |")' "$manifest_file"
+        jq -r 'def cell: gsub("[\\\\|`\\[\\]]"; "\\\\&");
+            def destination: if test("[() <>\\\\]") then "<" + gsub("[\\\\<>]"; "\\\\&") + ">" else . end;
+            .entries | sort_by([.phase, .type, .date, .source, .original_path])[] |
+            ("| " + (.phase | cell) + " | " + (.type | cell) + " | " + (.date | cell) +
+             " | " + (.source | cell) + " | " + (.original_path | cell) +
+             " | [open](" + (.archived_path | destination) + ") |")' "$manifest_file"
         printf '\n%s\n\n' '## Link Map'
         printf '%s\n' 'Archive links are represented by the relative paths in the Entries table; no archived source file is rewritten.'
     } > "$output_file"
 }
 
 stage_destination_precheck() {
-    local entry relative
+    local entry relative top_count=0
+    ARCHIVE_REUSE_EXISTING=0
     [[ -e "$ARCHIVE_DESTINATION" ]] || return 0
+    if [[ -f "$ARCHIVE_DESTINATION/manifest.json" &&
+        -f "$ARCHIVE_DESTINATION/INDEX.md" &&
+        -f "$ARCHIVE_DESTINATION/migration-inventory.tsv" &&
+        -f "$ARCHIVE_DESTINATION/rules.sha256" ]] &&
+        (verify_archive_contents) > /dev/null 2>&1; then
+        ARCHIVE_REUSE_EXISTING=1
+        return 0
+    fi
     while IFS= read -r -d '' entry; do
         [[ ! -L "$entry" ]] || die "existing destination contains symlink: ${entry#"$ARCHIVE_DESTINATION/"}"
         [[ -f "$entry" ]] || continue
@@ -1020,6 +1134,7 @@ stage_destination_precheck() {
         fi
     done < <(find -P "$ARCHIVE_DESTINATION" -mindepth 1 -print0 | LC_ALL=C sort -z)
     while IFS= read -r -d '' entry; do
+        top_count=$((top_count + 1))
         relative="${entry#"$ARCHIVE_DESTINATION/"}"
         [[ "$relative" == migration-inventory.tsv ]] ||
             die "existing destination contains unexpected entry: $entry"
@@ -1028,6 +1143,9 @@ stage_destination_precheck() {
         cmp -s "$ARCHIVE_INVENTORY_FILE" "$entry" ||
             die "existing destination migration-inventory.tsv differs from inventory"
     done < <(find -P "$ARCHIVE_DESTINATION" -mindepth 1 -maxdepth 1 -print0 | LC_ALL=C sort -z)
+    if ((top_count > 1)); then
+        die "existing destination is not empty or inventory-only: $ARCHIVE_DESTINATION"
+    fi
 }
 
 verify_archive_tree() {
@@ -1167,6 +1285,8 @@ verify_archive_contents() {
         [[ -n "$source_name" ]] || continue
         target_path="$ARCHIVE_DESTINATION/$target_path"
         [[ -f "$target_path" && ! -L "$target_path" ]] || die "archive target is missing: $target_path"
+        [[ "$(stat -c '%a' -- "$target_path")" == 644 ]] ||
+            die "archive target mode is not 0644: $target_path"
         actual_size="$(stat -c '%s' -- "$target_path")"
         [[ "$actual_size" == "$size" ]] || die "archive size differs: $target_path"
         actual_sha="$(sha256sum -b -- "$target_path")"
@@ -1176,23 +1296,18 @@ verify_archive_contents() {
 }
 
 publish_archive_stage() {
-    local parent backup
-    parent="$(dirname -- "$ARCHIVE_DESTINATION")"
+    local entry relative
     if [[ ! -e "$ARCHIVE_DESTINATION" ]]; then
         mv -- "$ARCHIVE_STAGE_TMP" "$ARCHIVE_DESTINATION"
         ARCHIVE_STAGE_TMP=""
         return 0
     fi
-    backup="$(mktemp -d "$parent/.$(basename -- "$ARCHIVE_DESTINATION").old.XXXXXX")"
-    rmdir -- "$backup"
-    mv -- "$ARCHIVE_DESTINATION" "$backup"
-    if mv -- "$ARCHIVE_STAGE_TMP" "$ARCHIVE_DESTINATION"; then
-        ARCHIVE_STAGE_TMP=""
-        rm -rf -- "$backup"
-    else
-        mv -- "$backup" "$ARCHIVE_DESTINATION"
-        die "failed to publish archive destination"
-    fi
+    while IFS= read -r -d '' entry; do
+        relative="${entry#"$ARCHIVE_STAGE_TMP/"}"
+        install -D -m 0644 -- "$entry" "$ARCHIVE_DESTINATION/$relative"
+    done < <(find -P "$ARCHIVE_STAGE_TMP" -type f -print0 | LC_ALL=C sort -z)
+    rm -rf -- "$ARCHIVE_STAGE_TMP"
+    ARCHIVE_STAGE_TMP=""
 }
 
 stage_archive() {
@@ -1205,6 +1320,11 @@ stage_archive() {
     validate_archive_destination "$requested_destination"
     stage_destination_precheck
     check_archive_source_states
+    if ((ARCHIVE_REUSE_EXISTING == 1)); then
+        echo "stage: existing verified archive is already current: $ARCHIVE_DESTINATION" >&2
+        return 0
+    fi
+    capture_archive_source_trees stage-before
 
     stage_parent="$(dirname -- "$ARCHIVE_DESTINATION")"
     ARCHIVE_STAGE_TMP="$(mktemp -d "$stage_parent/.$(basename -- "$ARCHIVE_DESTINATION").stage.XXXXXX")"
@@ -1213,9 +1333,10 @@ stage_archive() {
         source_path="$(validate_archive_source_file "$source_name" "$source_root" "$original_path")"
         target_path="$ARCHIVE_STAGE_TMP/$archived_path"
         [[ ! -e "$target_path" && ! -L "$target_path" ]] || die "archive path collision: $archived_path"
-        mkdir -p -- "$(dirname -- "$target_path")"
-        cp -- "$source_path" "$target_path"
+        install -D -m 0644 -- "$source_path" "$target_path"
         [[ -f "$target_path" && ! -L "$target_path" ]] || die "staged target is not a regular file: $archived_path"
+        [[ "$(stat -c '%a' -- "$target_path")" == 644 ]] ||
+            die "staged target mode is not 0644: $archived_path"
         current_size="$(stat -c '%s' -- "$target_path")"
         current_sha="$(sha256sum -b -- "$target_path")"
         current_sha="${current_sha%% *}"
@@ -1225,15 +1346,19 @@ stage_archive() {
         [[ "$current_size" == "$expected_size" && "$current_sha" == "$expected_sha" ]] ||
             die "staged target verification failed: $archived_path"
     done < "$ARCHIVE_RECORDS_FILE"
-    cp -- "$ARCHIVE_INVENTORY_FILE" "$ARCHIVE_STAGE_TMP/migration-inventory.tsv"
-    cp -- "$ARCHIVE_INVENTORY_SIDECAR" "$ARCHIVE_STAGE_TMP/rules.sha256"
+    install -D -m 0644 -- "$ARCHIVE_INVENTORY_FILE" "$ARCHIVE_STAGE_TMP/migration-inventory.tsv"
+    install -D -m 0644 -- "$ARCHIVE_INVENTORY_SIDECAR" "$ARCHIVE_STAGE_TMP/rules.sha256"
     stage_manifest="$ARCHIVE_STAGE_TMP/manifest.json"
     stage_index="$ARCHIVE_STAGE_TMP/INDEX.md"
     build_archive_manifest "$stage_manifest" "$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
     build_archive_index "$stage_manifest" "$ARCHIVE_RULES_PATH" "$stage_index"
+    chmod 0644 -- "$stage_manifest" "$stage_index"
     ARCHIVE_DESTINATION="$ARCHIVE_STAGE_TMP"
     verify_archive_contents
+    capture_archive_source_trees stage-after
+    compare_archive_source_trees stage-before stage-after
     check_archive_candidate_stability
+    check_archive_source_states
     ARCHIVE_DESTINATION="$(realpath -m -- "$requested_destination")"
     publish_archive_stage
     echo "stage: published verified archive at $ARCHIVE_DESTINATION" >&2
@@ -1263,11 +1388,13 @@ cleanup_known_history_directories() {
 
 delete_archive_sources() {
     local source_name source_root branch commit tracked original_path phase type date date_source size sha256 archived_path
-    local source_path target_path actual_size actual_sha
+    local source_path target_path actual_size actual_sha source_identity current_identity
     local -A deleted_paths=()
+    local -A verified_identities=()
 
     verify_archive_contents
     check_archive_source_states
+    capture_archive_source_trees delete-before
     while IFS=$'\t' read -r source_name source_root branch commit tracked original_path phase type date date_source size sha256 archived_path; do
         [[ -n "$source_name" ]] || continue
         source_path="$(validate_archive_source_file "$source_name" "$source_root" "$original_path")"
@@ -1278,16 +1405,34 @@ delete_archive_sources() {
         actual_sha="${actual_sha%% *}"
         [[ "$actual_size" == "$size" && "$actual_sha" == "$sha256" ]] ||
             die "source and archive differ before delete: $source_path"
+        [[ "$(stat -c '%h' -- "$source_path")" == 1 ]] ||
+            die "source file has unexpected hard links before delete: $source_path"
+        source_identity="$(stat -c '%F:%d:%i:%h:%s' -- "$source_path")"
+        [[ "$source_identity" == regular\ file:* ]] ||
+            die "source path is not a regular file before delete: $source_path"
         [[ -z "${deleted_paths[$source_path]+set}" ]] || die "source path is duplicated before delete: $source_path"
         deleted_paths["$source_path"]=1
+        verified_identities["$source_path"]="$source_identity"
     done < "$ARCHIVE_RECORDS_FILE"
 
+    capture_archive_source_trees delete-ready
+    compare_archive_source_trees delete-before delete-ready
+
+    # Shell cannot atomically combine lstat and unlink; identity/tree checks minimize the race window.
     while IFS=$'\t' read -r source_name source_root _ _ _ original_path _ _ _ _ _ _; do
         [[ -n "$source_name" ]] || continue
         source_path="$(validate_archive_source_file "$source_name" "$source_root" "$original_path")"
         [[ -f "$source_path" && ! -L "$source_path" ]] || die "source path changed before delete: $source_path"
-        rm -- "$source_path"
+        current_identity="$(stat -c '%F:%d:%i:%h:%s' -- "$source_path")"
+        [[ "$current_identity" == "${verified_identities[$source_path]}" ]] ||
+            die "source file identity changed during delete: $source_path"
+        [[ "$current_identity" == regular\ file:*:*:1:* ]] ||
+            die "source file has unexpected hard links during delete: $source_path"
+        rm --one-file-system -- "$source_path"
+        [[ ! -e "$source_path" && ! -L "$source_path" ]] ||
+            die "source path still exists after delete: $source_path"
     done < "$ARCHIVE_RECORDS_FILE"
+    verify_archive_deleted_source_trees
     verify_archive_contents
     echo "delete: removed only verified inventory files from source worktrees" >&2
 }
