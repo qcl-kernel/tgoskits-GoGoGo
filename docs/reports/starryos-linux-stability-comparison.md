@@ -2,207 +2,243 @@
 
 ## 1. 结论
 
-本次验证在同一套 AxVisor、QEMU、RT-Thread、网络协议、模型和宿主资源约束下，
-分别使用 2 vCPU Linux 与 2 vCPU StarryOS 作为应用客户机。300 秒快速回归已完成：
-两端 Task2、Task3 和 RTBench 样本完整，应用超时、协议错误、重复包和乱序包均为 0，
-Task3 成功率均为 100%。
+本轮在同一套 AxVisor、QEMU、RT-Thread、协议、模型和宿主环境中，分别启动 2-vCPU
+Linux 和 2-vCPU StarryOS，与固定在独立物理 CPU 集合上的 1-vCPU RT-Thread 进行
+3600 秒稳定性测试。两端均正常退出，QEMU 原始退出码为 0，结果目录由分析器完整发布。
 
-快速回归中，StarryOS 的 Task2 平均 RTT 约为 6 ms，Linux 约为 2 ms；StarryOS
-有效吞吐量低约 62%。Task3 控制往返平均时延由 Linux 的 3401 us 增加到 5785 us，
-增加约 70.1%。RT-Thread 周期任务 jitter P99 在 StarryOS 负载下为 379840 ns，
-比 Linux 负载下的 404944 ns 低约 6.2%；callback execution P99 则高约 22.9%。
+功能和可靠性结果通过：
 
-两次 300 秒运行均出现 8 个大于 1 ms 的周期 jitter 样本，因此严格硬实时门禁未通过，
-结果状态为 `PASS_WITH_QEMU_TIMER_LIMIT`。这表示功能、样本完整性和除 1 ms 周期截止期
-外的稳定性门禁通过，不表示当前 x86_64 宿主上的 AArch64 QEMU TCG 达到物理硬实时要求。
+- Task2 三种载荷（64/256/1024 B）均完成 `240000/240000` 请求；应用超时、协议错误、
+  重传、传输超时、重复包、乱序包和传输错误均为 0。
+- Task3 Linux/StarryOS 均 `6/6` 成功，成功率 100%，分类样本准确率 100%，RT-Thread
+  最终状态均为 `requests=9 errors=0 retries=0`。
+- RTBench 两端均采集 `3599999/3599999` 周期样本，`missing=0`。
+- StarryOS 在本轮 1024 B 全量测试中没有复现上轮约 55685 次请求处的断连。
 
-3600 秒正式对比正在同一 worktree 中运行。本报告在其最终门禁完成后补充正式数据，
-当前不得把 300 秒结果当作 3600 秒稳定性结论。
+结果门禁为 `PASS_WITH_QEMU_TIMER_LIMIT`，而不是严格 `PASS`。RTBench 的 1 ms 周期
+超限为 Linux 34 次、StarryOS 46 次；最大 jitter 分别为 7.865 ms 和 5.925 ms。
+这是 x86_64 宿主上 AArch64 QEMU TCG 的 timer/调度长尾证据，不是物理 AArch64 平台
+上的硬实时证明。若要求严格 `miss_1ms=0`，本轮应判为未通过。
 
-## 2. 测试对象
+相对 Linux，StarryOS 的网络 RTT 平均值约高 200%，有效应用吞吐量低约 64.5%；但
+RTBench jitter 的 P99 低 1.84%、P99.9 高 2.24%，最大 jitter 低 24.66%。这说明
+StarryOS 的主要瓶颈仍在客户机网络/调度路径，不是本轮 RT-Thread 网络线程被饿死。
 
-- Git 分支：`feat/starryos-task123`
-- 快速回归代码提交：`44d5dd0de`
-- 虚拟机监控器：AxVisor，AArch64
-- 模拟器：`qemu-system-aarch64`，`cortex-a72`，QEMU `virt`，GICv3
-- QEMU 配置：4 CPU、8 GiB 内存、两个 virtio-net hub 端点
-- 应用客户机：Linux 或 StarryOS，2 vCPU、512 MiB
-- 实时客户机：RT-Thread，1 vCPU、256 MiB
-- 传输：virtio-net 上的 TCP/UDP/IP；不使用共享内存、HyperCall 或 vsock 作为主通道
-- 网络：应用客户机 `192.168.77.11`，RT-Thread `192.168.77.30`
-- Task2 端口：TCP `9876`
-- Task3 端口：UDP `9877`
+## 2. 测试对象和拓扑
 
-## 3. CPU、内存和设备拓扑
+- Worktree：`/home/yfblock/Code/hyper-rtos/starryos-replace`
+- 分支：`feat/starryos-task123`
+- AxVisor：AArch64，QEMU `virt`，GICv3，`cortex-a72`
+- QEMU：`qemu-system-aarch64`，4 个 vCPU，8 GiB 内存
+- Linux：2 vCPU，512 MiB，客户机地址 `192.168.77.11`
+- StarryOS：2 vCPU，512 MiB，客户机地址 `192.168.77.11`
+- RT-Thread：1 vCPU，256 MiB，固定在物理 CPU 2，地址 `192.168.77.30`
+- Linux/StarryOS vCPU：可在物理 CPU 0、1、3 中调度
+- virtio-net：应用客户机 MAC `52:54:00:77:00:01`，RT-Thread MAC
+  `52:54:00:77:00:03`，通过 QEMU hub `77` 互通
+- Task2：TCP/IP，端口 `9876`
+- Task3：UDP/IP，端口 `9877`
+- 主数据通道：virtio-net 上的 IP 协议栈；不使用共享内存、HyperCall 或 vsock
 
-| 对象 | vCPU | 物理 CPU 约束 | 内存 | 网络设备 |
-|---|---:|---|---:|---|
-| Linux/StarryOS | 2 | 初始放置在 CPU 0/1；两个 vCPU 的可运行集合均为 CPU 0/1/3 | 512 MiB | virtio-net，MAC `52:54:00:77:00:01` |
-| RT-Thread | 1 | 固定在 CPU 2，idle policy 为 `busy` | 256 MiB | virtio-net，MAC `52:54:00:77:00:03` |
-| QEMU/AxVisor | 4 host CPU | QEMU 启动参数 `-smp 4` | 8 GiB | hub `77` |
+因此 Linux 和 StarryOS 使用相同的 2-vCPU、内存、设备、MAC/IP、RT-Thread 和负载
+配置；两次运行按 Linux 后 StarryOS 的固定顺序串行执行。
 
-应用客户机允许在非 RTOS CPU 集合中调度，RT-Thread 则使用静态 CPU 亲和性隔离。
-Linux 和 StarryOS 使用相同的 vCPU 数量、物理 CPU 集合、网络 MAC、IP 和负载参数。
-比较顺序固定为 Linux 后 StarryOS；宿主热状态和 TCG 翻译缓存状态可能造成顺序偏差。
+## 3. 代码迭代和根因修复
 
-## 4. 测量方法和门禁
+### 3.1 上轮失败
 
-### 4.1 Task2 网络
-
-每个客户机依次发送 64、256、1024 字节请求。协议记录发送和接收数量、RTT 的
-min/avg/P50/P95/P99/P99.9/max、有效吞吐量、应用超时、协议错误、连接恢复、传输重传、
-重复包、乱序包和传输错误。每种载荷必须完整收回全部请求。
-
-### 4.2 Task3 AI 控制闭环
-
-应用客户机执行模型推理，通过 UDP/IP 把控制结果发送给 RT-Thread；RT-Thread 执行控制
-并回传状态。报告记录推理时延、请求往返时延、RTOS 处理时延、成功率和错误计数。
-稳定性对比使用相同模型、协议源码和 `task3.frames=3`，用于验证闭环持续可用，不用 3 帧
-样本推断长期 AI 精度分布。
-
-### 4.3 RTBench
-
-RT-Thread 在网络负载并发期间运行 1 ms 周期基准，记录 `stability_jitter` 和
-`callback_exec` 的 P50/P95/P99/P99.9/max、均值、缺失样本以及 100 us、500 us、1 ms
-超限次数。严格门禁要求样本完整且 `miss_1ms=0`。
-
-### 4.4 两级结果状态
-
-- `PASS`：全部功能门禁和严格 `miss_1ms=0` 门禁通过。
-- `PASS_WITH_QEMU_TIMER_LIMIT`：仅显式启用诊断模式时允许周期 jitter 存在 1 ms 超限；
-  panic、assert、fatal、请求缺失、应用失败、QEMU 非零退出仍然失败。
-- `FAIL`：任何必需标记、请求、样本或功能门禁缺失，或运行异常退出。
-
-## 5. 300 秒快速回归结果
-
-原始结果目录：
+上轮目录为：
 
 ```text
-tmp/task123-guest-comparison-quick-diagnostic-final.6DVqWU/
+tmp/task123-guest-comparison-full-txrx-fix/
 ```
 
-有效输入为该目录中的 `linux/` 和 `starryos-current/`。目录中的旧 `starryos/` 使用过期
-镜像，缺少正常退出认证标记，已被结果门禁拒绝，不参与本报告。
-
-### 5.1 Task2 网络结果
-
-| 载荷 | 客户机 | 完成请求 | RTT avg | RTT P95 | RTT P99 | RTT P99.9 | RTT max | 有效吞吐量 |
-|---:|---|---:|---:|---:|---:|---:|---:|---:|
-| 64 B | Linux | 30000/30000 | 2 ms | 3 ms | 5 ms | 12 ms | 43 ms | 24.36 KiB/s |
-| 64 B | StarryOS | 30000/30000 | 6 ms | 8 ms | 10 ms | 43 ms | 58 ms | 9.22 KiB/s |
-| 256 B | Linux | 30000/30000 | 2 ms | 3 ms | 4 ms | 12 ms | 83 ms | 96.69 KiB/s |
-| 256 B | StarryOS | 30000/30000 | 6 ms | 8 ms | 10 ms | 45 ms | 1635 ms | 36.73 KiB/s |
-| 1024 B | Linux | 30000/30000 | 2 ms | 3 ms | 4 ms | 14 ms | 63 ms | 385.04 KiB/s |
-| 1024 B | StarryOS | 30000/30000 | 6 ms | 8 ms | 10 ms | 44 ms | 68 ms | 146.53 KiB/s |
-
-三种载荷的应用超时、协议错误、重复包、乱序包和传输错误均为 0。两端在首个载荷均有
-一次预期连接建立/恢复记录。StarryOS 256 B 测试出现 3 次传输重传，但最终请求完整，
-没有上升为应用超时。256 B 的 1635 ms 最大值是长尾异常点；P99.9 为 45 ms，不能用
-平均值掩盖该最坏样本。
-
-### 5.2 Task3 结果
-
-| 指标 | Linux | StarryOS | StarryOS 相对 Linux |
-|---|---:|---:|---:|
-| 成功率 | 100% | 100% | 0% |
-| 推理时延 mean | 492 us | 831 us | +68.90% |
-| 推理时延 P99 | 898 us | 1077 us | +19.93% |
-| 控制往返 mean | 3401 us | 5785 us | +70.10% |
-| 控制往返 P99 | 8532 us | 6506 us | -23.75% |
-| RTOS 处理 mean | 130 us | 123 us | -5.38% |
-
-Task3 每端只有 6 次事务，P99 实际等于有限样本中的最大值，主要作为功能闭环和异常恢复
-验证。性能趋势应结合 Task2 大样本和后续更大 Task3 样本运行判断。
-
-### 5.3 RTBench 结果
-
-| 指标 | Linux | StarryOS | StarryOS 相对 Linux |
-|---|---:|---:|---:|
-| jitter P50 | 22608 ns | 9056 ns | -59.94% |
-| jitter P95 | 328992 ns | 277136 ns | -15.76% |
-| jitter P99 | 404944 ns | 379840 ns | -6.20% |
-| jitter P99.9 | 445456 ns | 445328 ns | -0.03% |
-| jitter max | 5539344 ns | 5551824 ns | +0.23% |
-| jitter miss_1ms | 8 | 8 | 0% |
-| callback P99 | 2448 ns | 3008 ns | +22.88% |
-| callback max | 203408 ns | 164432 ns | -19.16% |
-
-两端均采集 `299999/299999` 个周期样本，没有 missing。主体分布低于 1 ms，但最大 jitter
-约 5.5 ms，说明普通 Ubuntu 宿主加 QEMU TCG 的调度和 timer path 仍产生毫秒级长尾。
-因此不能把本结果作为 AxVisor 在物理 AArch64 平台上的 WCET 或硬实时证明。
-
-### 5.4 宿主资源
-
-| 指标 | Linux | StarryOS | StarryOS 相对 Linux |
-|---|---:|---:|---:|
-| 墙钟时间 | 305020 ms | 622397 ms | +104.05% |
-| CPU 时间 | 596720 ms | 1224820 ms | +105.26% |
-| 峰值 RSS | 244072 KiB | 239372 KiB | -1.93% |
-| 最大线程数 | 7 | 7 | 0% |
-
-StarryOS 的网络请求 RTT 较高，使固定请求数的运行时间和 QEMU CPU 时间约为 Linux 的
-两倍；内存占用和线程数没有相应增加。
-
-## 6. 3600 秒正式运行
-
-运行目录：
+当时 RT-Thread benchmark worker 使用优先级 10，RT-IPC/Task3 网络线程使用优先级
+15。RT-Thread 中数值越小优先级越高。3600 秒周期采样结束后，worker 在唯一 RTOS
+vCPU 上执行两次大规模 `qsort`，阻塞了网络线程。StarryOS 在 1024 B 载荷约
+`55685/240000` 时失败，最后统计为：
 
 ```text
-tmp/task123-guest-comparison-full-diagnostic.C0ceB3/
+sent=55685 recv=55684 loss=0%
+request_timeouts=0 protocol_errors=1 reconnects=0
+transport: retrans=5 timeouts=1 dup=0 reorder=0 errors=0
+stall=273ms
 ```
 
-运行参数为每种 Task2 载荷 240000 次、RTBench 3600 秒、Task3 3 帧。Linux 已完成并通过
-诊断门禁；StarryOS 正在执行。本节将在 `comparison/comparison.json` 和
-`comparison/comparison-report.md` 通过分析器原子发布后替换为正式对比数据。
+这不是 QEMU 外部超时，也不是 `SourceMacViolation`；根因是 benchmark 汇总任务的
+优先级高于网络服务线程。
 
-## 7. 复现命令
+### 3.2 本轮修复
 
-在仓库根目录运行：
+在 `os/axvisor/guests/rt-benchmark/rtthread/rt_benchmark.c` 中增加：
+
+```c
+#define RTBENCH_WORKER_PRIORITY 20U
+```
+
+并将 `rt_thread_create("rtbench", ...)` 的优先级改为该常量。优先级 20 低于网络
+线程的 15，因此大规模排序变为后台任务，不会抢占网络服务线程。补丁回归脚本同时
+检查该常量存在并确实被 `rtbench_start_job()` 使用。
+
+回归命令：
 
 ```bash
-# 300 秒快速回归
-os/axvisor/scripts/run_task123_guest_comparison.sh \
-  --quick \
-  --allow-qemu-timer-limit \
-  --output "$PWD/tmp/task123-guest-comparison-quick"
+os/axvisor/patches/rtthread/test-rtthread-patches.sh \
+  tmp/starryos-task123/rt-thread-5.2.2-local
+```
 
-# 3600 秒正式对比
+结果：`PASS: RT-Thread patch and benchmark invariants`。
+
+## 4. 可复现实验命令
+
+RT-Thread 源码位于 `tmp/starryos-task123/rt-thread-5.2.2-local`，构建使用 uv 提供
+的 SCons。正常镜像、故障注入镜像和共享缓存已经准备好；重建故障镜像的命令为：
+
+```bash
+bsp=tmp/starryos-task123/rt-thread-5.2.2-local/bsp/qemu-virt64-aarch64
+
+uv run --with scons scons -C "$bsp" -c
+TASK3_FAULT_DROP_STATUS_ONCE=1 \
+  uv run --with scons scons -C "$bsp" -j"$(getconf _NPROCESSORS_ONLN)"
+cp "$bsp/rtthread.bin" tmp/task123-cache-bench-priority.IQYicb/rtthread-drop-status.bin
+
+uv run --with scons scons -C "$bsp" -c
+TASK3_FAULT_DELAY_START_MS=3000 \
+  uv run --with scons scons -C "$bsp" -j"$(getconf _NPROCESSORS_ONLN)"
+cp "$bsp/rtthread.bin" tmp/task123-cache-bench-priority.IQYicb/rtthread-delayed-server.bin
+```
+
+正式对比的一条命令：
+
+```bash
 os/axvisor/scripts/run_task123_guest_comparison.sh \
   --full \
   --allow-qemu-timer-limit \
-  --cache "$PWD/tmp/task123-comparison-cache" \
-  --output "$PWD/tmp/task123-guest-comparison-full"
+  --cache "$PWD/tmp/task123-cache-bench-priority.IQYicb" \
+  --output "$PWD/tmp/task123-guest-comparison-full-bench-priority"
 ```
 
-需要验证严格实时门禁时去掉 `--allow-qemu-timer-limit`。输出目录必须为空，缓存目录必须
-和输出目录分离。运行完成后至少保留：
+本轮结果目录：
+
+```text
+tmp/task123-guest-comparison-full-bench-priority/
+```
+
+关键结果文件：
 
 ```text
 comparison/comparison.json
 comparison/comparison-report.md
 linux/manifest.txt
 linux/console.log
-linux/linux.log
-linux/rtthread.log
 linux/summary.json
 linux/host-metrics.txt
 starryos/manifest.txt
 starryos/console.log
-starryos/starryos.log
-starryos/rtthread.log
 starryos/summary.json
 starryos/host-metrics.txt
 ```
 
-## 8. 限制和后续优化方向
+## 5. 3600 秒结果
 
-1. 当前结果来自 x86_64 宿主上的 AArch64 QEMU TCG，宿主调度、TCG 翻译、timerfd 和
-   线程唤醒共同影响最大延迟；需在物理 AArch64 或 KVM 环境重复严格门禁。
-2. Linux 固定在 StarryOS 之前运行，未执行 ABBA 顺序和多轮置信区间测试；平均差异可用于
-   定位工程瓶颈，但不能等同于统计显著性。
-3. StarryOS 的 Task2 RTT 和吞吐量明显落后，而 RT-Thread jitter 主体分布没有同步恶化，
-   瓶颈更可能位于 StarryOS 用户态网络/调度路径，而非 RT-Thread 控制回调。
-4. 应对 256 B 极端长尾增加用户态调度、socket wait/wake、virtio-net TX/RX 和 AxVisor
-   转发分段时间戳，再决定优化位置。
-5. Task3 稳定性模式只运行少量功能帧；若要评价 AI 闭环性能分布，应追加至少 600 帧的
-   独立 Task3 对比，并报告置信区间和异常恢复样本。
+### 5.1 Task2 网络
+
+| 载荷 | 指标 | Linux | StarryOS | StarryOS 相对 Linux |
+|---:|---|---:|---:|---:|
+| 64 B | RTT avg | 2 ms | 6 ms | +200.0% |
+| 64 B | RTT P95/P99/P99.9 | 3/3/11 ms | 9/10/46 ms | +200.0%/+233.3%/+318.2% |
+| 64 B | RTT max | 62 ms | 55 ms | -11.3% |
+| 64 B | 吞吐量 | 25.16 KiB/s | 8.82 KiB/s | -64.9% |
+| 256 B | RTT avg | 2 ms | 6 ms | +200.0% |
+| 256 B | RTT P95/P99/P99.9 | 3/4/15 ms | 9/10/46 ms | +200.0%/+150.0%/+206.7% |
+| 256 B | RTT max | 67 ms | 58 ms | -13.4% |
+| 256 B | 吞吐量 | 99.30 KiB/s | 35.18 KiB/s | -64.6% |
+| 1024 B | RTT avg | 2 ms | 6 ms | +200.0% |
+| 1024 B | RTT P95/P99/P99.9 | 3/4/14 ms | 9/10/47 ms | +200.0%/+150.0%/+235.7% |
+| 1024 B | RTT max | 59 ms | 58 ms | -1.7% |
+| 1024 B | 吞吐量 | 391.92 KiB/s | 139.31 KiB/s | -64.5% |
+
+三种载荷两端的发送和接收均为 `240000/240000`。所有应用层和传输层错误为 0；
+64 B 的一次 reconnect 是测试客户端建立首个连接时的正常记录，两端一致。
+
+### 5.2 Task3 AI 控制闭环
+
+| 指标 | Linux | StarryOS | StarryOS 相对 Linux |
+|---|---:|---:|---:|
+| 成功率 | 100% (6/6) | 100% (6/6) | 0% |
+| 分类准确率 | 100% (3/3) | 100% (3/3) | 0% |
+| 推理 mean | 487 us | 815 us | +67.4% |
+| 推理 max | 842 us | 1439 us | +70.9% |
+| 控制往返 mean | 2568 us | 5652 us | +120.1% |
+| 控制往返 max | 2671 us | 6383 us | +139.0% |
+| RTOS 处理 mean | 93 us | 195 us | +109.7% |
+
+Task3 仍是 3 个 fixed + 3 个 AI 帧，主要用于闭环功能和稳定性验证；不能把 6 个
+样本当作完整的 AI 性能分布。
+
+### 5.3 RTBench
+
+| 指标 | Linux | StarryOS | StarryOS 相对 Linux |
+|---|---:|---:|---:|
+| stability jitter P50 | 5728 ns | 9200 ns | +60.6% |
+| stability jitter P95 | 287424 ns | 289856 ns | +0.8% |
+| stability jitter P99 | 407104 ns | 399616 ns | -1.8% |
+| stability jitter P99.9 | 451296 ns | 461408 ns | +2.2% |
+| stability jitter max | 7865072 ns | 5925424 ns | -24.7% |
+| jitter mean | 57569 ns | 51568 ns | -10.4% |
+| jitter miss_1ms | 34 | 46 | +35.3% |
+| callback P99 | 864 ns | 2480 ns | +187.0% |
+| callback max | 505344 ns | 364848 ns | -27.8% |
+| missing | 0 | 0 | 0 |
+
+两端的 `expected` 和 `collected` 均为 `3599999`。StarryOS 的主体 jitter P95/P99 与
+Linux 接近，但 P50 和 callback P99 较高；这表明客户机调度/网络路径对普通延迟分布
+有影响，不能只看最大值判断实时性。两端均有 1 ms 超限，严格周期截止期门禁未通过。
+
+### 5.4 宿主资源
+
+| 指标 | Linux | StarryOS | StarryOS 相对 Linux |
+|---|---:|---:|---:|
+| 墙钟时间 | 3627371 ms | 5140047 ms | +41.7% |
+| QEMU CPU 时间 | 7103300 ms | 10123050 ms | +42.5% |
+| 峰值 RSS | 302264 KiB | 292644 KiB | -3.2% |
+| 最大线程数 | 7 | 7 | 0% |
+| 资源采样数 | 35384 | 50150 | +41.7% |
+
+StarryOS 的较高墙钟和 CPU 时间主要来自其网络 RTT/吞吐路径较慢，不代表 RT-Thread
+本身占用更多内存或创建更多线程。
+
+## 6. 镜像和证据摘要
+
+本轮共享缓存：
+
+```text
+tmp/task123-cache-bench-priority.IQYicb/
+```
+
+关键 RT-Thread 镜像 SHA-256：
+
+```text
+rtthread-normal.bin       f7bf4fbb5b067c0c73853af45a7fc9e038929b4e20a09ab3a616ceb174161403
+rtthread-drop-status.bin   857c934501f6f3ab0ee9a3162b14a061e322a3b2382cac9b20765eab496d80d2
+rtthread-delayed-server.bin 25ed8a1a00790ab480dd7ac2eb5f9168dda90df632704fafb7e98b84ceee0bd3
+```
+
+完整 artifact、VM 配置、QEMU 退出码和统计数据见两端 `manifest.txt` 及：
+
+```text
+tmp/task123-guest-comparison-full-bench-priority/comparison/comparison.json
+```
+
+## 7. 限制和后续优化
+
+1. 当前平台是 x86_64 宿主上的 AArch64 QEMU TCG；必须在物理 AArch64 或 KVM 环境中
+   重新验证严格 `miss_1ms=0` 和最坏情况响应时间。
+2. 本轮只执行一组 Linux→StarryOS 顺序；若要发表统计结论，应交换顺序并重复多轮，
+   报告置信区间。
+3. StarryOS Task2 平均 RTT 约为 Linux 的 3 倍，吞吐量约为 35.5%；下一轮优化应在
+   StarryOS 的 socket wait/wake、virtio-net 收发和 AxVisor 转发边界加入时间戳。
+4. RTBench worker 已降低为后台优先级，长测网络稳定性得到验证；仍需单独评估 qsort
+   汇总的 CPU 抢占影响以及更细的调度/中断路径延迟。
+5. Task3 只使用 6 个端到端样本；如需量化 AI 控制效果，应追加至少 600 帧并报告
+   控制误差、稳定时间和端到端延迟分布。

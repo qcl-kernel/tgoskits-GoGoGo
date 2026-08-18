@@ -23,6 +23,7 @@
 #define RTBENCH_WAIT_SLICE_MS 10U
 #define RTBENCH_TIMEOUT_MARGIN_MS 5000U
 #define RTBENCH_WORKER_STACK_SIZE 32768U
+#define RTBENCH_WORKER_PRIORITY 20U
 #define RTBENCH_SGI_INTID 7
 
 struct rtbench_result
@@ -717,7 +718,7 @@ static int rtbench_start_job(enum rtbench_job_kind kind, uint64_t argument)
                               rtbench_worker,
                               &rtbench_job,
                               RTBENCH_WORKER_STACK_SIZE,
-                              10,
+                              RTBENCH_WORKER_PRIORITY,
                               10);
     if (worker == RT_NULL)
     {

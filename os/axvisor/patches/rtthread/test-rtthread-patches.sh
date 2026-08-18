@@ -191,6 +191,15 @@ require_pattern \
     '#define MEMP_NUM_NETBUF[[:space:]]+16' \
     "$RTCONFIG"
 require_pattern \
+    "RT benchmark worker uses a background priority below the network threads" \
+    '#define RTBENCH_WORKER_PRIORITY[[:space:]]+20U' \
+    "$INSTALLED_BENCHMARK"
+require_function_pattern \
+    "RT benchmark worker uses the background priority constant" \
+    'rtbench_start_job' \
+    'RTBENCH_WORKER_PRIORITY' \
+    "$INSTALLED_BENCHMARK"
+require_pattern \
     "GICv3 set-pending uses the current CPU redistributor for SGIs and PPIs" \
     'GIC_RDISTSGI_ISPENDR0\(_gic_table\[index\]\.redist_hw_base\[cpu_id\]\) = mask;' \
     "$GICV3"
