@@ -727,7 +727,7 @@ assert_archive_tree_entries() {
                 fail "archive tree contains extra directory: $archive_path"
         elif [[ -f "$archive_path" ]]; then
             case "$relative_path" in
-                manifest.json|INDEX.md|migration-inventory.tsv|rules.sha256)
+                manifest.json|INDEX.md|migration-inventory.tsv|rules.sha256|migration-report.md)
                     ;;
                 *)
                     grep -Fzxq -- "$relative_path" "$expected_paths" ||
@@ -852,7 +852,8 @@ assert_manifest_matches_inventory() {
         while IFS= read -r -d '' source_path; do
             case "$source_path" in
                 "$destination/manifest.json"|"$destination/INDEX.md"|\
-                "$destination/migration-inventory.tsv"|"$destination/rules.sha256")
+                "$destination/migration-inventory.tsv"|"$destination/rules.sha256"|\
+                "$destination/migration-report.md")
                     continue
                     ;;
             esac
@@ -944,6 +945,8 @@ archive_inventory="$archive_fixture/inventory.tsv"
 archive_destination="$archive_fixture/archive"
 archive_snapshot="$archive_fixture/source-tree.before"
 archive_selected_sources="$archive_fixture/selected-source-paths"
+archive_report="$archive_destination/migration-report.md"
+archive_report_contents='Task 4 migration verification report fixture'
 snapshot_fixture_sources "$archive_fixture" "$archive_snapshot"
 build_inventory_source_paths \
     "$archive_fixture" "$archive_inventory" "$archive_selected_sources"
@@ -955,6 +958,36 @@ assert_fixture_sources_unchanged \
     "$archive_fixture" \
     "$archive_snapshot" \
     archive-success/stage
+write_fixture_file "$archive_report" "$archive_report_contents"
+chmod 0644 -- "$archive_report"
+run_required_command archive-success/verify-with-migration-report \
+    bash "$ARCHIVER" verify \
+    --inventory "$archive_inventory" \
+    --destination "$archive_destination"
+rm -- "$archive_report"
+ln -s -- manifest.json "$archive_report"
+archive_report_symlink_snapshot="$archive_fixture/destination-before-report-symlink-verify"
+snapshot_directory_tree "$archive_destination" "$archive_report_symlink_snapshot"
+run_expected_failure archive-success/migration-report-symlink/verify \
+    bash "$ARCHIVER" verify \
+    --inventory "$archive_inventory" \
+    --destination "$archive_destination"
+assert_expected_failure_contains archive-success/migration-report-symlink/verify symlink
+snapshot_directory_tree \
+    "$archive_destination" \
+    "$archive_fixture/destination-after-report-symlink-verify"
+assert_snapshot_equal \
+    "$archive_report_symlink_snapshot" \
+    "$archive_fixture/destination-after-report-symlink-verify" \
+    archive-success/migration-report-symlink/verify destination
+[[ -L "$archive_report" ]] || fail 'verify removed the migration report symlink'
+rm -- "$archive_report"
+write_fixture_file "$archive_report" "$archive_report_contents"
+chmod 0644 -- "$archive_report"
+run_required_command archive-success/verify-after-migration-report-symlink \
+    bash "$ARCHIVER" verify \
+    --inventory "$archive_inventory" \
+    --destination "$archive_destination"
 
 assert_inventory_sources_exist "$archive_inventory" "$archive_fixture"
 [[ -f "$archive_destination/manifest.json" ]] ||
@@ -1131,6 +1164,10 @@ run_required_command archive-success/verify-after-delete \
     bash "$ARCHIVER" verify \
     --inventory "$archive_inventory" \
     --destination "$archive_destination"
+[[ -f "$archive_report" && ! -L "$archive_report" ]] ||
+    fail 'delete removed or replaced migration-report.md'
+[[ "$(<"$archive_report")" == "$archive_report_contents" ]] ||
+    fail 'delete changed migration-report.md content'
 assert_only_inventory_sources_deleted \
     "$archive_fixture" \
     "$archive_selected_sources" \

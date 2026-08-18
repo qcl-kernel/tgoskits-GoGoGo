@@ -1197,7 +1197,7 @@ verify_archive_tree() {
             ((allowed == 1)) || die "archive tree contains extra directory: $relative"
         elif [[ -f "$entry" ]]; then
             case "$relative" in
-                migration-inventory.tsv|manifest.json|INDEX.md|rules.sha256) ;;
+                migration-inventory.tsv|manifest.json|INDEX.md|rules.sha256|migration-report.md) ;;
                 *) grep -Fzxq -- "$relative" "$expected_paths" || die "archive tree contains extra regular file: $relative" ;;
             esac
         else
@@ -1209,7 +1209,7 @@ verify_archive_tree() {
         while IFS= read -r -d '' entry; do
             relative="${entry#"$ARCHIVE_DESTINATION/"}"
             case "$relative" in
-                migration-inventory.tsv|manifest.json|INDEX.md|rules.sha256) ;;
+                migration-inventory.tsv|manifest.json|INDEX.md|rules.sha256|migration-report.md) ;;
                 *) printf '%s\0' "$relative" >> "$actual_paths" ;;
             esac
         done
