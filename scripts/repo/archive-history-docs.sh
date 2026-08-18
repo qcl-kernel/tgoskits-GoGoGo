@@ -983,33 +983,32 @@ check_archive_candidate_stability() {
 }
 
 capture_archive_source_tree() {
-    local source_root="$1"
-    local output_file="$2"
-    local entry relative link_target digest
+    local source_name="$1"
+    local source_root="$2"
+    local output_file="$3"
+    local candidate_file entry_path link_target identity raw_file
 
-    : > "$output_file"
-    (
-        cd -- "$source_root"
-        find -P . ! -path './.git' ! -path './.git/*' -mindepth 1 \
-            \( -type d -o -type f -o -type l \) -print0
-    ) | LC_ALL=C sort -z |
-        while IFS= read -r -d '' entry; do
-            relative="${entry#./}"
-            if [[ -L "$source_root/$relative" ]]; then
-                link_target="$(readlink -- "$source_root/$relative")"
-                printf 'l\t%s\t%s\0' "$relative" "$link_target"
-            elif [[ -d "$source_root/$relative" ]]; then
-                printf 'd\t%s\t-\0' "$relative"
-            elif [[ -f "$source_root/$relative" ]]; then
-                # The selected migration files are hashed by the strict
-                # preflight. Avoid hashing the entire worktree here: a
-                # source may contain multi-gigabyte build outputs.
-                digest="$(stat -c '%d:%i:%h:%a:%s:%Y' -- "$source_root/$relative")"
-                printf 'f\t%s\t%s\0' "$relative" "$digest"
-            else
-                die "source tree contains unsupported entry: $source_root/$relative"
-            fi
-        done >> "$output_file"
+    candidate_file="${ARCHIVE_CANDIDATE_FILES[$source_name]-}"
+    [[ -f "$candidate_file" ]] || die "source=$source_name candidate snapshot is unavailable"
+    raw_file="$output_file.raw"
+    : > "$raw_file"
+    while IFS= read -r -d '' entry_path; do
+        if [[ -L "$source_root/$entry_path" ]]; then
+            link_target="$(readlink -- "$source_root/$entry_path")"
+            printf 'l\t%s\t%s\0' "$entry_path" "$link_target" >> "$raw_file"
+        elif [[ -f "$source_root/$entry_path" ]]; then
+            # Selected files are hashed by strict preflight. Metadata is
+            # enough here to prove that no other Git-visible path changed.
+            identity="$(stat -c '%d:%i:%h:%a:%s:%Y' -- "$source_root/$entry_path")"
+            printf 'f\t%s\t%s\0' "$entry_path" "$identity" >> "$raw_file"
+        elif [[ ! -e "$source_root/$entry_path" ]]; then
+            # A selected file is intentionally absent in post-delete snapshots.
+            continue
+        else
+            die "source tree contains unsupported entry: $source_root/$entry_path"
+        fi
+    done < "$candidate_file"
+    LC_ALL=C sort -z -- "$raw_file" > "$output_file"
 }
 
 capture_archive_source_trees() {
@@ -1018,7 +1017,8 @@ capture_archive_source_trees() {
 
     for source_name in "${ARCHIVE_SOURCE_NAMES[@]}"; do
         source_root="${ARCHIVE_SOURCE_ROOTS[$source_name]}"
-        capture_archive_source_tree "$source_root" "$ARCHIVE_TMP_DIR/$source_name.tree.$suffix"
+        capture_archive_source_tree \
+            "$source_name" "$source_root" "$ARCHIVE_TMP_DIR/$source_name.tree.$suffix"
     done
 }
 
@@ -1068,7 +1068,7 @@ verify_archive_deleted_source_trees() {
         before_file="$ARCHIVE_TMP_DIR/$source_name.tree.delete-ready"
         after_file="$ARCHIVE_TMP_DIR/$source_name.tree.delete-after"
         expected_file="$ARCHIVE_TMP_DIR/$source_name.tree.delete-expected"
-        capture_archive_source_tree "$source_root" "$after_file"
+        capture_archive_source_tree "$source_name" "$source_root" "$after_file"
         build_archive_deleted_tree_expected "$source_name" "$before_file" "$expected_file"
         cmp -s "$expected_file" "$after_file" ||
             die "source=$source_name full tree after delete differs from the verified deletion set"
@@ -1558,7 +1558,8 @@ archive_delete_rollback() {
 
     for source_name in "${ARCHIVE_SOURCE_NAMES[@]}"; do
         source_root="${ARCHIVE_SOURCE_ROOTS[$source_name]}"
-        if ! capture_archive_source_tree "$source_root" "$ARCHIVE_TMP_DIR/$source_name.tree.delete-rollback" ||
+        if ! capture_archive_source_tree \
+            "$source_name" "$source_root" "$ARCHIVE_TMP_DIR/$source_name.tree.delete-rollback" ||
             ! cmp -s "$ARCHIVE_TMP_DIR/$source_name.tree.delete-before" \
                 "$ARCHIVE_TMP_DIR/$source_name.tree.delete-rollback"; then
             rollback_failed=1
