@@ -318,6 +318,7 @@ make_archive_fixture() {
     local name="$1"
     local fixture_root="$FIXTURE_ROOT/$name"
     local fixture_inventory="$fixture_root/inventory.tsv"
+    local ignored_symlink
 
     mkdir -p -- "$fixture_root"
     cp -a -- "$task12_source" "$fixture_root/task12-source"
@@ -325,8 +326,24 @@ make_archive_fixture() {
     write_fixture_file \
         "$fixture_root/task12-source/ignored-archive-sentinel.txt" \
         'ignored source sentinel'
+    ln -s -- docs/README.md "$fixture_root/task12-source/tracked-readme.link"
+    ln -s -- missing-tracked-target "$fixture_root/task12-source/tracked-dangling.link"
+    ln -s -- docs/README.md "$fixture_root/task12-source/ignored-readme.link"
+    ln -s -- missing-ignored-target "$fixture_root/task12-source/ignored-dangling.link"
     printf '%s\n' '/ignored-archive-sentinel.txt' \
+        '/ignored-readme.link' \
+        '/ignored-dangling.link' \
         >> "$fixture_root/task12-source/.git/info/exclude"
+    commit_fixture_repo "$fixture_root/task12-source" \
+        tracked-readme.link \
+        tracked-dangling.link
+    git -C "$fixture_root/task12-source" ls-files --error-unmatch -- \
+        tracked-readme.link tracked-dangling.link > /dev/null ||
+        fail "archive fixture tracked symlink setup failed: $name"
+    for ignored_symlink in ignored-readme.link ignored-dangling.link; do
+        git -C "$fixture_root/task12-source" check-ignore -q -- "$ignored_symlink" ||
+            fail "archive fixture ignored symlink setup failed: $name/$ignored_symlink"
+    done
     bash "$ARCHIVER" inventory \
         --rules "$archive_rules" \
         --source "task12-source=$fixture_root/task12-source" \
@@ -335,19 +352,24 @@ make_archive_fixture() {
         > "$fixture_root/inventory.stdout" \
         2> "$fixture_root/inventory.stderr" ||
         fail "archive fixture inventory failed: $name"
+    assert_inventory_source_roots "$fixture_root" "$fixture_inventory"
     printf '%s\n' "$fixture_root"
 }
 
 assert_inventory_sources_exist() {
     local inventory_file="$1"
+    local fixture_root="$2"
     local source source_root branch commit tracked original_path phase type
     local date date_source size sha256 archived_path
+    local source_path
 
     while IFS=$'\t' read -r source source_root branch commit tracked original_path \
         phase type date date_source size sha256 archived_path; do
         [[ -n "$source" ]] || continue
-        [[ -f "$source_root/$original_path" ]] ||
-            fail "inventory source file is missing: $source_root/$original_path"
+        source_path="$(resolve_inventory_source_path \
+            "$fixture_root" "$source_root" "$original_path" "inventory/$source")"
+        [[ -f "$source_path" && ! -L "$source_path" ]] ||
+            fail "inventory source file is not a regular file: $source_path"
     done < <(tail -n +2 "$inventory_file")
 }
 
@@ -356,30 +378,144 @@ assert_inventory_targets_exist() {
     local destination="$2"
     local source source_root branch commit tracked original_path phase type
     local date date_source size sha256 archived_path
+    local target_path
 
     while IFS=$'\t' read -r source source_root branch commit tracked original_path \
         phase type date date_source size sha256 archived_path; do
         [[ -n "$source" ]] || continue
-        [[ -f "$destination/$archived_path" ]] ||
-            fail "inventory target file is missing: $destination/$archived_path"
+        target_path="$(resolve_inventory_archive_path \
+            "$destination" "$archived_path" "inventory/$source")"
+        [[ -f "$target_path" && ! -L "$target_path" ]] ||
+            fail "inventory target file is not a regular file: $target_path"
     done < <(tail -n +2 "$inventory_file")
 }
 
-snapshot_source_tree() {
-    local source_root="$1"
+assert_safe_relative_path() {
+    local path="$1"
+    local label="$2"
+
+    [[ -n "$path" && "$path" != /* ]] ||
+        fail "$label is absolute or empty: $path"
+    case "/$path/" in
+        */../*) fail "$label contains parent traversal: $path" ;;
+    esac
+}
+
+resolve_inventory_source_path() {
+    local fixture_root="$1"
+    local source_root="$2"
+    local original_path="$3"
+    local label="$4"
+    local expected_root root_real source_path source_real
+
+    case "$source_root" in
+        "$fixture_root/task12-source") expected_root="$fixture_root/task12-source" ;;
+        "$fixture_root/task123-source") expected_root="$fixture_root/task123-source" ;;
+        *) fail "$label source_root is outside fixture: $source_root" ;;
+    esac
+    root_real="$(realpath -e -- "$source_root")" ||
+        fail "$label source_root does not exist: $source_root"
+    expected_root="$(realpath -e -- "$expected_root")" ||
+        fail "$label fixture source does not exist: $expected_root"
+    [[ "$root_real" == "$expected_root" ]] ||
+        fail "$label source_root does not match fixture source: $source_root"
+    assert_safe_relative_path "$original_path" "$label original_path"
+    source_path="$root_real/$original_path"
+    source_real="$(realpath -e -- "$source_path")" ||
+        fail "$label source path does not exist: $source_path"
+    [[ "$source_real" == "$root_real/"* ]] ||
+        fail "$label source path escapes fixture source: $original_path"
+    printf '%s\n' "$source_real"
+}
+
+build_inventory_source_paths() {
+    local fixture_root="$1"
+    local inventory_file="$2"
+    local output_file="$3"
+    local source source_root branch commit tracked original_path
+    local source_path
+
+    : > "$output_file"
+    while IFS=$'\t' read -r source source_root branch commit tracked original_path _; do
+        [[ -n "$source" ]] || continue
+        source_path="$(resolve_inventory_source_path \
+            "$fixture_root" "$source_root" "$original_path" "inventory/$source")"
+        [[ -f "$source_path" && ! -L "$source_path" ]] ||
+            fail "inventory source is not a regular file: $source_path"
+        printf '%s\0' "$source_path" >> "$output_file"
+    done < <(tail -n +2 "$inventory_file")
+}
+
+resolve_inventory_archive_path() {
+    local destination="$1"
+    local archived_path="$2"
+    local label="$3"
+    local destination_real target_real
+
+    assert_safe_relative_path "$archived_path" "$label archived_path"
+    destination_real="$(realpath -e -- "$destination")" ||
+        fail "$label archive destination does not exist: $destination"
+    target_real="$(realpath -m -- "$destination_real/$archived_path")" ||
+        fail "$label archived target cannot be resolved: $archived_path"
+    [[ "$target_real" == "$destination_real/"* ]] ||
+        fail "$label archived target escapes destination: $archived_path"
+    printf '%s\n' "$target_real"
+}
+
+assert_inventory_source_roots() {
+    local fixture_root="$1"
+    local inventory_file="$2"
+    local source source_root branch commit tracked original_path
+    local expected_root actual_root
+
+    while IFS=$'\t' read -r source source_root branch commit tracked original_path _; do
+        [[ -n "$source" ]] || continue
+        case "$source" in
+            task12-source) expected_root="$fixture_root/task12-source" ;;
+            task123-source) expected_root="$fixture_root/task123-source" ;;
+            *) fail "inventory has unexpected source name: $source" ;;
+        esac
+        actual_root="$(realpath -e -- "$source_root")" ||
+            fail "inventory source_root does not exist: $source_root"
+        expected_root="$(realpath -e -- "$expected_root")" ||
+            fail "fixture source does not exist: $expected_root"
+        [[ "$actual_root" == "$expected_root" ]] ||
+            fail "inventory source_root does not match fixture: $source_root"
+    done < <(tail -n +2 "$inventory_file")
+}
+
+snapshot_tree() {
+    local tree_root="$1"
     local output_file="$2"
-    local relative_path source_path digest
+    local exclude_git="$3"
+    local relative_path tree_path digest link_target
 
     (
-        cd "$source_root"
-        find . -type f ! -path './.git/*' -print0 | LC_ALL=C sort -z
-    ) | while IFS= read -r -d '' relative_path; do
+        cd "$tree_root"
+        if ((exclude_git)); then
+            find -P . ! -path './.git' ! -path './.git/*' -mindepth 1 \
+                \( -type d -o -type f -o -type l \) -print0
+        else
+            find -P . -mindepth 1 \( -type d -o -type f -o -type l \) -print0
+        fi
+    ) | LC_ALL=C sort -z | while IFS= read -r -d '' relative_path; do
         relative_path="${relative_path#./}"
-        source_path="$source_root/$relative_path"
-        digest="$(sha256sum -b -- "$source_path")"
-        digest="${digest%% *}"
-        printf '%s\t%s\0' "$digest" "$source_path"
+        tree_path="$tree_root/$relative_path"
+        if [[ -L "$tree_path" ]]; then
+            link_target="$(readlink -- "$tree_path")"
+            printf 'l\t%s\t%s\t-\0' "$tree_path" "$link_target"
+        elif [[ -d "$tree_path" ]]; then
+            printf 'd\t%s\t-\t-\0' "$tree_path"
+        else
+            digest="$(sha256sum -b -- "$tree_path")"
+            digest="${digest%% *}"
+            printf 'f\t%s\t-\t%s\0' "$tree_path" "$digest"
+        fi
     done >> "$output_file"
+}
+
+snapshot_source_tree() {
+    snapshot_tree "$1" "$2" 1
 }
 
 snapshot_fixture_sources() {
@@ -392,11 +528,7 @@ snapshot_fixture_sources() {
 }
 
 snapshot_directory_tree() {
-    local directory="$1"
-    local output_file="$2"
-
-    : > "$output_file"
-    snapshot_source_tree "$directory" "$output_file"
+    snapshot_tree "$1" "$2" 0
 }
 
 assert_snapshot_equal() {
@@ -408,7 +540,7 @@ assert_snapshot_equal() {
         diff -u \
             <(tr '\0' '\n' < "$expected_snapshot") \
             <(tr '\0' '\n' < "$actual_snapshot") || true
-        fail "$label regular-file path/SHA-256 snapshot changed"
+        fail "$label full-tree lstat/path/content snapshot changed"
     fi
 }
 
@@ -440,21 +572,35 @@ assert_failed_delete_preserved_sources() {
     local label="$3"
     local changed_path="${4:-}"
     local changed_digest="${5:-}"
-    local expected_digest source_path actual_digest
+    local entry_type source_path expected_link expected_digest
+    local actual_digest actual_link
     local actual_snapshot="$FIXTURE_ROOT/$label.source-tree.after"
     local expected_count actual_count
 
-    while IFS=$'\t' read -r -d '' expected_digest source_path; do
-        [[ -f "$source_path" ]] ||
-            fail "$label removed source regular file: $source_path"
-        actual_digest="$(sha256sum -b -- "$source_path")"
-        actual_digest="${actual_digest%% *}"
-        if [[ "$source_path" == "$changed_path" ]]; then
-            [[ "$actual_digest" == "$changed_digest" ]] ||
-                fail "$label changed the intentionally mutated source: $source_path"
+    while IFS=$'\t' read -r -d '' entry_type source_path expected_link expected_digest; do
+        if [[ "$entry_type" == f ]]; then
+            [[ -f "$source_path" && ! -L "$source_path" ]] ||
+                fail "$label removed source regular file: $source_path"
+            actual_digest="$(sha256sum -b -- "$source_path")"
+            actual_digest="${actual_digest%% *}"
+            if [[ "$source_path" == "$changed_path" ]]; then
+                [[ "$actual_digest" == "$changed_digest" ]] ||
+                    fail "$label changed the intentionally mutated source: $source_path"
+            else
+                [[ "$actual_digest" == "$expected_digest" ]] ||
+                    fail "$label changed source regular file: $source_path"
+            fi
+        elif [[ "$entry_type" == l ]]; then
+            [[ -L "$source_path" ]] ||
+                fail "$label removed source symlink: $source_path"
+            actual_link="$(readlink -- "$source_path")"
+            [[ "$actual_link" == "$expected_link" ]] ||
+                fail "$label changed source symlink: $source_path"
+        elif [[ "$entry_type" == d ]]; then
+            [[ -d "$source_path" && ! -L "$source_path" ]] ||
+                fail "$label removed source directory: $source_path"
         else
-            [[ "$actual_digest" == "$expected_digest" ]] ||
-                fail "$label changed source regular file: $source_path"
+            fail "$label snapshot has unknown entry type: $entry_type"
         fi
     done < "$expected_snapshot"
 
@@ -466,23 +612,31 @@ assert_failed_delete_preserved_sources() {
         expected_count="$(tr -cd '\0' < "$expected_snapshot" | wc -c)"
         actual_count="$(tr -cd '\0' < "$actual_snapshot" | wc -c)"
         [[ "$actual_count" == "$expected_count" ]] ||
-            fail "$label added or removed source regular files"
+            fail "$label added or removed source tree entries"
     fi
 }
 
 assert_only_inventory_sources_deleted() {
-    local inventory_file="$1"
+    local selected_paths="$1"
     local candidates_file="$2"
-    local expected_digest source_path actual_digest
+    local entry_type source_path expected_link expected_digest actual_digest
 
-    while IFS=$'\t' read -r -d '' expected_digest source_path; do
-        if awk -F '\t' -v expected_path="$source_path" \
-            'NR > 1 && $2 "/" $6 == expected_path { found = 1 }
-             END { exit found ? 0 : 1 }' "$inventory_file"; then
+    while IFS=$'\t' read -r -d '' entry_type source_path expected_link expected_digest; do
+        if grep -Fzxq -- "$source_path" "$selected_paths"; then
+            [[ "$entry_type" == f ]] ||
+                fail "inventory selected a non-regular source entry: $source_path"
             [[ ! -e "$source_path" ]] ||
                 fail "delete retained selected source: $source_path"
+        elif [[ "$entry_type" == l ]]; then
+            [[ -L "$source_path" ]] ||
+                fail "delete removed non-selected symlink: $source_path"
+            [[ "$(readlink -- "$source_path")" == "$expected_link" ]] ||
+                fail "delete changed non-selected symlink: $source_path"
+        elif [[ "$entry_type" == d ]]; then
+            [[ -d "$source_path" && ! -L "$source_path" ]] ||
+                fail "delete removed non-selected source directory: $source_path"
         else
-            [[ -f "$source_path" ]] ||
+            [[ -f "$source_path" && ! -L "$source_path" ]] ||
                 fail "delete removed non-selected source: $source_path"
             actual_digest="$(sha256sum -b -- "$source_path")"
             actual_digest="${actual_digest%% *}"
@@ -518,10 +672,12 @@ run_expected_failure() {
     shift
     local stdout_file="$FIXTURE_ROOT/$label.stdout"
     local stderr_file="$FIXTURE_ROOT/$label.stderr"
+    local command_file="$FIXTURE_ROOT/$label.command"
     local command_display output
 
     mkdir -p -- "$(dirname -- "$stdout_file")"
     command_display="$(printf '%q ' "$@")"
+    printf '%s\n' "$command_display" > "$command_file"
     if "$@" > "$stdout_file" 2> "$stderr_file"; then
         output="$(cat -- "$stdout_file" "$stderr_file")"
         fail "$label unexpectedly succeeded; command=$command_display; raw output:
@@ -534,13 +690,52 @@ assert_expected_failure_contains() {
     local expected="$2"
     local stdout_file="$FIXTURE_ROOT/$label.stdout"
     local stderr_file="$FIXTURE_ROOT/$label.stderr"
-    local output
+    local command_file="$FIXTURE_ROOT/$label.command"
+    local command_display output
 
     if ! grep -Fq "$expected" "$stderr_file"; then
+        command_display="$(<"$command_file")"
         output="$(cat -- "$stdout_file" "$stderr_file")"
-        fail "$label did not report $expected; raw output:
+        fail "$label did not report $expected; command=$command_display; raw output:
 $output"
     fi
+}
+
+assert_archive_tree_entries() {
+    local destination="$1"
+    local expected_paths="$2"
+    local archive_path relative_path expected_path
+    local allowed_directory
+
+    while IFS= read -r -d '' archive_path; do
+        relative_path="${archive_path#"$destination/"}"
+        if [[ -L "$archive_path" ]]; then
+            fail "archive tree contains symlink: $archive_path"
+        elif [[ -d "$archive_path" ]]; then
+            allowed_directory=0
+            while IFS= read -r -d '' expected_path; do
+                case "$expected_path" in
+                    "$relative_path"/*)
+                        allowed_directory=1
+                        break
+                        ;;
+                esac
+            done < "$expected_paths"
+            ((allowed_directory == 1)) ||
+                fail "archive tree contains extra directory: $archive_path"
+        elif [[ -f "$archive_path" ]]; then
+            case "$relative_path" in
+                manifest.json|INDEX.md|migration-inventory.tsv|migration-report.md)
+                    ;;
+                *)
+                    grep -Fzxq -- "$relative_path" "$expected_paths" ||
+                        fail "archive tree contains extra regular file: $archive_path"
+                    ;;
+            esac
+        else
+            fail "archive tree contains unsupported entry: $archive_path"
+        fi
+    done < <(find -P "$destination" -mindepth 1 -print0 | LC_ALL=C sort -z)
 }
 
 assert_manifest_matches_inventory() {
@@ -551,17 +746,48 @@ assert_manifest_matches_inventory() {
     local actual_paths="$FIXTURE_ROOT/actual-archived-paths"
     local source source_root branch commit tracked original_path phase type
     local date date_source size sha256 archived_path source_path target_path
-    local inventory_count manifest_count match_count actual_size actual_sha256
+    local inventory_count manifest_count match_count source_count
+    local actual_size actual_sha256 generated_at
 
     inventory_count="$(awk -F '\t' 'NR > 1 && NF { count++ } END { print count + 0 }' "$inventory_file")"
     manifest_count="$(jq -r '.entries | length' "$destination/manifest.json")"
     [[ "$manifest_count" == "$inventory_count" ]] ||
         fail "manifest entry count $manifest_count differs from inventory row count $inventory_count"
+    jq -e '
+        .schema_version == 1 and
+        (.sources | type == "array") and
+        (.entries | type == "array") and
+        (.generated_at | type == "string" and
+            length > 0 and
+            test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]+)?(Z|[+-][0-9]{2}:[0-9]{2})$"))
+    ' "$destination/manifest.json" > /dev/null ||
+        fail 'manifest schema_version or generated_at is invalid'
+    generated_at="$(jq -er '.generated_at' "$destination/manifest.json")" ||
+        fail 'manifest generated_at is missing'
+    date -u -d "$generated_at" '+%Y-%m-%dT%H:%M:%SZ' > /dev/null ||
+        fail 'manifest generated_at is not a valid RFC3339 timestamp'
 
     : > "$inventory_paths"
+    declare -A checked_sources=()
     while IFS=$'\t' read -r source source_root branch commit tracked original_path \
         phase type date date_source size sha256 archived_path; do
         [[ -n "$source" ]] || continue
+        if [[ -z "${checked_sources[$source]+set}" ]]; then
+            source_count="$(jq -r \
+                --arg source "$source" \
+                --arg source_root "$source_root" \
+                --arg branch "$branch" \
+                --arg commit "$commit" \
+                '[.sources[]? |
+                    select(.source == $source and
+                        .source_root == $source_root and
+                        .branch == $branch and
+                        .commit == $commit)] | length' \
+                "$destination/manifest.json")"
+            [[ "$source_count" == 1 ]] ||
+                fail "manifest sources lacks revision for $source"
+            checked_sources["$source"]=1
+        fi
         match_count="$(jq -r \
             --arg source "$source" \
             --arg source_root "$source_root" \
@@ -594,7 +820,8 @@ assert_manifest_matches_inventory() {
         [[ "$match_count" == 1 ]] ||
             fail "inventory row has $match_count manifest matches: $source/$original_path"
 
-        target_path="$destination/$archived_path"
+        target_path="$(resolve_inventory_archive_path \
+            "$destination" "$archived_path" "manifest/$source")"
         [[ -f "$target_path" && ! -L "$target_path" ]] ||
             fail "inventory archive file is missing: $target_path"
         actual_size="$(stat -c '%s' -- "$target_path")"
@@ -610,7 +837,7 @@ assert_manifest_matches_inventory() {
     LC_ALL=C sort -z -o "$inventory_paths" "$inventory_paths"
     jq -j '.entries[] | .archived_path, "\u0000"' "$destination/manifest.json" |
         LC_ALL=C sort -z > "$manifest_paths"
-    find "$destination" -type f -print0 |
+    find -P "$destination" -type f -print0 |
         while IFS= read -r -d '' source_path; do
             case "$source_path" in
                 "$destination/manifest.json"|"$destination/INDEX.md"|\
@@ -633,6 +860,7 @@ assert_manifest_matches_inventory() {
             <(tr '\0' '\n' < "$actual_paths") || true
         fail 'archive files and inventory archived_path values differ'
     fi
+    assert_archive_tree_entries "$destination" "$inventory_paths"
 }
 
 assert_index_counts_match_manifest() {
@@ -666,13 +894,16 @@ archive_fixture="$(make_archive_fixture archive-success)"
 archive_inventory="$archive_fixture/inventory.tsv"
 archive_destination="$archive_fixture/archive"
 archive_snapshot="$archive_fixture/source-tree.before"
+archive_selected_sources="$archive_fixture/selected-source-paths"
 snapshot_fixture_sources "$archive_fixture" "$archive_snapshot"
+build_inventory_source_paths \
+    "$archive_fixture" "$archive_inventory" "$archive_selected_sources"
 run_required_command archive-success/stage \
     bash "$ARCHIVER" stage \
     --inventory "$archive_inventory" \
     --destination "$archive_destination"
 
-assert_inventory_sources_exist "$archive_inventory"
+assert_inventory_sources_exist "$archive_inventory" "$archive_fixture"
 [[ -f "$archive_destination/manifest.json" ]] ||
     fail 'stage did not create manifest.json'
 [[ -f "$archive_destination/INDEX.md" ]] ||
@@ -697,6 +928,18 @@ duplicate_entry_count="$(jq -r '
 ' "$archive_destination/manifest.json")"
 [[ "$duplicate_entry_count" == 2 ]] ||
     fail 'both identical shared evidence entries were not retained'
+duplicate_sha="$(awk -F '\t' \
+    '$6 ~ /shared-evidence\.log$/ { print $12 }' \
+    "$archive_inventory" | LC_ALL=C sort -u)"
+[[ "$(printf '%s\n' "$duplicate_sha" | awk 'NF { count++ } END { print count + 0 }')" == 1 ]] ||
+    fail 'shared evidence inventory did not have one SHA-256'
+jq -e --arg duplicate_sha "$duplicate_sha" '
+    [.entries[] | select(.original_path | endswith("shared-evidence.log"))] |
+    length == 2 and
+    (map(.sha256) | unique == [$duplicate_sha]) and
+    (map(.duplicate_group) | unique == [$duplicate_sha])
+' "$archive_destination/manifest.json" > /dev/null ||
+    fail 'duplicate_group does not equal the shared evidence SHA-256'
 assert_index_counts_match_manifest "$archive_destination"
 
 [[ -f "$archive_fixture/task12-source/docs/README.md" ]] ||
@@ -709,7 +952,7 @@ run_required_command archive-success/delete \
     bash "$ARCHIVER" delete \
     --inventory "$archive_inventory" \
     --destination "$archive_destination"
-assert_only_inventory_sources_deleted "$archive_inventory" "$archive_snapshot"
+assert_only_inventory_sources_deleted "$archive_selected_sources" "$archive_snapshot"
 [[ -f "$archive_fixture/task12-source/docs/README.md" ]] ||
     fail 'delete removed task12 README'
 [[ -f "$archive_fixture/task12-source/docs/docs/architecture/axvisor/overview.md" ]] ||
@@ -723,12 +966,18 @@ mutation_fixture="$(make_archive_fixture archive-source-mutation)"
 mutation_inventory="$mutation_fixture/inventory.tsv"
 mutation_destination="$mutation_fixture/archive"
 mutation_snapshot="$mutation_fixture/source-tree.before"
+mutation_source_root="$(awk -F '\t' 'END { print $2 }' "$mutation_inventory")"
+mutation_original_path="$(awk -F '\t' 'END { print $6 }' "$mutation_inventory")"
+mutation_source_path="$(resolve_inventory_source_path \
+    "$mutation_fixture" \
+    "$mutation_source_root" \
+    "$mutation_original_path" \
+    archive-source-mutation)"
 snapshot_fixture_sources "$mutation_fixture" "$mutation_snapshot"
 run_required_command archive-source-mutation/stage \
     bash "$ARCHIVER" stage \
     --inventory "$mutation_inventory" \
     --destination "$mutation_destination"
-mutation_source_path="$(awk -F '\t' 'END { print $2 "/" $6 }' "$mutation_inventory")"
 printf '%s\n' 'changed after stage' >> "$mutation_source_path"
 mutation_source_digest="$(sha256sum -b -- "$mutation_source_path")"
 mutation_source_digest="${mutation_source_digest%% *}"
@@ -754,22 +1003,42 @@ missing_target_fixture="$(make_archive_fixture archive-missing-target)"
 missing_target_inventory="$missing_target_fixture/inventory.tsv"
 missing_target_destination="$missing_target_fixture/archive"
 missing_target_snapshot="$missing_target_fixture/source-tree.before"
+mkdir -p -- "$missing_target_destination"
+missing_target_archived_path="$(awk -F '\t' 'END { print $13 }' "$missing_target_inventory")"
+missing_target_path="$(resolve_inventory_archive_path \
+    "$missing_target_destination" \
+    "$missing_target_archived_path" \
+    archive-missing-target)"
 snapshot_fixture_sources "$missing_target_fixture" "$missing_target_snapshot"
 run_required_command archive-missing-target/stage \
     bash "$ARCHIVER" stage \
     --inventory "$missing_target_inventory" \
     --destination "$missing_target_destination"
-missing_target_path="$(awk -F '\t' -v destination="$missing_target_destination" \
-    'END { print destination "/" $13 }' "$missing_target_inventory")"
 rm -- "$missing_target_path"
+missing_verify_before="$missing_target_fixture/destination-before-verify"
+snapshot_directory_tree "$missing_target_destination" "$missing_verify_before"
 run_expected_failure archive-missing-target/verify \
     bash "$ARCHIVER" verify \
     --inventory "$missing_target_inventory" \
     --destination "$missing_target_destination"
+missing_verify_after="$missing_target_fixture/destination-after-verify"
+snapshot_directory_tree "$missing_target_destination" "$missing_verify_after"
+assert_snapshot_equal \
+    "$missing_verify_before" \
+    "$missing_verify_after" \
+    archive-missing-target/verify
+missing_delete_before="$missing_target_fixture/destination-before-delete"
+snapshot_directory_tree "$missing_target_destination" "$missing_delete_before"
 run_expected_failure archive-missing-target/delete \
     bash "$ARCHIVER" delete \
     --inventory "$missing_target_inventory" \
     --destination "$missing_target_destination"
+missing_delete_after="$missing_target_fixture/destination-after-delete"
+snapshot_directory_tree "$missing_target_destination" "$missing_delete_after"
+assert_snapshot_equal \
+    "$missing_delete_before" \
+    "$missing_delete_after" \
+    archive-missing-target/delete
 assert_expected_failure_contains archive-missing-target/verify missing
 assert_expected_failure_contains archive-missing-target/delete missing
 assert_failed_delete_preserved_sources \
@@ -781,22 +1050,42 @@ corrupt_target_fixture="$(make_archive_fixture archive-corrupt-target)"
 corrupt_target_inventory="$corrupt_target_fixture/inventory.tsv"
 corrupt_target_destination="$corrupt_target_fixture/archive"
 corrupt_target_snapshot="$corrupt_target_fixture/source-tree.before"
+mkdir -p -- "$corrupt_target_destination"
+corrupt_target_archived_path="$(awk -F '\t' 'END { print $13 }' "$corrupt_target_inventory")"
+corrupt_target_path="$(resolve_inventory_archive_path \
+    "$corrupt_target_destination" \
+    "$corrupt_target_archived_path" \
+    archive-corrupt-target)"
 snapshot_fixture_sources "$corrupt_target_fixture" "$corrupt_target_snapshot"
 run_required_command archive-corrupt-target/stage \
     bash "$ARCHIVER" stage \
     --inventory "$corrupt_target_inventory" \
     --destination "$corrupt_target_destination"
-corrupt_target_archived_path="$(awk -F '\t' 'END { print $13 }' "$corrupt_target_inventory")"
-corrupt_target_path="$corrupt_target_destination/$corrupt_target_archived_path"
 printf '%s\n' 'corrupted after stage' > "$corrupt_target_path"
+corrupt_verify_before="$corrupt_target_fixture/destination-before-verify"
+snapshot_directory_tree "$corrupt_target_destination" "$corrupt_verify_before"
 run_expected_failure archive-corrupt-target/verify \
     bash "$ARCHIVER" verify \
     --inventory "$corrupt_target_inventory" \
     --destination "$corrupt_target_destination"
+corrupt_verify_after="$corrupt_target_fixture/destination-after-verify"
+snapshot_directory_tree "$corrupt_target_destination" "$corrupt_verify_after"
+assert_snapshot_equal \
+    "$corrupt_verify_before" \
+    "$corrupt_verify_after" \
+    archive-corrupt-target/verify
+corrupt_delete_before="$corrupt_target_fixture/destination-before-delete"
+snapshot_directory_tree "$corrupt_target_destination" "$corrupt_delete_before"
 run_expected_failure archive-corrupt-target/delete \
     bash "$ARCHIVER" delete \
     --inventory "$corrupt_target_inventory" \
     --destination "$corrupt_target_destination"
+corrupt_delete_after="$corrupt_target_fixture/destination-after-delete"
+snapshot_directory_tree "$corrupt_target_destination" "$corrupt_delete_after"
+assert_snapshot_equal \
+    "$corrupt_delete_before" \
+    "$corrupt_delete_after" \
+    archive-corrupt-target/delete
 assert_expected_failure_contains \
     archive-corrupt-target/verify \
     "$corrupt_target_archived_path"
@@ -813,9 +1102,14 @@ collision_inventory="$collision_fixture/inventory.tsv"
 collision_destination="$collision_fixture/archive"
 collision_snapshot="$collision_fixture/source-tree.before"
 snapshot_fixture_sources "$collision_fixture" "$collision_snapshot"
+mkdir -p -- "$collision_destination"
 collision_archived_path="$(awk -F '\t' 'END { print $13 }' "$collision_inventory")"
-mkdir -p -- "$(dirname -- "$collision_destination/$collision_archived_path")"
-printf '%s\n' 'different collision content' > "$collision_destination/$collision_archived_path"
+collision_target_path="$(resolve_inventory_archive_path \
+    "$collision_destination" \
+    "$collision_archived_path" \
+    archive-collision)"
+mkdir -p -- "$(dirname -- "$collision_target_path")"
+printf '%s\n' 'different collision content' > "$collision_target_path"
 collision_destination_snapshot="$collision_fixture/destination-tree.before"
 snapshot_directory_tree "$collision_destination" "$collision_destination_snapshot"
 run_expected_failure archive-collision/stage \
@@ -823,7 +1117,7 @@ run_expected_failure archive-collision/stage \
     --inventory "$collision_inventory" \
     --destination "$collision_destination"
 assert_expected_failure_contains archive-collision/stage "$collision_archived_path"
-[[ "$(<"$collision_destination/$collision_archived_path")" == 'different collision content' ]] ||
+[[ "$(<"$collision_target_path")" == 'different collision content' ]] ||
     fail 'destination collision content was modified'
 assert_directory_unchanged \
     "$collision_destination" \
