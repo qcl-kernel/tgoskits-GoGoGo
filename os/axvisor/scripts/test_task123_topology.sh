@@ -4,12 +4,14 @@ set -euo pipefail
 
 ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/../../.." && pwd)"
 LINUX_CONFIG="$ROOT/os/axvisor/configs/vms/qemu/aarch64/linux-net.toml"
+STARRYOS_CONFIG="$ROOT/os/axvisor/configs/vms/qemu/aarch64/starryos-task123.toml"
 RTTHREAD_CONFIG="$ROOT/os/axvisor/configs/vms/qemu/aarch64/rtthread-net.toml"
 
 cargo run -q -p axvmconfig -- check --config-path "$LINUX_CONFIG"
+cargo run -q -p axvmconfig -- check --config-path "$STARRYOS_CONFIG"
 cargo run -q -p axvmconfig -- check --config-path "$RTTHREAD_CONFIG"
 
-python3 - "$LINUX_CONFIG" "$RTTHREAD_CONFIG" <<'PY'
+python3 - "$LINUX_CONFIG" "$STARRYOS_CONFIG" "$RTTHREAD_CONFIG" <<'PY'
 import sys
 import tomllib
 from pathlib import Path
@@ -33,9 +35,11 @@ def virtual_net_mac(config: dict, label: str) -> list[int]:
 
 
 linux = load(sys.argv[1])
-rtthread = load(sys.argv[2])
+starryos = load(sys.argv[2])
+rtthread = load(sys.argv[3])
 
 linux_base = linux["base"]
+starryos_base = starryos["base"]
 rtthread_base = rtthread["base"]
 
 require(linux_base.get("cpu_num"), 2, "Linux vCPU count")
@@ -44,6 +48,21 @@ require(linux_base.get("phys_cpu_sets"), [0b1011, 0b1011], "Linux allowed pCPU m
 require(linux_base.get("host_vcpu_idle_policy", "halt"), "halt", "Linux idle policy")
 require(linux["kernel"].get("memory_regions"), [[0x80000000, 0x20000000, 0x7, 2]], "Linux RAM")
 require(virtual_net_mac(linux, "Linux"), [0x52, 0x54, 0x00, 0x77, 0x00, 0x01], "Linux MAC")
+
+require(starryos_base.get("cpu_num"), 2, "StarryOS vCPU count")
+require(starryos_base.get("phys_cpu_ids"), [0, 1], "StarryOS initial pCPU placement")
+require(starryos_base.get("phys_cpu_sets"), [0b1011, 0b1011], "StarryOS allowed pCPU masks")
+require(starryos_base.get("host_vcpu_idle_policy", "halt"), "halt", "StarryOS idle policy")
+require(
+    starryos["kernel"].get("memory_regions"),
+    [[0x80000000, 0x20000000, 0x7, 2]],
+    "StarryOS RAM",
+)
+require(
+    virtual_net_mac(starryos, "StarryOS"),
+    [0x52, 0x54, 0x00, 0x77, 0x00, 0x01],
+    "StarryOS MAC",
+)
 
 require(rtthread_base.get("cpu_num"), 1, "RT-Thread vCPU count")
 require(rtthread_base.get("phys_cpu_ids"), [2], "RT-Thread initial pCPU placement")

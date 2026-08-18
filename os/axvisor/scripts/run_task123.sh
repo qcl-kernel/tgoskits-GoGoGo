@@ -7,22 +7,26 @@ ROOT="$(CDPATH= cd -- "$SCRIPT_DIR/../../.." && pwd)"
 TASK3_ROOT="$ROOT/os/axvisor/guests/task3"
 RUN_UNTIL="${RUN_UNTIL:-$SCRIPT_DIR/run_until_log_marker.sh}"
 QEMU_REALTIME_CONTROL="${QEMU_REALTIME_CONTROL:-$SCRIPT_DIR/apply_qemu_realtime_controls.sh}"
+QEMU_RESOURCE_SAMPLER="${QEMU_RESOURCE_SAMPLER:-$SCRIPT_DIR/sample_qemu_resources.sh}"
 LINUX_VMCONFIG_GENERATOR="${LINUX_VMCONFIG_GENERATOR:-$SCRIPT_DIR/generate_linux_vmconfig.sh}"
+STARRYOS_VMCONFIG_GENERATOR="${STARRYOS_VMCONFIG_GENERATOR:-$SCRIPT_DIR/generate_starryos_vmconfig.sh}"
 RTTHREAD_VMCONFIG_GENERATOR="${RTTHREAD_VMCONFIG_GENERATOR:-$SCRIPT_DIR/generate_rtthread_vmconfig.sh}"
 RESULT_GATE="${RESULT_GATE:-$SCRIPT_DIR/verify_task123_results.sh}"
 LINUX_VMCONFIG_TEMPLATE="$ROOT/os/axvisor/configs/vms/qemu/aarch64/linux-net.toml"
+STARRYOS_VMCONFIG_TEMPLATE="$ROOT/os/axvisor/configs/vms/qemu/aarch64/starryos-task123.toml"
 RTTHREAD_VMCONFIG_TEMPLATE="$ROOT/os/axvisor/configs/vms/qemu/aarch64/rtthread-net.toml"
+STARRYOS_BUILDER="$ROOT/os/axvisor/guests/starryos-task123/build.sh"
 PROTOCOL_SOURCE="$ROOT/os/axvisor/guests/rt-ipc/common/rt_ipc.c"
 PROTOCOL_HEADER="$ROOT/os/axvisor/guests/rt-ipc/common/rt_ipc.h"
 
 usage() {
     cat >&2 <<EOF
 usage:
-  $0 --mode smoke [--task2-count N] [--task3-frames N] --output DIR
-  $0 --mode realtime-suite [--rtbench-samples N] [--task2-count N] --output DIR
-  $0 --mode stability [--seconds N] [--task2-count N] --output DIR
-  $0 --mode task3 [--task3-frames N] --output DIR
-  $0 --mode task3-fault --task3-fault PROFILE [--task3-frames N] --output DIR
+  $0 [--app-guest linux|starryos] --mode smoke [--task2-count N] [--task3-frames N] --output DIR
+  $0 [--app-guest linux|starryos] --mode realtime-suite [--rtbench-samples N] [--task2-count N] --output DIR
+  $0 [--app-guest linux|starryos] --mode stability [--seconds N] [--task2-count N] --output DIR
+  $0 [--app-guest linux|starryos] --mode task3 [--task3-frames N] --output DIR
+  $0 [--app-guest linux|starryos] --mode task3-fault --task3-fault PROFILE [--task3-frames N] --output DIR
 EOF
     return 2
 }
@@ -44,6 +48,7 @@ require_integer() {
 }
 
 mode=
+app_guest=linux
 output_candidate=
 task2_count=
 task3_frames=
@@ -51,6 +56,7 @@ rtbench_samples=
 stability_seconds=
 task3_fault=
 seen_mode=0
+seen_app_guest=0
 seen_output=0
 seen_task2=0
 seen_task3_frames=0
@@ -64,11 +70,16 @@ parse_arguments() {
     while [[ $# -gt 0 ]]; do
         option=$1
         case "$option" in
-            --mode|--output|--task2-count|--task3-frames|--rtbench-samples|--seconds|--task3-fault)
+            --app-guest|--mode|--output|--task2-count|--task3-frames|--rtbench-samples|--seconds|--task3-fault)
                 [[ $# -ge 2 ]] || usage
                 value=$2
                 shift 2
                 case "$option" in
+                    --app-guest)
+                        [[ "$seen_app_guest" -eq 0 ]] || usage
+                        app_guest=$value
+                        seen_app_guest=1
+                        ;;
                     --mode)
                         [[ "$seen_mode" -eq 0 ]] || usage
                         mode=$value
@@ -152,6 +163,11 @@ validate_mode_options() {
         *) usage ;;
     esac
 
+    case "$app_guest" in
+        linux|starryos) ;;
+        *) usage ;;
+    esac
+
     require_integer "$task2_count" 1 2147483647 task2-count
     require_integer "$task3_frames" 1 600 task3-frames
     if [[ "$mode" == realtime-suite ]]; then
@@ -164,6 +180,7 @@ validate_mode_options() {
     require_integer "${TASK123_PHASE_TIMEOUT_S:-600}" 1 86400 TASK123_PHASE_TIMEOUT_S
     require_integer "${QEMU_UCLAMP_MIN:-1024}" 0 1024 QEMU_UCLAMP_MIN
     require_integer "${QEMU_TIMER_SLACK_NS:-1}" 1 1000000000 QEMU_TIMER_SLACK_NS
+    require_integer "${QEMU_RESOURCE_SAMPLE_INTERVAL_MS:-100}" 1 60000 QEMU_RESOURCE_SAMPLE_INTERVAL_MS
 }
 
 canonical_existing_file() {
@@ -230,6 +247,85 @@ validate_output_against_source() {
     fi
 }
 
+prepare_shared_artifact_cache() {
+    [[ -n "$SHARED_ARTIFACT_DIR" ]] || return 0
+    SHARED_ARTIFACT_DIR="$(realpath -m -- "$SHARED_ARTIFACT_DIR")" || return 2
+    [[ "$SHARED_ARTIFACT_DIR" != / && "$SHARED_ARTIFACT_DIR" != "$ROOT" ]] || {
+        fail "unsafe shared artifact cache: $SHARED_ARTIFACT_DIR"
+        return 2
+    }
+    local cache_parent
+    cache_parent="$(dirname -- "$SHARED_ARTIFACT_DIR")"
+    [[ -d "$cache_parent" && -w "$cache_parent" ]] || {
+        fail "shared artifact cache parent is missing or unwritable: $cache_parent"
+        return 2
+    }
+    if [[ -e "$SHARED_ARTIFACT_DIR" ]]; then
+        [[ -d "$SHARED_ARTIFACT_DIR" && -w "$SHARED_ARTIFACT_DIR" ]] || {
+            fail "shared artifact cache is not a writable directory: $SHARED_ARTIFACT_DIR"
+            return 2
+        }
+    else
+        mkdir -- "$SHARED_ARTIFACT_DIR"
+    fi
+    SHARED_ARTIFACT_DIR="$(realpath -e -- "$SHARED_ARTIFACT_DIR")"
+    if path_is_within "$OUTPUT" "$SHARED_ARTIFACT_DIR" ||
+       path_is_within "$SHARED_ARTIFACT_DIR" "$OUTPUT"; then
+        fail "output and shared artifact cache must be separate: output=$OUTPUT cache=$SHARED_ARTIFACT_DIR"
+        return 2
+    fi
+}
+
+shared_cache_file() {
+    local filename=$1
+    [[ -n "$SHARED_ARTIFACT_DIR" ]] || return 1
+    printf '%s/%s\n' "$SHARED_ARTIFACT_DIR" "$filename"
+}
+
+stage_shared_artifact() {
+    local label=$1
+    local filename=$2
+    local source=$3
+    local target
+    local temporary
+    [[ -n "$SHARED_ARTIFACT_DIR" ]] || {
+        printf '%s\n' "$source"
+        return 0
+    }
+    target="$(shared_cache_file "$filename")"
+    if [[ -e "$target" ]]; then
+        target="$(canonical_existing_file "shared-cache-$label" "$target")"
+        cmp -s -- "$source" "$target" || {
+            fail "shared cache artifact differs from explicit $label: $target"
+            return 1
+        }
+    else
+        temporary="$target.tmp.$$"
+        cp -- "$source" "$temporary"
+        chmod a+r -- "$temporary"
+        mv -- "$temporary" "$target"
+    fi
+    printf '%s\n' "$(canonical_existing_file "shared-cache-$label" "$target")"
+}
+
+resolve_input_artifact() {
+    local variable=$1
+    local label=$2
+    local filename=$3
+    local current="${!variable:-}"
+    local cached
+    if [[ -n "$current" ]]; then
+        current="$(canonical_existing_file "$label" "$current")"
+        current="$(stage_shared_artifact "$label" "$filename" "$current")"
+        printf -v "$variable" '%s' "$current"
+        return 0
+    fi
+    if [[ -n "$SHARED_ARTIFACT_DIR" && -e "$SHARED_ARTIFACT_DIR/$filename" ]]; then
+        cached="$(canonical_existing_file "shared-cache-$label" "$SHARED_ARTIFACT_DIR/$filename")"
+        printf -v "$variable" '%s' "$cached"
+    fi
+}
+
 prepare_output_directory() {
     local output_parent
     local source_input
@@ -267,15 +363,17 @@ prepare_output_directory() {
         mkdir -- "$OUTPUT"
     fi
     OUTPUT="$(realpath -e -- "$OUTPUT")"
+    prepare_shared_artifact_cache
 
     RUNNER_LOG="$OUTPUT/runner.log"
     CONSOLE_LOG="$OUTPUT/console.log"
     MANIFEST="$OUTPUT/manifest.txt"
     AXVISOR_BIN="$OUTPUT/axvisor.bin"
+    APP_GUEST_LOG="$OUTPUT/${app_guest}.log"
     local paths=(
         "$RUNNER_LOG" "$CONSOLE_LOG" "$MANIFEST" "$AXVISOR_BIN"
-        "$OUTPUT/linux.log" "$OUTPUT/rtthread.log" "$OUTPUT/frames.csv"
-        "$OUTPUT/summary.raw.json" "$OUTPUT/summary.json"
+        "$OUTPUT/${app_guest}.log" "$OUTPUT/rtthread.log" "$OUTPUT/frames.csv"
+        "$OUTPUT/summary.raw.json" "$OUTPUT/summary.json" "$OUTPUT/host-metrics.txt"
     )
     local i
     local j
@@ -295,13 +393,27 @@ prepare_output_directory() {
 
 watcher_pid=
 feeder_pid=
+resource_sampler_pid=
 qemu_pid=
 raw_qemu_exit=
 termination_reason=
 normalized_qemu_exit=
 RUNTIME_DIR=
 LINUX_RUNTIME_DIR=
+STARRYOS_RUNTIME_DIR=
 RTTHREAD_RUNTIME_DIR=
+APP_GUEST_IMAGE=
+APP_GUEST_VMCONFIG=
+APP_GUEST_RUNTIME_DIR=
+APP_GUEST_LOG=
+APP_GUEST_SMP_MARKER=
+APP_GUEST_NET_MARKER=
+APP_GUEST_TASK2_END_MARKER=
+APP_GUEST_TASK3_END_MARKER=
+APP_GUEST_TASK123_END_MARKER=
+APP_GUEST_FAILURE_MARKER=
+HOST_METRICS=
+SHARED_ARTIFACT_DIR="${TASK123_SHARED_ARTIFACT_DIR:-}"
 serial_fd_open=0
 
 terminate_owned_pid() {
@@ -316,6 +428,8 @@ terminate_owned_pid() {
 cleanup_owned_processes() {
     terminate_owned_pid "$feeder_pid"
     feeder_pid=
+    terminate_owned_pid "$resource_sampler_pid"
+    resource_sampler_pid=
     terminate_owned_pid "$watcher_pid"
     watcher_pid=
     if [[ "$serial_fd_open" -eq 1 ]]; then
@@ -332,6 +446,7 @@ remove_runtime_directory() {
 
 cleanup_runtime() {
     remove_runtime_directory "$LINUX_RUNTIME_DIR"
+    remove_runtime_directory "$STARRYOS_RUNTIME_DIR"
     remove_runtime_directory "$RTTHREAD_RUNTIME_DIR"
     remove_runtime_directory "$RUNTIME_DIR"
 }
@@ -376,15 +491,39 @@ run_timed() {
     return "$phase_rc"
 }
 
+configure_app_guest_markers() {
+    if [[ "$app_guest" == linux ]]; then
+        APP_GUEST_SMP_MARKER='LINUX_SMP_READY configured=2'
+        APP_GUEST_NET_MARKER='TASK123_LINUX_NET_READY'
+        APP_GUEST_TASK2_END_MARKER='TASK2_LINUX_END status=PASS'
+        APP_GUEST_TASK3_END_MARKER='TASK3_LINUX_END status=PASS'
+        APP_GUEST_TASK123_END_MARKER='TASK123_LINUX_END status=PASS'
+        APP_GUEST_FAILURE_MARKER='TASK123_LINUX_END status=FAIL'
+    else
+        APP_GUEST_SMP_MARKER='STARRY_SMP_READY configured=2'
+        APP_GUEST_NET_MARKER='STARRY_NET_READY'
+        APP_GUEST_TASK2_END_MARKER='TASK2_STARRY_END status=PASS'
+        APP_GUEST_TASK3_END_MARKER='TASK3_STARRY_END status=PASS'
+        APP_GUEST_TASK123_END_MARKER='TASK123_STARRY_END status=PASS'
+        APP_GUEST_FAILURE_MARKER='TASK123_STARRY_END status=FAIL'
+    fi
+}
+
 resolve_dependencies() {
     phase dependency-check
     local command_name
-    for command_name in realpath sha256sum awk sed grep find mktemp cp chmod date python3 timeout tee; do
+    for command_name in realpath sha256sum awk sed grep find mktemp cp chmod cmp date python3 timeout tee; do
         command -v "$command_name" >/dev/null || fail "required command not found: $command_name"
     done
     RUN_UNTIL="$(canonical_tool run-until "$RUN_UNTIL")"
     QEMU_REALTIME_CONTROL="$(canonical_tool realtime-control "$QEMU_REALTIME_CONTROL")"
-    LINUX_VMCONFIG_GENERATOR="$(canonical_tool linux-vmconfig-generator "$LINUX_VMCONFIG_GENERATOR")"
+    QEMU_RESOURCE_SAMPLER="$(canonical_tool qemu-resource-sampler "$QEMU_RESOURCE_SAMPLER")"
+    if [[ "$app_guest" == linux ]]; then
+        LINUX_VMCONFIG_GENERATOR="$(canonical_tool linux-vmconfig-generator "$LINUX_VMCONFIG_GENERATOR")"
+    else
+        STARRYOS_VMCONFIG_GENERATOR="$(canonical_tool starryos-vmconfig-generator "$STARRYOS_VMCONFIG_GENERATOR")"
+        STARRYOS_BUILDER="$(canonical_tool starryos-builder "$STARRYOS_BUILDER")"
+    fi
     RTTHREAD_VMCONFIG_GENERATOR="$(canonical_tool rtthread-vmconfig-generator "$RTTHREAD_VMCONFIG_GENERATOR")"
     RESULT_GATE="$(canonical_tool result-gate "$RESULT_GATE")"
     QEMU="$(canonical_tool qemu "${QEMU:-qemu-system-aarch64}")"
@@ -423,6 +562,20 @@ build_linux_images_if_needed() {
     LINUX_KERNEL_IMAGE="$build_root/images/linux/Image"
     LINUX_INITRAMFS_IMAGE="$build_root/images/linux/rootfs.cpio"
     TASK123_MODEL_IMAGE="${TASK123_MODEL_IMAGE:-$build_root/model/model_weights.h}"
+}
+
+build_starryos_image_if_needed() {
+    if [[ -n "${STARRYOS_IMAGE:-}" ]]; then
+        return
+    fi
+    [[ -n "${LINUX_INITRAMFS_IMAGE:-}" ]] || {
+        fail "StarryOS build requires the Linux Task123 initramfs as its application source"
+        return 1
+    }
+    run_timed "$TASK123_BUILD_TIMEOUT_S" starryos-image-build \
+        env TASK123_LINUX_ROOTFS="$LINUX_INITRAMFS_IMAGE" \
+        "$STARRYOS_BUILDER" --source-cpio "$LINUX_INITRAMFS_IMAGE"
+    STARRYOS_IMAGE="$ROOT/target/aarch64-unknown-none-softfloat/release/starryos-task123.bin"
 }
 
 build_rtthread_variant() {
@@ -466,10 +619,29 @@ build_rtthread_images_if_needed() {
 
 resolve_or_build_images() {
     phase build-select-images
-    build_linux_images_if_needed
+    resolve_input_artifact LINUX_KERNEL_IMAGE linux-kernel linux-kernel
+    resolve_input_artifact LINUX_INITRAMFS_IMAGE linux-initramfs linux-initramfs.cpio
+    resolve_input_artifact STARRYOS_IMAGE starryos-image starryos-task123.bin
+    resolve_input_artifact RTTHREAD_NORMAL_IMAGE rtthread-normal rtthread-normal.bin
+    resolve_input_artifact RTTHREAD_DROP_STATUS_IMAGE rtthread-drop-status rtthread-drop-status.bin
+    resolve_input_artifact RTTHREAD_DELAYED_SERVER_IMAGE rtthread-delayed-server rtthread-delayed-server.bin
+    resolve_input_artifact ROOTFS_IMAGE rootfs rootfs.img
+    resolve_input_artifact TASK123_MODEL_IMAGE model model_weights.h
+    if [[ "$app_guest" == linux ]]; then
+        build_linux_images_if_needed
+    elif [[ -z "${STARRYOS_IMAGE:-}" ]]; then
+        build_linux_images_if_needed
+    fi
     build_rtthread_images_if_needed
-    LINUX_KERNEL_IMAGE="$(canonical_existing_file linux-kernel "$LINUX_KERNEL_IMAGE")"
-    LINUX_INITRAMFS_IMAGE="$(canonical_existing_file linux-initramfs "$LINUX_INITRAMFS_IMAGE")"
+    if [[ "$app_guest" == linux ]]; then
+        LINUX_KERNEL_IMAGE="$(canonical_existing_file linux-kernel "$LINUX_KERNEL_IMAGE")"
+        LINUX_INITRAMFS_IMAGE="$(canonical_existing_file linux-initramfs "$LINUX_INITRAMFS_IMAGE")"
+        APP_GUEST_IMAGE="$LINUX_KERNEL_IMAGE"
+    else
+        build_starryos_image_if_needed
+        STARRYOS_IMAGE="$(canonical_existing_file starryos-image "$STARRYOS_IMAGE")"
+        APP_GUEST_IMAGE="$STARRYOS_IMAGE"
+    fi
     RTTHREAD_NORMAL_IMAGE="$(canonical_existing_file rtthread-normal "$RTTHREAD_NORMAL_IMAGE")"
     RTTHREAD_DROP_STATUS_IMAGE="$(canonical_existing_file rtthread-drop-status "$RTTHREAD_DROP_STATUS_IMAGE")"
     RTTHREAD_DELAYED_SERVER_IMAGE="$(canonical_existing_file rtthread-delayed-server "$RTTHREAD_DELAYED_SERVER_IMAGE")"
@@ -487,11 +659,36 @@ resolve_or_build_images() {
     fi
     TASK123_MODEL_IMAGE="$(canonical_existing_file model "$TASK123_MODEL_IMAGE")"
 
+    if [[ -n "${LINUX_KERNEL_IMAGE:-}" ]]; then
+        LINUX_KERNEL_IMAGE="$(stage_shared_artifact linux-kernel linux-kernel "$LINUX_KERNEL_IMAGE")"
+    fi
+    if [[ -n "${LINUX_INITRAMFS_IMAGE:-}" ]]; then
+        LINUX_INITRAMFS_IMAGE="$(stage_shared_artifact linux-initramfs linux-initramfs.cpio "$LINUX_INITRAMFS_IMAGE")"
+    fi
+    if [[ -n "${STARRYOS_IMAGE:-}" ]]; then
+        STARRYOS_IMAGE="$(stage_shared_artifact starryos-image starryos-task123.bin "$STARRYOS_IMAGE")"
+    fi
+    RTTHREAD_NORMAL_IMAGE="$(stage_shared_artifact rtthread-normal rtthread-normal.bin "$RTTHREAD_NORMAL_IMAGE")"
+    RTTHREAD_DROP_STATUS_IMAGE="$(stage_shared_artifact rtthread-drop-status rtthread-drop-status.bin "$RTTHREAD_DROP_STATUS_IMAGE")"
+    RTTHREAD_DELAYED_SERVER_IMAGE="$(stage_shared_artifact rtthread-delayed-server rtthread-delayed-server.bin "$RTTHREAD_DELAYED_SERVER_IMAGE")"
+    ROOTFS_IMAGE="$(stage_shared_artifact rootfs rootfs.img "$ROOTFS_IMAGE")"
+    TASK123_MODEL_IMAGE="$(stage_shared_artifact model model_weights.h "$TASK123_MODEL_IMAGE")"
+
     local source_input
-    for source_input in \
-        "$LINUX_KERNEL_IMAGE" "$LINUX_INITRAMFS_IMAGE" "$RTTHREAD_NORMAL_IMAGE" \
-        "$RTTHREAD_DROP_STATUS_IMAGE" "$RTTHREAD_DELAYED_SERVER_IMAGE" \
-        "$ROOTFS_IMAGE" "$TASK123_MODEL_IMAGE"; do
+    local source_inputs=(
+        "$RTTHREAD_NORMAL_IMAGE"
+        "$RTTHREAD_DROP_STATUS_IMAGE"
+        "$RTTHREAD_DELAYED_SERVER_IMAGE"
+        "$ROOTFS_IMAGE"
+        "$TASK123_MODEL_IMAGE"
+        "$APP_GUEST_IMAGE"
+    )
+    if [[ "$app_guest" == linux ]]; then
+        source_inputs+=("$LINUX_KERNEL_IMAGE" "$LINUX_INITRAMFS_IMAGE")
+    elif [[ -n "${LINUX_INITRAMFS_IMAGE:-}" ]]; then
+        source_inputs+=("$LINUX_INITRAMFS_IMAGE")
+    fi
+    for source_input in "${source_inputs[@]}"; do
         validate_output_against_source "$source_input"
     done
 
@@ -505,23 +702,41 @@ resolve_or_build_images() {
 
 generate_vmconfigs() {
     phase immutable-runtime-vmconfigs
-    LINUX_RUNTIME_DIR="$(mktemp -d "$ROOT/tmp/rtipc-runtime.XXXXXX")"
+    APP_GUEST_RUNTIME_DIR=
+    if [[ "$app_guest" == linux ]]; then
+        LINUX_RUNTIME_DIR="$(mktemp -d "$ROOT/tmp/rtipc-runtime.XXXXXX")"
+        APP_GUEST_RUNTIME_DIR="$LINUX_RUNTIME_DIR"
+    else
+        STARRYOS_RUNTIME_DIR="$(mktemp -d "$ROOT/tmp/starryos-runtime.XXXXXX")"
+        APP_GUEST_RUNTIME_DIR="$STARRYOS_RUNTIME_DIR"
+    fi
     RTTHREAD_RUNTIME_DIR="$(mktemp -d "$ROOT/tmp/rtthread-runtime.XXXXXX")"
     local guest_fault=${task3_fault:-normal}
     local guest_cmdline
-    guest_cmdline="console=ttyAMA0 rdinit=/init task2.count=$task2_count task2.fault=none task3.frames=$task3_frames task3.fault=$guest_fault"
-    LINUX_VMCONFIG="$(
-        run_timed "$TASK123_PHASE_TIMEOUT_S" linux-vmconfig-generator \
-            "$LINUX_VMCONFIG_GENERATOR" "$ROOT" "$LINUX_VMCONFIG_TEMPLATE" \
-            "$LINUX_KERNEL_IMAGE" "$LINUX_INITRAMFS_IMAGE" \
-            "$LINUX_RUNTIME_DIR" "$guest_cmdline"
-    )"
+    if [[ "$app_guest" == linux ]]; then
+        guest_cmdline="console=ttyAMA0 rdinit=/init task2.count=$task2_count task2.fault=none task3.frames=$task3_frames task3.fault=$guest_fault"
+        LINUX_VMCONFIG="$(
+            run_timed "$TASK123_PHASE_TIMEOUT_S" linux-vmconfig-generator \
+                "$LINUX_VMCONFIG_GENERATOR" "$ROOT" "$LINUX_VMCONFIG_TEMPLATE" \
+                "$LINUX_KERNEL_IMAGE" "$LINUX_INITRAMFS_IMAGE" \
+                "$LINUX_RUNTIME_DIR" "$guest_cmdline"
+        )"
+        APP_GUEST_VMCONFIG="$LINUX_VMCONFIG"
+    else
+        guest_cmdline="task2.count=$task2_count task2.fault=none task3.frames=$task3_frames task3.fault=$guest_fault"
+        STARRYOS_VMCONFIG="$(
+            run_timed "$TASK123_PHASE_TIMEOUT_S" starryos-vmconfig-generator \
+                "$STARRYOS_VMCONFIG_GENERATOR" "$ROOT" "$STARRYOS_VMCONFIG_TEMPLATE" \
+                "$STARRYOS_IMAGE" "$STARRYOS_RUNTIME_DIR" "$guest_cmdline"
+        )"
+        APP_GUEST_VMCONFIG="$STARRYOS_VMCONFIG"
+    fi
     RTTHREAD_VMCONFIG="$(
         run_timed "$TASK123_PHASE_TIMEOUT_S" rtthread-vmconfig-generator \
             "$RTTHREAD_VMCONFIG_GENERATOR" "$ROOT" "$RTTHREAD_VMCONFIG_TEMPLATE" \
             "$SELECTED_RTTHREAD_IMAGE" "$RTTHREAD_RUNTIME_DIR"
     )"
-    chmod a-w -- "$LINUX_VMCONFIG" "$RTTHREAD_VMCONFIG"
+    chmod a-w -- "$APP_GUEST_VMCONFIG" "$RTTHREAD_VMCONFIG"
 }
 
 build_axvisor() {
@@ -530,7 +745,7 @@ build_axvisor() {
     local build_evidence="$RUNTIME_DIR/axbuild-output.log"
     run_timed "$TASK123_BUILD_TIMEOUT_S" cargo-xtask-axvisor-build \
         "$CARGO" xtask axvisor build --config qemu-aarch64-two-guest-net \
-        --vmconfigs "$LINUX_VMCONFIG" \
+        --vmconfigs "$APP_GUEST_VMCONFIG" \
         --vmconfigs "$RTTHREAD_VMCONFIG" 2>&1 | tee "$build_evidence"
     local axvisor_artifacts=()
     mapfile -t axvisor_artifacts < <(
@@ -567,18 +782,29 @@ record_artifact() {
 prepare_manifest() {
     MANIFEST_TMP="$OUTPUT/.manifest.txt.tmp"
     : > "$MANIFEST_TMP"
-    printf 'schema=1\nmode=%s\ntask2_count=%s\ntask3_frames=%s\ntask3_fault=%s\nqemu_timer_slack_ns=%s\n' \
-        "$mode" "$task2_count" "$task3_frames" "${task3_fault:-normal}" \
+    printf 'schema=1\napp_guest=%s\nmode=%s\ntask2_count=%s\ntask3_frames=%s\ntask3_fault=%s\nqemu_timer_slack_ns=%s\n' \
+        "$app_guest" "$mode" "$task2_count" "$task3_frames" "${task3_fault:-normal}" \
         "$QEMU_TIMER_SLACK_NS" >> "$MANIFEST_TMP"
     record_artifact qemu "$QEMU"
     record_artifact axvisor "$AXVISOR_BIN"
-    record_artifact linux-kernel "$LINUX_KERNEL_IMAGE"
-    record_artifact linux-initramfs "$LINUX_INITRAMFS_IMAGE"
+    if [[ "$app_guest" == linux ]]; then
+        record_artifact linux-kernel "$LINUX_KERNEL_IMAGE"
+        record_artifact linux-initramfs "$LINUX_INITRAMFS_IMAGE"
+        record_artifact linux-vmconfig "$APP_GUEST_VMCONFIG"
+    else
+        if [[ -n "${LINUX_KERNEL_IMAGE:-}" ]]; then
+            record_artifact linux-kernel "$LINUX_KERNEL_IMAGE"
+        fi
+        if [[ -n "${LINUX_INITRAMFS_IMAGE:-}" ]]; then
+            record_artifact linux-initramfs "$LINUX_INITRAMFS_IMAGE"
+        fi
+        record_artifact starryos "$STARRYOS_IMAGE"
+        record_artifact starryos-vmconfig "$APP_GUEST_VMCONFIG"
+    fi
     record_artifact rtthread "$SELECTED_RTTHREAD_IMAGE"
     record_artifact rtthread-normal "$RTTHREAD_NORMAL_IMAGE"
     record_artifact rtthread-drop-status "$RTTHREAD_DROP_STATUS_IMAGE"
     record_artifact rtthread-delayed-server "$RTTHREAD_DELAYED_SERVER_IMAGE"
-    record_artifact linux-vmconfig "$LINUX_VMCONFIG"
     record_artifact rtthread-vmconfig "$RTTHREAD_VMCONFIG"
     record_artifact model "$TASK123_MODEL_IMAGE"
     record_artifact protocol-source "$PROTOCOL_SOURCE"
@@ -615,7 +841,7 @@ feed_benchmark_command() {
     # Keep Linux in the foreground until it emits its final evidence. Stopped
     # guests are removed from the mux together with any buffered output.
     printf '\030[' >&3
-    if ! wait_for_console_marker 'TASK123_LINUX_END status=PASS'; then
+    if ! wait_for_console_marker "$APP_GUEST_TASK123_END_MARKER"; then
         return 1
     fi
     # Replay VM 3's benchmark output and final counters.
@@ -692,16 +918,16 @@ launch_one_qemu() {
     serial_fd_open=1
 
     local markers=(
-        'LINUX_SMP_READY configured=2'
-        'TASK123_LINUX_NET_READY'
+        "$APP_GUEST_SMP_MARKER"
+        "$APP_GUEST_NET_MARKER"
         'RTIPC_SERVER_READY ip=192.168.77.30 port=9876'
         'TASK3_RTOS_READY ip=192.168.77.30 port=9877'
-        'TASK2_LINUX_END status=PASS'
-        'TASK3_LINUX_END status=PASS'
-        'TASK123_LINUX_END status=PASS'
+        "$APP_GUEST_TASK2_END_MARKER"
+        "$APP_GUEST_TASK3_END_MARKER"
+        "$APP_GUEST_TASK123_END_MARKER"
         'TASK3_RTOS_FINAL requests='
     )
-    local failure_markers=('TASK123_LINUX_END status=FAIL')
+    local failure_markers=("$APP_GUEST_FAILURE_MARKER")
     if [[ "$mode" == realtime-suite ]]; then
         markers+=('RTBENCH_END status=PASS')
         failure_markers+=('RTBENCH_END status=FAIL')
@@ -747,6 +973,11 @@ launch_one_qemu() {
     watcher_pid=$!
     wait_for_qemu_pid "$qemu_pid_file"
 
+    HOST_METRICS="$OUTPUT/host-metrics.txt"
+    "$QEMU_RESOURCE_SAMPLER" "$qemu_pid" "$HOST_METRICS" \
+        "${QEMU_RESOURCE_SAMPLE_INTERVAL_MS:-100}" &
+    resource_sampler_pid=$!
+
     phase apply-qemu-realtime-controls
     run_timed "$TASK123_PHASE_TIMEOUT_S" apply-qemu-realtime-controls \
         "$QEMU_REALTIME_CONTROL" "$qemu_pid" "$QEMU_UCLAMP_MIN"
@@ -763,6 +994,13 @@ launch_one_qemu() {
         watcher_rc=$?
     fi
     watcher_pid=
+    local resource_sampler_rc=0
+    if wait "$resource_sampler_pid"; then
+        resource_sampler_rc=0
+    else
+        resource_sampler_rc=$?
+    fi
+    resource_sampler_pid=
     local feeder_rc=0
     if [[ -n "$feeder_pid" ]]; then
         if wait "$feeder_pid"; then
@@ -783,12 +1021,17 @@ launch_one_qemu() {
         fail "benchmark command reported failure (see $CONSOLE_LOG)"
         return "$feeder_rc"
     fi
+    [[ "$resource_sampler_rc" -eq 0 && -s "$HOST_METRICS" ]] || {
+        fail "QEMU resource sampler did not produce host metrics"
+        return 1
+    }
 }
 
 run_result_gate() {
     phase result-gate
     local arguments=(
         --mode "$mode"
+        --app-guest "$app_guest"
         --log "$CONSOLE_LOG"
         --output "$OUTPUT"
         --task2-count "$task2_count"
@@ -826,6 +1069,7 @@ main() {
     TASK123_PHASE_TIMEOUT_S=${TASK123_PHASE_TIMEOUT_S:-600}
     QEMU_UCLAMP_MIN=${QEMU_UCLAMP_MIN:-1024}
     QEMU_TIMER_SLACK_NS=${QEMU_TIMER_SLACK_NS:-1}
+    configure_app_guest_markers
     mkdir -p -- "$ROOT/tmp"
     RUNTIME_DIR="$(mktemp -d "$ROOT/tmp/task123-runtime.XXXXXX")"
     trap cleanup EXIT

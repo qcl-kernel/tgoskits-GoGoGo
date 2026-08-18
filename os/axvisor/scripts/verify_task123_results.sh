@@ -8,7 +8,7 @@ SUMMARIZE="$ROOT/os/axvisor/guests/task3/scripts/summarize.py"
 SUMMARIZE_FAULTS="$ROOT/os/axvisor/guests/task3/scripts/summarize_faults.py"
 
 usage() {
-    echo "usage: $0 --mode MODE --log LOG --output DIR --task2-count N --task3-frames N --qemu-exit N [--rtbench-samples N] [--seconds N] [--task3-fault PROFILE]" >&2
+    echo "usage: $0 [--app-guest linux|starryos] --mode MODE --log LOG --output DIR --task2-count N --task3-frames N --qemu-exit N [--rtbench-samples N] [--seconds N] [--task3-fault PROFILE]" >&2
     exit 2
 }
 
@@ -26,6 +26,7 @@ require_positive() {
 }
 
 mode=
+app_guest=linux
 log=
 output=
 task2_count=
@@ -37,12 +38,13 @@ task3_fault=
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --mode|--log|--output|--task2-count|--task3-frames|--qemu-exit|--rtbench-samples|--seconds|--task3-fault)
+        --app-guest|--mode|--log|--output|--task2-count|--task3-frames|--qemu-exit|--rtbench-samples|--seconds|--task3-fault)
             [[ $# -ge 2 ]] || usage
             option=$1
             value=$2
             shift 2
             case "$option" in
+                --app-guest) app_guest=$value ;;
                 --mode) mode=$value ;;
                 --log) log=$value ;;
                 --output) output=$value ;;
@@ -60,6 +62,10 @@ done
 
 [[ -n "$mode" && -n "$log" && -n "$output" && -n "$task2_count" &&
    -n "$task3_frames" && -n "$qemu_exit" ]] || usage
+case "$app_guest" in
+    linux|starryos) ;;
+    *) usage ;;
+esac
 require_positive task2-count "$task2_count" 2147483647
 require_positive task3-frames "$task3_frames" 600
 [[ "$qemu_exit" =~ ^[0-9]+$ && "$qemu_exit" -le 255 ]] || usage
@@ -100,14 +106,28 @@ require_exact_marker() {
     [[ "$count" -eq 1 ]] || die "marker must occur exactly once: $marker (found $count)"
 }
 
+if [[ "$app_guest" == linux ]]; then
+    app_smp_marker='LINUX_SMP_READY configured=2'
+    app_net_marker='TASK123_LINUX_NET_READY'
+    app_task2_marker='TASK2_LINUX_END status=PASS'
+    app_task3_marker='TASK3_LINUX_END status=PASS'
+    app_task123_marker='TASK123_LINUX_END status=PASS'
+else
+    app_smp_marker='STARRY_SMP_READY configured=2'
+    app_net_marker='STARRY_NET_READY'
+    app_task2_marker='TASK2_STARRY_END status=PASS'
+    app_task3_marker='TASK3_STARRY_END status=PASS'
+    app_task123_marker='TASK123_STARRY_END status=PASS'
+fi
+
 for marker in \
-    'LINUX_SMP_READY configured=2' \
-    'TASK123_LINUX_NET_READY' \
+    "$app_smp_marker" \
+    "$app_net_marker" \
     'RTIPC_SERVER_READY ip=192.168.77.30 port=9876' \
     'TASK3_RTOS_READY ip=192.168.77.30 port=9877' \
-    'TASK2_LINUX_END status=PASS' \
-    'TASK3_LINUX_END status=PASS' \
-    'TASK123_LINUX_END status=PASS'; do
+    "$app_task2_marker" \
+    "$app_task3_marker" \
+    "$app_task123_marker"; do
     require_exact_marker "$marker"
 done
 if [[ "$mode" == realtime-suite ]]; then
@@ -116,22 +136,22 @@ elif [[ "$mode" == stability ]]; then
     require_exact_marker 'RTBENCH_STABILITY_END status=PASS'
 fi
 
-"$SCRIPT_DIR/verify_rtipc_results.sh" "$log" "$task2_count" "$qemu_exit" none
+"$SCRIPT_DIR/verify_rtipc_results.sh" "$log" "$task2_count" "$qemu_exit" none "$app_guest"
 if [[ "$mode" == realtime-suite ]]; then
     "$SCRIPT_DIR/verify_rtbench_suite.sh" "$log" "$rtbench_samples" "$qemu_exit"
 elif [[ "$mode" == stability ]]; then
     "$SCRIPT_DIR/verify_rtbench_stability.sh" "$log" "$seconds" "$qemu_exit"
 fi
 
-linux_log="$output/linux.log"
+app_log="$output/${app_guest}.log"
 rtthread_log="$output/rtthread.log"
 frames_csv="$output/frames.csv"
 raw_summary="$output/summary.raw.json"
-linux_tmp="$output/.linux.log.tmp"
+app_tmp="$output/.${app_guest}.log.tmp"
 rtthread_tmp="$output/.rtthread.log.tmp"
 frames_tmp="$output/.frames.csv.tmp"
 summary_tmp="$output/.summary.raw.json.tmp"
-trap 'rm -f -- "$linux_tmp" "$rtthread_tmp" "$frames_tmp" "$summary_tmp"' EXIT
+trap 'rm -f -- "$app_tmp" "$rtthread_tmp" "$frames_tmp" "$summary_tmp"' EXIT
 
 awk '
     /^\[VM 1\] / {
@@ -149,7 +169,7 @@ awk '
         next
     }
     attached_linux { print }
-' "$log" > "$linux_tmp"
+' "$log" > "$app_tmp"
 awk '
     /^\[VM 3\] / {
         sub(/^\[VM 3\] /, "")
@@ -160,20 +180,20 @@ awk '
         print
     }
 ' "$log" > "$rtthread_tmp"
-summary_count="$(grep -c '^TASK3_SUMMARY_JSON=' "$linux_tmp" || true)"
+summary_count="$(grep -c '^TASK3_SUMMARY_JSON=' "$app_tmp" || true)"
 [[ "$summary_count" -eq 1 ]] ||
-    die "authenticated Linux Task 3 summary must occur exactly once (found $summary_count)"
-frame_count="$(grep -c '^TASK3_FRAME_CSV=' "$linux_tmp" || true)"
+    die "authenticated $app_guest Task 3 summary must occur exactly once (found $summary_count)"
+frame_count="$(grep -c '^TASK3_FRAME_CSV=' "$app_tmp" || true)"
 [[ "$frame_count" -eq $((task3_frames * 2)) ]] ||
     die "Task 3 frame rows are missing or duplicated (found $frame_count)"
 
 {
     echo '# task3_csv_schema=1'
     echo 'mode,frame_id,target_q15,truth_class,predicted_class,confidence_q15,inference_us,transport_retries,rtos_status,pwm,actuator_q15,rtos_processing_us,round_trip_us,error_code,duplicate,recovered'
-    sed -n 's/^TASK3_FRAME_CSV=//p' "$linux_tmp"
+    sed -n 's/^TASK3_FRAME_CSV=//p' "$app_tmp"
 } > "$frames_tmp"
-sed -n 's/^TASK3_SUMMARY_JSON=//p' "$linux_tmp" > "$summary_tmp"
-mv -- "$linux_tmp" "$linux_log"
+sed -n 's/^TASK3_SUMMARY_JSON=//p' "$app_tmp" > "$summary_tmp"
+mv -- "$app_tmp" "$app_log"
 mv -- "$rtthread_tmp" "$rtthread_log"
 mv -- "$frames_tmp" "$frames_csv"
 mv -- "$summary_tmp" "$raw_summary"

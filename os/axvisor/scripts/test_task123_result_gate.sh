@@ -21,6 +21,12 @@ run_gate() {
         --qemu-exit 0 "$@"
 }
 
+run_starry_gate() {
+    local run_dir=$1
+    "$GATE" --app-guest starryos --mode smoke --log "$run_dir/console.log" \
+        --output "$run_dir" --task2-count 2 --task3-frames 3 --qemu-exit 0
+}
+
 emit_task2() {
     cat <<'EOF'
 [VM 1] LINUX_SMP_READY configured=2 online=0-1 nproc=2
@@ -156,6 +162,20 @@ make_fixture "$tmp/smoke"
 run_gate "$tmp/smoke" smoke >/dev/null || fail "smoke fixture was rejected"
 [[ -s "$tmp/smoke/frames.csv" && -s "$tmp/smoke/summary.json" ]] ||
     fail "smoke gate did not preserve structured Task 3 results"
+
+cp -a "$tmp/smoke" "$tmp/starryos"
+sed -i \
+    -e 's/LINUX_SMP_READY/STARRY_SMP_READY/g' \
+    -e 's/TASK123_LINUX_NET_READY/STARRY_NET_READY/g' \
+    -e 's/TASK2_LINUX_END/TASK2_STARRY_END/g' \
+    -e 's/TASK3_LINUX_END/TASK3_STARRY_END/g' \
+    -e 's/TASK123_LINUX_END/TASK123_STARRY_END/g' \
+    "$tmp/starryos/console.log"
+rm -f -- "$tmp/starryos/linux.log" "$tmp/starryos/summary.json" \
+    "$tmp/starryos/frames.csv" "$tmp/starryos/summary.raw.json"
+run_starry_gate "$tmp/starryos" >/dev/null || fail "StarryOS smoke fixture was rejected"
+[[ -s "$tmp/starryos/starryos.log" ]] ||
+    fail "StarryOS gate did not publish the authenticated application log"
 
 make_fixture "$tmp/attached-linux-replay"
 awk '

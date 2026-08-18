@@ -40,7 +40,8 @@ tools="$tmp/tools"
 records="$tmp/records"
 mkdir -p "$fixtures/source-input" "$tools" "$records"
 for artifact in linux-kernel initramfs.cpio rtthread-normal.bin \
-    rtthread-drop-status.bin rtthread-delayed-server.bin rootfs.img model.bin; do
+    rtthread-drop-status.bin rtthread-delayed-server.bin starryos-task123.bin \
+    rootfs.img model.bin; do
     printf '%s\n' "$artifact" > "$fixtures/$artifact"
 done
 
@@ -145,9 +146,19 @@ task3_frames="$(sed -n 's/.*task3.frames=\([0-9][0-9]*\).*/\1/p' <<< "$cmdline")
 task3_fault="$(sed -n 's/.*task3.fault=\([^ ]*\).*/\1/p' <<< "$cmdline")"
 
 emit_initial() {
+local app_guest=linux
+if grep -Fq 'kernel_path = "starryos-task123.bin"' "$FAKE_CARGO_VMCONFIG_DIR/1.toml"; then
+    app_guest=starryos
+fi
+local app_smp_marker='LINUX_SMP_READY configured=2 online=0-1 nproc=2'
+local app_net_marker='TASK123_LINUX_NET_READY ip=192.168.77.11 peer=192.168.77.30'
+if [[ "$app_guest" == starryos ]]; then
+    app_smp_marker='STARRY_SMP_READY configured=2 online=0-1 nproc=2'
+    app_net_marker='STARRY_NET_READY ip=192.168.77.11 peer=192.168.77.30'
+fi
+printf '[VM 1] %s\n' "$app_smp_marker"
+printf '[VM 1] %s\n' "$app_net_marker"
 cat <<'LOG'
-[VM 1] LINUX_SMP_READY configured=2 online=0-1 nproc=2
-[VM 1] TASK123_LINUX_NET_READY ip=192.168.77.11 peer=192.168.77.30
 [VM 3] RTIPC_SERVER_READY ip=192.168.77.30 port=9876
 [VM 3] TASK3_RTOS_READY ip=192.168.77.30 port=9877
 [VM 3] msh />
@@ -203,19 +214,27 @@ esac
 }
 
 emit_linux_finals() {
+    local app_guest=linux
+    if grep -Fq 'kernel_path = "starryos-task123.bin"' "$FAKE_CARGO_VMCONFIG_DIR/1.toml"; then
+        app_guest=starryos
+    fi
+    local task2_marker='TASK2_LINUX_END status=PASS'
+    local task3_marker='TASK3_LINUX_END status=PASS'
+    local task123_marker='TASK123_LINUX_END status=PASS'
+    if [[ "$app_guest" == starryos ]]; then
+        task2_marker='TASK2_STARRY_END status=PASS'
+        task3_marker='TASK3_STARRY_END status=PASS'
+        task123_marker='TASK123_STARRY_END status=PASS'
+    fi
     if [[ "${FAKE_QEMU_BEHAVIOR:-pass}" == linux-fail ]]; then
-        cat <<'LOG'
-[VM 1] TASK2_LINUX_END status=PASS
-[VM 1] TASK3_LINUX_END status=FAIL
-[VM 1] TASK123_LINUX_END status=FAIL
-LOG
+        printf '[VM 1] %s\n' "$task2_marker"
+        printf '[VM 1] %s\n' "${task3_marker/PASS/FAIL}"
+        printf '[VM 1] %s\n' "${task123_marker/PASS/FAIL}"
         return
     fi
-    cat <<'LOG'
-[VM 1] TASK2_LINUX_END status=PASS
-[VM 1] TASK3_LINUX_END status=PASS
-[VM 1] TASK123_LINUX_END status=PASS
-LOG
+    printf '[VM 1] %s\n' "$task2_marker"
+    printf '[VM 1] %s\n' "$task3_marker"
+    printf '[VM 1] %s\n' "$task123_marker"
 }
 
 emit_benchmark() {
@@ -333,6 +352,7 @@ common_env=(
     RTTHREAD_DELAYED_SERVER_IMAGE="$fixtures/rtthread-delayed-server.bin"
     ROOTFS_IMAGE="$fixtures/rootfs.img"
     TASK123_MODEL_IMAGE="$fixtures/model.bin"
+    STARRYOS_IMAGE="$fixtures/starryos-task123.bin"
     FAKE_CARGO_LOG="$records/cargo.log"
     FAKE_CARGO_PID_FILE="$records/fake-cargo.pid"
     FAKE_CARGO_CHILD_PID_FILE="$records/fake-cargo-child.pid"
@@ -393,6 +413,19 @@ assert_mode_contract() {
     fi
 }
 
+assert_starryos_contract() {
+    [[ "$(grep -Fx 'app_guest=starryos' "$1/manifest.txt")" == 'app_guest=starryos' ]] ||
+        fail "StarryOS manifest did not record app_guest"
+    grep -Fq 'STARRY_SMP_READY configured=2 online=0-1 nproc=2' "$1/console.log" ||
+        fail "StarryOS SMP marker is missing"
+    grep -Fq 'STARRY_NET_READY ip=192.168.77.11 peer=192.168.77.30' "$1/console.log" ||
+        fail "StarryOS network marker is missing"
+    grep -Fq 'TASK123_STARRY_END status=PASS' "$1/console.log" ||
+        fail "StarryOS completion marker is missing"
+    grep -Eq '^ARTIFACT name=starryos path=/.* sha256=[0-9a-f]{64}$' "$1/manifest.txt" ||
+        fail "StarryOS image was not recorded in the manifest"
+}
+
 [[ -x "$RUNNER" ]] || fail "run_task123.sh is missing or not executable"
 
 normal_output="$tmp/normal-output"
@@ -408,6 +441,7 @@ grep -Fq 'STEP cargo-xtask-axvisor-build' "$tmp/normal.stdout" ||
     fail "runner did not launch exactly one QEMU"
 qemu_pid="$(cat "$records/qemu.pid")"
 assert_reaped "$qemu_pid"
+
 [[ "$(sed -n '1p' "$records/qemu-timerslack.log")" == 1 ]] ||
     fail "runner did not apply 1 ns timer slack before QEMU exec"
 grep -Fxq 'qemu_timer_slack_ns=1' "$normal_output/manifest.txt" ||
@@ -436,6 +470,21 @@ assert_mode_contract smoke \
     "$fixtures/rtthread-normal.bin"
 grep -Fq 'AxVisor host cmdline' "$RUNNER" ||
     fail "runner does not document that outer -append belongs to the AxVisor host"
+
+: > "$records/cargo.log"
+: > "$records/qemu.log"
+starry_output="$tmp/starry-output"
+if ! env "${common_env[@]}" "$RUNNER" --app-guest starryos --mode smoke \
+    --task2-count 2 --task3-frames 3 --output "$starry_output" >/dev/null; then
+    [[ ! -f "$starry_output/runner.log" ]] || cat "$starry_output/runner.log" >&2
+    fail "StarryOS fake run failed"
+fi
+grep -Fq 'kernel_path = "starryos-task123.bin"' "$records/1.toml" ||
+    fail "StarryOS run did not select the StarryOS VM config"
+[[ "$(cat "$records/1.image")" == "$(realpath -e "$fixtures/starryos-task123.bin")" ]] ||
+    fail "StarryOS run selected the wrong application image"
+assert_starryos_contract "$starry_output"
+assert_reaped "$(cat "$records/qemu.pid")"
 
 for realtime_case in 'realtime-suite:benchmark 2' 'stability:rtbench_stability 1'; do
     realtime_mode=${realtime_case%%:*}
@@ -849,5 +898,60 @@ assert_reaped "$term_qemu_pid"
 
 : > "$records/qemu.log"
 run_runner "$tmp/cargo-symlink" CARGO="$tools/cargo-shim"
+
+cache="$tmp/shared-artifact-cache"
+cache_output="$tmp/cache-first"
+env "${common_env[@]}" TASK123_SHARED_ARTIFACT_DIR="$cache" \
+    "$RUNNER" --mode smoke --task2-count 2 --task3-frames 3 \
+    --output "$cache_output" >/dev/null || {
+    [[ ! -f "$cache_output/runner.log" ]] || cat "$cache_output/runner.log" >&2
+    fail "cache population run failed"
+}
+for cached_name in \
+    linux-kernel linux-initramfs.cpio model_weights.h rootfs.img \
+    rtthread-normal.bin rtthread-drop-status.bin rtthread-delayed-server.bin \
+    starryos-task123.bin; do
+    [[ -s "$cache/$cached_name" ]] || fail "cache did not populate $cached_name"
+done
+
+cache_second_output="$tmp/cache-second"
+cache_env=(
+    PATH="$tools:$PATH"
+    QEMU="$tools/qemu-system-aarch64"
+    CARGO="$tools/cargo"
+    AARCH64_STRIP="$tools/aarch64-linux-gnu-strip"
+    AARCH64_OBJCOPY="$tools/aarch64-linux-gnu-objcopy"
+    QEMU_REALTIME_CONTROL="$tools/realtime-control"
+    FAKE_CARGO_LOG="$records/cargo.log"
+    FAKE_CARGO_PID_FILE="$records/fake-cargo.pid"
+    FAKE_CARGO_CHILD_PID_FILE="$records/fake-cargo-child.pid"
+    FAKE_CARGO_VMCONFIG_DIR="$records"
+    FAKE_AXVISOR_ELF="$fixtures/generated/axvisor"
+    FAKE_QEMU_LOG="$records/qemu.log"
+    FAKE_QEMU_PID_FILE="$records/qemu.pid"
+    FAKE_QEMU_TIMERSLACK_LOG="$records/qemu-timerslack.log"
+    FAKE_QEMU_STDIN_LOG="$records/qemu-stdin.log"
+    FAKE_CONTROL_LOG="$records/control.log"
+)
+: > "$records/cargo.log"
+: > "$records/qemu.log"
+env "${cache_env[@]}" TASK123_SHARED_ARTIFACT_DIR="$cache" \
+    "$RUNNER" --app-guest starryos --mode smoke --task2-count 2 \
+    --task3-frames 3 --output "$cache_second_output" >/dev/null || {
+    [[ ! -f "$cache_second_output/runner.log" ]] || cat "$cache_second_output/runner.log" >&2
+    fail "cache reuse run failed"
+}
+! grep -Fq 'xtask image pull qemu-aarch64' "$records/cargo.log" ||
+    fail "cache reuse unexpectedly pulled rootfs"
+! grep -Fq 'linux-image-build' "$cache_second_output/runner.log" ||
+    fail "cache reuse unexpectedly rebuilt Linux images"
+grep -Fq 'app_guest=starryos' "$cache_second_output/manifest.txt" ||
+    fail "cache reuse did not run the StarryOS guest"
+assert_reaped "$(cat "$records/qemu.pid")"
+
+expect_failure "output nested in shared cache was accepted" \
+    env "${cache_env[@]}" TASK123_SHARED_ARTIFACT_DIR="$cache" \
+    "$RUNNER" --mode smoke --task2-count 2 --task3-frames 3 \
+    --output "$cache/nested-output"
 
 echo "PASS: Task 1/2/3 runner owns and reaps one AxVisor QEMU"
