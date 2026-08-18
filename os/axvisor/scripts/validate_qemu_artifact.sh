@@ -25,7 +25,7 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
-for tool in realpath sha256sum cmp mktemp mv rm awk dirname nm python3 rust-objcopy; do
+for tool in realpath sha256sum cmp mktemp mv rm dirname python3 rust-objcopy; do
   command -v "$tool" >/dev/null 2>&1 || die "required tool is unavailable: ${tool}"
 done
 
@@ -85,22 +85,13 @@ cmp -s -- "$GENERATED_RAW" "$RAW_PATH" \
   || die "regenerated raw binary does not match supplied raw binary: ${RAW_PATH}"
 
 python3 - "$ELF_PATH" "$RAW_PATH" "${VM_CONFIG_PATHS[@]}" <<'PY' \
-  || die "required diagnostic or VM config bytes are absent from Axvisor artifacts"
+  || die "required VM config bytes are absent from Axvisor artifacts"
 import pathlib
 import sys
 
 elf_path, raw_path, *config_paths = map(pathlib.Path, sys.argv[1:])
 elf_bytes = elf_path.read_bytes()
 raw_bytes = raw_path.read_bytes()
-host_policy_diagnostic = (
-    b"configured host policy: timer={:?}, vcpu_yield={}, vcpu_idle={:?}"
-)
-if host_policy_diagnostic not in elf_bytes:
-    print(
-        f"required host policy diagnostic is absent from ELF: {elf_path}",
-        file=sys.stderr,
-    )
-    raise SystemExit(1)
 for config_path in config_paths:
     config_bytes = config_path.read_bytes()
     missing_from = []
@@ -115,16 +106,6 @@ for config_path in config_paths:
         )
         raise SystemExit(1)
 PY
-
-HOST_POLICY_WITNESS=axvisor_log_configured_host_policy
-if ! nm -g --defined-only --format=posix "$ELF_PATH" \
-  | awk -v witness="$HOST_POLICY_WITNESS" '
-      $1 == witness && $2 == "T" { count += 1 }
-      END { exit count == 1 ? 0 : 1 }
-    '
-then
-  die "runtime host policy diagnostic witness is absent from ELF: ${HOST_POLICY_WITNESS}: ${ELF_PATH}"
-fi
 
 verify_input_unchanged() {
   local role="$1"

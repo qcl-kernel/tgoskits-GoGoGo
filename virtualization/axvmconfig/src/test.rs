@@ -51,6 +51,8 @@ fn parses_structured_guest_config() {
     assert_eq!(config.base.cpu_num, 2);
     assert_eq!(config.base.phys_cpu_ids, Some(vec![0x500, 0x501]));
     assert_eq!(config.base.phys_cpu_sets, Some(vec![3, 4]));
+    assert_eq!(config.base.host_vcpu_idle_policy, HostVcpuIdlePolicy::Halt);
+    assert_eq!(config.base.guest_tlbi_policy, GuestTlbiPolicy::Native);
 
     assert_eq!(config.kernel.entry_point, 0xdeadbeef);
     assert_eq!(config.kernel.configured_memory_region_count, 1);
@@ -71,6 +73,38 @@ fn parses_structured_guest_config() {
             path: "/soc/gpio@2000".into(),
         }]
     );
+}
+
+#[test]
+fn parses_busy_host_vcpu_idle_policy() {
+    let config = GuestConfig::from_toml(
+        r#"
+[base]
+host_vcpu_idle_policy = "busy"
+"#,
+    )
+    .unwrap();
+
+    assert_eq!(config.base.host_vcpu_idle_policy, HostVcpuIdlePolicy::Busy);
+
+    let encoded = toml::to_string(&config).unwrap();
+    assert!(encoded.contains("host_vcpu_idle_policy = \"busy\""));
+}
+
+#[test]
+fn parses_vm_scoped_guest_tlbi_policy() {
+    let config = GuestConfig::from_toml(
+        r#"
+[base]
+guest_tlbi_policy = "vm_scoped"
+"#,
+    )
+    .unwrap();
+
+    assert_eq!(config.base.guest_tlbi_policy, GuestTlbiPolicy::VmScoped);
+
+    let encoded = toml::to_string(&config).unwrap();
+    assert!(encoded.contains("guest_tlbi_policy = \"vm_scoped\""));
 }
 
 #[test]

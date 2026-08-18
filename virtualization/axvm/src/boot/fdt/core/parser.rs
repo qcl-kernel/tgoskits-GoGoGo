@@ -449,17 +449,26 @@ pub fn set_phys_cpu_sets(
     info!("Found {} host CPU nodes", cpu_nodes_info.len());
 
     let policy = super::selected_guest_fdt_policy();
-    let (new_phys_cpu_sets, guest_phys_cpu_ids) = resolve_phys_cpu_sets(
+    let (fdt_phys_cpu_sets, guest_phys_cpu_ids) = resolve_phys_cpu_sets(
         phys_cpu_ids,
         &cpu_nodes_info,
         (policy.host_cpu_count)(),
         policy.resolve_cpu_index,
     )?;
+    let configured_phys_cpu_sets = vm_cfg.phys_cpu_ls.phys_cpu_sets().as_deref();
+    let new_phys_cpu_sets = select_phys_cpu_sets(configured_phys_cpu_sets, fdt_phys_cpu_sets);
 
     let phys_cpu_ls = vm_cfg.phys_cpu_ls_mut();
     phys_cpu_ls.set_guest_cpu_sets(new_phys_cpu_sets);
     phys_cpu_ls.set_guest_phys_cpu_ids(guest_phys_cpu_ids);
     Ok(())
+}
+
+fn select_phys_cpu_sets(
+    configured_phys_cpu_sets: Option<&[usize]>,
+    fdt_phys_cpu_sets: Vec<usize>,
+) -> Vec<usize> {
+    configured_phys_cpu_sets.map_or(fdt_phys_cpu_sets, <[usize]>::to_vec)
 }
 
 fn resolve_phys_cpu_sets(
@@ -717,7 +726,7 @@ mod tests {
 
     use super::{
         align_reserved_region_4k, parse_passthrough_devices_address, parse_vm_interrupt,
-        reserve_excluded_device_ranges, resolve_phys_cpu_sets,
+        reserve_excluded_device_ranges, resolve_phys_cpu_sets, select_phys_cpu_sets,
     };
     use crate::config::{AxVMConfig, AxVMConfigParams, PhysCpuList};
 
@@ -900,6 +909,22 @@ mod tests {
 
         assert_eq!(cpu_sets, vec![0b0010]);
         assert_eq!(guest_cpu_ids, vec![0]);
+    }
+
+    #[test]
+    fn explicit_phys_cpu_sets_override_fdt_one_hot_defaults() {
+        assert_eq!(
+            select_phys_cpu_sets(Some(&[0b0011, 0b0011]), vec![0b0001, 0b0010]),
+            vec![0b0011, 0b0011]
+        );
+    }
+
+    #[test]
+    fn absent_phys_cpu_sets_use_fdt_one_hot_defaults() {
+        assert_eq!(
+            select_phys_cpu_sets(None, vec![0b0001, 0b0010]),
+            vec![0b0001, 0b0010]
+        );
     }
 
     #[test]

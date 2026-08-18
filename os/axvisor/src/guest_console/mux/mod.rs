@@ -7,11 +7,11 @@ use alloc::{
 };
 
 use anyhow::{Result, bail};
+use ax_std::os::arceos::modules::ax_task::sync::{SpinLock, SpinLockGuard};
 use axvm::{SerialBackend, SerialBackendFactory, VMId, VmStatus};
 use core::ops::Bound::{Excluded, Unbounded};
 use log::warn;
 use std::sync::LazyLock;
-use ax_std::os::arceos::modules::ax_task::sync::{SpinLock, SpinLockGuard};
 
 use super::host::write_host_bytes;
 
@@ -341,13 +341,11 @@ fn switch_guest(state: &mut ConsoleState, direction: GuestSwitchDirection) -> Ro
 
 impl ConsoleCore {
     fn lock_state(&self) -> SpinLockGuard<'_, ConsoleState> {
-        self.state
-            .lock()
+        self.state.lock()
     }
 
     fn lock_output(&self) -> SpinLockGuard<'_, ()> {
-        self.output_lock
-            .lock()
+        self.output_lock.lock()
     }
 
     fn create_serial_backend(self: &Arc<Self>, vm_id: VMId) -> Arc<GuestSerialBackend> {

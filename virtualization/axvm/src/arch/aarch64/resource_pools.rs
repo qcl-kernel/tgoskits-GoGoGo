@@ -25,7 +25,10 @@ pub(super) fn create(vgic: &ArmVgicConfig, vm_id: usize) -> AxVmResult<ResourceP
     // in the global ASSIGNED_SPI_ROUTES table. Each VM gets a 64-SPI window.
     let window = 64usize;
     let auto_irq_start = 32usize + vm_id * window;
-    let auto_irq_end = auto_irq_start.checked_add(window).unwrap_or(spi_end).min(spi_end);
+    let auto_irq_end = auto_irq_start
+        .checked_add(window)
+        .unwrap_or(spi_end)
+        .min(spi_end);
     pools.add_auto_controller_inputs(
         controller,
         ControllerInputId::new(auto_irq_start)..ControllerInputId::new(auto_irq_end),

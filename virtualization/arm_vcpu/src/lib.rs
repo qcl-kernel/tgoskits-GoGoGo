@@ -22,6 +22,7 @@ extern crate log;
 #[cfg(target_arch = "aarch64")]
 mod architecture;
 mod timer;
+mod tlbi;
 mod types;
 
 #[cfg(test)]
@@ -34,6 +35,7 @@ pub use self::{
         ArmTimerContext, ArmTimerKind, ArmTimerRegisters, ArmTimerSnapshot, ArmTimerVmConfig,
         ArmVcpuTimer,
     },
+    tlbi::{TlbiClassification, classify_tlbi},
     types::{
         ArmAccessWidth, ArmGicCpuInterfaceRegister, ArmGuestPhysAddr, ArmNestedPagingConfig,
         ArmSysRegAddr, ArmVcpuError, ArmVcpuResult, ArmVmExit,

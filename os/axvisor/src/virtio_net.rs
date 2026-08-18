@@ -13,7 +13,7 @@ use axvirtio_common::{GuestMemory, NoGuestMemoryAccessor, VirtioError};
 use axvirtio_net::{
     DeviceEvent, NetworkBackend, NetworkBackendError, RxOutcome, VirtioMmioNetDevice,
     VirtioNetConfig,
-    switch::{SwitchPort, SwitchPortId, SwitchPortRegistration, VirtualSwitch},
+    switch::{EgressOutcome, SwitchPort, SwitchPortId, SwitchPortRegistration, VirtualSwitch},
 };
 use axvm::{ConfiguredDeviceError, ConfiguredModelRegistration, DeviceInstantiationContext};
 use axvm_types::GuestPhysAddr;
@@ -116,7 +116,7 @@ impl DeviceModel for VirtioNetModel {
                 4,
                 ResourceRequest::Auto,
             )?
-        .with_wired_irq(
+            .with_wired_irq(
                 ResourceSlot::new(IRQ_SLOT)?,
                 self.controller,
                 InterruptTrigger::EdgeTriggered,
@@ -206,15 +206,40 @@ struct SwitchBackend {
 
 impl NetworkBackend for SwitchBackend {
     fn transmit(&self, frame: &[u8]) -> Result<(), NetworkBackendError> {
-        let _ = self.switch.switch_from_port(self.endpoint.id(), frame);
+        let outcome = self.switch.switch_from_port(self.endpoint.id(), frame);
+        match outcome {
+            EgressOutcome::Forwarded { .. } => {}
+            EgressOutcome::Dropped(reason) => {
+                log::warn!(
+                    "virtio-net TX[{}] {} bytes dropped: {:?}",
+                    self.endpoint.id().vm_id,
+                    frame.len(),
+                    reason
+                );
+            }
+        }
         Ok(())
     }
+
+    fn rx_queue_notified(&self) {
+        self.endpoint.retry_deferred_ingress();
+    }
+}
+
+struct IngressState {
+    frames: VecDeque<alloc::vec::Vec<u8>>,
+    // A retained front frame is either waiting for a guest kick
+    // (`deferred_retry`), eligible for one delivery attempt, or in flight.
+    // A kick observed in flight is consumed by that attempt's completion.
+    deferred_retry: bool,
+    rx_attempt_in_flight: bool,
+    retry_kick_pending: bool,
 }
 
 struct PortEndpoint {
     id: SwitchPortId,
     mac: [u8; 6],
-    ingress: Mutex<VecDeque<alloc::vec::Vec<u8>>>,
+    ingress: Mutex<IngressState>,
     active: AtomicBool,
     wake_target: Arc<dyn WakeTarget>,
     _switch: Arc<VirtualSwitch>,
@@ -252,7 +277,12 @@ impl PortEndpoint {
         Arc::new(Self {
             id,
             mac,
-            ingress: Mutex::new(VecDeque::new()),
+            ingress: Mutex::new(IngressState {
+                frames: VecDeque::new(),
+                deferred_retry: false,
+                rx_attempt_in_flight: false,
+                retry_kick_pending: false,
+            }),
             active: AtomicBool::new(false),
             wake_target,
             _switch: switch,
@@ -264,14 +294,55 @@ impl PortEndpoint {
     }
 
     fn pop_ingress(&self) -> Option<alloc::vec::Vec<u8>> {
-        self.lock_ingress().pop_front()
+        let mut ingress = self.lock_ingress();
+        if ingress.deferred_retry {
+            return None;
+        }
+        let frame = ingress.frames.pop_front();
+        if frame.is_some() {
+            ingress.deferred_retry = false;
+            ingress.rx_attempt_in_flight = true;
+        }
+        frame
     }
 
-    fn requeue_ingress(&self, frame: alloc::vec::Vec<u8>) {
-        self.lock_ingress().push_front(frame);
+    fn requeue_deferred_ingress(&self, frame: alloc::vec::Vec<u8>) {
+        let should_wake = {
+            let mut ingress = self.lock_ingress();
+            ingress.frames.push_front(frame);
+            ingress.rx_attempt_in_flight = false;
+            let should_wake = core::mem::take(&mut ingress.retry_kick_pending);
+            ingress.deferred_retry = !should_wake;
+            should_wake
+        };
+        if should_wake {
+            self.wake_target.notify();
+        }
     }
 
-    fn lock_ingress(&self) -> MutexGuard<'_, VecDeque<alloc::vec::Vec<u8>>> {
+    fn finish_ingress_attempt(&self) {
+        let mut ingress = self.lock_ingress();
+        ingress.rx_attempt_in_flight = false;
+        ingress.retry_kick_pending = false;
+    }
+
+    fn retry_deferred_ingress(&self) {
+        let should_wake = {
+            let mut ingress = self.lock_ingress();
+            let should_wake = ingress.deferred_retry && !ingress.frames.is_empty();
+            if should_wake {
+                ingress.deferred_retry = false;
+            } else if ingress.rx_attempt_in_flight {
+                ingress.retry_kick_pending = true;
+            }
+            should_wake
+        };
+        if should_wake {
+            self.wake_target.notify();
+        }
+    }
+
+    fn lock_ingress(&self) -> MutexGuard<'_, IngressState> {
         self.ingress
             .lock()
             .expect("virtio-net ingress mutex poisoned")
@@ -293,10 +364,10 @@ impl SwitchPort for PortEndpoint {
 
     fn deliver_ingress(&self, frame: &[u8]) -> bool {
         let mut ingress = self.lock_ingress();
-        if !self.is_active() || ingress.len() >= INGRESS_CAPACITY {
+        if !self.is_active() || ingress.frames.len() >= INGRESS_CAPACITY {
             return false;
         }
-        ingress.push_back(frame.into());
+        ingress.frames.push_back(frame.into());
         true
     }
 
@@ -384,6 +455,7 @@ impl DmaPollableDeviceOps for VirtioNetRuntimeDevice {
         while let Some(frame) = self.endpoint.pop_ingress() {
             match self.model.receive_frame_with_memory(&frame, &mut memory) {
                 Ok(RxOutcome::Delivered { notify, .. }) => {
+                    self.endpoint.finish_ingress_attempt();
                     if notify {
                         self.irq
                             .pulse()
@@ -394,10 +466,11 @@ impl DmaPollableDeviceOps for VirtioNetRuntimeDevice {
                     }
                 }
                 Ok(RxOutcome::NoGuestBuffer) => {
-                    self.endpoint.requeue_ingress(frame);
+                    self.endpoint.requeue_deferred_ingress(frame);
                     break;
                 }
                 Err(error) => {
+                    self.endpoint.finish_ingress_attempt();
                     warn!("virtio-net drops an ingress frame: {error:?}");
                 }
             }
@@ -422,5 +495,396 @@ fn map_virtio_error(error: VirtioError) -> DeviceError {
     DeviceError::InvalidInput {
         operation: "access virtio-net MMIO transport",
         detail: format!("{error:?}"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axdevice_base::{
+        ControllerInputId, DeviceId, InterruptControllerId, IrqResult, WiredIrqInput, WiredIrqSink,
+    };
+    use axvirtio_common::constants as vc;
+    use axvm_types::AccessWidth;
+
+    const TEST_BASE_IPA: usize = 0x0a00_0000;
+    const TEST_REGION_LEN: usize = 0x200;
+    const TEST_RX_DESC: usize = 0x1000;
+    const TEST_RX_AVAIL: usize = 0x2000;
+    const TEST_RX_USED: usize = 0x3000;
+    const TEST_RX_BUFFER: usize = 0x4000;
+
+    struct CountingWakeTarget {
+        notifications: AtomicUsize,
+    }
+
+    impl WakeTarget for CountingWakeTarget {
+        fn notify(&self) {
+            self.notifications.fetch_add(1, Ordering::Relaxed);
+        }
+    }
+
+    struct CountingIrqSink {
+        pulses: AtomicUsize,
+    }
+
+    impl WiredIrqSink for CountingIrqSink {
+        fn set_level(&self, _input: ControllerInputId, _asserted: bool) -> IrqResult {
+            Ok(())
+        }
+
+        fn pulse(&self, _input: ControllerInputId) -> IrqResult {
+            self.pulses.fetch_add(1, Ordering::Relaxed);
+            Ok(())
+        }
+    }
+
+    struct TestDeviceAccess {
+        bytes: alloc::vec::Vec<u8>,
+    }
+
+    impl TestDeviceAccess {
+        fn new(size: usize) -> Self {
+            Self {
+                bytes: alloc::vec![0; size],
+            }
+        }
+
+        fn put(&mut self, addr: usize, data: &[u8]) {
+            self.bytes[addr..addr + data.len()].copy_from_slice(data);
+        }
+
+        fn read_u16(&self, addr: usize) -> u16 {
+            u16::from_le_bytes(self.bytes[addr..addr + 2].try_into().unwrap())
+        }
+    }
+
+    impl DeviceAccess for TestDeviceAccess {
+        fn device_id(&self) -> DeviceId {
+            DeviceId::new(0)
+        }
+
+        fn read_guest_memory(
+            &mut self,
+            _grant: &DmaGrant,
+            addr: GuestPhysAddr,
+            data: &mut [u8],
+        ) -> Result<(), DeviceError> {
+            let start = addr.as_usize();
+            let end = start
+                .checked_add(data.len())
+                .filter(|end| *end <= self.bytes.len())
+                .ok_or(DeviceError::OutOfRange { addr: start as u64 })?;
+            data.copy_from_slice(&self.bytes[start..end]);
+            Ok(())
+        }
+
+        fn write_guest_memory(
+            &mut self,
+            _grant: &DmaGrant,
+            addr: GuestPhysAddr,
+            data: &[u8],
+        ) -> Result<(), DeviceError> {
+            let start = addr.as_usize();
+            let end = start
+                .checked_add(data.len())
+                .filter(|end| *end <= self.bytes.len())
+                .ok_or(DeviceError::OutOfRange { addr: start as u64 })?;
+            self.bytes[start..end].copy_from_slice(data);
+            Ok(())
+        }
+    }
+
+    fn runtime_mmio_write(
+        device: &VirtioNetRuntimeDevice,
+        memory: &mut TestDeviceAccess,
+        register: usize,
+        value: u32,
+    ) {
+        let response = device
+            .access(
+                &BusAccess {
+                    kind: BusKind::Mmio,
+                    is_read: false,
+                    addr: (TEST_BASE_IPA + register) as u64,
+                    width: AccessWidth::Dword,
+                    data: value as u64,
+                },
+                memory,
+            )
+            .unwrap();
+        assert!(matches!(response, BusResponse::Write));
+    }
+
+    fn configure_empty_rx_queue(device: &VirtioNetRuntimeDevice, memory: &mut TestDeviceAccess) {
+        let features = axvirtio_net::AXVIRTIO_NET_FEATURES;
+        runtime_mmio_write(device, memory, vc::VIRTIO_MMIO_DRIVER_FEATURES_SEL, 0);
+        runtime_mmio_write(
+            device,
+            memory,
+            vc::VIRTIO_MMIO_DRIVER_FEATURES,
+            features as u32,
+        );
+        runtime_mmio_write(device, memory, vc::VIRTIO_MMIO_DRIVER_FEATURES_SEL, 1);
+        runtime_mmio_write(
+            device,
+            memory,
+            vc::VIRTIO_MMIO_DRIVER_FEATURES,
+            (features >> 32) as u32,
+        );
+        runtime_mmio_write(
+            device,
+            memory,
+            vc::VIRTIO_MMIO_STATUS,
+            vc::VIRTIO_STATUS_ACKNOWLEDGE
+                | vc::VIRTIO_STATUS_DRIVER
+                | vc::VIRTIO_STATUS_FEATURES_OK,
+        );
+        runtime_mmio_write(device, memory, vc::VIRTIO_MMIO_QUEUE_SEL, 0);
+        runtime_mmio_write(device, memory, vc::VIRTIO_MMIO_QUEUE_NUM, 4);
+        runtime_mmio_write(
+            device,
+            memory,
+            vc::VIRTIO_MMIO_QUEUE_DESC_LOW,
+            TEST_RX_DESC as u32,
+        );
+        runtime_mmio_write(
+            device,
+            memory,
+            vc::VIRTIO_MMIO_QUEUE_AVAIL_LOW,
+            TEST_RX_AVAIL as u32,
+        );
+        runtime_mmio_write(
+            device,
+            memory,
+            vc::VIRTIO_MMIO_QUEUE_USED_LOW,
+            TEST_RX_USED as u32,
+        );
+        runtime_mmio_write(device, memory, vc::VIRTIO_MMIO_QUEUE_READY, 1);
+        runtime_mmio_write(
+            device,
+            memory,
+            vc::VIRTIO_MMIO_STATUS,
+            vc::VIRTIO_STATUS_ACKNOWLEDGE
+                | vc::VIRTIO_STATUS_DRIVER
+                | vc::VIRTIO_STATUS_FEATURES_OK
+                | vc::VIRTIO_STATUS_DRIVER_OK,
+        );
+    }
+
+    fn install_rx_descriptor(memory: &mut TestDeviceAccess) {
+        let mut descriptor = [0u8; 16];
+        descriptor[0..8].copy_from_slice(&(TEST_RX_BUFFER as u64).to_le_bytes());
+        descriptor[8..12].copy_from_slice(&128u32.to_le_bytes());
+        descriptor[12..14].copy_from_slice(&vc::VIRTQ_DESC_F_WRITE.to_le_bytes());
+        memory.put(TEST_RX_DESC, &descriptor);
+        memory.put(TEST_RX_AVAIL + 2, &1u16.to_le_bytes());
+        memory.put(TEST_RX_AVAIL + 4, &0u16.to_le_bytes());
+    }
+
+    #[cfg_attr(axtest, axtest::axtest)]
+    #[cfg_attr(not(axtest), test)]
+    fn runtime_no_buffer_waits_for_mmio_rx_kick_before_delivery() {
+        let switch = VirtualSwitch::new();
+        let wake_target = Arc::new(CountingWakeTarget {
+            notifications: AtomicUsize::new(0),
+        });
+        let endpoint = PortEndpoint::new(
+            SwitchPortId::new(1, 0, 0),
+            [0x02, 0, 0, 0, 0, 1],
+            switch.clone(),
+            wake_target.clone(),
+        );
+        let registration = switch.register_owned(endpoint.clone()).unwrap();
+        endpoint.activate();
+        let backend = SwitchBackend {
+            endpoint: endpoint.clone(),
+            switch,
+        };
+        let model = Arc::new(
+            VirtioMmioNetDevice::new(
+                GuestPhysAddr::from(TEST_BASE_IPA),
+                TEST_REGION_LEN,
+                backend,
+                VirtioNetConfig::new([0x02, 0, 0, 0, 0, 1]),
+                NoGuestMemoryAccessor,
+            )
+            .unwrap(),
+        );
+        let irq_sink = Arc::new(CountingIrqSink {
+            pulses: AtomicUsize::new(0),
+        });
+        let irq = WiredIrqInput::new(
+            InterruptControllerId::new(0),
+            ControllerInputId::new(48),
+            InterruptTrigger::EdgeTriggered,
+            irq_sink.clone(),
+        )
+        .connect()
+        .unwrap();
+        let grant = DmaGrant::new();
+        let device = VirtioNetRuntimeDevice {
+            model,
+            irq,
+            grant: grant.clone(),
+            endpoint: endpoint.clone(),
+            _registration: registration,
+            resources: alloc::vec![].into_boxed_slice(),
+        };
+        let mut memory = TestDeviceAccess::new(0x8000);
+        configure_empty_rx_queue(&device, &mut memory);
+        assert!(endpoint.deliver_ingress(&[0x5a; 64]));
+
+        device.poll_dma(0, &mut memory, &grant).unwrap();
+        assert_eq!(memory.read_u16(TEST_RX_USED + 2), 0);
+        install_rx_descriptor(&mut memory);
+        device.poll_dma(0, &mut memory, &grant).unwrap();
+        assert_eq!(memory.read_u16(TEST_RX_USED + 2), 0);
+
+        runtime_mmio_write(&device, &mut memory, vc::VIRTIO_MMIO_QUEUE_NOTIFY, 0);
+        assert_eq!(wake_target.notifications.load(Ordering::Relaxed), 1);
+        device.poll_dma(0, &mut memory, &grant).unwrap();
+
+        assert_eq!(memory.read_u16(TEST_RX_USED + 2), 1);
+        assert_eq!(irq_sink.pulses.load(Ordering::Relaxed), 1);
+        assert_eq!(
+            &memory.bytes[TEST_RX_BUFFER + axvirtio_net::VIRTIO_NET_HDR_MODERN_SIZE
+                ..TEST_RX_BUFFER + axvirtio_net::VIRTIO_NET_HDR_MODERN_SIZE + 64],
+            &[0x5a; 64]
+        );
+    }
+
+    #[cfg_attr(axtest, axtest::axtest)]
+    #[cfg_attr(not(axtest), test)]
+    fn rx_queue_kick_consumes_one_deferred_retry_qualification() {
+        let switch = VirtualSwitch::new();
+        let wake_target = Arc::new(CountingWakeTarget {
+            notifications: AtomicUsize::new(0),
+        });
+        let endpoint = PortEndpoint::new(
+            SwitchPortId::new(1, 0, 0),
+            [0x02, 0, 0, 0, 0, 1],
+            switch.clone(),
+            wake_target.clone(),
+        );
+        endpoint.activate();
+        assert!(endpoint.deliver_ingress(&[0; 64]));
+        let frame = endpoint.pop_ingress().expect("queued ingress frame");
+        endpoint.requeue_deferred_ingress(frame);
+        let backend = SwitchBackend { endpoint, switch };
+
+        backend.rx_queue_notified();
+        backend.rx_queue_notified();
+
+        assert_eq!(wake_target.notifications.load(Ordering::Relaxed), 1);
+    }
+
+    #[cfg_attr(axtest, axtest::axtest)]
+    #[cfg_attr(not(axtest), test)]
+    fn rx_queue_kick_does_not_wake_without_deferred_retry() {
+        let switch = VirtualSwitch::new();
+        let wake_target = Arc::new(CountingWakeTarget {
+            notifications: AtomicUsize::new(0),
+        });
+        let endpoint = PortEndpoint::new(
+            SwitchPortId::new(1, 0, 0),
+            [0x02, 0, 0, 0, 0, 1],
+            switch.clone(),
+            wake_target.clone(),
+        );
+        endpoint.activate();
+        let backend = SwitchBackend { endpoint, switch };
+
+        backend.rx_queue_notified();
+
+        assert_eq!(wake_target.notifications.load(Ordering::Relaxed), 0);
+    }
+
+    #[cfg_attr(axtest, axtest::axtest)]
+    #[cfg_attr(not(axtest), test)]
+    fn rx_queue_kick_during_delivery_attempt_wakes_after_no_buffer_requeue() {
+        let switch = VirtualSwitch::new();
+        let wake_target = Arc::new(CountingWakeTarget {
+            notifications: AtomicUsize::new(0),
+        });
+        let endpoint = PortEndpoint::new(
+            SwitchPortId::new(1, 0, 0),
+            [0x02, 0, 0, 0, 0, 1],
+            switch.clone(),
+            wake_target.clone(),
+        );
+        endpoint.activate();
+        assert!(endpoint.deliver_ingress(&[0; 64]));
+        let frame = endpoint.pop_ingress().expect("queued ingress frame");
+        let backend = SwitchBackend {
+            endpoint: endpoint.clone(),
+            switch,
+        };
+
+        backend.rx_queue_notified();
+        endpoint.requeue_deferred_ingress(frame);
+
+        assert_eq!(wake_target.notifications.load(Ordering::Relaxed), 1);
+    }
+
+    #[cfg_attr(axtest, axtest::axtest)]
+    #[cfg_attr(not(axtest), test)]
+    fn deferred_frame_cannot_be_polled_again_before_rx_queue_kick() {
+        let switch = VirtualSwitch::new();
+        let wake_target = Arc::new(CountingWakeTarget {
+            notifications: AtomicUsize::new(0),
+        });
+        let endpoint = PortEndpoint::new(
+            SwitchPortId::new(1, 0, 0),
+            [0x02, 0, 0, 0, 0, 1],
+            switch.clone(),
+            wake_target,
+        );
+        endpoint.activate();
+        assert!(endpoint.deliver_ingress(&[0; 64]));
+        let frame = endpoint.pop_ingress().expect("queued ingress frame");
+        endpoint.requeue_deferred_ingress(frame);
+        let backend = SwitchBackend {
+            endpoint: endpoint.clone(),
+            switch,
+        };
+
+        assert!(endpoint.pop_ingress().is_none());
+        backend.rx_queue_notified();
+        assert!(endpoint.pop_ingress().is_some());
+    }
+
+    #[cfg_attr(axtest, axtest::axtest)]
+    #[cfg_attr(not(axtest), test)]
+    fn completed_attempt_discards_in_flight_rx_queue_kick() {
+        let switch = VirtualSwitch::new();
+        let wake_target = Arc::new(CountingWakeTarget {
+            notifications: AtomicUsize::new(0),
+        });
+        let endpoint = PortEndpoint::new(
+            SwitchPortId::new(1, 0, 0),
+            [0x02, 0, 0, 0, 0, 1],
+            switch.clone(),
+            wake_target.clone(),
+        );
+        endpoint.activate();
+        let backend = SwitchBackend {
+            endpoint: endpoint.clone(),
+            switch,
+        };
+
+        assert!(endpoint.deliver_ingress(&[0; 64]));
+        assert!(endpoint.pop_ingress().is_some());
+        backend.rx_queue_notified();
+        endpoint.finish_ingress_attempt();
+
+        assert!(endpoint.deliver_ingress(&[1; 64]));
+        let frame = endpoint.pop_ingress().expect("second ingress frame");
+        endpoint.requeue_deferred_ingress(frame);
+        assert_eq!(wake_target.notifications.load(Ordering::Relaxed), 0);
+        assert!(endpoint.pop_ingress().is_none());
+
+        backend.rx_queue_notified();
+        assert_eq!(wake_target.notifications.load(Ordering::Relaxed), 1);
     }
 }

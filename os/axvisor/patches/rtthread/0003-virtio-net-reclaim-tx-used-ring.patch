@@ -1,0 +1,66 @@
+--- a/components/drivers/virtio/virtio_net.c
++++ b/components/drivers/virtio/virtio_net.c
+@@ -20,11 +20,32 @@
+ static rt_err_t virtio_net_tx(rt_device_t dev, struct pbuf *p)
+ {
+     rt_uint16_t id;
++    rt_uint16_t id2;
+     struct virtio_net_device *virtio_net_dev = (struct virtio_net_device *)dev;
+     struct virtio_device *virtio_dev = &virtio_net_dev->virtio_dev;
+     struct virtq *queue_tx = &virtio_dev->queues[VIRTIO_NET_QUEUE_TX];
+ 
+-    id = (queue_tx->avail->idx * 2) % queue_tx->num;
++    /* Reclaim completed TX chains before allocating new descriptors. The
++     * device owns a chain until it publishes its head in the used ring. */
++    rt_hw_dsb();
++    while (queue_tx->used_idx != queue_tx->used->idx)
++    {
++        rt_uint16_t used_id = queue_tx->used->ring[queue_tx->used_idx % queue_tx->num].id;
++        queue_tx->used_idx++;
++        virtio_free_desc_chain(virtio_dev, VIRTIO_NET_QUEUE_TX, used_id);
++    }
++    rt_hw_dsb();
++
++    id = virtio_alloc_desc(virtio_dev, VIRTIO_NET_QUEUE_TX);
++    id2 = virtio_alloc_desc(virtio_dev, VIRTIO_NET_QUEUE_TX);
++    if (id == VIRTQ_INVALID_DESC_ID || id2 == VIRTQ_INVALID_DESC_ID || id2 != id + 1)
++    {
++        if (id2 != VIRTQ_INVALID_DESC_ID)
++            virtio_free_desc(virtio_dev, VIRTIO_NET_QUEUE_TX, id2);
++        if (id != VIRTQ_INVALID_DESC_ID)
++            virtio_free_desc(virtio_dev, VIRTIO_NET_QUEUE_TX, id);
++        return -RT_EFULL;
++    }
+ 
+     virtio_net_dev->info[id].hdr.flags = 0;
+     virtio_net_dev->info[id].hdr.gso_type = 0;
+@@ -43,12 +64,10 @@
+             VIRTIO_VA2PA(virtio_net_dev->info[id].rx_buffer), p->tot_len, 0, 0);
+ 
+     virtio_submit_chain(virtio_dev, VIRTIO_NET_QUEUE_TX, id);
++    rt_hw_dsb();
+ 
+     virtio_queue_notify(virtio_dev, VIRTIO_NET_QUEUE_TX);
+ 
+-    virtio_alloc_desc(virtio_dev, VIRTIO_NET_QUEUE_TX);
+-    virtio_alloc_desc(virtio_dev, VIRTIO_NET_QUEUE_TX);
+-
+     return RT_EOK;
+ }
+ 
+@@ -129,6 +148,15 @@
+     queue_tx->avail->flags = VIRTQ_AVAIL_F_NO_INTERRUPT;
+     queue_tx->avail->idx = 0;
+ 
++    /* The initial allocation only reserves TX descriptors; none have been
++     * submitted. Return them to the free pool so the TX path can allocate and
++     * own exactly the chains it submits. */
++    for (i = 0; i < queue_tx->num; ++i)
++    {
++        if (!queue_tx->free[i])
++            virtio_free_desc(virtio_dev, VIRTIO_NET_QUEUE_TX, i);
++    }
++
+     virtio_queue_notify(virtio_dev, VIRTIO_NET_QUEUE_RX);
+ 
+     return eth_device_linkchange(&virtio_net_dev->parent, RT_TRUE);

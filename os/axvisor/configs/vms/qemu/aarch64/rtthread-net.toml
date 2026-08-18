@@ -3,13 +3,14 @@ id = 3
 name = "rtthread-net"
 guest_type = "virtualized"
 cpu_num = 1
+host_vcpu_idle_policy = "busy"
 phys_cpu_ids = [2]
 phys_cpu_sets = [4]
 
 [kernel]
 entry_point = 0xa000_0000
 image_location = "memory"
-kernel_path = "/home/yfblock/Code/hyper-rtos/tgoskits/tmp/rt-thread-5.2.2/bsp/qemu-virt64-aarch64/rtthread.bin"
+kernel_path = "rtthread.bin"
 kernel_load_addr = 0xa000_0000
 dtb_load_addr = 0xaf00_0000
 memory_regions = [

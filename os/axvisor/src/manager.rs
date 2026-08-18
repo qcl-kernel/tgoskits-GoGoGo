@@ -224,7 +224,6 @@ impl AxvmManager {
     }
 }
 
-
 #[cfg(target_arch = "loongarch64")]
 pub(crate) fn register_loongarch_passthrough_irq_routes(vm_id: VMId) {
     let routes = axvm::boot::guest_platform::loongarch64::get_guest_irq_routes(vm_id);

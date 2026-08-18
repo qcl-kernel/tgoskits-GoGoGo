@@ -1,11 +1,16 @@
 //! AArch64 VM resource creation and initialization.
 
+#[cfg(target_arch = "aarch64")]
 use std::{sync::Arc, vec::Vec};
 
-use arm_vcpu::{ArmTimerVmConfig, ArmVcpuCreateConfig, ArmVcpuSetupConfig};
+#[cfg(target_arch = "aarch64")]
+use arm_vcpu::{ArmTimerVmConfig, ArmVcpuCreateConfig, ArmVcpuSetupConfig, ArmVcpuTlbiPolicy};
+#[cfg(target_arch = "aarch64")]
 use axvm_types::NestedPagingConfig;
 
+#[cfg(target_arch = "aarch64")]
 use super::*;
+#[cfg(target_arch = "aarch64")]
 use crate::{
     AxVmError, AxVmResult, ax_err,
     config::*,
@@ -16,6 +21,7 @@ use crate::{
     },
 };
 
+#[cfg(target_arch = "aarch64")]
 impl Aarch64Arch {
     pub(crate) fn create_vm_resources(
         config: AxVMConfig,
@@ -41,10 +47,19 @@ impl Aarch64Arch {
                 AxVmError::invalid_config("AArch64 machine profile has no architectural timer")
             })?;
             let timer_config = timer_vm_config(&timer_profile, &vcpu_mappings)?;
+            let guest_tlbi_policy = resources.config().guest_tlbi_policy();
+            let busy_wfi_fastpath =
+                resources.config().host_vcpu_idle_policy() == HostVcpuIdlePolicy::Busy;
+            if guest_tlbi_policy == GuestTlbiPolicy::VmScoped {
+                super::tlbi::vm_pcpu_mask(&vcpu_mappings).map_err(|error| {
+                    AxVmError::invalid_config(std::format!(
+                        "VM-scoped AArch64 TLBI requires bounded vCPU affinity: {error:?}"
+                    ))
+                })?;
+            }
+            let vcpu_tlbi_policy = arm_tlbi_policy(guest_tlbi_policy);
             let host_irq_config = super::gic::host_irq_config()
                 .map_err(|error| AxVmError::interrupt("discover host IRQ CPU interface", error))?;
-            let passthrough_interrupt = resources.config().uses_passthrough_address_space();
-            let trap_wfi = !passthrough_interrupt;
             let dtb_addr = resources
                 .config()
                 .image_config()
@@ -76,11 +91,11 @@ impl Aarch64Arch {
 
             resources.prepare_guest_address_space(vm.id(), &[])?;
             vcpus.setup(resources, move |_config, _memory_regions| {
-                Ok(ArmVcpuSetupConfig::new(
+                Ok(ArmVcpuSetupConfig::with_runtime_policies(
                     timer_config,
                     host_irq_config,
-                    passthrough_interrupt,
-                    trap_wfi,
+                    vcpu_tlbi_policy,
+                    busy_wfi_fastpath,
                 ))
             })?;
 
@@ -91,6 +106,15 @@ impl Aarch64Arch {
     }
 }
 
+#[cfg(target_arch = "aarch64")]
+const fn arm_tlbi_policy(policy: GuestTlbiPolicy) -> ArmVcpuTlbiPolicy {
+    match policy {
+        GuestTlbiPolicy::Native => ArmVcpuTlbiPolicy::Native,
+        GuestTlbiPolicy::VmScoped => ArmVcpuTlbiPolicy::TrapEl1,
+    }
+}
+
+#[cfg(target_arch = "aarch64")]
 fn guest_page_table_levels(vcpu_mappings: &[(usize, Option<usize>, usize)]) -> AxVmResult<usize> {
     let selected = crate::architecture::minimum_recorded_target_cpu_capability(
         "AArch64 stage-2 page-table levels",
@@ -117,6 +141,7 @@ fn guest_page_table_levels(vcpu_mappings: &[(usize, Option<usize>, usize)]) -> A
     }
 }
 
+#[cfg(target_arch = "aarch64")]
 fn nested_paging_config(
     root_paddr: ax_memory_addr::PhysAddr,
     levels: usize,
@@ -148,6 +173,7 @@ fn nested_paging_config(
     ))
 }
 
+#[cfg(target_arch = "aarch64")]
 fn timer_vm_config(
     profile: &GuestTimerProfile,
     vcpu_mappings: &[(usize, Option<usize>, usize)],
@@ -189,4 +215,24 @@ fn timer_vm_config(
             std::format!("{error:?}"),
         )
     })
+}
+
+#[cfg(all(test, target_arch = "aarch64"))]
+mod tests {
+    use arm_vcpu::ArmVcpuTlbiPolicy;
+    use axvmconfig::GuestTlbiPolicy;
+
+    use super::arm_tlbi_policy;
+
+    #[test]
+    fn vm_scoped_is_the_only_policy_that_traps_el1_tlbi() {
+        assert_eq!(
+            arm_tlbi_policy(GuestTlbiPolicy::Native),
+            ArmVcpuTlbiPolicy::Native
+        );
+        assert_eq!(
+            arm_tlbi_policy(GuestTlbiPolicy::VmScoped),
+            ArmVcpuTlbiPolicy::TrapEl1
+        );
+    }
 }

@@ -1,0 +1,16 @@
+diff --git a/components/net/lwip/port/lwipopts.h b/components/net/lwip/port/lwipopts.h
+--- a/components/net/lwip/port/lwipopts.h
++++ b/components/net/lwip/port/lwipopts.h
+@@ -481,7 +481,11 @@
+ #endif
+ 
+ #define LWIP_UDPLITE                0
+ #define UDP_TTL                     255
++#ifdef RT_LWIP_UDP_RECVMBOX_SIZE
++#define DEFAULT_UDP_RECVMBOX_SIZE   RT_LWIP_UDP_RECVMBOX_SIZE
++#else
+ #define DEFAULT_UDP_RECVMBOX_SIZE   1
++#endif
+ 
+ /* ---------- RAW options ---------- */
+ #ifdef RT_LWIP_RAW

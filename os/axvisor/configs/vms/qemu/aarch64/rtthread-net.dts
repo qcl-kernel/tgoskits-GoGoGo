@@ -1,4 +1,5 @@
 /dts-v1/;
+/plugin/;
 
 / {
 	#address-cells = <2>;

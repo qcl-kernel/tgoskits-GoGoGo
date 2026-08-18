@@ -3,7 +3,7 @@ features = [
     "fs",
     "qemu-aarch64-two-guest-net",
 ]
-log = "Debug"
+log = "Info"
 target = "aarch64-unknown-none-softfloat"
 vm_configs = [
   "os/axvisor/configs/vms/qemu/aarch64/linux-net.toml",
