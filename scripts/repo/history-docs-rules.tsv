@@ -27,4 +27,4 @@ include	^docs/docs/build/axvisor/task123.*\.md$	task123	report	integrated report
 include	^docs/docs/build/axvisor/task123.*\.(log|csv|json|tsv|txt)$	task123	evidence	task123 build evidence
 include	^docs/docs/build/axvisor/.*(report|progress|status).*\.md$	task12	report	task12 report
 include	^docs/docs/build/axvisor/rtos-realtime-iterations\.(csv|png)$	task12	result	realtime result data
-include	^docs/docs/build/axvisor/.*\.(log|csv|json|tsv|txt)$	task12	evidence	task12 evidence
+include	^docs/docs/build/axvisor/.*\.(log|csv|json|tsv|txt)$	task12	evidence	task12 evidence with migration marker

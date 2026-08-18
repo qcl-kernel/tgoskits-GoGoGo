@@ -33,6 +33,43 @@ canonical_existing_path() {
     realpath -e -- "$1" 2>/dev/null || die "path does not exist: $1"
 }
 
+validate_output_path() {
+    local requested="$1"
+    local lexical parent current component
+    local -a components=()
+
+    if [[ "$requested" == /* ]]; then
+        lexical="$requested"
+    else
+        lexical="$PWD/$requested"
+    fi
+    parent="${lexical%/*}"
+    [[ "$parent" == "$lexical" ]] && parent="$PWD"
+    [[ -n "$parent" ]] || parent="/"
+
+    current="/"
+    IFS='/' read -r -a components <<< "${parent#/}"
+    for component in "${components[@]}"; do
+        [[ -z "$component" || "$component" == . ]] && continue
+        if [[ "$component" == .. ]]; then
+            current="$(dirname -- "$current")"
+            continue
+        fi
+        if [[ "$current" == / ]]; then
+            current="/$component"
+        else
+            current="$current/$component"
+        fi
+        [[ -L "$current" ]] &&
+            die "output parent component is symlink: $current"
+    done
+
+    [[ -L "$lexical" ]] && die "output file is symlink: $lexical"
+    [[ -e "$lexical" && ! -f "$lexical" ]] &&
+        die "output path is not a regular file: $lexical"
+    VALIDATED_OUTPUT_PATH="$(realpath -m -- "$lexical")"
+}
+
 valid_date() {
     local candidate="$1"
     [[ "$candidate" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]] || return 1
@@ -41,7 +78,7 @@ valid_date() {
 
 load_rules() {
     local rules_file="$1"
-    local line action regex phase type reason rest
+    local line action regex phase type reason rest regex_status
 
     [[ -f "$rules_file" ]] || die "rules file does not exist: $rules_file"
     RULE_ACTIONS=()
@@ -69,6 +106,12 @@ load_rules() {
         [[ "$action" == include || "$action" == exclude ]] ||
             die "invalid rule action: $action"
         [[ -n "$regex" && -n "$reason" ]] || die "rule has an empty pattern or reason"
+        if [[ "" =~ $regex ]]; then
+            :
+        else
+            regex_status=$?
+            ((regex_status == 2)) && die "invalid Bash regex in rule: $regex"
+        fi
         if [[ "$action" == include ]]; then
             [[ -n "$phase" && -n "$type" ]] || die "include rule has an empty phase or type"
         fi
@@ -85,7 +128,7 @@ load_rules() {
 
 classify_path() {
     local path="$1"
-    local i
+    local i regex_status
 
     CLASS_ACTION=""
     CLASS_PHASE=""
@@ -98,9 +141,38 @@ classify_path() {
             CLASS_TYPE="${RULE_TYPES[i]}"
             CLASS_REASON="${RULE_REASONS[i]}"
             return 0
+        else
+            regex_status=$?
+            ((regex_status == 2)) &&
+                die "invalid Bash regex in rule: ${RULE_REGEXES[i]}"
         fi
     done
     return 1
+}
+
+build_evidence_has_marker() {
+    local relative_path="$1"
+    local full_path="$2"
+    local phase="$3"
+    local type="$4"
+    local grep_status
+
+    [[ "$phase" == task12 && "$type" == evidence ]] || return 0
+    [[ "$relative_path" == docs/docs/build/axvisor/* ]] || return 0
+    case "$relative_path" in
+        *.log|*.json|*.csv|*.tsv|*.txt) ;;
+        *) return 0 ;;
+    esac
+
+    if grep -Eiq -- \
+        'task1|task2|task3|task123|rtthread|rtbench|rtipc|virtio|qemu|realtime|stability|timer|interrupt|network|guest' \
+        "$full_path"; then
+        return 0
+    else
+        grep_status=$?
+    fi
+    ((grep_status == 1)) && return 1
+    die "unable to inspect build evidence: $full_path"
 }
 
 file_date() {
@@ -109,14 +181,27 @@ file_date() {
     local tracked="$3"
     local repo="$4"
     local relative_path="$5"
-    local candidate git_date
+    local candidate git_date remaining token legal_date
+    local legal_count=0
+    local -a date_tokens=()
 
-    if [[ "$base" =~ ([0-9]{4}-[0-9]{2}-[0-9]{2}) ]]; then
-        candidate="${BASH_REMATCH[1]}"
-        if valid_date "$candidate"; then
-            printf '%s\tfilename\n' "$candidate"
-            return 0
+    remaining="$base"
+    while [[ "$remaining" =~ ([0-9]{4}-[0-9]{2}-[0-9]{2}) ]]; do
+        token="${BASH_REMATCH[1]}"
+        date_tokens+=("$token")
+        remaining="${remaining#*"$token"}"
+    done
+    for token in "${date_tokens[@]}"; do
+        if valid_date "$token"; then
+            legal_count=$((legal_count + 1))
+            legal_date="$token"
         fi
+    done
+    if ((legal_count > 1)); then
+        die "ambiguous filename dates in $base: ${date_tokens[*]}"
+    elif ((legal_count == 1)); then
+        printf '%s\tfilename\n' "$legal_date"
+        return 0
     fi
 
     if [[ "$tracked" == true ]]; then
@@ -138,7 +223,7 @@ inventory() {
     local spec name requested_path source_root repo_root branch commit
     local tracked_file untracked_file candidates_file rel full_path target_path
     local tracked flag base extension phase type date date_source size digest archived
-    local selected excluded unmatched skipped i
+    local selected excluded unmatched skipped i tracked_status odd_display
     local output_tmp
     local -a source_specs=()
     local -A seen_sources=()
@@ -169,6 +254,8 @@ inventory() {
     done
 
     [[ -n "$rules_file" && -n "$output_file" && ${#source_specs[@]} -gt 0 ]] || usage
+    validate_output_path "$output_file"
+    output_file="$VALIDATED_OUTPUT_PATH"
     rules_file="$(canonical_existing_path "$rules_file")"
     load_rules "$rules_file"
 
@@ -198,6 +285,12 @@ inventory() {
             die "source has detached HEAD: $source_root"
         commit="$(git -C "$repo_root" rev-parse --verify HEAD 2>/dev/null)" ||
             die "source has no commit: $source_root"
+        tracked_status="$(git -C "$repo_root" status --porcelain=v1 --untracked-files=no)"
+        if [[ -n "$tracked_status" ]]; then
+            echo "archive-history-docs.sh: source=$name has tracked worktree changes: $source_root" >&2
+            printf '%s\n' "$tracked_status" >&2
+            exit 1
+        fi
 
         tracked_file="$tmp_dir/$name.tracked"
         untracked_file="$tmp_dir/$name.untracked"
@@ -225,8 +318,8 @@ inventory() {
             esac
             case "$rel" in
                 *$'\t'*|*$'\n'*)
-                    ((skipped += 1))
-                    continue
+                    odd_display="$(printf '%q' "$rel")"
+                    die "source=$name candidate path contains TAB/newline: $odd_display"
                     ;;
             esac
 
@@ -243,6 +336,10 @@ inventory() {
             fi
             if [[ "$CLASS_ACTION" == exclude ]]; then
                 ((excluded += 1))
+                continue
+            fi
+            if ! build_evidence_has_marker "$rel" "$target_path" "$CLASS_PHASE" "$CLASS_TYPE"; then
+                ((unmatched += 1))
                 continue
             fi
 
@@ -273,7 +370,6 @@ inventory() {
     done
 
     LC_ALL=C sort -t $'\t' -k13,13 "$tmp_dir/records.tsv" >> "$output_tmp"
-    output_file="$(realpath -m -- "$output_file")"
     output_tmp_target="$(mktemp "$(dirname -- "$output_file")/.$(basename -- "$output_file").tmp.XXXXXX")"
     ARCHIVE_OUTPUT_TMP="$output_tmp_target"
     cp -- "$output_tmp" "$output_tmp_target"
