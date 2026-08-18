@@ -45,7 +45,7 @@ commit_fixture_repo() {
 init_fixture_repo "$task12_source"
 init_fixture_repo "$task123_source"
 
-shared_evidence='task12 shared evidence content'
+shared_evidence='shared evidence content'
 
 write_fixture_file \
     "$task12_source/docs/README.md" \
@@ -60,11 +60,14 @@ write_fixture_file \
     "$task12_source/docs/docs/build/axvisor/task1-2026-08-15-run.log" \
     'task1 evidence log'
 write_fixture_file \
-    "$task12_source/docs/docs/build/axvisor/shared-evidence.log" \
+    "$task12_source/docs/docs/build/axvisor/task12-shared-evidence.log" \
     "$shared_evidence"
 write_fixture_file \
     "$task12_source/docs/docs/build/axvisor/unrelated.log" \
     'unrelated log without a migration marker'
+write_fixture_file \
+    "$task12_source/docs/docs/build/axvisor/network-maintenance.log" \
+    'network guest timer maintenance notes'
 write_fixture_file \
     "$task12_source/docs/docs/build/axvisor/_category_.json" \
     '{"label":"generated"}'
@@ -79,8 +82,9 @@ commit_fixture_repo "$task12_source" \
     docs/README.md \
     docs/superpowers/specs/2026-08-11-rt-ipc-integration-design.md \
     docs/superpowers/plans/2026-08-15-task1-task2-implementation.md \
-    docs/docs/build/axvisor/shared-evidence.log \
+    docs/docs/build/axvisor/task12-shared-evidence.log \
     docs/docs/build/axvisor/unrelated.log \
+    docs/docs/build/axvisor/network-maintenance.log \
     docs/docs/build/axvisor/_category_.json \
     docs/docs/architecture/axvisor/overview.md \
     apps/demo/validation/baseline.txt
@@ -106,7 +110,7 @@ write_fixture_file \
 commit_fixture_repo "$task123_source" .
 
 diff -u \
-    "$task12_source/docs/docs/build/axvisor/shared-evidence.log" \
+    "$task12_source/docs/docs/build/axvisor/task12-shared-evidence.log" \
     "$task123_source/docs/docs/build/axvisor/task123-shared-evidence.log" \
     || fail 'shared evidence fixtures differ'
 
@@ -138,7 +142,7 @@ awk -F '\t' 'NR > 1 && NF {
 {
     printf '%s\t%s\t%s\t%s\t%s\t%s\n' \
         task12-source \
-        docs/docs/build/axvisor/shared-evidence.log \
+        docs/docs/build/axvisor/task12-shared-evidence.log \
         task12 evidence 2026-08-17 true
     printf '%s\t%s\t%s\t%s\t%s\t%s\n' \
         task12-source \
@@ -194,6 +198,7 @@ assert_excluded docs/README.md
 assert_excluded docs/docs/architecture/axvisor/overview.md
 assert_excluded docs/docs/build/axvisor/_category_.json
 assert_excluded docs/docs/build/axvisor/unrelated.log
+assert_excluded docs/docs/build/axvisor/network-maintenance.log
 assert_excluded apps/demo/validation/baseline.txt
 
 bash "$ARCHIVER" inventory \
@@ -211,6 +216,77 @@ renamed_classification="$(awk -F '\t' \
     }' "$renamed_inventory")"
 [[ -n "$task123_classification" && "$task123_classification" == "$renamed_classification" ]] ||
     fail 'classification depends on source name'
+
+inside_source="$(mktemp -d "$FIXTURE_ROOT/inside-source.XXXXXX")"
+inside_output="$inside_source/docs/tracked-output.tsv"
+init_fixture_repo "$inside_source"
+write_fixture_file "$inside_output" 'tracked source content'
+commit_fixture_repo "$inside_source" docs/tracked-output.tsv
+if bash "$ARCHIVER" inventory \
+    --rules "$RULES" \
+    --source "inside-source=$inside_source" \
+    --output "$inside_output" \
+    > "$FIXTURE_ROOT/inside-output.stdout" 2> "$FIXTURE_ROOT/inside-output.stderr"; then
+    fail 'inventory accepted an output file inside a source root'
+fi
+grep -Fq 'output must be outside source root' "$FIXTURE_ROOT/inside-output.stderr" ||
+    fail 'inside-source output failure was not reported'
+[[ "$(<"$inside_output")" == 'tracked source content' ]] ||
+    fail 'tracked source output file was modified'
+if bash "$ARCHIVER" inventory \
+    --rules "$RULES" \
+    --source "inside-source=$inside_source" \
+    --output "$inside_source" \
+    > "$FIXTURE_ROOT/equal-output.stdout" 2> "$FIXTURE_ROOT/equal-output.stderr"; then
+    fail 'inventory accepted a source root as output'
+fi
+grep -Fq 'output must be outside source root' "$FIXTURE_ROOT/equal-output.stderr" ||
+    fail 'equal-source output failure was not reported'
+
+flag_path='docs/reports/starryos-linux-stability-comparison.md'
+git -C "$task123_source" update-index --assume-unchanged "$flag_path"
+if bash "$ARCHIVER" inventory \
+    --rules "$RULES" \
+    --source "assume-source=$task123_source" \
+    --output "$FIXTURE_ROOT/assume-inventory.tsv" \
+    > "$FIXTURE_ROOT/assume.stdout" 2> "$FIXTURE_ROOT/assume.stderr"; then
+    fail 'inventory accepted an assume-unchanged tracked path'
+fi
+grep -Fq 'assume-unchanged' "$FIXTURE_ROOT/assume.stderr" ||
+    fail 'assume-unchanged failure was not reported'
+grep -Fq "$flag_path" "$FIXTURE_ROOT/assume.stderr" ||
+    fail 'assume-unchanged path was not listed'
+git -C "$task123_source" update-index --no-assume-unchanged "$flag_path"
+
+git -C "$task123_source" update-index --skip-worktree "$flag_path"
+if bash "$ARCHIVER" inventory \
+    --rules "$RULES" \
+    --source "skip-source=$task123_source" \
+    --output "$FIXTURE_ROOT/skip-inventory.tsv" \
+    > "$FIXTURE_ROOT/skip.stdout" 2> "$FIXTURE_ROOT/skip.stderr"; then
+    fail 'inventory accepted a skip-worktree tracked path'
+fi
+grep -Fq 'skip-worktree' "$FIXTURE_ROOT/skip.stderr" ||
+    fail 'skip-worktree failure was not reported'
+grep -Fq "$flag_path" "$FIXTURE_ROOT/skip.stderr" ||
+    fail 'skip-worktree path was not listed'
+git -C "$task123_source" update-index --no-skip-worktree "$flag_path"
+
+newline_source="$FIXTURE_ROOT/"$'source\nroot'
+init_fixture_repo "$newline_source"
+write_fixture_file \
+    "$newline_source/docs/superpowers/specs/2026-08-10-newline-root-design.md" \
+    'newline root design'
+commit_fixture_repo "$newline_source" .
+if bash "$ARCHIVER" inventory \
+    --rules "$RULES" \
+    --source "newline-source=$newline_source" \
+    --output "$FIXTURE_ROOT/newline-root-inventory.tsv" \
+    > "$FIXTURE_ROOT/newline-root.stdout" 2> "$FIXTURE_ROOT/newline-root.stderr"; then
+    fail 'inventory accepted a source_root containing newline'
+fi
+grep -Fq 'source_root contains TAB/CR/LF' "$FIXTURE_ROOT/newline-root.stderr" ||
+    fail 'newline source_root failure was not reported'
 
 output_target="$FIXTURE_ROOT/output-target.tsv"
 output_file_link="$FIXTURE_ROOT/output-file-link.tsv"

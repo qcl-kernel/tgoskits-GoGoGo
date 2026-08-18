@@ -65,9 +65,59 @@ validate_output_path() {
     done
 
     [[ -L "$lexical" ]] && die "output file is symlink: $lexical"
-    [[ -e "$lexical" && ! -f "$lexical" ]] &&
-        die "output path is not a regular file: $lexical"
     VALIDATED_OUTPUT_PATH="$(realpath -m -- "$lexical")"
+}
+
+validate_tsv_field() {
+    local label="$1"
+    local value="$2"
+    local source="$3"
+    local display
+
+    case "$value" in
+        *$'\t'*|*$'\r'*|*$'\n'*)
+            display="$(printf '%q' "$value")"
+            die "source=$source $label contains TAB/CR/LF: $display"
+            ;;
+    esac
+}
+
+check_tracked_index_flags() {
+    local source="$1"
+    local repo="$2"
+    local tmp_dir="$3"
+    local record tag path display
+    local flagged=0
+
+    git -C "$repo" ls-files -v -z > "$tmp_dir/$source.flags-v"
+    while IFS= read -r -d '' record; do
+        tag="${record:0:1}"
+        path="${record:2}"
+        if [[ "$tag" == [[:lower:]] ]]; then
+            if ((flagged == 0)); then
+                echo "archive-history-docs.sh: source=$source has tracked index flags: $repo" >&2
+            fi
+            display="$(printf '%q' "$path")"
+            printf 'assume-unchanged\t%s\n' "$display" >&2
+            flagged=1
+        fi
+    done < "$tmp_dir/$source.flags-v"
+
+    git -C "$repo" ls-files -t -z > "$tmp_dir/$source.flags-t"
+    while IFS= read -r -d '' record; do
+        tag="${record:0:1}"
+        path="${record:2}"
+        if [[ "$tag" == S ]]; then
+            if ((flagged == 0)); then
+                echo "archive-history-docs.sh: source=$source has tracked index flags: $repo" >&2
+            fi
+            display="$(printf '%q' "$path")"
+            printf 'skip-worktree\t%s\n' "$display" >&2
+            flagged=1
+        fi
+    done < "$tmp_dir/$source.flags-t"
+
+    ((flagged == 0))
 }
 
 valid_date() {
@@ -150,31 +200,6 @@ classify_path() {
     return 1
 }
 
-build_evidence_has_marker() {
-    local relative_path="$1"
-    local full_path="$2"
-    local phase="$3"
-    local type="$4"
-    local grep_status
-
-    [[ "$phase" == task12 && "$type" == evidence ]] || return 0
-    [[ "$relative_path" == docs/docs/build/axvisor/* ]] || return 0
-    case "$relative_path" in
-        *.log|*.json|*.csv|*.tsv|*.txt) ;;
-        *) return 0 ;;
-    esac
-
-    if grep -Eiq -- \
-        'task1|task2|task3|task123|rtthread|rtbench|rtipc|virtio|qemu|realtime|stability|timer|interrupt|network|guest' \
-        "$full_path"; then
-        return 0
-    else
-        grep_status=$?
-    fi
-    ((grep_status == 1)) && return 1
-    die "unable to inspect build evidence: $full_path"
-}
-
 file_date() {
     local base="$1"
     local full_path="$2"
@@ -222,10 +247,14 @@ inventory() {
     local output_file=""
     local spec name requested_path source_root repo_root branch commit
     local tracked_file untracked_file candidates_file rel full_path target_path
-    local tracked flag base extension phase type date date_source size digest archived
-    local selected excluded unmatched skipped i tracked_status odd_display
-    local output_tmp
+    local tracked base phase type date date_source size digest archived
+    local selected excluded unmatched skipped tracked_status odd_display
+    local output_tmp source_index field_value
     local -a source_specs=()
+    local -a source_names=()
+    local -a source_roots=()
+    local -a source_branches=()
+    local -a source_commits=()
     local -A seen_sources=()
     local -A seen_archived=()
     local tmp_dir
@@ -261,11 +290,6 @@ inventory() {
 
     tmp_dir="$(mktemp -d "${TMPDIR:-/tmp}/archive-history-docs.XXXXXX")"
     ARCHIVE_TMP_DIR="$tmp_dir"
-    output_tmp="$tmp_dir/inventory.tsv"
-    printf '%s\n' \
-        $'source\tsource_root\tbranch\tcommit\ttracked\toriginal_path\tphase\ttype\tdate\tdate_source\tsize\tsha256\tarchived_path' \
-        > "$output_tmp"
-    : > "$tmp_dir/records.tsv"
 
     for spec in "${source_specs[@]}"; do
         [[ "$spec" == *=* ]] || die "source must be NAME=PATH: $spec"
@@ -285,12 +309,48 @@ inventory() {
             die "source has detached HEAD: $source_root"
         commit="$(git -C "$repo_root" rev-parse --verify HEAD 2>/dev/null)" ||
             die "source has no commit: $source_root"
+
+        validate_tsv_field source "$name" "$name"
+        validate_tsv_field source_root "$source_root" "$name"
+        validate_tsv_field branch "$branch" "$name"
+        validate_tsv_field commit "$commit" "$name"
+
         tracked_status="$(git -C "$repo_root" status --porcelain=v1 --untracked-files=no)"
         if [[ -n "$tracked_status" ]]; then
             echo "archive-history-docs.sh: source=$name has tracked worktree changes: $source_root" >&2
             printf '%s\n' "$tracked_status" >&2
             exit 1
         fi
+        check_tracked_index_flags "$name" "$repo_root" "$tmp_dir" || exit 1
+
+        source_names+=("$name")
+        source_roots+=("$source_root")
+        source_branches+=("$branch")
+        source_commits+=("$commit")
+    done
+
+    for source_index in "${!source_roots[@]}"; do
+        source_root="${source_roots[source_index]}"
+        if [[ "$source_root" == / || "$output_file" == "$source_root" ||
+            "$output_file" == "$source_root/"* ]]; then
+            die "output must be outside source root: $output_file (source=${source_names[source_index]} root=$source_root)"
+        fi
+    done
+    [[ -e "$output_file" && ! -f "$output_file" ]] &&
+        die "output path is not a regular file: $output_file"
+
+    output_tmp="$tmp_dir/inventory.tsv"
+    printf '%s\n' \
+        $'source\tsource_root\tbranch\tcommit\ttracked\toriginal_path\tphase\ttype\tdate\tdate_source\tsize\tsha256\tarchived_path' \
+        > "$output_tmp"
+    : > "$tmp_dir/records.tsv"
+
+    for source_index in "${!source_names[@]}"; do
+        name="${source_names[source_index]}"
+        source_root="${source_roots[source_index]}"
+        repo_root="$source_root"
+        branch="${source_branches[source_index]}"
+        commit="${source_commits[source_index]}"
 
         tracked_file="$tmp_dir/$name.tracked"
         untracked_file="$tmp_dir/$name.untracked"
@@ -317,9 +377,9 @@ inventory() {
                     ;;
             esac
             case "$rel" in
-                *$'\t'*|*$'\n'*)
+                *$'\t'*|*$'\r'*|*$'\n'*)
                     odd_display="$(printf '%q' "$rel")"
-                    die "source=$name candidate path contains TAB/newline: $odd_display"
+                    die "source=$name candidate path contains TAB/newline or CR: $odd_display"
                     ;;
             esac
 
@@ -338,11 +398,6 @@ inventory() {
                 ((excluded += 1))
                 continue
             fi
-            if ! build_evidence_has_marker "$rel" "$target_path" "$CLASS_PHASE" "$CLASS_TYPE"; then
-                ((unmatched += 1))
-                continue
-            fi
-
             if [[ -n "${tracked_paths[$rel]+set}" ]]; then
                 tracked=true
             else
@@ -359,6 +414,11 @@ inventory() {
             [[ -z "${seen_archived[$archived]+set}" ]] ||
                 die "archive path collision: $archived"
             seen_archived["$archived"]=1
+
+            for field_value in "$tracked" "$rel" "$phase" "$type" "$date" \
+                "$date_source" "$size" "$digest" "$archived"; do
+                validate_tsv_field inventory_field "$field_value" "$name"
+            done
             printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
                 "$name" "$source_root" "$branch" "$commit" "$tracked" "$rel" \
                 "$phase" "$type" "$date" "$date_source" "$size" "$digest" "$archived" \

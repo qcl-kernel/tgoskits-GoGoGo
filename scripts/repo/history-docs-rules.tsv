@@ -24,7 +24,8 @@ include	^docs/superpowers/plans/.*\.md$	task12	plan	task12 plan
 include	^docs/docs/build/axvisor/task123.*(reproduction|复现).*\.md$	task123	guide	integrated reproduction guide
 include	^docs/docs/build/axvisor/rtthread-reproduction\.md$	task12	guide	task12 reproduction guide
 include	^docs/docs/build/axvisor/task123.*\.md$	task123	report	integrated report
-include	^docs/docs/build/axvisor/task123.*\.(log|csv|json|tsv|txt)$	task123	evidence	task123 build evidence
+include	^docs/docs/build/axvisor/(task123|task3|starryos)[^/]*\.(log|csv|json|tsv|txt)$	task123	evidence	task123 build evidence by filename
 include	^docs/docs/build/axvisor/.*(report|progress|status).*\.md$	task12	report	task12 report
 include	^docs/docs/build/axvisor/rtos-realtime-iterations\.(csv|png)$	task12	result	realtime result data
-include	^docs/docs/build/axvisor/.*\.(log|csv|json|tsv|txt)$	task12	evidence	task12 evidence with migration marker
+include	^docs/docs/build/axvisor/(task1|task2|task12|rtthread|rtos-realtime|rtipc|rtbench|v[0-9]+)[^/]*\.(log|csv|json|tsv|txt)$	task12	evidence	task12 evidence by filename prefix
+include	^docs/docs/build/axvisor/[^/]*(baseline|passthrough)[^/]*\.(log|csv|json|tsv|txt)$	task12	evidence	task12 evidence by filename term
