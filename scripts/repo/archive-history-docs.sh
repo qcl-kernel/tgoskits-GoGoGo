@@ -171,8 +171,6 @@ load_rules() {
         validate_tsv_field rule_phase "$phase" rules
         validate_tsv_field rule_type "$type" rules
         validate_tsv_field rule_reason "$reason" rules
-        validate_path_component rule_phase "$phase" rules
-        validate_path_component rule_type "$type" rules
         [[ "$action" == include || "$action" == exclude ]] ||
             die "invalid rule action: $action"
         [[ -n "$regex" && -n "$reason" ]] || die "rule has an empty pattern or reason"
@@ -184,6 +182,8 @@ load_rules() {
         fi
         if [[ "$action" == include ]]; then
             [[ -n "$phase" && -n "$type" ]] || die "include rule has an empty phase or type"
+            validate_path_component rule_phase "$phase" rules
+            validate_path_component rule_type "$type" rules
         fi
 
         RULE_ACTIONS+=("$action")
@@ -218,6 +218,14 @@ classify_path() {
         fi
     done
     return 1
+}
+
+has_task12_evidence_signature() {
+    local path="$1"
+
+    LC_ALL=C grep -aEq \
+        'qemu-system-aarch64|VM[[:space:]]+Load[[:space:]]+@PA|RTBENCH|TASK[[:space:]_-]*[0-9]+' \
+        -- "$path"
 }
 
 file_date() {
@@ -278,6 +286,54 @@ inventory() {
     local -A seen_sources=()
     local -A seen_archived=()
     local tmp_dir
+
+    check_output_outside_sources() {
+        local check_index check_root
+
+        for check_index in "${!source_roots[@]}"; do
+            check_root="${source_roots[check_index]}"
+            if [[ "$check_root" == / || "$output_file" == "$check_root" ||
+                "$output_file" == "$check_root/"* ]]; then
+                die "output must be outside source root: $output_file (source=${source_names[check_index]} root=$check_root)"
+            fi
+        done
+    }
+
+    check_final_state() {
+        local check_index check_root current_root current_branch current_commit current_status
+        local check_name
+
+        validate_output_path "$output_file"
+        [[ "$VALIDATED_OUTPUT_PATH" == "$output_file" ]] ||
+            die "output path changed during inventory: $output_file"
+        [[ -e "$output_file" && ! -f "$output_file" ]] &&
+            die "output path is not a regular file: $output_file"
+        check_output_outside_sources
+
+        for check_index in "${!source_roots[@]}"; do
+            check_name="${source_names[check_index]}"
+            check_root="${source_roots[check_index]}"
+            current_root="$(git -C "$check_root" rev-parse --show-toplevel 2>/dev/null)" ||
+                die "source=$check_name source root changed during inventory: $check_root"
+            current_root="$(canonical_existing_path "$current_root")"
+            [[ "$current_root" == "$check_root" ]] ||
+                die "source=$check_name source root changed during inventory: $check_root"
+            current_branch="$(git -C "$check_root" symbolic-ref --quiet --short HEAD 2>/dev/null)" ||
+                die "source=$check_name branch changed during inventory: $check_root"
+            [[ "$current_branch" == "${source_branches[check_index]}" ]] ||
+                die "source=$check_name branch changed during inventory: $check_root"
+            current_commit="$(git -C "$check_root" rev-parse --verify HEAD 2>/dev/null)" ||
+                die "source=$check_name HEAD changed during inventory: $check_root"
+            [[ "$current_commit" == "${source_commits[check_index]}" ]] ||
+                die "source=$check_name HEAD changed during inventory: $check_root"
+            current_status="$(git -C "$check_root" status --porcelain=v1 --untracked-files=no)"
+            [[ -z "$current_status" ]] ||
+                die "source=$check_name tracked worktree changed during inventory: $check_root"
+            if ! check_tracked_index_flags "$check_name" "$check_root" "$tmp_dir"; then
+                die "source=$check_name index flags changed during inventory: $check_root"
+            fi
+        done
+    }
 
     while (($#)); do
         case "$1" in
@@ -349,13 +405,7 @@ inventory() {
         source_commits+=("$commit")
     done
 
-    for source_index in "${!source_roots[@]}"; do
-        source_root="${source_roots[source_index]}"
-        if [[ "$source_root" == / || "$output_file" == "$source_root" ||
-            "$output_file" == "$source_root/"* ]]; then
-            die "output must be outside source root: $output_file (source=${source_names[source_index]} root=$source_root)"
-        fi
-    done
+    check_output_outside_sources
     [[ -e "$output_file" && ! -f "$output_file" ]] &&
         die "output path is not a regular file: $output_file"
 
@@ -418,6 +468,12 @@ inventory() {
                 ((excluded += 1))
                 continue
             fi
+            if [[ "$CLASS_PHASE" == task12 && "$CLASS_TYPE" == evidence &&
+                "$rel" == docs/docs/build/axvisor/* ]] &&
+                ! has_task12_evidence_signature "$target_path"; then
+                ((unmatched += 1))
+                continue
+            fi
             if [[ -n "${tracked_paths[$rel]+set}" ]]; then
                 tracked=true
             else
@@ -459,6 +515,7 @@ inventory() {
     done
 
     LC_ALL=C sort -t $'\t' -k13,13 "$tmp_dir/records.tsv" >> "$output_tmp"
+    check_final_state
     output_tmp_target="$(mktemp "$(dirname -- "$output_file")/.$(basename -- "$output_file").tmp.XXXXXX")"
     ARCHIVE_OUTPUT_TMP="$output_tmp_target"
     cp -- "$output_tmp" "$output_tmp_target"

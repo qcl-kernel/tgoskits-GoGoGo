@@ -148,7 +148,7 @@ archive-history-docs.sh delete --inventory FILE --destination DIR
 - 使用 `git ls-files -z` 与 `git ls-files --others --exclude-standard -z` 合并候选；
 - 只接受普通文件，不跟随源目录外的符号链接；
 - 规则只处理 `.md`、`.txt`、`.log`、`.json`、`.csv`、`.tsv`，以及被 Markdown 历史报告明确引用的 `.png` 结果图；
-- 从文件名提取第一个合法 `YYYY-MM-DD`，否则 tracked 文件用
+- 从文件名收集全部 `YYYY-MM-DD` token；恰好一个合法日期时使用文件名，多个合法日期失败，无合法日期时
   `git log -1 --format=%cs -- "$relative_path"`，untracked 文件用
   `date -r "$path" +%F`；
 - inventory 使用制表符分隔并包含：source、source_root、branch、commit、tracked、original_path、phase、type、date、date_source、size、sha256、archived_path；

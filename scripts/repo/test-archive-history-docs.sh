@@ -45,7 +45,7 @@ commit_fixture_repo() {
 init_fixture_repo "$task12_source"
 init_fixture_repo "$task123_source"
 
-shared_evidence='shared evidence content'
+shared_evidence='qemu-system-aarch64 shared evidence content'
 
 write_fixture_file \
     "$task12_source/docs/README.md" \
@@ -58,7 +58,7 @@ write_fixture_file \
     'task1 task2 plan'
 write_fixture_file \
     "$task12_source/docs/docs/build/axvisor/task1-2026-08-15-run.log" \
-    'task1 evidence log'
+    'RTBENCH TASK1 qemu-system-aarch64 evidence log'
 write_fixture_file \
     "$task12_source/docs/docs/build/axvisor/task12-shared-evidence.log" \
     "$shared_evidence"
@@ -101,6 +101,15 @@ write_fixture_file \
     "$task123_source/docs/docs/build/axvisor/task123-shared-evidence.log" \
     "$shared_evidence"
 write_fixture_file \
+    "$task123_source/docs/docs/build/axvisor/task123-test-report.md" \
+    'task123 test report'
+write_fixture_file \
+    "$task123_source/docs/docs/build/axvisor/task123-reproduction-cn.md" \
+    'task123 reproduction guide'
+write_fixture_file \
+    "$task123_source/docs/docs/build/axvisor/task123-unrelated.log" \
+    'task123 unrelated log without an explicit rule'
+write_fixture_file \
     "$task123_source/os/axvisor/guests/task3/docs/results/task3-report.md" \
     'task3 report'
 write_fixture_file \
@@ -118,10 +127,17 @@ if ! bash "$ARCHIVER" inventory \
     --rules "$RULES" \
     --source "task12-source=$task12_source" \
     --source "task123-source=$task123_source" \
-    --output "$inventory"; then
+    --output "$inventory" \
+    > "$FIXTURE_ROOT/initial.stdout" 2> "$FIXTURE_ROOT/initial.stderr"; then
     echo "archive-history-docs.sh inventory is unavailable or failed" >&2
     exit 1
 fi
+grep -Fq 'inventory: source=task12-source selected=4 excluded=4 unmatched=2 skipped=0' \
+    "$FIXTURE_ROOT/initial.stderr" ||
+    fail 'task12 unsigned build logs were not reported as unmatched'
+grep -Fq 'inventory: source=task123-source selected=6 excluded=0 unmatched=2 skipped=0' \
+    "$FIXTURE_ROOT/initial.stderr" ||
+    fail 'task123 unrelated build logs were not reported as unmatched'
 
 [[ -s "$inventory" ]] || fail 'inventory.tsv was not created'
 
@@ -158,8 +174,12 @@ awk -F '\t' 'NR > 1 && NF {
         task12 design 2026-08-11 true
     printf '%s\t%s\t%s\t%s\t%s\t%s\n' \
         task123-source \
-        docs/docs/build/axvisor/task123-shared-evidence.log \
-        task123 evidence 2026-08-17 true
+        docs/docs/build/axvisor/task123-reproduction-cn.md \
+        task123 guide 2026-08-17 true
+    printf '%s\t%s\t%s\t%s\t%s\t%s\n' \
+        task123-source \
+        docs/docs/build/axvisor/task123-test-report.md \
+        task123 report 2026-08-17 true
     printf '%s\t%s\t%s\t%s\t%s\t%s\n' \
         task123-source \
         docs/reports/starryos-linux-stability-comparison.md \
@@ -182,8 +202,8 @@ diff -u "$expected_projection" "$actual_projection" \
     || fail 'inventory phase/type/date/tracked mappings differ'
 
 selected_count="$(awk -F '\t' 'NR > 1 && NF { count++ } END { print count + 0 }' "$inventory")"
-[[ "$selected_count" == 9 ]] ||
-    fail "expected 9 selected inventory entries, got $selected_count"
+[[ "$selected_count" == 10 ]] ||
+    fail "expected 10 selected inventory entries, got $selected_count"
 
 assert_excluded() {
     local path="$1"
@@ -199,6 +219,8 @@ assert_excluded docs/docs/architecture/axvisor/overview.md
 assert_excluded docs/docs/build/axvisor/_category_.json
 assert_excluded docs/docs/build/axvisor/unrelated.log
 assert_excluded docs/docs/build/axvisor/network-maintenance.log
+assert_excluded docs/docs/build/axvisor/task123-shared-evidence.log
+assert_excluded docs/docs/build/axvisor/task123-unrelated.log
 assert_excluded apps/demo/validation/baseline.txt
 
 bash "$ARCHIVER" inventory \
@@ -207,11 +229,11 @@ bash "$ARCHIVER" inventory \
     --output "$renamed_inventory"
 
 task123_classification="$(awk -F '\t' \
-    '$1 == "task123-source" && $6 == "docs/docs/build/axvisor/task123-shared-evidence.log" {
+    '$1 == "task123-source" && $6 == "docs/docs/build/axvisor/task123-test-report.md" {
         print $7 "\t" $8
     }' "$inventory")"
 renamed_classification="$(awk -F '\t' \
-    '$1 == "renamed-source" && $6 == "docs/docs/build/axvisor/task123-shared-evidence.log" {
+    '$1 == "renamed-source" && $6 == "docs/docs/build/axvisor/task123-test-report.md" {
         print $7 "\t" $8
     }' "$renamed_inventory")"
 [[ -n "$task123_classification" && "$task123_classification" == "$renamed_classification" ]] ||
@@ -364,6 +386,19 @@ fi
 grep -Fq 'rule_reason contains ASCII control byte' "$FIXTURE_ROOT/control-reason.stderr" ||
     fail 'rule reason control byte failure was not reported'
 
+empty_exclude_rules="$FIXTURE_ROOT/empty-exclude-rules.tsv"
+empty_exclude_inventory="$FIXTURE_ROOT/empty-exclude-inventory.tsv"
+printf '%s\n' $'exclude\t^docs/superpowers/specs/.*\\.md$\t\t\tempty exclude fields' \
+    > "$empty_exclude_rules"
+bash "$ARCHIVER" inventory \
+    --rules "$empty_exclude_rules" \
+    --source "empty-exclude-source=$task12_source" \
+    --output "$empty_exclude_inventory" \
+    > "$FIXTURE_ROOT/empty-exclude.stdout" 2> "$FIXTURE_ROOT/empty-exclude.stderr" ||
+    fail 'inventory rejected empty phase/type fields on an exclude rule'
+[[ -s "$empty_exclude_inventory" ]] ||
+    fail 'empty exclude rule did not produce an inventory header'
+
 malicious_source_inventory="$FIXTURE_ROOT/malicious-source-inventory.tsv"
 if bash "$ARCHIVER" inventory \
     --rules "$RULES" \
@@ -471,6 +506,51 @@ if bash "$ARCHIVER" inventory \
 fi
 grep -Fq 'candidate path contains TAB/newline' "$FIXTURE_ROOT/odd-path.stderr" ||
     fail 'TAB/newline candidate path failure was not reported'
+
+final_state_source="$(mktemp -d "$FIXTURE_ROOT/final-state-source.XXXXXX")"
+init_fixture_repo "$final_state_source"
+write_fixture_file "$final_state_source/docs/README.md" 'final state metadata'
+write_fixture_file \
+    "$final_state_source/docs/superpowers/specs/final-state-design.md" \
+    'final state design'
+commit_fixture_repo "$final_state_source" .
+final_state_hook_bin="$FIXTURE_ROOT/final-state-hook-bin"
+final_state_hook_state="$FIXTURE_ROOT/final-state-hook-state"
+final_state_mutation="$final_state_source/docs/README.md"
+mkdir -p -- "$final_state_hook_bin"
+real_git="$(command -v git)"
+write_fixture_file "$final_state_hook_bin/git" "#!/usr/bin/env bash
+set -euo pipefail
+real_git='$real_git'
+state='$final_state_hook_state'
+mutation='$final_state_mutation'
+if [[ \"\$1\" == '-C' && \"\$3\" == 'status' ]]; then
+    count=0
+    if [[ -f \"\$state\" ]]; then
+        count=\"\$(<\"\$state\")\"
+    fi
+    count=\$((count + 1))
+    printf '%s\\n' \"\$count\" > \"\$state\"
+    if [[ \"\$count\" == 2 ]]; then
+        printf '%s\\n' 'final state mutation' >> \"\$mutation\"
+    fi
+fi
+exec \"\$real_git\" \"\$@\"
+"
+chmod +x -- "$final_state_hook_bin/git"
+final_state_inventory="$FIXTURE_ROOT/final-state-inventory.tsv"
+if PATH="$final_state_hook_bin:$PATH" bash "$ARCHIVER" inventory \
+    --rules "$RULES" \
+    --source "final-state-source=$final_state_source" \
+    --output "$final_state_inventory" \
+    > "$FIXTURE_ROOT/final-state.stdout" 2> "$FIXTURE_ROOT/final-state.stderr"; then
+    fail 'inventory published output after a final source state change'
+fi
+[[ ! -e "$final_state_inventory" ]] ||
+    fail 'final source state failure published an inventory file'
+if ! grep -Fq 'changed during inventory' "$FIXTURE_ROOT/final-state.stderr"; then
+    fail 'final source state failure was not reported'
+fi
 
 printf '%s\n' 'staged tracked change' >> "$task12_source/docs/README.md"
 git -C "$task12_source" add -- docs/README.md

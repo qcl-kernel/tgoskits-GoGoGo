@@ -1,16 +1,16 @@
-exclude	(^|/)_category_\.json$	excluded	excluded	generated config
+exclude	(^|/)_category_\.json$			generated config
 include	^docs/design/axvisor-virtio-net\.md$	task12	design	axvisor virtio-net design
 include	^docs/qperf-(virtio-optimization|starryos-integration)-report\.md$	task12	report	qperf historical report
 include	^docs/spin-migration-tracking\.md$	task12	report	spin migration history
-exclude	(^|/)(README|CHANGELOG|AGENTS|CLAUDE)([^/]*)$	excluded	excluded	repository metadata
-exclude	^apps/(.*/)?(validation|golden)(/|$)	excluded	excluded	test validation or golden data
-exclude	(^|/)(syscalls?|syscall[-_ ]?lists?)(/|[^/]*)	excluded	excluded	syscall list
-exclude	(^|/).*syscall.*(list|numbers?|table).*$	excluded	excluded	syscall list
-exclude	^(book|design)/	excluded	excluded	active reference
-exclude	^docs/docs/architecture/	excluded	excluded	active architecture reference
-exclude	(^|/)memory/.*/docs(/|$)	excluded	excluded	active memory reference
-exclude	(^|/)virtualization/.*/docs(/|$)	excluded	excluded	active virtualization reference
-exclude	^docs/(blog|community)/	excluded	excluded	public or community documentation
+exclude	(^|/)(README|CHANGELOG|AGENTS|CLAUDE)([^/]*)$			repository metadata
+exclude	^apps/(.*/)?(validation|golden)(/|$)			test validation or golden data
+exclude	(^|/)(syscalls?|syscall[-_ ]?lists?)(/|[^/]*)			syscall list
+exclude	(^|/).*syscall.*(list|numbers?|table).*$			syscall list
+exclude	^(book|design)/			active reference
+exclude	^docs/docs/architecture/			active architecture reference
+exclude	(^|/)memory/.*/docs(/|$)			active memory reference
+exclude	(^|/)virtualization/.*/docs(/|$)			active virtualization reference
+exclude	^docs/(blog|community)/			public or community documentation
 include	^os/axvisor/guests/task3/docs/results/evidence/	task123	evidence	task3 raw evidence
 include	^os/axvisor/guests/task3/docs/results/.*\.md$	task123	report	task3 report
 include	^os/axvisor/guests/task3/docs/superpowers/specs/.*-design\.md$	task123	design	task3 design
@@ -21,11 +21,10 @@ include	^docs/superpowers/specs/.*(task123|starryos|native-runner|one-click|loca
 include	^docs/superpowers/plans/.*(task123|starryos|native-runner|one-click|local-first|stability|history-docs).*\.md$	task123	plan	task123 plan
 include	^docs/superpowers/specs/.*\.md$	task12	design	task12 design
 include	^docs/superpowers/plans/.*\.md$	task12	plan	task12 plan
-include	^docs/docs/build/axvisor/task123.*(reproduction|复现).*\.md$	task123	guide	integrated reproduction guide
+include	^docs/docs/build/axvisor/task123-test-report\.md$	task123	report	task123 test report
+include	^docs/docs/build/axvisor/task123-reproduction-cn\.md$	task123	guide	task123 reproduction guide
 include	^docs/docs/build/axvisor/rtthread-reproduction\.md$	task12	guide	task12 reproduction guide
-include	^docs/docs/build/axvisor/task123.*\.md$	task123	report	integrated report
-include	^docs/docs/build/axvisor/(task123|task3|starryos)[^/]*\.(log|csv|json|tsv|txt)$	task123	evidence	task123 build evidence by filename
 include	^docs/docs/build/axvisor/.*(report|progress|status).*\.md$	task12	report	task12 report
 include	^docs/docs/build/axvisor/rtos-realtime-iterations\.(csv|png)$	task12	result	realtime result data
-include	^docs/docs/build/axvisor/(task1|task2|task12|rtthread|rtos-realtime|rtipc|rtbench|v[0-9]+)[^/]*\.(log|csv|json|tsv|txt)$	task12	evidence	task12 evidence by filename prefix
-include	^docs/docs/build/axvisor/[^/]*(baseline|passthrough)[^/]*\.(log|csv|json|tsv|txt)$	task12	evidence	task12 evidence by filename term
+include	^docs/docs/build/axvisor/(task1|task2|task12|rtthread|rtos-realtime|rtipc|rtbench|v[0-9]+)([-_.][^/]*)?\.(log|csv|json|tsv|txt)$	task12	evidence	task12 evidence filename plus strong runtime signature
+include	^docs/docs/build/axvisor/[^/]*(baseline|passthrough)[^/]*\.(log|csv|json|tsv|txt)$	task12	evidence	task12 evidence filename plus strong runtime signature
