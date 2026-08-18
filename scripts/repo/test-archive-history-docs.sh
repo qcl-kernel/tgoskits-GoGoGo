@@ -685,6 +685,27 @@ $output"
     fi
 }
 
+run_expected_manifest_failure() {
+    local label="$1"
+    local inventory_file="$2"
+    local destination="$3"
+    local stdout_file="$FIXTURE_ROOT/$label.stdout"
+    local stderr_file="$FIXTURE_ROOT/$label.stderr"
+    local command_file="$FIXTURE_ROOT/$label.command"
+    local command_display output
+
+    mkdir -p -- "$(dirname -- "$stdout_file")"
+    command_display="assert_manifest_matches_inventory $(printf '%q ' \
+        "$inventory_file" "$destination")"
+    printf '%s\n' "$command_display" > "$command_file"
+    if (assert_manifest_matches_inventory "$inventory_file" "$destination") \
+        > "$stdout_file" 2> "$stderr_file"; then
+        output="$(cat -- "$stdout_file" "$stderr_file")"
+        fail "$label unexpectedly succeeded; command=$command_display; raw output:
+$output"
+    fi
+}
+
 assert_expected_failure_contains() {
     local label="$1"
     local expected="$2"
@@ -744,10 +765,12 @@ assert_manifest_matches_inventory() {
     local inventory_paths="$FIXTURE_ROOT/inventory-archived-paths"
     local manifest_paths="$FIXTURE_ROOT/manifest-archived-paths"
     local actual_paths="$FIXTURE_ROOT/actual-archived-paths"
+    local inventory_sources="$FIXTURE_ROOT/inventory-sources"
+    local manifest_sources="$FIXTURE_ROOT/manifest-sources"
     local source source_root branch commit tracked original_path phase type
     local date date_source size sha256 archived_path source_path target_path
-    local inventory_count manifest_count match_count source_count
-    local actual_size actual_sha256 generated_at
+    local inventory_count manifest_count match_count source_count source_rows
+    local actual_size actual_sha256 generated_at duplicate_count duplicate_group_json
 
     inventory_count="$(awk -F '\t' 'NR > 1 && NF { count++ } END { print count + 0 }' "$inventory_file")"
     manifest_count="$(jq -r '.entries | length' "$destination/manifest.json")"
@@ -767,26 +790,30 @@ assert_manifest_matches_inventory() {
     date -u -d "$generated_at" '+%Y-%m-%dT%H:%M:%SZ' > /dev/null ||
         fail 'manifest generated_at is not a valid RFC3339 timestamp'
 
+    awk -F '\t' 'NR > 1 && NF { print $1 "\t" $2 "\t" $3 "\t" $4 }' \
+        "$inventory_file" | LC_ALL=C sort -u > "$inventory_sources"
+    jq -r '.sources[] | [.source, .source_root, .branch, .commit] | @tsv' \
+        "$destination/manifest.json" | LC_ALL=C sort > "$manifest_sources"
+    source_rows="$(wc -l < "$inventory_sources")"
+    source_count="$(jq -r '.sources | length' "$destination/manifest.json")"
+    [[ "$source_count" == "$source_rows" ]] ||
+        fail "manifest source count $source_count differs from inventory source count $source_rows"
+    if ! cmp -s "$inventory_sources" "$manifest_sources"; then
+        diff -u "$inventory_sources" "$manifest_sources" || true
+        fail 'manifest sources are not the exact inventory source set'
+    fi
+
     : > "$inventory_paths"
-    declare -A checked_sources=()
     while IFS=$'\t' read -r source source_root branch commit tracked original_path \
         phase type date date_source size sha256 archived_path; do
         [[ -n "$source" ]] || continue
-        if [[ -z "${checked_sources[$source]+set}" ]]; then
-            source_count="$(jq -r \
-                --arg source "$source" \
-                --arg source_root "$source_root" \
-                --arg branch "$branch" \
-                --arg commit "$commit" \
-                '[.sources[]? |
-                    select(.source == $source and
-                        .source_root == $source_root and
-                        .branch == $branch and
-                        .commit == $commit)] | length' \
-                "$destination/manifest.json")"
-            [[ "$source_count" == 1 ]] ||
-                fail "manifest sources lacks revision for $source"
-            checked_sources["$source"]=1
+        duplicate_count="$(awk -F '\t' -v expected_sha256="$sha256" \
+            'NR > 1 && $12 == expected_sha256 { count++ }
+             END { print count + 0 }' "$inventory_file")"
+        if ((duplicate_count >= 2)); then
+            duplicate_group_json="\"$sha256\""
+        else
+            duplicate_group_json='null'
         fi
         match_count="$(jq -r \
             --arg source "$source" \
@@ -802,6 +829,7 @@ assert_manifest_matches_inventory() {
             --argjson size "$size" \
             --arg sha256 "$sha256" \
             --arg archived_path "$archived_path" \
+            --argjson expected_duplicate_group "$duplicate_group_json" \
             '[.entries[] |
                 select(.source == $source and
                     .source_root == $source_root and
@@ -815,7 +843,8 @@ assert_manifest_matches_inventory() {
                     .date_source == $date_source and
                     .size == $size and
                     .sha256 == $sha256 and
-                    .archived_path == $archived_path)] | length' \
+                    .archived_path == $archived_path and
+                    .duplicate_group == $expected_duplicate_group)] | length' \
             "$destination/manifest.json")"
         [[ "$match_count" == 1 ]] ||
             fail "inventory row has $match_count manifest matches: $source/$original_path"
@@ -911,6 +940,30 @@ assert_inventory_sources_exist "$archive_inventory" "$archive_fixture"
 assert_inventory_targets_exist "$archive_inventory" "$archive_destination"
 assert_manifest_matches_inventory "$archive_inventory" "$archive_destination"
 
+unique_manifest_path="$(jq -r '[.entries[] | select(.duplicate_group == null)][0].archived_path' \
+    "$archive_destination/manifest.json")"
+[[ -n "$unique_manifest_path" && "$unique_manifest_path" != null ]] ||
+    fail 'archive fixture did not contain a unique manifest entry'
+unique_manifest_sha="$(awk -F '\t' -v expected_path="$unique_manifest_path" \
+    'NR > 1 && $13 == expected_path { print $12; exit }' "$archive_inventory")"
+[[ -n "$unique_manifest_sha" ]] ||
+    fail 'unique manifest entry was not found in inventory'
+archive_manifest_backup="$archive_fixture/manifest.before-duplicate-mutation.json"
+archive_manifest_tmp="$archive_fixture/manifest.duplicate-mutation.json"
+cp -- "$archive_destination/manifest.json" "$archive_manifest_backup"
+jq --arg archived_path "$unique_manifest_path" --arg duplicate_group "$unique_manifest_sha" \
+    '(.entries[] | select(.archived_path == $archived_path) | .duplicate_group) = $duplicate_group' \
+    "$archive_manifest_backup" > "$archive_manifest_tmp"
+mv -- "$archive_manifest_tmp" "$archive_destination/manifest.json"
+run_expected_manifest_failure \
+    archive-success/manifest-unique-duplicate-group \
+    "$archive_inventory" \
+    "$archive_destination"
+assert_expected_failure_contains \
+    archive-success/manifest-unique-duplicate-group \
+    "$unique_manifest_path"
+mv -- "$archive_manifest_backup" "$archive_destination/manifest.json"
+
 run_required_command archive-success/verify \
     bash "$ARCHIVER" verify \
     --inventory "$archive_inventory" \
@@ -983,6 +1036,8 @@ mutation_source_digest="$(sha256sum -b -- "$mutation_source_path")"
 mutation_source_digest="${mutation_source_digest%% *}"
 mutation_delete_snapshot="$mutation_fixture/source-tree.before-delete"
 snapshot_fixture_sources "$mutation_fixture" "$mutation_delete_snapshot"
+mutation_destination_snapshot="$mutation_fixture/destination-tree.before-delete"
+snapshot_directory_tree "$mutation_destination" "$mutation_destination_snapshot"
 run_expected_failure archive-source-mutation/delete \
     bash "$ARCHIVER" delete \
     --inventory "$mutation_inventory" \
@@ -998,6 +1053,12 @@ assert_fixture_sources_unchanged \
     "$mutation_fixture" \
     "$mutation_delete_snapshot" \
     archive-source-mutation/delete-command
+mutation_destination_after="$mutation_fixture/destination-tree.after-delete"
+snapshot_directory_tree "$mutation_destination" "$mutation_destination_after"
+assert_snapshot_equal \
+    "$mutation_destination_snapshot" \
+    "$mutation_destination_after" \
+    archive-source-mutation/delete destination
 
 missing_target_fixture="$(make_archive_fixture archive-missing-target)"
 missing_target_inventory="$missing_target_fixture/inventory.tsv"
