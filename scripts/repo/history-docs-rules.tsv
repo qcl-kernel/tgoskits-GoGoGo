@@ -1,0 +1,29 @@
+include	^docs/design/axvisor-virtio-net\.md$	task12	design	axvisor virtio-net design
+include	^docs/qperf-(virtio-optimization|starryos-integration)-report\.md$	task12	report	qperf historical report
+include	^docs/spin-migration-tracking\.md$	task12	report	spin migration history
+include	^task123[^/]*/docs/docs/build/axvisor/.*\.(log|csv|json|tsv|txt)$	task123	evidence	task123 build evidence
+exclude	(^|/)(README|CHANGELOG|AGENTS|CLAUDE)([^/]*)$	-	-	repository metadata
+exclude	^apps/(.*/)?(validation|golden)(/|$)	-	-	test validation or golden data
+exclude	(^|/)(syscalls?|syscall[-_ ]?lists?)(/|[^/]*)	-	-	syscall list
+exclude	(^|/).*syscall.*(list|numbers?|table).*$	-	-	syscall list
+exclude	^(book|design)/	-	-	active reference
+exclude	^docs/docs/architecture/	-	-	active architecture reference
+exclude	(^|/)memory/.*/docs(/|$)	-	-	active memory reference
+exclude	(^|/)virtualization/.*/docs(/|$)	-	-	active virtualization reference
+exclude	^docs/(blog|community)/	-	-	public or community documentation
+include	^os/axvisor/guests/task3/docs/results/evidence/	task123	evidence	task3 raw evidence
+include	^os/axvisor/guests/task3/docs/results/.*\.md$	task123	report	task3 report
+include	^os/axvisor/guests/task3/docs/superpowers/specs/.*-design\.md$	task123	design	task3 design
+include	^os/axvisor/guests/task3/docs/superpowers/plans/.*\.md$	task123	plan	task3 plan
+include	^os/axvisor/guests/task3/docs/protocol\.md$	task123	spec	task3 protocol
+include	^docs/reports/.*\.md$	task123	report	integrated report
+include	^docs/superpowers/specs/.*(task123|starryos|native-runner|one-click|local-first|stability|history-docs).*\.md$	task123	design	task123 design
+include	^docs/superpowers/plans/.*(task123|starryos|native-runner|one-click|local-first|stability|history-docs).*\.md$	task123	plan	task123 plan
+include	^docs/superpowers/specs/.*\.md$	task12	design	task12 design
+include	^docs/superpowers/plans/.*\.md$	task12	plan	task12 plan
+include	^docs/docs/build/axvisor/task123.*(reproduction|复现).*\.md$	task123	guide	integrated reproduction guide
+include	^docs/docs/build/axvisor/rtthread-reproduction\.md$	task12	guide	task12 reproduction guide
+include	^docs/docs/build/axvisor/task123.*\.md$	task123	report	integrated report
+include	^docs/docs/build/axvisor/.*(report|progress|status).*\.md$	task12	report	task12 report
+include	^docs/docs/build/axvisor/rtos-realtime-iterations\.(csv|png)$	task12	result	realtime result data
+include	^docs/docs/build/axvisor/.*\.(log|csv|json|tsv|txt)$	task12	evidence	task12 evidence
