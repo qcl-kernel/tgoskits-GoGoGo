@@ -1319,6 +1319,46 @@ assert_snapshot_equal \
     "$archive_target_identity_fixture/destination-tree.after-delete" \
     archive-target-identity-mutation/delete destination
 
+archive_post_move_fixture="$(make_archive_fixture archive-post-move-target-mutation)"
+archive_post_move_inventory="$archive_post_move_fixture/inventory.tsv"
+archive_post_move_destination="$archive_post_move_fixture/archive"
+archive_post_move_source_snapshot="$archive_post_move_fixture/source-tree.before-delete"
+archive_post_move_destination_snapshot="$archive_post_move_fixture/destination-tree.before-delete"
+archive_post_move_archived_path="$(awk -F '\t' 'END { print $13 }' \
+    "$archive_post_move_inventory")"
+run_required_command archive-post-move-target-mutation/stage \
+    bash "$ARCHIVER" stage \
+    --inventory "$archive_post_move_inventory" \
+    --destination "$archive_post_move_destination"
+archive_post_move_target="$(resolve_inventory_archive_path \
+    "$archive_post_move_destination" \
+    "$archive_post_move_archived_path" \
+    archive-post-move-target-mutation)"
+snapshot_fixture_sources \
+    "$archive_post_move_fixture" \
+    "$archive_post_move_source_snapshot"
+snapshot_directory_tree \
+    "$archive_post_move_destination" \
+    "$archive_post_move_destination_snapshot"
+run_expected_failure archive-post-move-target-mutation/delete \
+    env ARCHIVE_HISTORY_DOCS_TEST_REPLACE_ARCHIVE_TARGET_AFTER_MOVES="$archive_post_move_target" \
+    bash "$ARCHIVER" delete \
+    --inventory "$archive_post_move_inventory" \
+    --destination "$archive_post_move_destination"
+assert_expected_failure_contains archive-post-move-target-mutation/delete \
+    'archive target changed after source moves'
+assert_fixture_sources_unchanged \
+    "$archive_post_move_fixture" \
+    "$archive_post_move_source_snapshot" \
+    archive-post-move-target-mutation/delete
+snapshot_directory_tree \
+    "$archive_post_move_destination" \
+    "$archive_post_move_fixture/destination-tree.after-delete"
+assert_snapshot_equal \
+    "$archive_post_move_destination_snapshot" \
+    "$archive_post_move_fixture/destination-tree.after-delete" \
+    archive-post-move-target-mutation/delete destination
+
 missing_target_fixture="$(make_archive_fixture archive-missing-target)"
 missing_target_inventory="$missing_target_fixture/inventory.tsv"
 missing_target_destination="$missing_target_fixture/archive"

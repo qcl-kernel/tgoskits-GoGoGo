@@ -1461,7 +1461,7 @@ check_archive_delete_parent_directories() {
 }
 
 archive_delete_quarantine_cleanup() {
-    local source_name source_root original_path source_path qroot qpath parent
+    local source_name source_root original_path source_path qroot qpath parent directory
     local remove_entries="${1:-0}" cleanup_failed=0
 
     if ((remove_entries)); then
@@ -1483,30 +1483,15 @@ archive_delete_quarantine_cleanup() {
         done < "$ARCHIVE_RECORDS_FILE"
     fi
 
-    while IFS=$'\t' read -r source_name source_root _ _ _ original_path _; do
-        [[ -n "$source_name" ]] || continue
-        source_path="$source_root/$original_path"
-        qroot="${ARCHIVE_DELETE_QUARANTINE_ROOTS[$source_name]-}"
-        qpath="${ARCHIVE_DELETE_QUARANTINE_PATHS[$source_path]-}"
-        [[ -n "$qroot" && -n "$qpath" ]] || continue
-        parent="$(dirname -- "$qpath")"
-        while [[ "$parent" != "$qroot" && "$parent" == "$qroot/"* ]]; do
-            if [[ ! -d "$parent" ]]; then
-                parent="$(dirname -- "$parent")"
-                continue
-            fi
-            if ! rmdir -- "$parent" 2>/dev/null; then
-                echo "archive-history-docs.sh: quarantine directory is not empty or not removable: $parent" >&2
-                cleanup_failed=1
-                break
-            fi
-            parent="$(dirname -- "$parent")"
-        done
-    done < "$ARCHIVE_RECORDS_FILE"
-
     for source_name in "${ARCHIVE_SOURCE_NAMES[@]}"; do
         qroot="${ARCHIVE_DELETE_QUARANTINE_ROOTS[$source_name]-}"
         [[ -z "$qroot" ]] && continue
+        while IFS= read -r -d '' directory; do
+            if ! rmdir -- "$directory" 2>/dev/null; then
+                echo "archive-history-docs.sh: quarantine directory is not empty or not removable: $directory" >&2
+                cleanup_failed=1
+            fi
+        done < <(find -P "$qroot" -depth -mindepth 1 -type d -print0)
         if ! rmdir -- "$qroot" 2>/dev/null; then
             echo "archive-history-docs.sh: quarantine root is not empty or not removable: $qroot" >&2
             cleanup_failed=1
