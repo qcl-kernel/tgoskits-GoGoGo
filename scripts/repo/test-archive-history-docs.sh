@@ -685,27 +685,6 @@ $output"
     fi
 }
 
-run_expected_manifest_failure() {
-    local label="$1"
-    local inventory_file="$2"
-    local destination="$3"
-    local stdout_file="$FIXTURE_ROOT/$label.stdout"
-    local stderr_file="$FIXTURE_ROOT/$label.stderr"
-    local command_file="$FIXTURE_ROOT/$label.command"
-    local command_display output
-
-    mkdir -p -- "$(dirname -- "$stdout_file")"
-    command_display="assert_manifest_matches_inventory $(printf '%q ' \
-        "$inventory_file" "$destination")"
-    printf '%s\n' "$command_display" > "$command_file"
-    if (assert_manifest_matches_inventory "$inventory_file" "$destination") \
-        > "$stdout_file" 2> "$stderr_file"; then
-        output="$(cat -- "$stdout_file" "$stderr_file")"
-        fail "$label unexpectedly succeeded; command=$command_display; raw output:
-$output"
-    fi
-}
-
 assert_expected_failure_contains() {
     local label="$1"
     local expected="$2"
@@ -844,6 +823,7 @@ assert_manifest_matches_inventory() {
                     .size == $size and
                     .sha256 == $sha256 and
                     .archived_path == $archived_path and
+                    has("duplicate_group") and
                     .duplicate_group == $expected_duplicate_group)] | length' \
             "$destination/manifest.json")"
         [[ "$match_count" == 1 ]] ||
@@ -940,7 +920,12 @@ assert_inventory_sources_exist "$archive_inventory" "$archive_fixture"
 assert_inventory_targets_exist "$archive_inventory" "$archive_destination"
 assert_manifest_matches_inventory "$archive_inventory" "$archive_destination"
 
-unique_manifest_path="$(jq -r '[.entries[] | select(.duplicate_group == null)][0].archived_path' \
+run_required_command archive-success/verify-before-duplicate-mutation \
+    bash "$ARCHIVER" verify \
+    --inventory "$archive_inventory" \
+    --destination "$archive_destination"
+
+unique_manifest_path="$(jq -r '[.entries[] | select(has("duplicate_group") and .duplicate_group == null)][0].archived_path' \
     "$archive_destination/manifest.json")"
 [[ -n "$unique_manifest_path" && "$unique_manifest_path" != null ]] ||
     fail 'archive fixture did not contain a unique manifest entry'
@@ -955,16 +940,33 @@ jq --arg archived_path "$unique_manifest_path" --arg duplicate_group "$unique_ma
     '(.entries[] | select(.archived_path == $archived_path) | .duplicate_group) = $duplicate_group' \
     "$archive_manifest_backup" > "$archive_manifest_tmp"
 mv -- "$archive_manifest_tmp" "$archive_destination/manifest.json"
-run_expected_manifest_failure \
-    archive-success/manifest-unique-duplicate-group \
-    "$archive_inventory" \
-    "$archive_destination"
+run_expected_failure archive-success/manifest-unique-duplicate-group/verify \
+    bash "$ARCHIVER" verify \
+    --inventory "$archive_inventory" \
+    --destination "$archive_destination"
 assert_expected_failure_contains \
-    archive-success/manifest-unique-duplicate-group \
+    archive-success/manifest-unique-duplicate-group/verify \
     "$unique_manifest_path"
-mv -- "$archive_manifest_backup" "$archive_destination/manifest.json"
+cp -- "$archive_manifest_backup" "$archive_destination/manifest.json"
+run_required_command archive-success/verify-after-duplicate-value-mutation \
+    bash "$ARCHIVER" verify \
+    --inventory "$archive_inventory" \
+    --destination "$archive_destination"
 
-run_required_command archive-success/verify \
+jq --arg archived_path "$unique_manifest_path" \
+    'del(.entries[] | select(.archived_path == $archived_path).duplicate_group)' \
+    "$archive_destination/manifest.json" > "$archive_manifest_tmp"
+mv -- "$archive_manifest_tmp" "$archive_destination/manifest.json"
+run_expected_failure archive-success/manifest-unique-duplicate-group-missing/verify \
+    bash "$ARCHIVER" verify \
+    --inventory "$archive_inventory" \
+    --destination "$archive_destination"
+assert_expected_failure_contains \
+    archive-success/manifest-unique-duplicate-group-missing/verify \
+    "$unique_manifest_path"
+cp -- "$archive_manifest_backup" "$archive_destination/manifest.json"
+
+run_required_command archive-success/verify-after-duplicate-mutation \
     bash "$ARCHIVER" verify \
     --inventory "$archive_inventory" \
     --destination "$archive_destination"
@@ -989,6 +991,7 @@ duplicate_sha="$(awk -F '\t' \
 jq -e --arg duplicate_sha "$duplicate_sha" '
     [.entries[] | select(.original_path | endswith("shared-evidence.log"))] |
     length == 2 and
+    all(has("duplicate_group")) and
     (map(.sha256) | unique == [$duplicate_sha]) and
     (map(.duplicate_group) | unique == [$duplicate_sha])
 ' "$archive_destination/manifest.json" > /dev/null ||
