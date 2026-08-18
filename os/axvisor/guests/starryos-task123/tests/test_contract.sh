@@ -130,6 +130,8 @@ grep -Fq 'STARRY_NET_READY' "$GUEST_INIT" ||
     fail "StarryOS init must report the network gate"
 grep -Fq 'TASK2_STARRY_BEGIN' "$GUEST_INIT" ||
     fail "StarryOS init must launch Task 2"
+grep -Fq 'RT-IPC client exited with rc=%s' "$GUEST_INIT" ||
+    fail "StarryOS init must authenticate the RT-IPC client exit status"
 grep -Fq 'TASK3_STARRY_END' "$GUEST_INIT" ||
     fail "StarryOS init must launch Task 3"
 grep -Fq 'STARRY_EMBEDDED_ROOTFS=' "$GUEST_BUILDER" ||

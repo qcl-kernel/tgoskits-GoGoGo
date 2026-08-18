@@ -197,3 +197,87 @@ fn tls_switch_occurs_only_inside_the_final_assembly_windows() {
     assert!(VCPU.contains("offset_of!(HostRuntimeContext, tpidr_el0)"));
     assert!(CONTEXT_FRAME.contains("offset_of!(GuestSystemRegisters, tpidr_el0)"));
 }
+
+#[test]
+fn fp_simd_world_switch_preserves_complete_guest_and_host_state() {
+    let save_fp = section(EXCEPTION_ASSEMBLY, ".macro SAVE_FP_SIMD", ".endm");
+    let restore_fp = section(EXCEPTION_ASSEMBLY, ".macro RESTORE_FP_SIMD", ".endm");
+
+    for (save, restore) in [
+        ("stp     q0, q1", "ldp     q0, q1"),
+        ("stp     q2, q3", "ldp     q2, q3"),
+        ("stp     q4, q5", "ldp     q4, q5"),
+        ("stp     q6, q7", "ldp     q6, q7"),
+        ("stp     q8, q9", "ldp     q8, q9"),
+        ("stp     q10, q11", "ldp     q10, q11"),
+        ("stp     q12, q13", "ldp     q12, q13"),
+        ("stp     q14, q15", "ldp     q14, q15"),
+        ("stp     q16, q17", "ldp     q16, q17"),
+        ("stp     q18, q19", "ldp     q18, q19"),
+        ("stp     q20, q21", "ldp     q20, q21"),
+        ("stp     q22, q23", "ldp     q22, q23"),
+        ("stp     q24, q25", "ldp     q24, q25"),
+        ("stp     q26, q27", "ldp     q26, q27"),
+        ("stp     q28, q29", "ldp     q28, q29"),
+        ("stp     q30, q31", "ldp     q30, q31"),
+    ] {
+        assert!(
+            save_fp.contains(save),
+            "FP/SIMD save must include {save}",
+        );
+        assert!(
+            restore_fp.contains(restore),
+            "FP/SIMD restore must include {restore}",
+        );
+    }
+    assert_in_order(
+        save_fp,
+        &[
+            "mrs     x10, fpcr",
+            "mrs     x11, fpsr",
+            "add     x12, x9, #{fp_control_delta}",
+            "stp     x10, x11, [x12]",
+        ],
+    );
+    assert_in_order(
+        restore_fp,
+        &[
+            "add     x12, x9, #{fp_control_delta}",
+            "ldp     x10, x11, [x12]",
+            "msr     fpcr, x10",
+            "msr     fpsr, x11",
+            "isb",
+        ],
+    );
+
+    let exit = section(
+        EXCEPTION_ASSEMBLY,
+        ".macro SAVE_VCPU_RUNTIME_FROM_EL1",
+        ".endm",
+    );
+    assert_in_order(
+        exit,
+        &[
+            "SAVE_FP_SIMD sp, {guest_fp_simd_offset}",
+            "RESTORE_FP_SIMD sp, {host_fp_simd_offset}",
+        ],
+    );
+
+    let entry = section(
+        EXCEPTION_ASSEMBLY,
+        ".Lexception_return_guest_el1:",
+        "RESTORE_GUEST_REGS_INTO_EL1",
+    );
+    assert_in_order(
+        entry,
+        &[
+            "SAVE_FP_SIMD sp, {host_fp_simd_offset}",
+            "RESTORE_FP_SIMD sp, {guest_fp_simd_offset}",
+        ],
+    );
+
+    assert!(VCPU.contains("host_fp_simd: FpSimdState"));
+    assert!(VCPU.contains("guest_fp_simd: FpSimdState"));
+    assert!(VCPU.contains("offset_of!(HostRuntimeContext, host_fp_simd)"));
+    assert!(VCPU.contains("offset_of!(AssemblyArmVcpu, guest_fp_simd)"));
+}

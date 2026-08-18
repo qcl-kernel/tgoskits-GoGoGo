@@ -72,6 +72,24 @@ require_positive task3-frames "$task3_frames" 600
 [[ -f "$log" && -r "$log" ]] || die "console log is missing or unreadable: $log"
 [[ -d "$output" && -w "$output" ]] || die "output directory is missing or unwritable: $output"
 
+normalized_log="$output/.console.normalized.log"
+python3 - "$log" "$normalized_log" <<'PY'
+import re
+import sys
+from pathlib import Path
+
+source, destination = map(Path, sys.argv[1:])
+data = source.read_bytes()
+# QEMU serial capture can insert CSI color sequences between a VM prefix and
+# an authenticated marker. Normalize only presentation bytes; keep payloads
+# and marker text unchanged for the strict checks below.
+data = re.sub(rb"\x1b\[[0-?]*[ -/]*[@-~]", b"", data)
+data = data.replace(b"\r", b"")
+destination.write_bytes(data)
+PY
+log="$normalized_log"
+trap 'rm -f -- "$normalized_log"' EXIT
+
 case "$mode" in
     smoke|task3)
         [[ -z "$rtbench_samples" && -z "$seconds" && -z "$task3_fault" ]] || usage
@@ -151,7 +169,7 @@ app_tmp="$output/.${app_guest}.log.tmp"
 rtthread_tmp="$output/.rtthread.log.tmp"
 frames_tmp="$output/.frames.csv.tmp"
 summary_tmp="$output/.summary.raw.json.tmp"
-trap 'rm -f -- "$app_tmp" "$rtthread_tmp" "$frames_tmp" "$summary_tmp"' EXIT
+trap 'rm -f -- "$normalized_log" "$app_tmp" "$rtthread_tmp" "$frames_tmp" "$summary_tmp"' EXIT
 
 awk '
     /^\[VM 1\] / {
@@ -197,6 +215,7 @@ mv -- "$app_tmp" "$app_log"
 mv -- "$rtthread_tmp" "$rtthread_log"
 mv -- "$frames_tmp" "$frames_csv"
 mv -- "$summary_tmp" "$raw_summary"
+rm -f -- "$normalized_log"
 trap - EXIT
 
 summarize_args=(

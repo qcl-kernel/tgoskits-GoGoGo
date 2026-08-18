@@ -41,6 +41,15 @@ pub struct VmCpuRegisters {
     pub vm_system_regs: GuestSystemRegisters,
 }
 
+/// Floating-point and SIMD state owned by one execution context.
+#[repr(C, align(16))]
+#[derive(Clone, Copy, Debug, Default)]
+struct FpSimdState {
+    regs: [u128; 32],
+    fpcr: u64,
+    fpsr: u64,
+}
+
 /// Host-only state used by one guest entry/exit round.
 #[repr(C)]
 #[derive(Debug, Default)]
@@ -52,6 +61,7 @@ struct HostRuntimeContext {
     irq_cpu_interface_base: usize,
     pending_irq_ack: u32,
     busy_wfi_fastpath: u32,
+    host_fp_simd: FpSimdState,
 }
 
 /// A virtual CPU within a guest.
@@ -62,6 +72,7 @@ pub struct ArmVcpu<H: ArmHostOps> {
     // Keep `ctx` first and `host` immediately after it.
     ctx: TrapFrame,
     host: HostRuntimeContext,
+    guest_fp_simd: FpSimdState,
     guest_system_regs: GuestSystemRegisters,
     timer: ArmVcpuTimer,
     /// The MPIDR_EL1 value for the vCPU.
@@ -109,6 +120,12 @@ pub(crate) const ARM_VCPU_HOST_PENDING_IRQ_ACK_OFFSET: usize =
 pub(crate) const ARM_VCPU_HOST_BUSY_WFI_FASTPATH_OFFSET: usize =
     core::mem::offset_of!(AssemblyArmVcpu, host)
         + core::mem::offset_of!(HostRuntimeContext, busy_wfi_fastpath);
+pub(crate) const ARM_VCPU_HOST_FP_SIMD_OFFSET: usize =
+    core::mem::offset_of!(AssemblyArmVcpu, host)
+        + core::mem::offset_of!(HostRuntimeContext, host_fp_simd);
+pub(crate) const ARM_VCPU_GUEST_FP_SIMD_OFFSET: usize =
+    core::mem::offset_of!(AssemblyArmVcpu, guest_fp_simd);
+pub(crate) const FP_SIMD_CONTROL_DELTA: usize = core::mem::offset_of!(FpSimdState, fpcr);
 /// Offset of the guest-owned `TPIDR_EL0` slot within [`ArmVcpu`].
 pub(crate) const ARM_VCPU_GUEST_TPIDR_EL0_OFFSET: usize =
     core::mem::offset_of!(AssemblyArmVcpu, guest_system_regs)
@@ -147,6 +164,9 @@ const _: () = {
     );
     assert!(ARM_VCPU_HOST_PENDING_IRQ_ACK_OFFSET.is_multiple_of(core::mem::align_of::<u32>()));
     assert!(ARM_VCPU_HOST_BUSY_WFI_FASTPATH_OFFSET.is_multiple_of(core::mem::align_of::<u32>()));
+    assert!(ARM_VCPU_HOST_FP_SIMD_OFFSET.is_multiple_of(core::mem::align_of::<FpSimdState>()));
+    assert!(ARM_VCPU_GUEST_FP_SIMD_OFFSET.is_multiple_of(core::mem::align_of::<FpSimdState>()));
+    assert!(FP_SIMD_CONTROL_DELTA == core::mem::size_of::<[u128; 32]>());
     assert!(
         ARM_VCPU_GUEST_TPIDR_EL0_OFFSET
             >= ARM_VCPU_HOST_TPIDR_EL0_OFFSET + core::mem::size_of::<u64>()
@@ -263,6 +283,7 @@ impl<H: ArmHostOps> ArmVcpu<H> {
         Ok(Self {
             ctx,
             host: HostRuntimeContext::default(),
+            guest_fp_simd: FpSimdState::default(),
             guest_system_regs: GuestSystemRegisters::default(),
             timer: ArmVcpuTimer::unconfigured(),
             mpidr: config.mpidr_el1,

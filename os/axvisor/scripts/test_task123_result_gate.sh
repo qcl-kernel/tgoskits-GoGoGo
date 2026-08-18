@@ -177,6 +177,25 @@ run_starry_gate "$tmp/starryos" >/dev/null || fail "StarryOS smoke fixture was r
 [[ -s "$tmp/starryos/starryos.log" ]] ||
     fail "StarryOS gate did not publish the authenticated application log"
 
+cp -a "$tmp/smoke" "$tmp/ansi-console"
+python3 - "$tmp/ansi-console/console.log" <<'PY'
+import sys
+from pathlib import Path
+
+path = Path(sys.argv[1])
+text = path.read_text(encoding="utf-8")
+text = text.replace(
+    "[VM 1] TASK3_FRAME_CSV=FIXED,0",
+    "[VM 1] \x1b[mTASK3_FRAME_CSV=FIXED,0",
+    1,
+)
+path.write_text(text, encoding="utf-8")
+PY
+rm -f -- "$tmp/ansi-console/linux.log" "$tmp/ansi-console/summary.json" \
+    "$tmp/ansi-console/frames.csv" "$tmp/ansi-console/summary.raw.json"
+run_gate "$tmp/ansi-console" smoke >/dev/null ||
+    fail "ANSI-wrapped console markers were rejected"
+
 make_fixture "$tmp/attached-linux-replay"
 awk '
     !attached && /^\[VM 1\] TASK3_FRAME_CSV=/ {
