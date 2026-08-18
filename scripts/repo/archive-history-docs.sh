@@ -237,7 +237,7 @@ inventory() {
                 continue
             fi
 
-            if ! classify_path "$name/$rel" && ! classify_path "$rel"; then
+            if ! classify_path "$rel"; then
                 ((unmatched += 1))
                 continue
             fi

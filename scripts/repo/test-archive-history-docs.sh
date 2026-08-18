@@ -12,6 +12,7 @@ FIXED_GIT_DATE="2026-08-17T12:00:00Z"
 task12_source="$(mktemp -d "$FIXTURE_ROOT/task12-source.XXXXXX")"
 task123_source="$(mktemp -d "$FIXTURE_ROOT/task123-source.XXXXXX")"
 inventory="$FIXTURE_ROOT/inventory.tsv"
+renamed_inventory="$FIXTURE_ROOT/renamed-inventory.tsv"
 
 fail() {
     echo "FAIL: $*" >&2
@@ -62,6 +63,9 @@ write_fixture_file \
     "$task12_source/docs/docs/build/axvisor/shared-evidence.log" \
     "$shared_evidence"
 write_fixture_file \
+    "$task12_source/docs/docs/build/axvisor/_category_.json" \
+    '{"label":"generated"}'
+write_fixture_file \
     "$task12_source/docs/docs/architecture/axvisor/overview.md" \
     'active architecture reference'
 write_fixture_file \
@@ -73,6 +77,7 @@ commit_fixture_repo "$task12_source" \
     docs/superpowers/specs/2026-08-11-rt-ipc-integration-design.md \
     docs/superpowers/plans/2026-08-15-task1-task2-implementation.md \
     docs/docs/build/axvisor/shared-evidence.log \
+    docs/docs/build/axvisor/_category_.json \
     docs/docs/architecture/axvisor/overview.md \
     apps/demo/validation/baseline.txt
 touch -d '2026-08-15T12:00:00Z' \
@@ -85,7 +90,7 @@ write_fixture_file \
     "$task123_source/docs/superpowers/plans/2026-08-18-task123-native-runner.md" \
     'native task123 runner plan'
 write_fixture_file \
-    "$task123_source/docs/docs/build/axvisor/shared-evidence.log" \
+    "$task123_source/docs/docs/build/axvisor/task123-shared-evidence.log" \
     "$shared_evidence"
 write_fixture_file \
     "$task123_source/os/axvisor/guests/task3/docs/results/task3-report.md" \
@@ -98,7 +103,7 @@ commit_fixture_repo "$task123_source" .
 
 diff -u \
     "$task12_source/docs/docs/build/axvisor/shared-evidence.log" \
-    "$task123_source/docs/docs/build/axvisor/shared-evidence.log" \
+    "$task123_source/docs/docs/build/axvisor/task123-shared-evidence.log" \
     || fail 'shared evidence fixtures differ'
 
 if ! bash "$ARCHIVER" inventory \
@@ -145,7 +150,7 @@ awk -F '\t' 'NR > 1 && NF {
         task12 design 2026-08-11 true
     printf '%s\t%s\t%s\t%s\t%s\t%s\n' \
         task123-source \
-        docs/docs/build/axvisor/shared-evidence.log \
+        docs/docs/build/axvisor/task123-shared-evidence.log \
         task123 evidence 2026-08-17 true
     printf '%s\t%s\t%s\t%s\t%s\t%s\n' \
         task123-source \
@@ -183,6 +188,23 @@ assert_excluded() {
 
 assert_excluded docs/README.md
 assert_excluded docs/docs/architecture/axvisor/overview.md
+assert_excluded docs/docs/build/axvisor/_category_.json
 assert_excluded apps/demo/validation/baseline.txt
+
+bash "$ARCHIVER" inventory \
+    --rules "$RULES" \
+    --source "renamed-source=$task123_source" \
+    --output "$renamed_inventory"
+
+task123_classification="$(awk -F '\t' \
+    '$1 == "task123-source" && $6 == "docs/docs/build/axvisor/task123-shared-evidence.log" {
+        print $7 "\t" $8
+    }' "$inventory")"
+renamed_classification="$(awk -F '\t' \
+    '$1 == "renamed-source" && $6 == "docs/docs/build/axvisor/task123-shared-evidence.log" {
+        print $7 "\t" $8
+    }' "$renamed_inventory")"
+[[ -n "$task123_classification" && "$task123_classification" == "$renamed_classification" ]] ||
+    fail 'classification depends on source name'
 
 echo 'PASS: archive history inventory fixture contract'
