@@ -74,12 +74,10 @@ validate_tsv_field() {
     local source="$3"
     local display
 
-    case "$value" in
-        *$'\t'*|*$'\r'*|*$'\n'*)
-            display="$(printf '%q' "$value")"
-            die "source=$source $label contains TAB/CR/LF: $display"
-            ;;
-    esac
+    if printf '%s' "$value" | LC_ALL=C grep -zq '[[:cntrl:]]'; then
+        display="$(printf '%q' "$value")"
+        die "source=$source $label contains ASCII control byte: $display"
+    fi
 }
 
 check_tracked_index_flags() {
@@ -153,6 +151,11 @@ load_rules() {
         type="${rest%%$'\t'*}"
         reason="${rest#*$'\t'}"
         [[ "$reason" != *$'\t'* ]] || die "rule does not have five tab-separated fields"
+        validate_tsv_field rule_action "$action" rules
+        validate_tsv_field rule_path_regex "$regex" rules
+        validate_tsv_field rule_phase "$phase" rules
+        validate_tsv_field rule_type "$type" rules
+        validate_tsv_field rule_reason "$reason" rules
         [[ "$action" == include || "$action" == exclude ]] ||
             die "invalid rule action: $action"
         [[ -n "$regex" && -n "$reason" ]] || die "rule has an empty pattern or reason"
@@ -249,7 +252,7 @@ inventory() {
     local tracked_file untracked_file candidates_file rel full_path target_path
     local tracked base phase type date date_source size digest archived
     local selected excluded unmatched skipped tracked_status odd_display
-    local output_tmp source_index field_value
+    local output_tmp source_index
     local -a source_specs=()
     local -a source_names=()
     local -a source_roots=()
@@ -415,10 +418,19 @@ inventory() {
                 die "archive path collision: $archived"
             seen_archived["$archived"]=1
 
-            for field_value in "$tracked" "$rel" "$phase" "$type" "$date" \
-                "$date_source" "$size" "$digest" "$archived"; do
-                validate_tsv_field inventory_field "$field_value" "$name"
-            done
+            validate_tsv_field source "$name" "$name"
+            validate_tsv_field source_root "$source_root" "$name"
+            validate_tsv_field branch "$branch" "$name"
+            validate_tsv_field commit "$commit" "$name"
+            validate_tsv_field tracked "$tracked" "$name"
+            validate_tsv_field original_path "$rel" "$name"
+            validate_tsv_field phase "$phase" "$name"
+            validate_tsv_field type "$type" "$name"
+            validate_tsv_field date "$date" "$name"
+            validate_tsv_field date_source "$date_source" "$name"
+            validate_tsv_field size "$size" "$name"
+            validate_tsv_field sha256 "$digest" "$name"
+            validate_tsv_field archived_path "$archived" "$name"
             printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
                 "$name" "$source_root" "$branch" "$commit" "$tracked" "$rel" \
                 "$phase" "$type" "$date" "$date_source" "$size" "$digest" "$archived" \

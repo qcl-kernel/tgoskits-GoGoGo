@@ -285,7 +285,7 @@ if bash "$ARCHIVER" inventory \
     > "$FIXTURE_ROOT/newline-root.stdout" 2> "$FIXTURE_ROOT/newline-root.stderr"; then
     fail 'inventory accepted a source_root containing newline'
 fi
-grep -Fq 'source_root contains TAB/CR/LF' "$FIXTURE_ROOT/newline-root.stderr" ||
+grep -Fq 'source_root contains ASCII control byte' "$FIXTURE_ROOT/newline-root.stderr" ||
     fail 'newline source_root failure was not reported'
 
 output_target="$FIXTURE_ROOT/output-target.tsv"
@@ -331,6 +331,38 @@ if bash "$ARCHIVER" inventory \
 fi
 grep -Fq 'invalid Bash regex' "$FIXTURE_ROOT/malformed.stderr" ||
     fail 'malformed regex failure was not reported'
+
+control_type_rules="$FIXTURE_ROOT/control-type-rules.tsv"
+control_type_inventory="$FIXTURE_ROOT/control-type-inventory.tsv"
+printf '%s\n' $'include\t^docs/superpowers/specs/.*\.md$\ttask12\tdesign\x01\tcontrol type' \
+    > "$control_type_rules"
+if bash "$ARCHIVER" inventory \
+    --rules "$control_type_rules" \
+    --source "control-type-source=$task12_source" \
+    --output "$control_type_inventory" \
+    > "$FIXTURE_ROOT/control-type.stdout" 2> "$FIXTURE_ROOT/control-type.stderr"; then
+    fail 'inventory accepted a rule type containing 0x01'
+fi
+[[ ! -e "$control_type_inventory" ]] ||
+    fail 'control type failure produced an inventory file'
+grep -Fq 'rule_type contains ASCII control byte' "$FIXTURE_ROOT/control-type.stderr" ||
+    fail 'rule type control byte failure was not reported'
+
+control_reason_rules="$FIXTURE_ROOT/control-reason-rules.tsv"
+control_reason_inventory="$FIXTURE_ROOT/control-reason-inventory.tsv"
+printf '%s\n' $'include\t^docs/superpowers/specs/.*\.md$\ttask12\tdesign\treason with CR\r' \
+    > "$control_reason_rules"
+if bash "$ARCHIVER" inventory \
+    --rules "$control_reason_rules" \
+    --source "control-reason-source=$task12_source" \
+    --output "$control_reason_inventory" \
+    > "$FIXTURE_ROOT/control-reason.stdout" 2> "$FIXTURE_ROOT/control-reason.stderr"; then
+    fail 'inventory accepted a rule reason containing CR'
+fi
+[[ ! -e "$control_reason_inventory" ]] ||
+    fail 'control reason failure produced an inventory file'
+grep -Fq 'rule_reason contains ASCII control byte' "$FIXTURE_ROOT/control-reason.stderr" ||
+    fail 'rule reason control byte failure was not reported'
 
 date_inventory="$FIXTURE_ROOT/date-inventory.tsv"
 invalid_then_valid="$task12_source/docs/superpowers/specs/2026-99-99-2026-08-09-date.md"
