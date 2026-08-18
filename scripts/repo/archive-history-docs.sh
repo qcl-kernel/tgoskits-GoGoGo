@@ -80,6 +80,18 @@ validate_tsv_field() {
     fi
 }
 
+validate_path_component() {
+    local label="$1"
+    local value="$2"
+    local source="$3"
+    local display
+
+    if [[ ! "$value" =~ ^[A-Za-z0-9][A-Za-z0-9_-]*$ ]]; then
+        display="$(printf '%q' "$value")"
+        die "source=$source $label is not a safe path component: $display"
+    fi
+}
+
 check_tracked_index_flags() {
     local source="$1"
     local repo="$2"
@@ -129,6 +141,9 @@ load_rules() {
     local line action regex phase type reason rest regex_status
 
     [[ -f "$rules_file" ]] || die "rules file does not exist: $rules_file"
+    if od -An -v -t x1 -- "$rules_file" | tr -d ' \n' | grep -q '00'; then
+        die "rules file contains NUL: $rules_file"
+    fi
     RULE_ACTIONS=()
     RULE_REGEXES=()
     RULE_PHASES=()
@@ -156,6 +171,8 @@ load_rules() {
         validate_tsv_field rule_phase "$phase" rules
         validate_tsv_field rule_type "$type" rules
         validate_tsv_field rule_reason "$reason" rules
+        validate_path_component rule_phase "$phase" rules
+        validate_path_component rule_type "$type" rules
         [[ "$action" == include || "$action" == exclude ]] ||
             die "invalid rule action: $action"
         [[ -n "$regex" && -n "$reason" ]] || die "rule has an empty pattern or reason"
@@ -298,7 +315,7 @@ inventory() {
         [[ "$spec" == *=* ]] || die "source must be NAME=PATH: $spec"
         name="${spec%%=*}"
         requested_path="${spec#*=}"
-        [[ "$name" =~ ^[A-Za-z0-9._-]+$ ]] || die "invalid source name: $name"
+        validate_path_component source_name "$name" "$name"
         [[ -z "${seen_sources[$name]+set}" ]] || die "duplicate source name: $name"
         seen_sources["$name"]=1
 

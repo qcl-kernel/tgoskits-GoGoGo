@@ -364,6 +364,61 @@ fi
 grep -Fq 'rule_reason contains ASCII control byte' "$FIXTURE_ROOT/control-reason.stderr" ||
     fail 'rule reason control byte failure was not reported'
 
+malicious_source_inventory="$FIXTURE_ROOT/malicious-source-inventory.tsv"
+if bash "$ARCHIVER" inventory \
+    --rules "$RULES" \
+    --source "bad.name=$task12_source" \
+    --output "$malicious_source_inventory" \
+    > "$FIXTURE_ROOT/malicious-source.stdout" 2> "$FIXTURE_ROOT/malicious-source.stderr"; then
+    fail 'inventory accepted a source name that is not a safe path component'
+fi
+[[ ! -e "$malicious_source_inventory" ]] ||
+    fail 'malicious source name failure produced an inventory file'
+
+malicious_phase_rules="$FIXTURE_ROOT/malicious-phase-rules.tsv"
+malicious_phase_inventory="$FIXTURE_ROOT/malicious-phase-inventory.tsv"
+printf '%s\n' $'include\t^docs/superpowers/specs/.*\\.md$\t../phase\tdesign\tmalicious phase' \
+    > "$malicious_phase_rules"
+if bash "$ARCHIVER" inventory \
+    --rules "$malicious_phase_rules" \
+    --source "malicious-phase-source=$task12_source" \
+    --output "$malicious_phase_inventory" \
+    > "$FIXTURE_ROOT/malicious-phase.stdout" 2> "$FIXTURE_ROOT/malicious-phase.stderr"; then
+    fail 'inventory accepted a rule phase that is not a safe path component'
+fi
+[[ ! -e "$malicious_phase_inventory" ]] ||
+    fail 'malicious phase failure produced an inventory file'
+
+malicious_type_rules="$FIXTURE_ROOT/malicious-type-rules.tsv"
+malicious_type_inventory="$FIXTURE_ROOT/malicious-type-inventory.tsv"
+printf '%s\n' $'include\t^docs/superpowers/specs/.*\\.md$\ttask12\t../type\tmalicious type' \
+    > "$malicious_type_rules"
+if bash "$ARCHIVER" inventory \
+    --rules "$malicious_type_rules" \
+    --source "malicious-type-source=$task12_source" \
+    --output "$malicious_type_inventory" \
+    > "$FIXTURE_ROOT/malicious-type.stdout" 2> "$FIXTURE_ROOT/malicious-type.stderr"; then
+    fail 'inventory accepted a rule type that is not a safe path component'
+fi
+[[ ! -e "$malicious_type_inventory" ]] ||
+    fail 'malicious type failure produced an inventory file'
+
+nul_reason_rules="$FIXTURE_ROOT/nul-reason-rules.tsv"
+nul_reason_inventory="$FIXTURE_ROOT/nul-reason-inventory.tsv"
+printf 'include\t^docs/superpowers/specs/.*\\.md$\ttask12\tdesign\treason with NUL\0\n' \
+    > "$nul_reason_rules"
+if bash "$ARCHIVER" inventory \
+    --rules "$nul_reason_rules" \
+    --source "nul-reason-source=$task12_source" \
+    --output "$nul_reason_inventory" \
+    > "$FIXTURE_ROOT/nul-reason.stdout" 2> "$FIXTURE_ROOT/nul-reason.stderr"; then
+    fail 'inventory accepted a rules file containing NUL'
+fi
+[[ ! -e "$nul_reason_inventory" ]] ||
+    fail 'NUL rules failure produced an inventory file'
+grep -Fq 'rules file contains NUL' "$FIXTURE_ROOT/nul-reason.stderr" ||
+    fail 'NUL rules failure was not reported'
+
 date_inventory="$FIXTURE_ROOT/date-inventory.tsv"
 invalid_then_valid="$task12_source/docs/superpowers/specs/2026-99-99-2026-08-09-date.md"
 write_fixture_file "$invalid_then_valid" 'invalid date token followed by a valid date token'
