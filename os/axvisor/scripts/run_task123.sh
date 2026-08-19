@@ -751,6 +751,7 @@ build_axvisor() {
     local build_evidence="$RUNTIME_DIR/axbuild-output.log"
     run_timed "$TASK123_BUILD_TIMEOUT_S" cargo-xtask-axvisor-build \
         "$CARGO" xtask axvisor build --config qemu-aarch64-two-guest-net \
+        --smp 4 \
         --vmconfigs "$APP_GUEST_VMCONFIG" \
         --vmconfigs "$RTTHREAD_VMCONFIG" 2>&1 | tee "$build_evidence"
     local axvisor_artifacts=()

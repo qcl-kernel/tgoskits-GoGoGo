@@ -467,6 +467,8 @@ fi
     fail "cargo axvisor build did not receive exactly two VM configs"
 grep -Eq '^xtask axvisor build .*--vmconfigs .*--vmconfigs ' "$records/cargo.log" ||
     fail "runner did not use cargo xtask axvisor build"
+grep -Eq '^xtask axvisor build .*--smp 4 ' "$records/cargo.log" ||
+    fail "runner did not build AxVisor for all four QEMU CPUs"
 grep -Fq 'task2.count=2 task2.fault=none task3.frames=3 task3.fault=normal' \
     "$records/1.toml" || fail "guest controls were not written through Linux VM config"
 [[ "$(cat "$records/2.image")" == "$(realpath -e "$fixtures/rtthread-normal.bin")" ]] ||
