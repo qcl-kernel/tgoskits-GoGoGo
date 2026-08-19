@@ -132,20 +132,23 @@ prepare_output() {
     local output_parent
     local timestamp
     local suffix
+    local candidate
 
     if [[ "$output_set" -eq 1 ]]; then
         OUTPUT="$(canonical_candidate output "$output_candidate")"
     else
         output_parent="$ROOT/tmp/task123-runs"
         mkdir -p -- "$output_parent"
+        [[ -d "$output_parent" && -w "$output_parent" ]] ||
+            fail "output parent is missing or unwritable: $output_parent"
         timestamp="$(date -u +%Y%m%dT%H%M%SZ)"
-        OUTPUT="$output_parent/$mode-$timestamp"
+        candidate="$output_parent/$mode-$timestamp"
         suffix=1
-        while [[ -e "$OUTPUT" || -L "$OUTPUT" ]]; do
-            OUTPUT="$output_parent/$mode-$timestamp-$suffix"
+        while ! mkdir -- "$candidate" 2>/dev/null; do
+            candidate="$output_parent/$mode-$timestamp-$suffix"
             suffix=$((suffix + 1))
         done
-        OUTPUT="$(canonical_candidate output "$OUTPUT")"
+        OUTPUT="$(canonical_candidate output "$candidate")"
     fi
 
     output_parent="$(dirname -- "$OUTPUT")"
@@ -158,6 +161,13 @@ prepare_output() {
             fail "output is not a writable directory: $OUTPUT"
         [[ -z "$(find "$OUTPUT" -mindepth 1 -maxdepth 1 -print -quit)" ]] ||
             fail "output directory must be empty: $OUTPUT"
+    else
+        mkdir -- "$OUTPUT" || {
+            [[ -d "$OUTPUT" && ! -L "$OUTPUT" && -w "$OUTPUT" ]] ||
+                fail "output could not be reserved as a writable directory: $OUTPUT"
+            [[ -z "$(find "$OUTPUT" -mindepth 1 -maxdepth 1 -print -quit)" ]] ||
+                fail "output directory must be empty: $OUTPUT"
+        }
     fi
 
     if [[ "$cache_set" -eq 1 ]]; then
@@ -193,12 +203,80 @@ quote_command() {
 }
 
 temporary_log=
+pipeline_status_file=
+pipeline_pid=
+interrupted=0
+interrupt_status=0
+pending_signal=
 cleanup() {
     if [[ -n "${temporary_log:-}" ]]; then
         rm -f -- "$temporary_log"
     fi
+    if [[ -n "${pipeline_status_file:-}" ]]; then
+        rm -f -- "$pipeline_status_file"
+    fi
 }
 trap cleanup EXIT
+
+forward_signal() {
+    local signal=$1
+
+    interrupted=1
+    pending_signal=$signal
+    case "$signal" in
+        HUP) interrupt_status=129 ;;
+        INT) interrupt_status=130 ;;
+        TERM) interrupt_status=143 ;;
+    esac
+    if [[ -n "${pipeline_pid:-}" ]]; then
+        kill -s "$signal" -- "-$pipeline_pid" 2>/dev/null || true
+    fi
+}
+trap 'forward_signal HUP' HUP
+trap 'forward_signal INT' INT
+trap 'forward_signal TERM' TERM
+
+wait_for_pipeline() {
+    local wait_status=0
+    local group_attempts=0
+
+    while :; do
+        set +e
+        wait "$pipeline_pid"
+        wait_status=$?
+        set -e
+        if [[ "$wait_status" -gt 128 && "$interrupted" -eq 1 ]] &&
+            kill -0 "$pipeline_pid" 2>/dev/null; then
+            continue
+        fi
+        break
+    done
+
+    while kill -0 -- "-$pipeline_pid" 2>/dev/null; do
+        if [[ "$group_attempts" -ge 100 ]]; then
+            kill -KILL -- "-$pipeline_pid" 2>/dev/null || true
+            break
+        fi
+        sleep 0.05
+        group_attempts=$((group_attempts + 1))
+    done
+
+    WAIT_STATUS=$wait_status
+}
+
+read_pipeline_status() {
+    local -n result=$1
+    local -a captured_status=()
+
+    result=()
+    if [[ -f "$pipeline_status_file" ]] &&
+        mapfile -t captured_status < "$pipeline_status_file" &&
+        [[ "${#captured_status[@]}" -ge 2 ]] &&
+        [[ "${captured_status[0]}" =~ ^[0-9]+$ ]] &&
+        [[ "${captured_status[1]}" =~ ^[0-9]+$ ]]; then
+        result=("${captured_status[0]}" "${captured_status[1]}")
+    fi
+}
 
 main() {
     parse_arguments "$@"
@@ -225,6 +303,7 @@ main() {
     fi
 
     temporary_log="$(mktemp "$(dirname -- "$OUTPUT")/.task123-run.${mode}.XXXXXX")"
+    pipeline_status_file="$(mktemp "$(dirname -- "$OUTPUT")/.task123-status.${mode}.XXXXXX")"
     {
         printf 'MODE %s\n' "$mode"
         printf 'RUNNER %s\n' "$RUNNER"
@@ -232,23 +311,70 @@ main() {
         quote_command "$RUNNER" "${runner_args[@]}"
     } | tee "$temporary_log"
 
-    set +e
-    "$RUNNER" "${runner_args[@]}" 2>&1 | tee -a "$temporary_log"
-    pipeline_status=("${PIPESTATUS[@]}")
-    set -e
-    runner_status=${pipeline_status[0]}
-
-    if [[ -e "$OUTPUT" || -L "$OUTPUT" ]]; then
-        [[ -d "$OUTPUT" && ! -L "$OUTPUT" && -w "$OUTPUT" ]] ||
-            fail "runner created an invalid output path: $OUTPUT"
-    else
-        mkdir -- "$OUTPUT"
+    TASK123_PIPELINE_LOG="$temporary_log" \
+        TASK123_PIPELINE_STATUS="$pipeline_status_file" \
+        setsid --wait bash -c '
+            set +e
+            "$@" 2>&1 | tee -a "$TASK123_PIPELINE_LOG"
+            pipeline_status=("${PIPESTATUS[@]}")
+            printf "%s\n%s\n" "${pipeline_status[0]}" "${pipeline_status[1]}" > \
+                "$TASK123_PIPELINE_STATUS"
+            if [[ "${pipeline_status[0]}" -ne 0 ]]; then
+                exit "${pipeline_status[0]}"
+            fi
+            exit "${pipeline_status[1]}"
+        ' task123-pipeline "$RUNNER" "${runner_args[@]}" &
+    pipeline_pid=$!
+    if [[ "$interrupted" -eq 1 ]]; then
+        forward_signal "$pending_signal"
     fi
-    [[ "$(realpath -e -- "$OUTPUT")" == "$OUTPUT" ]] ||
-        fail "runner output path changed unexpectedly: $OUTPUT"
-    cp -- "$temporary_log" "$OUTPUT/run.log"
 
-    return "$runner_status"
+    wait_for_pipeline
+    wait_status=$WAIT_STATUS
+    pipeline_status=()
+    read_pipeline_status pipeline_status
+    if [[ "${#pipeline_status[@]}" -eq 2 ]]; then
+        printf 'PIPESTATUS runner=%s tee=%s\n' \
+            "${pipeline_status[0]}" "${pipeline_status[1]}" >> "$temporary_log"
+    else
+        printf 'PIPESTATUS unavailable wait=%s signal=%s\n' \
+            "$wait_status" "${pending_signal:-none}" >> "$temporary_log"
+    fi
+
+    if [[ "$interrupted" -eq 1 ]]; then
+        pipeline_result=$interrupt_status
+    elif [[ "${#pipeline_status[@]}" -eq 2 ]]; then
+        runner_status=${pipeline_status[0]}
+        tee_status=${pipeline_status[1]}
+        pipeline_result=0
+        if [[ "$runner_status" -ne 0 ]]; then
+            pipeline_result=$runner_status
+        elif [[ "$tee_status" -ne 0 ]]; then
+            pipeline_result=$tee_status
+        elif [[ "$wait_status" -ne 0 ]]; then
+            pipeline_result=$wait_status
+        fi
+    else
+        pipeline_result=$wait_status
+        [[ "$pipeline_result" -ne 0 ]] || pipeline_result=1
+    fi
+
+    log_copy_status=0
+    if [[ ! -e "$OUTPUT" && ! -L "$OUTPUT" ]]; then
+        mkdir -- "$OUTPUT" || log_copy_status=1
+    fi
+    if [[ "$log_copy_status" -eq 0 ]]; then
+        if [[ ! -d "$OUTPUT" || -L "$OUTPUT" || ! -w "$OUTPUT" ]]; then
+            log_copy_status=1
+        elif ! cp -- "$temporary_log" "$OUTPUT/run.log"; then
+            log_copy_status=1
+        fi
+    fi
+    if [[ "$log_copy_status" -ne 0 && "$pipeline_result" -eq 0 ]]; then
+        pipeline_result=1
+    fi
+
+    return "$pipeline_result"
 }
 
 if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
