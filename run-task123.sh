@@ -165,6 +165,11 @@ canonical_candidate() {
 
     [[ -n "$candidate" ]] || fail "$label path is empty"
     case "$candidate" in
+        *$'\n'*)
+            fail "$label path contains a newline or NUL byte; filenames with newlines are not supported"
+            ;;
+    esac
+    case "$candidate" in
         /*) candidate_absolute=$candidate ;;
         *) candidate_absolute="$(pwd -P)/$candidate" ;;
     esac
