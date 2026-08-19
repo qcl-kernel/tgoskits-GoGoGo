@@ -56,7 +56,7 @@ TASK123_TEST_ARGUMENTS="$quick_arguments" \
     TASK123_COMPARISON_RUNNER="$fake_runner" "$ENTRYPOINT" \
     --quick --allow-qemu-timer-limit --output "$quick" > "$tmp/quick.out"
 
-printf '%s\0' --quick --allow-qemu-timer-limit --output "$quick" > "$tmp/quick-expected-arguments"
+printf '%s\0' --quick --output "$quick" --allow-qemu-timer-limit > "$tmp/quick-expected-arguments"
 cmp -s "$tmp/quick-expected-arguments" "$quick_arguments" ||
     fail 'quick invocation forwarded an unexpected argv sequence'
 [[ -s "$quick/fake-runner-called" ]] || fail 'quick output is missing fake marker'
