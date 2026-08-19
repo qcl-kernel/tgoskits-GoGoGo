@@ -154,24 +154,56 @@ canonical_candidate() {
     local label=$1
     local candidate=$2
     local candidate_absolute
+    local component
     local existing_parent
     local parent_real
+    local prefix
     local suffix
     local resolved
+    local -a components=()
+    local -a raw_components=()
 
     [[ -n "$candidate" ]] || fail "$label path is empty"
     case "$candidate" in
         /*) candidate_absolute=$candidate ;;
-        *) candidate_absolute="$PWD/$candidate" ;;
+        *) candidate_absolute="$(pwd -P)/$candidate" ;;
     esac
-    existing_parent=$candidate_absolute
-    while [[ "$existing_parent" != / ]]; do
-        [[ ! -L "$existing_parent" ]] ||
-            fail "$label path contains a symbolic link: $existing_parent"
-        existing_parent="$(dirname -- "$existing_parent")"
+
+    IFS='/' read -r -a raw_components <<< "${candidate_absolute#/}"
+    resolved=/
+    for component in "${raw_components[@]}"; do
+        case "$component" in
+            ''|.)
+                continue
+                ;;
+            ..)
+                if [[ "${#components[@]}" -gt 0 ]]; then
+                    components=("${components[@]:0:${#components[@]}-1}")
+                    resolved=/
+                    for component in "${components[@]}"; do
+                        if [[ "$resolved" == / ]]; then
+                            resolved="/$component"
+                        else
+                            resolved="$resolved/$component"
+                        fi
+                    done
+                fi
+                ;;
+            *)
+                if [[ "$resolved" == / ]]; then
+                    prefix="/$component"
+                else
+                    prefix="$resolved/$component"
+                fi
+                [[ ! -L "$prefix" ]] ||
+                    fail "$label path contains a symbolic link: $prefix"
+                components+=("$component")
+                resolved=$prefix
+                ;;
+        esac
     done
 
-    resolved="$(realpath -m -- "$candidate_absolute")" ||
+    resolved="$(realpath -m -- "$resolved")" ||
         fail "$label path could not be resolved: $candidate"
     [[ "$resolved" != / && "$resolved" != "$ROOT" ]] ||
         fail "unsafe $label directory: $resolved"
