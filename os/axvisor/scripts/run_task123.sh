@@ -331,6 +331,33 @@ resolve_input_artifact() {
     fi
 }
 
+check_no_network_artifacts() {
+    [[ "${TASK123_NO_NETWORK:-0}" == 1 ]] || return 0
+
+    local -a required_artifacts=(
+        RTTHREAD_NORMAL_IMAGE
+        RTTHREAD_DROP_STATUS_IMAGE
+        RTTHREAD_DELAYED_SERVER_IMAGE
+        ROOTFS_IMAGE
+        TASK123_MODEL_IMAGE
+    )
+    if [[ "$app_guest" == linux ]]; then
+        required_artifacts=(LINUX_KERNEL_IMAGE LINUX_INITRAMFS_IMAGE "${required_artifacts[@]}")
+    else
+        required_artifacts=(STARRYOS_IMAGE "${required_artifacts[@]}")
+    fi
+
+    local artifact
+    local -a missing_artifacts=()
+    for artifact in "${required_artifacts[@]}"; do
+        [[ -n "${!artifact:-}" ]] || missing_artifacts+=("$artifact")
+    done
+    if [[ "${#missing_artifacts[@]}" -gt 0 ]]; then
+        fail "TASK123_NO_NETWORK=1 missing local artifacts: ${missing_artifacts[*]}"
+        return 1
+    fi
+}
+
 prepare_output_directory() {
     local output_parent
     local source_input
@@ -633,6 +660,7 @@ resolve_or_build_images() {
     resolve_input_artifact RTTHREAD_DELAYED_SERVER_IMAGE rtthread-delayed-server rtthread-delayed-server.bin
     resolve_input_artifact ROOTFS_IMAGE rootfs rootfs.img
     resolve_input_artifact TASK123_MODEL_IMAGE model model_weights.h
+    check_no_network_artifacts || return $?
     if [[ "$app_guest" == linux ]]; then
         build_linux_images_if_needed
     elif [[ -z "${STARRYOS_IMAGE:-}" ]]; then

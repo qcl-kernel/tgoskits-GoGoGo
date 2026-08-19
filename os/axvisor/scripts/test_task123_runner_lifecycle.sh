@@ -434,6 +434,80 @@ assert_starryos_contract() {
 
 [[ -x "$RUNNER" ]] || fail "run_task123.sh is missing or not executable"
 
+run_no_network_selection() {
+    local guest=$1
+    local output=$2
+    if (
+        source "$RUNNER"
+        app_guest=$guest
+        TASK123_NO_NETWORK=1
+        SHARED_ARTIFACT_DIR=
+        unset LINUX_KERNEL_IMAGE LINUX_INITRAMFS_IMAGE STARRYOS_IMAGE \
+            RTTHREAD_NORMAL_IMAGE RTTHREAD_DROP_STATUS_IMAGE \
+            RTTHREAD_DELAYED_SERVER_IMAGE ROOTFS_IMAGE TASK123_MODEL_IMAGE
+        phase() { printf 'PHASE %s\n' "$1"; }
+        build_linux_images_if_needed() {
+            printf 'build_linux_images_if_needed\n' >&2
+            exit 90
+        }
+        build_rtthread_images_if_needed() {
+            printf 'build_rtthread_images_if_needed\n' >&2
+            exit 91
+        }
+        build_starryos_image_if_needed() {
+            printf 'build_starryos_image_if_needed\n' >&2
+            exit 92
+        }
+        resolve_rootfs_image() {
+            printf 'resolve_rootfs_image\n' >&2
+            exit 93
+        }
+        resolve_or_build_images
+    ) > "$output.stdout" 2>&1; then
+        fail "no-network $guest selection accepted missing artifacts"
+    fi
+    cat "$output.stdout" > "$output.log"
+    grep -Fxq 'PHASE build-select-images' "$output.log" ||
+        fail "no-network $guest selection did not enter build-select-images"
+}
+
+no_network_linux_output="$tmp/no-network-linux-output"
+run_no_network_selection linux "$no_network_linux_output"
+grep -Fq 'missing local artifacts:' "$no_network_linux_output.log" ||
+    fail "no-network Linux failure did not list missing artifacts"
+for missing_artifact in LINUX_KERNEL_IMAGE LINUX_INITRAMFS_IMAGE \
+    RTTHREAD_NORMAL_IMAGE RTTHREAD_DROP_STATUS_IMAGE RTTHREAD_DELAYED_SERVER_IMAGE \
+    ROOTFS_IMAGE TASK123_MODEL_IMAGE; do
+    grep -Fq "$missing_artifact" "$no_network_linux_output.log" ||
+        fail "no-network Linux failure omitted $missing_artifact"
+done
+! grep -Eiq 'fetch|image pull|pip install|cargo build' \
+    "$no_network_linux_output.log" ||
+    fail "no-network Linux failure attempted a network or build step"
+for forbidden_step in build_linux_images_if_needed build_rtthread_images_if_needed \
+    build_starryos_image_if_needed resolve_rootfs_image model-build; do
+    ! grep -Fq "$forbidden_step" "$no_network_linux_output.log" ||
+        fail "no-network Linux run invoked $forbidden_step"
+done
+
+no_network_starry_output="$tmp/no-network-starry-output"
+run_no_network_selection starryos "$no_network_starry_output"
+grep -Fq 'missing local artifacts:' "$no_network_starry_output.log" ||
+    fail "no-network StarryOS failure did not list missing artifacts"
+for missing_artifact in STARRYOS_IMAGE RTTHREAD_NORMAL_IMAGE RTTHREAD_DROP_STATUS_IMAGE \
+    RTTHREAD_DELAYED_SERVER_IMAGE ROOTFS_IMAGE TASK123_MODEL_IMAGE; do
+    grep -Fq "$missing_artifact" "$no_network_starry_output.log" ||
+        fail "no-network StarryOS failure omitted $missing_artifact"
+done
+! grep -Eiq 'fetch|image pull|pip install|cargo build' \
+    "$no_network_starry_output.log" ||
+    fail "no-network StarryOS failure attempted a network or build step"
+for forbidden_step in build_linux_images_if_needed build_rtthread_images_if_needed \
+    build_starryos_image_if_needed resolve_rootfs_image model-build; do
+    ! grep -Fq "$forbidden_step" "$no_network_starry_output.log" ||
+        fail "no-network StarryOS run invoked $forbidden_step"
+done
+
 normal_output="$tmp/normal-output"
 if ! run_runner "$normal_output" > "$tmp/normal.stdout"; then
     [[ ! -f "$normal_output/runner.log" ]] || cat "$normal_output/runner.log" >&2

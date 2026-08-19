@@ -475,6 +475,7 @@ main() {
 
     pipeline_environment=(
         "QEMU=$QEMU"
+        "TASK123_NO_NETWORK=${TASK123_NO_NETWORK:-1}"
         "TASK123_PIPELINE_LOG=$temporary_log"
         "TASK123_PIPELINE_STATUS=$pipeline_status_file"
     )

@@ -19,6 +19,7 @@ cat > "$fake_runner" <<'EOF'
 set -euo pipefail
 
 printf '%s\0' "$@" > "$TASK123_TEST_ARGUMENTS"
+printf '%s\n' "${TASK123_NO_NETWORK-UNSET}" > "$TASK123_TEST_ENV"
 
 output=
 while [[ $# -gt 0 ]]; do
@@ -56,20 +57,26 @@ fi
 
 quick="$tmp/quick"
 quick_arguments="$tmp/quick-arguments"
+quick_environment="$tmp/quick-environment"
 TASK123_TEST_ARGUMENTS="$quick_arguments" \
+    TASK123_TEST_ENV="$quick_environment" \
     TASK123_COMPARISON_RUNNER="$fake_runner" "$ENTRYPOINT" \
     --quick --allow-qemu-timer-limit --output "$quick" > "$tmp/quick.out"
 
 printf '%s\0' --quick --output "$quick" --allow-qemu-timer-limit > "$tmp/quick-expected-arguments"
 cmp -s "$tmp/quick-expected-arguments" "$quick_arguments" ||
     fail 'quick invocation forwarded an unexpected argv sequence'
+grep -Fxq '1' "$quick_environment" ||
+    fail 'quick invocation did not pass TASK123_NO_NETWORK=1 to the comparison runner'
 [[ -s "$quick/fake-runner-called" ]] || fail 'quick output is missing fake marker'
 [[ -s "$quick/run.log" ]] || fail 'quick output is missing run.log'
 
 long="$tmp/long"
 cache="$tmp/cache/nested"
 long_arguments="$tmp/long-arguments"
+long_environment="$tmp/long-environment"
 TASK123_TEST_ARGUMENTS="$long_arguments" \
+    TASK123_TEST_ENV="$long_environment" \
     TASK123_COMPARISON_RUNNER="$fake_runner" "$ENTRYPOINT" \
     --long --cache "$cache" --output "$long" > "$tmp/long.out"
 
