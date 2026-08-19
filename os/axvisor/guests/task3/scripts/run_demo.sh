@@ -117,7 +117,7 @@ start_rtthread() {
         -kernel "$rtthread_image" \
         -netdev socket,id=net0,mcast=230.77.0.1:"$multicast_port" \
         -device virtio-net-device,netdev=net0,mac=52:54:00:77:00:30 \
-        -nographic -no-reboot >"$rtthread_log" 2>&1 &
+        -nographic -no-reboot 2>&1 | tee -- "$rtthread_log" &
     rtthread_pid=$!
 }
 
@@ -127,7 +127,7 @@ start_linux() {
         -append "console=ttyAMA0 rdinit=/sbin/init task3.frames=$frames $linux_extra_append" \
         -netdev socket,id=net0,mcast=230.77.0.1:"$multicast_port" \
         -device virtio-net-device,netdev=net0,mac=52:54:00:77:00:11 \
-        -nographic -no-reboot >"$linux_log" 2>&1 &
+        -nographic -no-reboot 2>&1 | tee -- "$linux_log" &
     linux_pid=$!
 }
 

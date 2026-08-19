@@ -5,6 +5,7 @@ SCRIPT_DIR=$(CDPATH= cd -- "$(dirname "$0")" && pwd)
 TASK3_ROOT=${TASK3_ROOT:-$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd)}
 export TASK3_ROOT
 . "$SCRIPT_DIR/common.sh"
+. "$SCRIPT_DIR/source_cache.sh"
 . "$TASK3_ROOT/configs/dependencies.lock"
 
 REPO_ROOT=$(CDPATH= cd -- "$TASK3_ROOT/../../../.." && pwd)
@@ -13,19 +14,21 @@ TASK2_COMMON_ROOT="$REPO_ROOT/os/axvisor/guests/rt-ipc/common"
 TASK123_INIT="$REPO_ROOT/os/axvisor/guests/linux-net/init-task123"
 
 output="$BUILD_DIR/buildroot"
+model_dir=${TASK3_MODEL_DIR:-"$BUILD_DIR/model"}
 mkdir -p "$BUILD_DIR"
 require_command flock
 exec 9>"$output.lock"
 flock -n 9 || die "another Linux image build owns $output"
 
 "$SCRIPT_DIR/fetch_sources.sh" --sources-only
-[ -s "$BUILD_DIR/model/model_weights.h" ] ||
-    "$SCRIPT_DIR/build_model.sh"
+[ -s "$model_dir/model_weights.h" ] ||
+    TASK3_MODEL_DIR="$model_dir" "$SCRIPT_DIR/build_model.sh"
 
 source_tree="$BUILD_DIR/sources/buildroot"
 staging="$BUILD_DIR/staging/linux-app"
 images="$BUILD_DIR/images/linux"
-downloads="$BUILD_DIR/downloads/buildroot"
+downloads="$(source_cache_root)/buildroot/$BUILDROOT_COMMIT/downloads"
+mkdir -p "$downloads"
 
 [ -d "$source_tree/.git" ] || die "Buildroot source is not a Git checkout"
 [ "$(git -C "$source_tree" remote get-url origin)" = "$BUILDROOT_URL" ] ||
@@ -46,8 +49,8 @@ for file in \
     cp "$TASK3_ROOT/$file" "$staging/"
 done
 cp "$RTIPC_DIR/rt_ipc.c" "$RTIPC_DIR/rt_ipc.h" "$staging/"
-cp "$BUILD_DIR/model/model_weights.h" "$BUILD_DIR/model/line-follow.y4m" \
-    "$BUILD_DIR/model/truth.csv" "$staging/"
+cp "$model_dir/model_weights.h" "$model_dir/line-follow.y4m" \
+    "$model_dir/truth.csv" "$staging/"
 for file in \
     Makefile rtipc_client.c rtipc_client_report.c rtipc_client_report.h \
     rtipc_fault.c rtipc_fault.h rtipc_shutdown.c rtipc_shutdown.h; do

@@ -8,6 +8,13 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <string.h>
+#ifndef TASK3_HOST_TEST
+#include <drivers/ofw.h>
+#endif
+#include <limits.h>
+#include <stddef.h>
+#include <stdint.h>
+#include <string.h>
 
 typedef int (*task3_server_reply_fn)(void *context, uint8_t message_type,
                                      const uint8_t *payload, size_t length,
@@ -175,6 +182,7 @@ typedef struct {
     socklen_t peer_length;
     int have_peer;
     int dropped_status;
+    int drop_status_once;
 } task3_server_runtime_t;
 
 static task3_server_runtime_t runtime;
@@ -193,14 +201,13 @@ static int send_datagram(void *context, const uint8_t *bytes, size_t length)
     if (!server->have_peer) {
         return -1;
     }
-#ifdef TASK3_FAULT_DROP_STATUS_ONCE
-    if (!server->dropped_status && length >= RTIPC_HEADER_SIZE &&
+    if (server->drop_status_once && !server->dropped_status &&
+        length >= RTIPC_HEADER_SIZE &&
         bytes[1] == RTIPC_MSG_STATUS_REP) {
         server->dropped_status = 1;
         rt_kprintf("TASK3_FAULT_DROP_STATUS dropped=1\n");
         return 0;
     }
-#endif
     sent = sendto(server->socket_fd, bytes, length, 0,
                   (struct sockaddr *)&server->peer, server->peer_length);
     return sent == (ssize_t)length ? 0 : -1;
@@ -259,6 +266,28 @@ static int configure_receive_timeout(int socket_fd)
                       sizeof(timeout));
 }
 
+static void configure_runtime_faults(task3_server_runtime_t *server)
+{
+#ifdef TASK3_HOST_TEST
+    (void)server;
+#else
+    const char *fault = rt_ofw_bootargs_select("task3.fault=", 0);
+
+    if (fault == RT_NULL) {
+        return;
+    }
+    if (rt_strcmp(fault, "drop-status") == 0) {
+        server->drop_status_once = 1;
+        rt_kprintf("TASK3_RTOS_FAULT drop-status\n");
+    } else if (rt_strcmp(fault, "delayed-server") == 0) {
+        rt_kprintf("TASK3_FAULT_DELAYED_SERVER delay_ms=%d\n", 3000);
+        rt_thread_mdelay(3000);
+    } else if (rt_strcmp(fault, "normal") != 0) {
+        rt_kprintf("TASK3_RTOS_ERROR invalid-task3-fault\n");
+    }
+#endif
+}
+
 static void task3_server_entry(void *parameter)
 {
     struct sockaddr_in local_address;
@@ -266,11 +295,7 @@ static void task3_server_entry(void *parameter)
     (void)parameter;
     memset(&runtime, 0, sizeof(runtime));
     runtime.socket_fd = -1;
-#ifdef TASK3_FAULT_DELAY_START_MS
-    rt_kprintf("TASK3_FAULT_DELAYED_SERVER delay_ms=%d\n",
-               TASK3_FAULT_DELAY_START_MS);
-    rt_thread_mdelay(TASK3_FAULT_DELAY_START_MS);
-#endif
+    configure_runtime_faults(&runtime);
     if (wait_for_network() != 0) {
         rt_kprintf("TASK3_RTOS_ERROR network-timeout\n");
         return;

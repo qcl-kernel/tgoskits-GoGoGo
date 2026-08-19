@@ -23,7 +23,9 @@ for marker in TASK3_FAULT_DUPLICATE TASK3_FAULT_MALFORMED \
 done
 grep -F 'applied_delta' "$SUMMARIZER" >/dev/null
 grep -F 'application_errors' "$SUMMARIZER" >/dev/null
-grep -F 'rt_kprintf("TASK3_FAULT_DELAYED_SERVER delay_ms=%d\n",' \
+grep -F 'rt_ofw_bootargs_select("task3.fault=", 0)' \
+    "$RTTHREAD_SERVER" >/dev/null
+grep -F 'rt_kprintf("TASK3_FAULT_DELAYED_SERVER delay_ms=%d\n", 3000);' \
     "$RTTHREAD_SERVER" >/dev/null
 
 DEMO="$TASK3_ROOT/scripts/run_demo.sh"

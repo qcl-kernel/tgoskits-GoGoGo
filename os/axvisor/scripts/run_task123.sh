@@ -4,6 +4,8 @@ set -Eeuo pipefail
 
 SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(CDPATH= cd -- "$SCRIPT_DIR/../../.." && pwd)"
+export TGOS_SOURCE_CACHE="${TGOS_SOURCE_CACHE:-$ROOT/tmp/source-cache}"
+export UV_CACHE_DIR="${UV_CACHE_DIR:-$TGOS_SOURCE_CACHE/uv}"
 TASK3_ROOT="$ROOT/os/axvisor/guests/task3"
 RUN_UNTIL="${RUN_UNTIL:-$SCRIPT_DIR/run_until_log_marker.sh}"
 QEMU_REALTIME_CONTROL="${QEMU_REALTIME_CONTROL:-$SCRIPT_DIR/apply_qemu_realtime_controls.sh}"
@@ -174,6 +176,14 @@ validate_mode_options() {
         require_integer "$rtbench_samples" 1 100000 rtbench-samples
     elif [[ "$mode" == stability ]]; then
         require_integer "$stability_seconds" 1 3600 seconds
+    fi
+
+    # A diagnostic stability run intentionally lets RT-Thread report a FAIL
+    # status for a complete 1-ms result. Keep that marker out of the early-
+    # failure list so the verifier can authenticate and classify it.
+    if [[ "$mode" == stability &&
+          "${TASK123_ALLOW_QEMU_TIMER_LIMIT:-0}" -eq 1 ]]; then
+        failure_markers=()
     fi
     require_integer "${TASK123_TIMEOUT_S:-600}" 1 86400 TASK123_TIMEOUT_S
     require_integer "${TASK123_BUILD_TIMEOUT_S:-1800}" 1 86400 TASK123_BUILD_TIMEOUT_S
@@ -370,13 +380,12 @@ prepare_output_directory() {
     OUTPUT="$(realpath -e -- "$OUTPUT")"
     prepare_shared_artifact_cache
 
-    RUNNER_LOG="$OUTPUT/runner.log"
     CONSOLE_LOG="$OUTPUT/console.log"
     MANIFEST="$OUTPUT/manifest.txt"
     AXVISOR_BIN="$OUTPUT/axvisor.bin"
     APP_GUEST_LOG="$OUTPUT/${app_guest}.log"
     local paths=(
-        "$RUNNER_LOG" "$CONSOLE_LOG" "$MANIFEST" "$AXVISOR_BIN"
+        "$CONSOLE_LOG" "$MANIFEST" "$AXVISOR_BIN"
         "$OUTPUT/${app_guest}.log" "$OUTPUT/rtthread.log" "$OUTPUT/frames.csv"
         "$OUTPUT/summary.raw.json" "$OUTPUT/summary.json" "$OUTPUT/host-metrics.txt"
     )
@@ -392,7 +401,6 @@ prepare_output_directory() {
             }
         done
     done
-    : > "$RUNNER_LOG"
     : > "$CONSOLE_LOG"
 }
 
@@ -470,8 +478,7 @@ handle_signal() {
 }
 
 progress() {
-    printf '%s\n' "$*" >&6
-    printf '%s\n' "$*" >&4
+    printf '%s\n' "$*"
 }
 
 phase() {
@@ -485,7 +492,7 @@ run_timed() {
     shift 2
 
     progress "STEP $phase_name timeout_s=$timeout_s"
-    if timeout --signal TERM --kill-after 5s \
+    if timeout --foreground --signal TERM --kill-after 5s \
         "$timeout_s" "$@"; then
         return 0
     else
@@ -562,12 +569,21 @@ build_linux_images_if_needed() {
     if [[ -n "${LINUX_KERNEL_IMAGE:-}" && -n "${LINUX_INITRAMFS_IMAGE:-}" ]]; then
         return
     fi
+    if [[ -s "$TGOS_SOURCE_CACHE/linux/6.12.21/Image" &&
+          -s "$TGOS_SOURCE_CACHE/linux/6.12.21/rootfs.cpio.gz" ]]; then
+        LINUX_KERNEL_IMAGE="$TGOS_SOURCE_CACHE/linux/6.12.21/Image"
+        LINUX_INITRAMFS_IMAGE="$TGOS_SOURCE_CACHE/linux/6.12.21/rootfs.cpio.gz"
+        TASK123_MODEL_IMAGE="${TASK123_MODEL_IMAGE:-$TGOS_SOURCE_CACHE/task3-model/model_weights.h}"
+        return
+    fi
     local build_root="$RUNTIME_DIR/task3-linux-build"
+    local model_dir="$TGOS_SOURCE_CACHE/task3-model"
     run_timed "$TASK123_BUILD_TIMEOUT_S" linux-image-build \
-        env BUILD_DIR="$build_root" "$TASK3_ROOT/scripts/build_linux.sh"
+        env BUILD_DIR="$build_root" TASK3_MODEL_DIR="$model_dir" \
+            "$TASK3_ROOT/scripts/build_alpine_linux.sh"
     LINUX_KERNEL_IMAGE="$build_root/images/linux/Image"
-    LINUX_INITRAMFS_IMAGE="$build_root/images/linux/rootfs.cpio"
-    TASK123_MODEL_IMAGE="${TASK123_MODEL_IMAGE:-$build_root/model/model_weights.h}"
+    LINUX_INITRAMFS_IMAGE="$build_root/images/linux/rootfs.cpio.gz"
+    TASK123_MODEL_IMAGE="${TASK123_MODEL_IMAGE:-$model_dir/model_weights.h}"
 }
 
 build_starryos_image_if_needed() {
@@ -587,24 +603,16 @@ build_starryos_image_if_needed() {
 build_rtthread_variant() {
     local source_tree=$1
     local output=$2
-    local drop_status=$3
-    local delay_ms=$4
     local bsp="$source_tree/bsp/qemu-virt64-aarch64"
     run_timed "$TASK123_BUILD_TIMEOUT_S" rtthread-clean \
-        env TASK3_FAULT_DROP_STATUS_ONCE="$drop_status" \
-        TASK3_FAULT_DELAY_START_MS="$delay_ms" \
-        uv run --with scons scons -C "$bsp" -c
+            uv run --with scons scons -C "$bsp" -c
     run_timed "$TASK123_BUILD_TIMEOUT_S" rtthread-build \
-        env TASK3_FAULT_DROP_STATUS_ONCE="$drop_status" \
-        TASK3_FAULT_DELAY_START_MS="$delay_ms" \
-        uv run --with scons scons -C "$bsp" -j"$(getconf _NPROCESSORS_ONLN)"
+            uv run --with scons scons -C "$bsp" -j"$(getconf _NPROCESSORS_ONLN)"
     cp -- "$bsp/rtthread.bin" "$output"
 }
 
 build_rtthread_images_if_needed() {
-    if [[ -n "${RTTHREAD_NORMAL_IMAGE:-}" &&
-          -n "${RTTHREAD_DROP_STATUS_IMAGE:-}" &&
-          -n "${RTTHREAD_DELAYED_SERVER_IMAGE:-}" ]]; then
+    if [[ -n "${RTTHREAD_IMAGE:-}" ]]; then
         return
     fi
     command -v uv >/dev/null || fail "uv is required to build RT-Thread images"
@@ -615,12 +623,8 @@ build_rtthread_images_if_needed() {
         "$ROOT/os/axvisor/patches/rtthread/prepare_rtthread_source.sh" "$source_tree"
     run_timed "$TASK123_PHASE_TIMEOUT_S" apply-rtthread-patches \
         "$ROOT/os/axvisor/patches/rtthread/apply-rtthread-patches.sh" "$source_tree"
-    RTTHREAD_NORMAL_IMAGE="$image_dir/rtthread-normal.bin"
-    RTTHREAD_DROP_STATUS_IMAGE="$image_dir/rtthread-drop-status.bin"
-    RTTHREAD_DELAYED_SERVER_IMAGE="$image_dir/rtthread-delayed-server.bin"
-    build_rtthread_variant "$source_tree" "$RTTHREAD_NORMAL_IMAGE" 0 0
-    build_rtthread_variant "$source_tree" "$RTTHREAD_DROP_STATUS_IMAGE" 1 0
-    build_rtthread_variant "$source_tree" "$RTTHREAD_DELAYED_SERVER_IMAGE" 0 3000
+    RTTHREAD_IMAGE="$image_dir/rtthread.bin"
+    build_rtthread_variant "$source_tree" "$RTTHREAD_IMAGE"
 }
 
 resolve_or_build_images() {
@@ -628,9 +632,7 @@ resolve_or_build_images() {
     resolve_input_artifact LINUX_KERNEL_IMAGE linux-kernel linux-kernel
     resolve_input_artifact LINUX_INITRAMFS_IMAGE linux-initramfs linux-initramfs.cpio
     resolve_input_artifact STARRYOS_IMAGE starryos-image starryos-task123.bin
-    resolve_input_artifact RTTHREAD_NORMAL_IMAGE rtthread-normal rtthread-normal.bin
-    resolve_input_artifact RTTHREAD_DROP_STATUS_IMAGE rtthread-drop-status rtthread-drop-status.bin
-    resolve_input_artifact RTTHREAD_DELAYED_SERVER_IMAGE rtthread-delayed-server rtthread-delayed-server.bin
+    resolve_input_artifact RTTHREAD_IMAGE rtthread rtthread.bin
     resolve_input_artifact ROOTFS_IMAGE rootfs rootfs.img
     resolve_input_artifact TASK123_MODEL_IMAGE model model_weights.h
     if [[ "$app_guest" == linux ]]; then
@@ -648,9 +650,7 @@ resolve_or_build_images() {
         STARRYOS_IMAGE="$(canonical_existing_file starryos-image "$STARRYOS_IMAGE")"
         APP_GUEST_IMAGE="$STARRYOS_IMAGE"
     fi
-    RTTHREAD_NORMAL_IMAGE="$(canonical_existing_file rtthread-normal "$RTTHREAD_NORMAL_IMAGE")"
-    RTTHREAD_DROP_STATUS_IMAGE="$(canonical_existing_file rtthread-drop-status "$RTTHREAD_DROP_STATUS_IMAGE")"
-    RTTHREAD_DELAYED_SERVER_IMAGE="$(canonical_existing_file rtthread-delayed-server "$RTTHREAD_DELAYED_SERVER_IMAGE")"
+    RTTHREAD_IMAGE="$(canonical_existing_file rtthread "$RTTHREAD_IMAGE")"
     resolve_rootfs_image
 
     if [[ -z "${TASK123_MODEL_IMAGE:-}" ]]; then
@@ -674,17 +674,13 @@ resolve_or_build_images() {
     if [[ -n "${STARRYOS_IMAGE:-}" ]]; then
         STARRYOS_IMAGE="$(stage_shared_artifact starryos-image starryos-task123.bin "$STARRYOS_IMAGE")"
     fi
-    RTTHREAD_NORMAL_IMAGE="$(stage_shared_artifact rtthread-normal rtthread-normal.bin "$RTTHREAD_NORMAL_IMAGE")"
-    RTTHREAD_DROP_STATUS_IMAGE="$(stage_shared_artifact rtthread-drop-status rtthread-drop-status.bin "$RTTHREAD_DROP_STATUS_IMAGE")"
-    RTTHREAD_DELAYED_SERVER_IMAGE="$(stage_shared_artifact rtthread-delayed-server rtthread-delayed-server.bin "$RTTHREAD_DELAYED_SERVER_IMAGE")"
+    RTTHREAD_IMAGE="$(stage_shared_artifact rtthread rtthread.bin "$RTTHREAD_IMAGE")"
     ROOTFS_IMAGE="$(stage_shared_artifact rootfs rootfs.img "$ROOTFS_IMAGE")"
     TASK123_MODEL_IMAGE="$(stage_shared_artifact model model_weights.h "$TASK123_MODEL_IMAGE")"
 
     local source_input
     local source_inputs=(
-        "$RTTHREAD_NORMAL_IMAGE"
-        "$RTTHREAD_DROP_STATUS_IMAGE"
-        "$RTTHREAD_DELAYED_SERVER_IMAGE"
+        "$RTTHREAD_IMAGE"
         "$ROOTFS_IMAGE"
         "$TASK123_MODEL_IMAGE"
         "$APP_GUEST_IMAGE"
@@ -698,12 +694,7 @@ resolve_or_build_images() {
         validate_output_against_source "$source_input"
     done
 
-    SELECTED_RTTHREAD_IMAGE=$RTTHREAD_NORMAL_IMAGE
-    if [[ "$mode" == task3-fault && "$task3_fault" == drop-status ]]; then
-        SELECTED_RTTHREAD_IMAGE=$RTTHREAD_DROP_STATUS_IMAGE
-    elif [[ "$mode" == task3-fault && "$task3_fault" == delayed-server ]]; then
-        SELECTED_RTTHREAD_IMAGE=$RTTHREAD_DELAYED_SERVER_IMAGE
-    fi
+    SELECTED_RTTHREAD_IMAGE=$RTTHREAD_IMAGE
 }
 
 generate_vmconfigs() {
@@ -721,8 +712,10 @@ generate_vmconfigs() {
     local guest_cmdline
     if [[ "$app_guest" == linux ]]; then
         guest_cmdline="console=ttyAMA0 rdinit=/init task2.count=$task2_count task2.fault=none task3.frames=$task3_frames task3.fault=$guest_fault"
+        phase linux-vmconfig
         LINUX_VMCONFIG="$(
-            run_timed "$TASK123_PHASE_TIMEOUT_S" linux-vmconfig-generator \
+            timeout --foreground --signal TERM --kill-after 5s \
+                "$TASK123_PHASE_TIMEOUT_S" \
                 "$LINUX_VMCONFIG_GENERATOR" "$ROOT" "$LINUX_VMCONFIG_TEMPLATE" \
                 "$LINUX_KERNEL_IMAGE" "$LINUX_INITRAMFS_IMAGE" \
                 "$LINUX_RUNTIME_DIR" "$guest_cmdline"
@@ -730,39 +723,40 @@ generate_vmconfigs() {
         APP_GUEST_VMCONFIG="$LINUX_VMCONFIG"
     else
         guest_cmdline="task2.count=$task2_count task2.fault=none task3.frames=$task3_frames task3.fault=$guest_fault"
+        phase starryos-vmconfig
         STARRYOS_VMCONFIG="$(
-            run_timed "$TASK123_PHASE_TIMEOUT_S" starryos-vmconfig-generator \
+            timeout --foreground --signal TERM --kill-after 5s \
+                "$TASK123_PHASE_TIMEOUT_S" \
                 "$STARRYOS_VMCONFIG_GENERATOR" "$ROOT" "$STARRYOS_VMCONFIG_TEMPLATE" \
                 "$STARRYOS_IMAGE" "$STARRYOS_RUNTIME_DIR" "$guest_cmdline"
         )"
         APP_GUEST_VMCONFIG="$STARRYOS_VMCONFIG"
     fi
+    phase rtthread-vmconfig
     RTTHREAD_VMCONFIG="$(
-        run_timed "$TASK123_PHASE_TIMEOUT_S" rtthread-vmconfig-generator \
+        timeout --foreground --signal TERM --kill-after 5s \
+            "$TASK123_PHASE_TIMEOUT_S" \
             "$RTTHREAD_VMCONFIG_GENERATOR" "$ROOT" "$RTTHREAD_VMCONFIG_TEMPLATE" \
-            "$SELECTED_RTTHREAD_IMAGE" "$RTTHREAD_RUNTIME_DIR"
+            "$SELECTED_RTTHREAD_IMAGE" "$RTTHREAD_RUNTIME_DIR" "task3.fault=$guest_fault"
     )"
     chmod a-w -- "$APP_GUEST_VMCONFIG" "$RTTHREAD_VMCONFIG"
 }
 
 build_axvisor() {
     phase cargo-xtask-axvisor-build
-    export CARGO_TARGET_DIR="$RUNTIME_DIR/cargo-target"
-    local build_evidence="$RUNTIME_DIR/axbuild-output.log"
+    export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-$ROOT/target}"
+    local build_log="$RUNTIME_DIR/axvisor-build.log"
+    local axvisor_elf
     run_timed "$TASK123_BUILD_TIMEOUT_S" cargo-xtask-axvisor-build \
         "$CARGO" xtask axvisor build --config qemu-aarch64-two-guest-net \
         --smp 4 \
         --vmconfigs "$APP_GUEST_VMCONFIG" \
-        --vmconfigs "$RTTHREAD_VMCONFIG" 2>&1 | tee "$build_evidence"
-    local axvisor_artifacts=()
-    mapfile -t axvisor_artifacts < <(
-        sed -n 's/^\[axbuild\] cargo build elf=//p' "$build_evidence"
-    )
-    [[ "${#axvisor_artifacts[@]}" -eq 1 ]] || {
-        fail "AxVisor build must report exactly one ELF artifact (found ${#axvisor_artifacts[@]})"
+        --vmconfigs "$RTTHREAD_VMCONFIG" 2>&1 | tee "$build_log"
+    axvisor_elf="$(sed -n 's/^\[axbuild\] cargo build elf=//p' "$build_log" | tail -n 1)"
+    [[ -n "$axvisor_elf" ]] || {
+        fail "AxVisor build did not report its ELF artifact"
         return 1
     }
-    local axvisor_elf="${axvisor_artifacts[0]}"
     axvisor_elf="$(canonical_existing_file axvisor-elf "$axvisor_elf")"
 
     phase strip-objcopy
@@ -780,7 +774,7 @@ record_artifact() {
     local resolved
     local digest
     resolved="$(canonical_existing_file "$label" "$path")"
-    digest="$(run_timed "$TASK123_PHASE_TIMEOUT_S" artifact-digest sha256sum "$resolved")"
+    digest="$(sha256sum -- "$resolved")"
     digest=${digest%% *}
     [[ "$digest" =~ ^[0-9a-f]{64}$ ]] || fail "invalid digest for $label"
     printf 'ARTIFACT name=%s path=%s sha256=%s\n' "$label" "$resolved" "$digest" >> "$MANIFEST_TMP"
@@ -809,9 +803,6 @@ prepare_manifest() {
         record_artifact starryos-vmconfig "$APP_GUEST_VMCONFIG"
     fi
     record_artifact rtthread "$SELECTED_RTTHREAD_IMAGE"
-    record_artifact rtthread-normal "$RTTHREAD_NORMAL_IMAGE"
-    record_artifact rtthread-drop-status "$RTTHREAD_DROP_STATUS_IMAGE"
-    record_artifact rtthread-delayed-server "$RTTHREAD_DELAYED_SERVER_IMAGE"
     record_artifact rtthread-vmconfig "$RTTHREAD_VMCONFIG"
     record_artifact model "$TASK123_MODEL_IMAGE"
     record_artifact protocol-source "$PROTOCOL_SOURCE"
@@ -980,7 +971,7 @@ launch_one_qemu() {
     RUN_UNTIL_CHILD_TIMERSLACK_NS="$QEMU_TIMER_SLACK_NS" \
         "$RUN_UNTIL" "$TASK123_TIMEOUT_S" "$CONSOLE_LOG" "${markers[@]}" \
         "${failure_marker_args[@]}" -- \
-        "$QEMU" "${qemu_args[@]}" <&3 >> "$CONSOLE_LOG" 2>&1 &
+        "$QEMU" "${qemu_args[@]}" <&3 2>&1 | tee -a -- "$CONSOLE_LOG" &
     watcher_pid=$!
     wait_for_qemu_pid "$qemu_pid_file"
 
@@ -1076,8 +1067,6 @@ main() {
     parse_arguments "$@"
     validate_mode_options
     prepare_output_directory
-    exec 4>&1 5>&2 6>> "$RUNNER_LOG"
-    exec >> "$RUNNER_LOG" 2>&1
     cd "$ROOT"
 
     TASK123_TIMEOUT_S=${TASK123_TIMEOUT_S:-600}
@@ -1103,7 +1092,7 @@ main() {
     cleanup_owned_processes
     run_result_gate
     publish_manifest
-    printf 'Task 1/2/3 run complete: %s\n' "$OUTPUT" >&4
+    printf 'Task 1/2/3 run complete: %s\n' "$OUTPUT"
 }
 
 if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then

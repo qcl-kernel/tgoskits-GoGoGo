@@ -5,36 +5,34 @@ SCRIPT_DIR=$(CDPATH= cd -- "$(dirname "$0")" && pwd)
 TASK3_ROOT=${TASK3_ROOT:-$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd)}
 export TASK3_ROOT
 . "$SCRIPT_DIR/common.sh"
+. "$SCRIPT_DIR/source_cache.sh"
 . "$TASK3_ROOT/configs/dependencies.lock"
 
-variant=normal
-fault_define=0
 case "${1:-}" in
     "") ;;
-    --fault-drop-status-once)
-        variant=drop-status
-        fault_define=1
-        ;;
-    *) die "usage: $0 [--fault-drop-status-once]" ;;
+    *) die "usage: $0" ;;
 esac
 
 mkdir -p "$BUILD_DIR/work"
 require_command flock
-exec 9>"$BUILD_DIR/work/rtthread-$variant.lock"
-flock -n 9 || die "another RT-Thread $variant build is running"
+exec 9>"$BUILD_DIR/work/rtthread.lock"
+flock -n 9 || die "another RT-Thread build is running"
 
 "$SCRIPT_DIR/fetch_sources.sh"
 source_tree="$BUILD_DIR/sources/rt-thread"
 toolchain="$BUILD_DIR/toolchains/arm-gnu-toolchain-$ARM_TOOLCHAIN_VERSION"
-work_tree="$BUILD_DIR/work/rtthread-$variant"
+work_tree="$BUILD_DIR/work/rtthread"
 image_dir="$BUILD_DIR/images/rtthread"
-python_dir="$BUILD_DIR/python"
+python_dir="$(source_cache_root)/python/kconfiglib/$KCONFIGLIB_VERSION"
 bsp="$work_tree/bsp/qemu-virt64-aarch64"
 app="$bsp/applications/task3"
 packages_stub="$work_tree/packages-stub"
 
 [ "$(git -C "$source_tree" rev-parse HEAD)" = "$RTTHREAD_COMMIT" ] ||
     die "RT-Thread source commit changed"
+mkdir -p "$python_dir"
+exec 8>"$python_dir.lock"
+flock 8
 if ! PYTHONPATH="$python_dir" python3 -c 'import kconfiglib' 2>/dev/null; then
     python3 -m pip install --disable-pip-version-check --no-deps \
         --index-url https://pypi.tuna.tsinghua.edu.cn/simple \
@@ -67,7 +65,6 @@ python3 "$TASK3_ROOT/scripts/set_kconfig.py" "$bsp/.config" \
     cd "$bsp"
     export RTT_EXEC_PATH="$toolchain/bin"
     export RTT_CC_PREFIX=aarch64-none-elf-
-    export TASK3_FAULT_DROP_STATUS_ONCE="$fault_define"
     export PATH="$toolchain/bin:$PATH"
     export PYTHONPATH="$python_dir"
     export PKGS_DIR="$packages_stub"
@@ -87,12 +84,6 @@ entry=$("$toolchain/bin/aarch64-none-elf-readelf" -h "$bsp/rtthread.elf" |
     awk '/Entry point address:/ {print $4}')
 python3 "$TASK3_ROOT/scripts/check_elf_entry.py" "$entry"
 
-if [ "$variant" = normal ]; then
-    cp "$bsp/rtthread.bin" "$image_dir/rtthread.bin"
-    cp "$bsp/rtthread.elf" "$image_dir/rtthread.elf"
-    printf 'rtthread_image=%s\n' "$image_dir/rtthread.bin"
-else
-    cp "$bsp/rtthread.bin" "$image_dir/rtthread-drop-status.bin"
-    cp "$bsp/rtthread.elf" "$image_dir/rtthread-drop-status.elf"
-    printf 'rtthread_fault_image=%s\n' "$image_dir/rtthread-drop-status.bin"
-fi
+cp "$bsp/rtthread.bin" "$image_dir/rtthread.bin"
+cp "$bsp/rtthread.elf" "$image_dir/rtthread.elf"
+printf 'rtthread_image=%s\n' "$image_dir/rtthread.bin"

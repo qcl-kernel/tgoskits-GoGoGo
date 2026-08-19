@@ -6,6 +6,7 @@ SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(CDPATH= cd -- "$SCRIPT_DIR/../../.." && pwd)"
 RUNNER="${TASK123_COMPARISON_RUNNER:-$SCRIPT_DIR/run_task123.sh}"
 ANALYZER="${TASK123_COMPARISON_ANALYZER:-$SCRIPT_DIR/compare_task123_guests.py}"
+ROOTFS_IMAGE="${ROOTFS_IMAGE:-$ROOT/tmp/source-cache/rootfs/qemu-aarch64/rootfs.img}"
 
 mode=quick
 mode_set=0
@@ -84,6 +85,30 @@ canonical_executable() {
     printf '%s\n' "$resolved"
 }
 
+prepare_local_rootfs() {
+    local source
+    if [[ -s "$ROOTFS_IMAGE" ]]; then
+        return 0
+    fi
+
+    local -a candidates=(
+        "$ROOT/tmp/vmconfigs/two-guest-net/current/rootfs.img"
+        "$ROOT/tmp/task123-native-inputs/rootfs.img"
+        "$ROOT/tmp/rootfs-task12.img"
+        "$ROOT/tmp/rootfs.img"
+    )
+    for source in "${candidates[@]}"; do
+        if [[ -s "$source" ]]; then
+            mkdir -p "$(dirname -- "$ROOTFS_IMAGE")"
+            cp -- "$source" "$ROOTFS_IMAGE.tmp.$$"
+            mv -- "$ROOTFS_IMAGE.tmp.$$" "$ROOTFS_IMAGE"
+            return 0
+        fi
+    done
+
+    ROOTFS_IMAGE=
+}
+
 prepare_output() {
     local parent
     if [[ -z "$output_candidate" ]]; then
@@ -141,8 +166,6 @@ prepare_output() {
         fail "output and artifact cache must be separate: output=$OUTPUT cache=$CACHE"
         return 2
     fi
-    ORCHESTRATOR_LOG="$OUTPUT/orchestrator.log"
-    : > "$ORCHESTRATOR_LOG"
     {
         printf 'schema=1\nmode=%s\nstability_seconds=%s\ntask2_count=%s\ntask3_frames=3\n' \
             "$mode" "$STABILITY_SECONDS" "$TASK2_COUNT"
@@ -159,19 +182,22 @@ prepare_output() {
 run_guest() {
     local guest=$1
     local output="$OUTPUT/$guest"
-    printf 'PHASE guest-%s\n' "$guest" | tee -a "$ORCHESTRATOR_LOG"
+    printf 'PHASE guest-%s\n' "$guest"
     printf 'STEP run-%s mode=stability seconds=%s task2_count=%s\n' \
-        "$guest" "$STABILITY_SECONDS" "$TASK2_COUNT" | tee -a "$ORCHESTRATOR_LOG"
+        "$guest" "$STABILITY_SECONDS" "$TASK2_COUNT"
     local runner_environment=(
         "TASK123_SHARED_ARTIFACT_DIR=$CACHE"
         "TASK123_TIMEOUT_S=$RUN_TIMEOUT"
     )
+    if [[ -n "$ROOTFS_IMAGE" ]]; then
+        runner_environment+=("ROOTFS_IMAGE=$ROOTFS_IMAGE")
+    fi
     if [[ "$allow_qemu_timer_limit" -eq 1 ]]; then
         runner_environment+=(TASK123_ALLOW_QEMU_TIMER_LIMIT=1)
     fi
     env "${runner_environment[@]}" "$RUNNER" --app-guest "$guest" --mode stability \
         --seconds "$STABILITY_SECONDS" --task2-count "$TASK2_COUNT" \
-        --output "$output" 2>&1 | tee -a "$ORCHESTRATOR_LOG"
+        --output "$output"
 }
 
 main() {
@@ -198,13 +224,14 @@ main() {
     fi
     RUNNER="$(canonical_executable runner "$RUNNER")"
     ANALYZER="$(canonical_executable analyzer "$ANALYZER")"
+    prepare_local_rootfs
     prepare_output
 
-    printf 'OUTPUT %s\nCACHE %s\n' "$OUTPUT" "$CACHE" | tee -a "$ORCHESTRATOR_LOG"
+    printf 'OUTPUT %s\nCACHE %s\n' "$OUTPUT" "$CACHE"
     run_guest linux
     run_guest starryos
 
-    printf 'PHASE comparison-analysis\n' | tee -a "$ORCHESTRATOR_LOG"
+    printf 'PHASE comparison-analysis\n'
     analyzer_arguments=(
         --linux-run "$OUTPUT/linux"
         --starryos-run "$OUTPUT/starryos"
@@ -213,7 +240,7 @@ main() {
     if [[ "$allow_qemu_timer_limit" -eq 1 ]]; then
         analyzer_arguments+=(--allow-qemu-timer-limit)
     fi
-    "$ANALYZER" "${analyzer_arguments[@]}" 2>&1 | tee -a "$ORCHESTRATOR_LOG"
+    "$ANALYZER" "${analyzer_arguments[@]}"
     [[ -s "$OUTPUT/comparison/comparison.json" &&
        -s "$OUTPUT/comparison/comparison-report.md" ]] || {
         fail "comparison analyzer did not publish both output files"

@@ -257,7 +257,7 @@ run_full_profile() {
 
     announce '[task123] START task3-fault-summary'
     "$TASK123_FAULT_SUMMARIZER" --suite-dir "$OUTPUT/task3-faults" \
-        >> "$REPRODUCTION_LOG" 2>&1
+        2>&1 | tee -a -- "$REPRODUCTION_LOG"
     [[ -s "$OUTPUT/task3-faults/fault-summary.json" ]] ||
         fail "fault summarizer produced no fault-summary.json"
     announce '[task123] PASS  task3-fault-summary'
