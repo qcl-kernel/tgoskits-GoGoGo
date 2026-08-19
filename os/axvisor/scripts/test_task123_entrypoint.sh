@@ -41,7 +41,7 @@ chmod 0755 "$fake_runner"
 
 help_arguments="$tmp/help-arguments"
 TASK123_TEST_ARGUMENTS="$help_arguments" \
-    TASK123_COMPARISON_RUNNER="$fake_runner" "$ENTRYPOINT" --help > "$tmp/help.out"
+    TASK123_COMPARISON_RUNNER="$fake_runner" "$ENTRYPOINT" --help > "$tmp/help.out" 2>&1
 grep -Fq -- 'Usage:' "$tmp/help.out" || fail '--help did not print usage'
 [[ ! -e "$help_arguments" ]] ||
     fail 'help invocation started the comparison runner'
