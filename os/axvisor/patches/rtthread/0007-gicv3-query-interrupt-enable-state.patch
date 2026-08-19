@@ -4,7 +4,7 @@ diff --git a/libcpu/aarch64/common/gic.c b/libcpu/aarch64/common/gic.c
 @@ -108,6 +108,19 @@ void arm_gic_umask(rt_uint64_t index, int irq)
      GIC_DIST_ENABLE_SET(_gic_table[index].dist_hw_base, irq) = mask;
  }
- 
+
 +rt_uint64_t arm_gic_get_enable_irq(rt_uint64_t index, int irq)
 +{
 +    rt_uint64_t enabled;
@@ -27,7 +27,7 @@ diff --git a/libcpu/aarch64/common/gicv3.c b/libcpu/aarch64/common/gicv3.c
 @@ -109,6 +109,29 @@ void arm_gic_umask(rt_uint64_t index, int irq)
      }
  }
- 
+
 +rt_uint64_t arm_gic_get_enable_irq(rt_uint64_t index, int irq)
 +{
 +    rt_uint64_t enabled;
@@ -58,22 +58,22 @@ diff --git a/libcpu/aarch64/common/include/gic.h b/libcpu/aarch64/common/include
 --- a/libcpu/aarch64/common/include/gic.h
 +++ b/libcpu/aarch64/common/include/gic.h
 @@ -20,6 +20,7 @@ void arm_gic_ack(rt_uint64_t index, int irq);
- 
+
  void arm_gic_mask(rt_uint64_t index, int irq);
  void arm_gic_umask(rt_uint64_t index, int irq);
 +rt_uint64_t arm_gic_get_enable_irq(rt_uint64_t index, int irq);
- 
+
  rt_uint64_t arm_gic_get_pending_irq(rt_uint64_t index, int irq);
  void arm_gic_set_pending_irq(rt_uint64_t index, int irq);
 diff --git a/libcpu/aarch64/common/include/gicv3.h b/libcpu/aarch64/common/include/gicv3.h
 --- a/libcpu/aarch64/common/include/gicv3.h
 +++ b/libcpu/aarch64/common/include/gicv3.h
 @@ -145,6 +145,7 @@ void arm_gic_ack(rt_uint64_t index, int irq);
- 
+
  void arm_gic_mask(rt_uint64_t index, int irq);
  void arm_gic_umask(rt_uint64_t index, int irq);
 +rt_uint64_t arm_gic_get_enable_irq(rt_uint64_t index, int irq);
- 
+
  rt_uint64_t arm_gic_get_pending_irq(rt_uint64_t index, int irq);
  void arm_gic_set_pending_irq(rt_uint64_t index, int irq);
 diff --git a/libcpu/aarch64/common/include/interrupt.h b/libcpu/aarch64/common/include/interrupt.h
@@ -86,7 +86,7 @@ diff --git a/libcpu/aarch64/common/include/interrupt.h b/libcpu/aarch64/common/i
 +#ifndef SOC_BCM283x
 +unsigned int rt_hw_interrupt_get_enable(int vector);
 +#endif
- 
+
  int rt_hw_interrupt_get_irq(void);
  void rt_hw_interrupt_ack(int vector);
 diff --git a/libcpu/aarch64/common/interrupt.c b/libcpu/aarch64/common/interrupt.c
@@ -95,7 +95,7 @@ diff --git a/libcpu/aarch64/common/interrupt.c b/libcpu/aarch64/common/interrupt
 @@ -170,6 +170,18 @@ if (vector < 32)
  #endif
  }
- 
+
 +#ifndef SOC_BCM283x
 +/**
 + * This function returns whether an interrupt is enabled on this CPU.

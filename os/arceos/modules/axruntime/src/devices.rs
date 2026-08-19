@@ -106,12 +106,12 @@ pub(crate) fn init_net() {
     register_wireless_devices(wireless);
 }
 
-#[cfg(all(feature = "net", feature = "fs"))]
+#[cfg(all(feature = "net", any(feature = "fs", feature = "embedded-rootfs")))]
 fn register_unix_namespace() {
     ax_net::unix::register_unix_namespace(crate::unix_ns::AxFsUnixNamespace);
 }
 
-#[cfg(all(feature = "net", not(feature = "fs")))]
+#[cfg(all(feature = "net", not(any(feature = "fs", feature = "embedded-rootfs"))))]
 fn register_unix_namespace() {
     // Path-based Unix sockets require filesystem namespace support.
 }

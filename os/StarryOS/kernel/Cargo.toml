@@ -65,7 +65,8 @@ SMP = "4"
 [features]
 default = ["dynamic_debug"]
 dev-log = []
-ext4 = ["ax-fs-ng/ext4"]
+ext4 = ["ax-fs-ng/ext4", "ax-runtime/ext4fs"]
+embedded-rootfs = ["ax-runtime/embedded-rootfs"]
 fat = ["ax-fs-ng/fat"]
 input = ["dep:ax-input", "ax-runtime/input"]
 ipi = ["ax-runtime/ipi"]
@@ -130,7 +131,6 @@ ax-runtime = { workspace = true, features = [
     "uspace",
     "multitask",
     "rtc",
-    "ext4fs",
     "net",
     "serial",
 ] }

@@ -54,22 +54,25 @@ index 3791a1bf..0e7c4dc2 100644
  env['ASCOM'] = env['ASPPCOM']
 -env['LINKCOM'] = '$LINK -o $TARGET $LINKFLAGS $__RPATH $SOURCES $_LIBDIRFLAGS -Wl,--start-group $_LIBFLAGS -Wl,--end-group'
 +env['LINKCOM'] = '$LINK -o $TARGET $LINKFLAGS --start-group $SOURCES ' + rtconfig.LIBS + ' --end-group'
- 
+
  Export('RTT_ROOT')
  Export('rtconfig')
 diff --git a/bsp/qemu-virt64-aarch64/applications/SConscript b/bsp/qemu-virt64-aarch64/applications/SConscript
-index c583d301..410e4727 100644
+index c583d301..df07af34 100644
 --- a/bsp/qemu-virt64-aarch64/applications/SConscript
 +++ b/bsp/qemu-virt64-aarch64/applications/SConscript
-@@ -1,7 +1,7 @@
+@@ -1,9 +1,10 @@
  from building import *
- 
+
  cwd     = GetCurrentDir()
 -src     = Glob('*.c') + Glob('*.cpp')
 +src     = Glob('*.c') + Glob('*.cpp') + Glob('rt-ipc-test/*.c')
  CPPPATH = [cwd]
- 
+
  group = DefineGroup('Applications', src, depend = [''], CPPPATH = CPPPATH)
++group += SConscript('task3/SConscript')
+
+ Return('group')
 diff --git a/bsp/qemu-virt64-aarch64/applications/console.c b/bsp/qemu-virt64-aarch64/applications/console.c
 deleted file mode 100644
 index b69b9b3b..00000000
@@ -385,7 +388,7 @@ index 4447a4f4..ab5481a6 100644
   */
 -
  #include <rtthread.h>
- 
+
  int main(void)
  {
 -    rt_kprintf("hello rt-thread\n");
@@ -944,7 +947,7 @@ index 801e889b..b8f134a9 100644
 +#define VIRTIO_MAX_NR       1
 +#define VIRTIO_IRQ_BASE     (224)
 +#define VIRTIO_VENDOR_ID    0x1AF4      /* Red Hat (standard virtio PCI vendor) */
- 
+
  /* GIC */
 -#define MAX_HANDLERS        96
 +#define MAX_HANDLERS        256
@@ -952,7 +955,7 @@ index 801e889b..b8f134a9 100644
 -#define ARM_GIC_NR_IRQS     96
 +#define ARM_GIC_NR_IRQS     256
  #define ARM_GIC_MAX_NR      1
- 
+
  #define IRQ_ARM_IPI_KICK    0
 diff --git a/bsp/qemu-virt64-aarch64/link.lds b/bsp/qemu-virt64-aarch64/link.lds
 new file mode 100644
@@ -1101,7 +1104,7 @@ index 7a4f7103..63a9c40e 100644
 @@ -1,530 +1,211 @@
  #ifndef RT_CONFIG_H__
  #define RT_CONFIG_H__
- 
+
 -/* RT-Thread Kernel */
 -
 -/* klibc options */
@@ -1769,7 +1772,7 @@ index 7a4f7103..63a9c40e 100644
 +#define RT_PAGE_AFFINITY_BLOCK_SIZE 0x1000
 +#define RT_CONSOLE_DEVICE_NAME "uart0"
 +#define FINSH_THREAD_NAME "tshell"
- 
+
 -#define BSP_SUPPORT_FPU
 -#define BSP_USING_UART
 -#define RT_USING_UART0
@@ -1799,7 +1802,7 @@ index 7a4f7103..63a9c40e 100644
 +#define SAL_USING_LWIP 1
 +#define RT_LWIP_UDP_RECVMBOX_SIZE 16
 +#define MEMP_NUM_NETBUF 16
- 
+
  #endif
 diff --git a/bsp/qemu-virt64-aarch64/rtconfig.py b/bsp/qemu-virt64-aarch64/rtconfig.py
 index b9008b6f..d80f4f62 100644
@@ -1809,7 +1812,7 @@ index b9008b6f..d80f4f62 100644
  import os
 +import shutil
 +import subprocess
- 
+
 -# toolchains options
  ARCH        ='aarch64'
  CPU         ='cortex-a'
@@ -1827,7 +1830,7 @@ index b9008b6f..d80f4f62 100644
 +RTT_PRIORITY_INC = (
 +    ' -I' + RTT_ROOT_PY + '/components/libc/compilers/common/extension'
 +)
- 
+
  if PLATFORM == 'gcc':
 -    # toolchains
 -    PREFIX  = os.getenv('RTT_CC_PREFIX') or 'aarch64-none-elf-'
@@ -1865,7 +1868,7 @@ index b9008b6f..d80f4f62 100644
 +    LIBS    = ' ' + LIBGCC + ' ' + LIBGCC_EH + ' ' + LIBC
      CPATH   = ''
      LPATH   = ''
- 
+
 diff --git a/components/drivers/pin/dev_pin.c b/components/drivers/pin/dev_pin.c
 index 4403557b..202149d8 100644
 --- a/components/drivers/pin/dev_pin.c
@@ -1880,7 +1883,7 @@ index 4403557b..202149d8 100644
      {
          return _hw_pin.ops->pin_attach_irq(&_hw_pin.parent, pin, mode, hdr, args);
 @@ -114,7 +114,7 @@ rt_err_t rt_pin_attach_irq(rt_base_t pin, rt_uint8_t mode,
- 
+
  rt_err_t rt_pin_detach_irq(rt_base_t pin)
  {
 -    RT_ASSERT(_hw_pin.ops != RT_NULL);
@@ -1889,7 +1892,7 @@ index 4403557b..202149d8 100644
      {
          return _hw_pin.ops->pin_detach_irq(&_hw_pin.parent, pin);
 @@ -124,7 +124,7 @@ rt_err_t rt_pin_detach_irq(rt_base_t pin)
- 
+
  rt_err_t rt_pin_irq_enable(rt_base_t pin, rt_uint8_t enabled)
  {
 -    RT_ASSERT(_hw_pin.ops != RT_NULL);
@@ -1898,7 +1901,7 @@ index 4403557b..202149d8 100644
      {
          return _hw_pin.ops->pin_irq_enable(&_hw_pin.parent, pin, enabled);
 @@ -134,7 +134,7 @@ rt_err_t rt_pin_irq_enable(rt_base_t pin, rt_uint8_t enabled)
- 
+
  rt_err_t rt_pin_debounce(rt_base_t pin, rt_uint32_t debounce)
  {
 -    RT_ASSERT(_hw_pin.ops != RT_NULL);
@@ -1914,27 +1917,27 @@ index 4403557b..202149d8 100644
 +    if (_hw_pin.ops == RT_NULL) return -RT_ERROR;
      _hw_pin.ops->pin_mode(&_hw_pin.parent, pin, mode);
  }
- 
+
  void rt_pin_write(rt_base_t pin, rt_ssize_t value)
  {
 -    RT_ASSERT(_hw_pin.ops != RT_NULL);
 +    if (_hw_pin.ops == RT_NULL) return -RT_ERROR;
      _hw_pin.ops->pin_write(&_hw_pin.parent, pin, value);
  }
- 
+
  rt_ssize_t rt_pin_read(rt_base_t pin)
  {
 -    RT_ASSERT(_hw_pin.ops != RT_NULL);
 +    if (_hw_pin.ops == RT_NULL) return -RT_ERROR;
      return _hw_pin.ops->pin_read(&_hw_pin.parent, pin);
  }
- 
+
  /* Get pin number by name, such as PA.0, P0.12 */
  rt_base_t rt_pin_get(const char *name)
  {
 -    RT_ASSERT(_hw_pin.ops != RT_NULL);
 +    if (_hw_pin.ops == RT_NULL) return -RT_ERROR;
- 
+
      if (_hw_pin.ops->pin_get == RT_NULL)
      {
 diff --git a/components/drivers/virtio/virtio.c b/components/drivers/virtio/virtio.c
@@ -1944,10 +1947,10 @@ index 0ad924e9..1d79c50f 100644
 @@ -121,21 +121,43 @@ rt_err_t virtio_queue_init(struct virtio_device *dev, rt_uint32_t queue_index, r
          return -RT_ENOMEM;
      }
- 
+
 -    rt_memset(pages, 0, pages_total_size);
 +   rt_memset(pages, 0, pages_total_size);
- 
+
 -    dev->mmio_config->guest_page_size = VIRTIO_PAGE_SIZE;
 -    dev->mmio_config->queue_sel = queue_index;
 -    dev->mmio_config->queue_num = ring_size;
@@ -1957,7 +1960,7 @@ index 0ad924e9..1d79c50f 100644
 +   dev->mmio_config->queue_sel = queue_index;
 +   dev->mmio_config->queue_num = ring_size;
 +   dev->mmio_config->queue_align = VIRTIO_PAGE_SIZE;
- 
+
 -    queue->num = ring_size;
 -    queue->desc = (struct virtq_desc *)((rt_ubase_t)pages);
 -    queue->avail = (struct virtq_avail *)(((rt_ubase_t)pages) + VIRTQ_DESC_TOTAL_SIZE(ring_size));
@@ -1968,7 +1971,7 @@ index 0ad924e9..1d79c50f 100644
 +   queue->avail = (struct virtq_avail *)(((rt_ubase_t)pages) + VIRTQ_DESC_TOTAL_SIZE(ring_size));
 +   queue->used = (struct virtq_used *)VIRTIO_PAGE_ALIGN(
 +           (rt_ubase_t)&queue->avail->ring[ring_size] + VIRTQ_AVAIL_RES_SIZE);
- 
+
 -    queue->used_idx = 0;
 +#ifdef RT_USING_VIRTIO10
 +    /* Virtio MMIO version 2 (non-legacy): use split-ring 64-bit address registers */
@@ -1994,13 +1997,13 @@ index 0ad924e9..1d79c50f 100644
 +#endif
 +
 +   queue->used_idx = 0;
- 
+
      /* All descriptors start out unused */
      for (i = 0; i < ring_size; ++i)
 @@ -164,10 +186,20 @@ void virtio_queue_destroy(struct virtio_device *dev, rt_uint32_t queue_index)
      rt_free(queue->free);
      rt_free_align((void *)queue->desc);
- 
+
 -    dev->mmio_config->queue_sel = queue_index;
 +   dev->mmio_config->queue_sel = queue_index;
 +#ifdef RT_USING_VIRTIO10
@@ -2014,7 +2017,7 @@ index 0ad924e9..1d79c50f 100644
 +#else
      dev->mmio_config->queue_pfn = RT_NULL;
 +#endif
- 
+
 -    queue->num = 0;
 +   queue->num = 0;
      queue->desc = RT_NULL;
@@ -2027,20 +2030,20 @@ index 3807585d..052a9b98 100644
 @@ -20,11 +20,16 @@
  #include <ioremap.h>
  #endif
- 
+
 +#include <mm_aspace.h>
 +
  #if RT_NAME_MAX < 16
  #error "Please set RT_NAME_MAX to at lest 16"
  #endif
- 
+
  #ifdef RT_USING_VIRTIO10
 +#define RT_USING_VIRTIO_VERSION 0x2
 +#endif
 +#ifndef RT_USING_VIRTIO_VERSION
  #define RT_USING_VIRTIO_VERSION 0x1
  #endif
- 
+
 @@ -51,7 +56,21 @@
  #define VIRTIO_VA2PA(vaddr)         ((rt_ubase_t)rt_kmem_v2p(vaddr))
  #define VIRTIO_PA2VA(paddr)         ((rt_ubase_t)rt_ioremap((void *)paddr, ARCH_PAGE_SIZE))
@@ -2071,7 +2074,7 @@ index 3807585d..052a9b98 100644
 -        struct virtio_mmio_config *mmio_config;
 +        volatile struct virtio_mmio_config *mmio_config;
      };
- 
+
  #ifdef RT_USING_SMP
 diff --git a/components/drivers/virtio/virtio_net.c b/components/drivers/virtio/virtio_net.c
 index d92421b6..29e0de1b 100644
@@ -2085,7 +2088,7 @@ index d92421b6..29e0de1b 100644
      struct virtio_net_device *virtio_net_dev = (struct virtio_net_device *)dev;
      struct virtio_device *virtio_dev = &virtio_net_dev->virtio_dev;
      struct virtq *queue_tx = &virtio_dev->queues[VIRTIO_NET_QUEUE_TX];
- 
+
 -    id = (queue_tx->avail->idx * 2) % queue_tx->num;
 +    /* Reclaim completed TX chains before allocating new descriptors. The
 +     * device owns a chain until it publishes its head in the used ring. */
@@ -2108,91 +2111,93 @@ index d92421b6..29e0de1b 100644
 +            virtio_free_desc(virtio_dev, VIRTIO_NET_QUEUE_TX, id);
 +        return -RT_EFULL;
 +    }
- 
+
      virtio_net_dev->info[id].hdr.flags = 0;
      virtio_net_dev->info[id].hdr.gso_type = 0;
 @@ -36,9 +57,6 @@ static rt_err_t virtio_net_tx(rt_device_t dev, struct pbuf *p)
- 
-     pbuf_copy_partial(p, virtio_net_dev->info[id].rx_buffer, p->tot_len, 0);
- 
+
+-    pbuf_copy_partial(p, virtio_net_dev->info[id].rx_buffer, p->tot_len, 0);
++    pbuf_copy_partial(p, virtio_net_dev->info[id].tx_buffer, p->tot_len, 0);
+
 -    virtio_free_desc(virtio_dev, VIRTIO_NET_QUEUE_TX, id);
 -    virtio_free_desc(virtio_dev, VIRTIO_NET_QUEUE_TX, id + 1);
 -
      virtio_fill_desc(virtio_dev, VIRTIO_NET_QUEUE_TX, id,
              VIRTIO_VA2PA(&virtio_net_dev->info[id].hdr), VIRTIO_NET_HDR_SIZE, VIRTQ_DESC_F_NEXT, id + 1);
- 
+
 @@ -46,12 +64,10 @@ static rt_err_t virtio_net_tx(rt_device_t dev, struct pbuf *p)
-             VIRTIO_VA2PA(virtio_net_dev->info[id].rx_buffer), p->tot_len, 0, 0);
- 
+-            VIRTIO_VA2PA(virtio_net_dev->info[id].rx_buffer), p->tot_len, 0, 0);
++            VIRTIO_VA2PA(virtio_net_dev->info[id].tx_buffer), p->tot_len, 0, 0);
+
      virtio_submit_chain(virtio_dev, VIRTIO_NET_QUEUE_TX, id);
 +    rt_hw_dsb();
- 
+
      virtio_queue_notify(virtio_dev, VIRTIO_NET_QUEUE_TX);
- 
+
 -    virtio_alloc_desc(virtio_dev, VIRTIO_NET_QUEUE_TX);
 -    virtio_alloc_desc(virtio_dev, VIRTIO_NET_QUEUE_TX);
 -
      return RT_EOK;
  }
- 
+
 @@ -66,7 +82,8 @@ static struct pbuf *virtio_net_rx(rt_device_t dev)
- 
+
      if (queue_rx->used_idx != queue_rx->used->idx)
      {
 -        id = (queue_rx->used->ring[queue_rx->used_idx % queue_rx->num].id + 1) % queue_rx->num;
 +        rt_uint16_t used_id = queue_rx->used->ring[queue_rx->used_idx % queue_rx->num].id;
 +        id = used_id;
          len = queue_rx->used->ring[queue_rx->used_idx % queue_rx->num].len - VIRTIO_NET_HDR_SIZE;
- 
+
          if (len > VIRTIO_NET_PAYLOAD_MAX_SIZE)
 @@ -79,11 +96,11 @@ static struct pbuf *virtio_net_rx(rt_device_t dev)
- 
+
          if (p != RT_NULL)
          {
 -            rt_memcpy(p->payload, (void *)queue_rx->desc[id].addr - PV_OFFSET, len);
 +            rt_memcpy(p->payload, virtio_net_dev->info[id / 2].rx_buffer, len);
- 
+
              queue_rx->used_idx++;
- 
+
 -            virtio_submit_chain(virtio_dev, VIRTIO_NET_QUEUE_RX, id - 1);
 +            virtio_submit_chain(virtio_dev, VIRTIO_NET_QUEUE_RX, used_id);
- 
+
              virtio_queue_notify(virtio_dev, VIRTIO_NET_QUEUE_RX);
          }
 @@ -106,31 +123,40 @@ static rt_err_t virtio_net_init(rt_device_t dev)
      virtio_alloc_desc_chain(virtio_dev, VIRTIO_NET_QUEUE_RX, queue_rx->num, idx);
      virtio_alloc_desc_chain(virtio_dev, VIRTIO_NET_QUEUE_TX, queue_tx->num, idx);
- 
+
 -    for (i = 0; i < queue_rx->num; ++i)
 +    for (i = 0; i < (queue_rx->num / 2); ++i)
      {
          rt_uint16_t id = (i * 2) % queue_rx->num;
 -        void *addr = virtio_net_dev->info[i].tx_buffer;
 +        void *addr = &virtio_net_dev->info[i].hdr;
- 
+
          /* Descriptor for net_hdr */
          virtio_fill_desc(virtio_dev, VIRTIO_NET_QUEUE_RX, id,
 -                VIRTIO_VA2PA(addr), VIRTIO_NET_HDR_SIZE, VIRTQ_DESC_F_NEXT | VIRTQ_DESC_F_WRITE, id + 1);
 +                (rt_uint64_t)(rt_ubase_t)addr, VIRTIO_NET_HDR_SIZE, VIRTQ_DESC_F_NEXT | VIRTQ_DESC_F_WRITE, id + 1);
- 
+
          /* Descriptor for data */
          virtio_fill_desc(virtio_dev, VIRTIO_NET_QUEUE_RX, id + 1,
 -                VIRTIO_VA2PA(addr) + VIRTIO_NET_HDR_SIZE, VIRTIO_NET_MSS, VIRTQ_DESC_F_WRITE, 0);
 +                VIRTIO_VA2PA(virtio_net_dev->info[i].rx_buffer), VIRTIO_NET_MSS, VIRTQ_DESC_F_WRITE, 0);
- 
+
          queue_rx->avail->ring[i] = id;
      }
      rt_hw_dsb();
- 
+
      queue_rx->avail->flags = 0;
 -    queue_rx->avail->idx = queue_rx->num;
 +    queue_rx->avail->idx = queue_rx->num / 2;
- 
+
      queue_rx->used_idx = queue_rx->used->idx;
- 
+
      queue_tx->avail->flags = VIRTQ_AVAIL_F_NO_INTERRUPT;
      queue_tx->avail->idx = 0;
- 
+
 +    /* The initial allocation only reserves TX descriptors; none have been
 +     * submitted. Return them to the free pool so the TX path can allocate and
 +     * own exactly the chains it submits. */
@@ -2203,7 +2208,7 @@ index d92421b6..29e0de1b 100644
 +    }
 +
      virtio_queue_notify(virtio_dev, VIRTIO_NET_QUEUE_RX);
- 
+
      return eth_device_linkchange(&virtio_net_dev->parent, RT_TRUE);
 @@ -184,7 +210,6 @@ static void virtio_net_isr(int irqno, void *param)
      if (queue_rx->used_idx != queue_rx->used->idx)
@@ -2216,13 +2221,13 @@ index d92421b6..29e0de1b 100644
 @@ -207,14 +232,45 @@ rt_err_t rt_virtio_net_init(rt_ubase_t *mmio_base, rt_uint32_t irq)
      virtio_dev->irq = irq;
      virtio_dev->mmio_base = mmio_base;
- 
+
 -    virtio_net_dev->config = (struct virtio_net_config *)virtio_dev->mmio_config->config;
 +    virtio_net_dev->config = (volatile struct virtio_net_config *)virtio_dev->mmio_config->config;
- 
+
      virtio_reset_device(virtio_dev);
      virtio_status_acknowledge_driver(virtio_dev);
- 
+
 -    virtio_dev->mmio_config->driver_features = virtio_dev->mmio_config->device_features & ~(
 -            (1 << VIRTIO_NET_F_CTRL_VQ) |
 -            (1 << VIRTIO_F_RING_EVENT_IDX));
@@ -2260,9 +2265,9 @@ index d92421b6..29e0de1b 100644
 +        regs[0x20/4] = feat_hi;    /* driver_features word 1 */
 +        rt_hw_dsb();
 +    }
- 
+
      virtio_status_driver_ok(virtio_dev);
- 
+
 diff --git a/components/libc/compilers/common/extension/sys/types.h b/components/libc/compilers/common/extension/sys/types.h
 index cae4d4ad..9e7d6f9f 100644
 --- a/components/libc/compilers/common/extension/sys/types.h
@@ -2270,7 +2275,7 @@ index cae4d4ad..9e7d6f9f 100644
 @@ -20,7 +20,9 @@
  extern "C" {
  #endif
- 
+
 +#ifndef __DEFINED_clockid_t
  typedef int32_t          clockid_t;
 +#endif
@@ -2288,7 +2293,7 @@ index cae4d4ad..9e7d6f9f 100644
 +#endif
  typedef long             suseconds_t;   /* microseconds. */
  typedef unsigned long    useconds_t;    /* microseconds (unsigned) */
- 
+
 diff --git a/components/libc/compilers/common/include/fcntl.h b/components/libc/compilers/common/include/fcntl.h
 new file mode 100644
 index 00000000..72b975fe
@@ -2347,7 +2352,7 @@ index 817fe786..b4a612b5 100644
 +++ b/components/libc/compilers/common/include/sys/time.h
 @@ -201,10 +201,12 @@ int nanosleep(const struct timespec *rqtp, struct timespec *rmtp);
  #endif /* defined(RT_USING_POSIX_CLOCK) || defined (RT_USING_POSIX_TIMER) */
- 
+
  #ifdef RT_USING_POSIX_CLOCK
 +#if !defined(__MUSL__) && !defined(__linux__)
  int clock_getres  (clockid_t clockid, struct timespec *res);
@@ -2357,7 +2362,7 @@ index 817fe786..b4a612b5 100644
 +#endif
  int rt_timespec_to_tick(const struct timespec *time);
  #endif /* RT_USING_POSIX_CLOCK */
- 
+
 diff --git a/components/libc/compilers/musl/SConscript b/components/libc/compilers/musl/SConscript
 index 8c5d0448..ad1a71fa 100644
 --- a/components/libc/compilers/musl/SConscript
@@ -2369,7 +2374,7 @@ index 8c5d0448..ad1a71fa 100644
 -    LINKFLAGS = ' --specs=kernel.specs'
 +    LINKFLAGS = ''
      AddDepend(['RT_USING_MUSLLIBC', 'RT_USING_LIBC'])
- 
+
      group = group + DefineGroup('Compiler', src, depend = [''], CPPPATH = CPPPATH, LINKFLAGS = LINKFLAGS, CPPDEFINES = CPPDEFINES, LIBS = LIBS)
 diff --git a/components/net/lwip/port/ethernetif.c b/components/net/lwip/port/ethernetif.c
 index 0f32ac85..d8a5d3b9 100644
@@ -2397,7 +2402,7 @@ index 9cd86abc..cbc7fc31 100644
 --- a/components/net/lwip/port/lwipopts.h
 +++ b/components/net/lwip/port/lwipopts.h
 @@ -481,7 +481,11 @@
- 
+
  #define LWIP_UDPLITE                0
  #define UDP_TTL                     255
 +#ifdef RT_LWIP_UDP_RECVMBOX_SIZE
@@ -2405,7 +2410,7 @@ index 9cd86abc..cbc7fc31 100644
 +#else
  #define DEFAULT_UDP_RECVMBOX_SIZE   1
 +#endif
- 
+
  /* ---------- RAW options ---------- */
  #ifdef RT_LWIP_RAW
 diff --git a/libcpu/aarch64/SConscript b/libcpu/aarch64/SConscript
@@ -2414,11 +2419,11 @@ index 957708fd..cdf69a64 100644
 +++ b/libcpu/aarch64/SConscript
 @@ -16,7 +16,7 @@ if not os.path.exists(bsp_path + "/link.lds"):
      Preprocessing("link.lds.S", ".lds", CPPPATH=[bsp_path])
- 
+
  # fix the linker with crtx.o
 -Env['LINKFLAGS'] += ' -nostartfiles'
 +# Env['LINKFLAGS'] += ' -nostartfiles'  # disabled for ld.bfd
- 
+
  # add common code files
  group = group + SConscript(os.path.join('common', 'SConscript'))
 diff --git a/libcpu/aarch64/common/cpu_gcc.S b/libcpu/aarch64/common/cpu_gcc.S
@@ -2432,7 +2437,7 @@ index 840668a7..b160e6ce 100644
 -    msr     CNTP_CTL_EL0, x0
 +    msr     CNTV_CTL_EL0, x0
      ret
- 
+
  /*
 - *set gtimer CNTP_TVAL_EL0 value
 + *set gtimer CNTV_TVAL_EL0 value
@@ -2442,7 +2447,7 @@ index 840668a7..b160e6ce 100644
 -    msr     CNTP_TVAL_EL0, x0
 +    msr     CNTV_TVAL_EL0, x0
      ret
- 
+
  /*
 - *get gtimer CNTP_TVAL_EL0 value
 + *get gtimer CNTV_TVAL_EL0 value
@@ -2452,8 +2457,8 @@ index 840668a7..b160e6ce 100644
 -    mrs     x0, CNTP_TVAL_EL0
 +    mrs     x0, CNTV_TVAL_EL0
      ret
- 
- 
+
+
 diff --git a/libcpu/aarch64/common/gic.c b/libcpu/aarch64/common/gic.c
 index 498cc9ea..b93e5744 100644
 --- a/libcpu/aarch64/common/gic.c
@@ -2461,7 +2466,7 @@ index 498cc9ea..b93e5744 100644
 @@ -110,6 +110,19 @@ void arm_gic_umask(rt_uint64_t index, int irq)
      GIC_DIST_ENABLE_SET(_gic_table[index].dist_hw_base, irq) = mask;
  }
- 
+
 +rt_uint64_t arm_gic_get_enable_irq(rt_uint64_t index, int irq)
 +{
 +    rt_uint64_t enabled;
@@ -2485,7 +2490,7 @@ index 0ddc3b99..9f8ecac3 100644
 @@ -108,6 +108,29 @@ void arm_gic_umask(rt_uint64_t index, int irq)
      }
  }
- 
+
 +rt_uint64_t arm_gic_get_enable_irq(rt_uint64_t index, int irq)
 +{
 +    rt_uint64_t enabled;
@@ -2515,7 +2520,7 @@ index 0ddc3b99..9f8ecac3 100644
 @@ -117,23 +140,15 @@ rt_uint64_t arm_gic_get_pending_irq(rt_uint64_t index, int irq)
      irq = irq - _gic_table[index].offset;
      RT_ASSERT(irq >= 0);
- 
+
 -    if (irq >= 16)
 +    if (irq < 32)
      {
@@ -2539,20 +2544,20 @@ index 0ddc3b99..9f8ecac3 100644
 -        }
 +        pend = (GIC_DIST_PENDING_SET(_gic_table[index].dist_hw_base, irq) >> (irq % 32)) & 0x1;
      }
- 
+
      return pend;
 @@ -141,20 +156,23 @@ rt_uint64_t arm_gic_get_pending_irq(rt_uint64_t index, int irq)
- 
+
  void arm_gic_set_pending_irq(rt_uint64_t index, int irq)
  {
 +    rt_uint64_t mask;
 +
      RT_ASSERT(index < ARM_GIC_MAX_NR);
- 
+
      irq = irq - _gic_table[index].offset;
      RT_ASSERT(irq >= 0);
 +    mask = 1UL << (irq % 32);
- 
+
 -    if (irq >= 16)
 +    if (irq < 32)
      {
@@ -2569,13 +2574,13 @@ index 0ddc3b99..9f8ecac3 100644
 +        GIC_DIST_PENDING_SET(_gic_table[index].dist_hw_base, irq) = mask;
      }
  }
- 
+
 @@ -166,16 +184,17 @@ void arm_gic_clear_pending_irq(rt_uint64_t index, int irq)
- 
+
      irq = irq - _gic_table[index].offset;
      RT_ASSERT(irq >= 0);
 +    mask = 1UL << (irq % 32);
- 
+
 -    if (irq >= 16)
 +    if (irq < 32)
      {
@@ -2592,55 +2597,69 @@ index 0ddc3b99..9f8ecac3 100644
 +        GIC_DIST_PENDING_CLEAR(_gic_table[index].dist_hw_base, irq) = mask;
      }
  }
- 
+
 @@ -725,10 +744,7 @@ int arm_gic_redist_init(rt_uint64_t index, rt_uint64_t redist_base)
      GIC_RDISTSGI_IGRPMODR0(redist_base, 0) = 0xffffffff;
- 
+
      /* Configure default priorities for SGI 0:15 and PPI 16:31. */
 -    for (i = 0; i < 32; i += 4)
 -    {
 -        GIC_RDISTSGI_IPRIORITYR(redist_base, i) = 0xa0a0a0a0U;
 -    }
 +    /* AxVisor's GPPT GICR model does not emulate SGI-frame IPRIORITYR writes. */
- 
+
      /* Trigger level for PPI interrupts*/
      GIC_RDISTSGI_ICFGR1(redist_base) = 0;
 diff --git a/libcpu/aarch64/common/gtimer.c b/libcpu/aarch64/common/gtimer.c
-index 514ec4e0..561b4a86 100644
+index 514ec4e0..5d9a4ee4 100644
 --- a/libcpu/aarch64/common/gtimer.c
 +++ b/libcpu/aarch64/common/gtimer.c
-@@ -17,19 +17,34 @@
+@@ -17,31 +17,63 @@
  #include <ktime.h>
  #endif
- 
+
 -#define EL1_PHY_TIMER_IRQ_NUM 30
 +#define EL1_VIR_TIMER_IRQ_NUM 27
- 
++#define GTIMER_MAX_ELAPSED_TICKS ((rt_uint64_t)(RT_TICK_MAX / 2 - 1))
+
  static volatile rt_uint64_t timer_step;
 +static volatile rt_uint64_t timer_deadline;
- 
+
  static void rt_hw_timer_isr(int vector, void *parameter)
  {
 -    rt_hw_set_gtimer_val(timer_step);
 -    rt_tick_increase();
 +    rt_uint64_t now;
 +    rt_uint64_t elapsed_ticks = 1;
++    rt_int64_t lateness;
 +
-+    timer_deadline += timer_step;
 +    rt_hw_sysreg_read(CNTVCT_EL0, now);
-+    while (timer_deadline <= now)
++    lateness = (rt_int64_t)(now - timer_deadline);
++    if (lateness >= 0)
++    {
++        elapsed_ticks = (rt_uint64_t)lateness / timer_step;
++        if (elapsed_ticks >= GTIMER_MAX_ELAPSED_TICKS)
++        {
++            elapsed_ticks = GTIMER_MAX_ELAPSED_TICKS;
++            timer_deadline = now + timer_step;
++        }
++        else
++        {
++            elapsed_ticks++;
++            timer_deadline += elapsed_ticks * timer_step;
++        }
++    }
++    else
 +    {
 +        timer_deadline += timer_step;
-+        elapsed_ticks++;
 +    }
-+    rt_hw_sysreg_write(CNTV_CVAL_EL0, timer_deadline);
 +
-+    while (elapsed_ticks-- > 0)
-+    {
-+        rt_tick_increase();
-+    }
++    rt_hw_sysreg_write(CNTV_CVAL_EL0, timer_deadline);
++    /* Bulk accounting removes work proportional to missed ticks. RT-Thread
++     * still performs its normal expired-timer scan once. */
++    rt_tick_increase_tick((rt_tick_t)elapsed_ticks);
  }
- 
+
  void rt_hw_gtimer_init(void)
  {
 -    rt_hw_interrupt_install(EL1_PHY_TIMER_IRQ_NUM, rt_hw_timer_isr, RT_NULL, "tick");
@@ -2648,7 +2667,11 @@ index 514ec4e0..561b4a86 100644
      rt_hw_isb();
      timer_step = rt_hw_get_gtimer_frq();
      rt_hw_dsb();
-@@ -40,8 +55,10 @@ void rt_hw_gtimer_init(void)
+     timer_step /= RT_TICK_PER_SECOND;
++    RT_ASSERT(timer_step > 0);
+     rt_hw_gtimer_local_enable();
+ }
+
  void rt_hw_gtimer_local_enable(void)
  {
      rt_hw_gtimer_disable();
@@ -2661,7 +2684,7 @@ index 514ec4e0..561b4a86 100644
  #ifdef RT_USING_KTIME
      rt_ktime_cputimer_init();
  #endif
-@@ -51,5 +68,5 @@ void rt_hw_gtimer_local_enable(void)
+@@ -51,5 +83,5 @@ void rt_hw_gtimer_local_enable(void)
  void rt_hw_gtimer_local_disable(void)
  {
      rt_hw_gtimer_disable();
@@ -2673,11 +2696,11 @@ index 4cdcb440..9bcd5355 100644
 --- a/libcpu/aarch64/common/include/gic.h
 +++ b/libcpu/aarch64/common/include/gic.h
 @@ -19,6 +19,7 @@ void arm_gic_ack(rt_uint64_t index, int irq);
- 
+
  void arm_gic_mask(rt_uint64_t index, int irq);
  void arm_gic_umask(rt_uint64_t index, int irq);
 +rt_uint64_t arm_gic_get_enable_irq(rt_uint64_t index, int irq);
- 
+
  rt_uint64_t arm_gic_get_pending_irq(rt_uint64_t index, int irq);
  void arm_gic_set_pending_irq(rt_uint64_t index, int irq);
 diff --git a/libcpu/aarch64/common/include/gicv3.h b/libcpu/aarch64/common/include/gicv3.h
@@ -2685,11 +2708,11 @@ index d449774c..b753c8a4 100644
 --- a/libcpu/aarch64/common/include/gicv3.h
 +++ b/libcpu/aarch64/common/include/gicv3.h
 @@ -145,6 +145,7 @@ void arm_gic_ack(rt_uint64_t index, int irq);
- 
+
  void arm_gic_mask(rt_uint64_t index, int irq);
  void arm_gic_umask(rt_uint64_t index, int irq);
 +rt_uint64_t arm_gic_get_enable_irq(rt_uint64_t index, int irq);
- 
+
  rt_uint64_t arm_gic_get_pending_irq(rt_uint64_t index, int irq);
  void arm_gic_set_pending_irq(rt_uint64_t index, int irq);
 diff --git a/libcpu/aarch64/common/include/gtimer.h b/libcpu/aarch64/common/include/gtimer.h
@@ -2697,13 +2720,13 @@ index 322f2506..a4ef2eb0 100644
 --- a/libcpu/aarch64/common/include/gtimer.h
 +++ b/libcpu/aarch64/common/include/gtimer.h
 @@ -21,7 +21,7 @@ void rt_hw_gtimer_enable();
- 
+
  rt_inline void rt_hw_gtimer_disable(void)
  {
 -    __asm__ volatile ("msr CNTP_CTL_EL0, xzr":::"memory");
 +    __asm__ volatile ("msr CNTV_CTL_EL0, xzr":::"memory");
  }
- 
+
  void rt_hw_set_gtimer_val(rt_uint64_t value);
 diff --git a/libcpu/aarch64/common/include/interrupt.h b/libcpu/aarch64/common/include/interrupt.h
 index d90b8a9e..d1f30805 100644
@@ -2716,7 +2739,7 @@ index d90b8a9e..d1f30805 100644
 +#ifndef SOC_BCM283x
 +unsigned int rt_hw_interrupt_get_enable(int vector);
 +#endif
- 
+
  int rt_hw_interrupt_get_irq(void);
  void rt_hw_interrupt_ack(int vector);
 diff --git a/libcpu/aarch64/common/include/mmu.h b/libcpu/aarch64/common/include/mmu.h
@@ -2726,12 +2749,12 @@ index eac43331..655cedcd 100644
 @@ -85,7 +85,9 @@ struct mem_desc
  #define ARCH_PAGE_TBL_SIZE  (1 << ARCH_PAGE_TBL_SHIFT)
  #define ARCH_PAGE_TBL_MASK  (ARCH_PAGE_TBL_SIZE - 1)
- 
+
 +#ifndef ARCH_VADDR_WIDTH
  #define ARCH_VADDR_WIDTH        48
 +#endif
  #define ARCH_ADDRESS_WIDTH_BITS 64
- 
+
  #define MMU_MAP_ERROR_VANOTALIGN  -1
 diff --git a/libcpu/aarch64/common/interrupt.c b/libcpu/aarch64/common/interrupt.c
 index 08ab57b5..0a1e2cab 100644
@@ -2740,7 +2763,7 @@ index 08ab57b5..0a1e2cab 100644
 @@ -170,6 +170,18 @@ if (vector < 32)
  #endif
  }
- 
+
 +#ifndef SOC_BCM283x
 +/**
 + * This function returns whether an interrupt is enabled on this CPU.
@@ -2763,7 +2786,7 @@ index ced3eaa7..045ca4a4 100644
 @@ -928,15 +928,34 @@ void rt_hw_mem_setup_early(unsigned long *tbl0, unsigned long *tbl1,
      rt_memset((char *)tbl0, 0, ARCH_PAGE_SIZE);
      rt_memset((char *)tbl1, 0, ARCH_PAGE_SIZE);
- 
+
 -    ret = _init_map_2M(tbl1, va, va + pv_off, count, normal_attr);
 -    if (ret != 0)
 +    if (pv_off == 0)
@@ -2799,7 +2822,7 @@ index ced3eaa7..045ca4a4 100644
 +        RT_ASSERT(0);
      }
  }
- 
+
 diff --git a/libcpu/aarch64/common/setup.c b/libcpu/aarch64/common/setup.c
 index d64dfc98..28c9f757 100644
 --- a/libcpu/aarch64/common/setup.c
@@ -2811,7 +2834,7 @@ index d64dfc98..28c9f757 100644
 +extern const rt_size_t rt_mpr_size;
 +extern void *rt_mpr_start;
  extern void *system_vectors;
- 
+
  static void *fdt_ptr = RT_NULL;
 @@ -207,7 +209,7 @@ void rt_hw_common_setup(void)
      rt_size_t fdt_start, fdt_end;
@@ -2820,12 +2843,12 @@ index d64dfc98..28c9f757 100644
 -    static struct mem_desc platform_mem_desc;
 +    static struct mem_desc platform_mem_desc[3];
      const rt_ubase_t pv_off = PV_OFFSET;
- 
+
      system_vectors_init();
 @@ -258,12 +260,22 @@ void rt_hw_common_setup(void)
      platform_mem_region.start = RT_ALIGN_DOWN(platform_mem_region.start, ARCH_PAGE_SIZE);
      platform_mem_region.end   = RT_ALIGN(platform_mem_region.end, ARCH_PAGE_SIZE);
- 
+
 -    platform_mem_desc.paddr_start = platform_mem_region.start;
 -    platform_mem_desc.vaddr_start = platform_mem_region.start - pv_off;
 -    platform_mem_desc.vaddr_end = platform_mem_region.end - pv_off - 1;
@@ -2834,7 +2857,7 @@ index d64dfc98..28c9f757 100644
 +    platform_mem_desc[0].vaddr_start = platform_mem_region.start - pv_off;
 +    platform_mem_desc[0].vaddr_end = platform_mem_region.end - pv_off - 1;
 +    platform_mem_desc[0].attr = NORMAL_MEM;
- 
+
 -    rt_hw_mmu_setup(&rt_kernel_space, &platform_mem_desc, 1);
 +    platform_mem_desc[1].paddr_start = 0x08000000;
 +    platform_mem_desc[1].vaddr_start = 0x08000000;
@@ -2847,11 +2870,11 @@ index d64dfc98..28c9f757 100644
 +    platform_mem_desc[2].attr = DEVICE_MEM;
 +
 +    rt_hw_mmu_setup(&rt_kernel_space, platform_mem_desc, 3);
- 
+
      if (rt_fdt_prefetch(fdt_ptr))
      {
 @@ -423,5 +435,12 @@ rt_weak void rt_hw_secondary_cpu_idle_exec(void)
- 
+
  void rt_hw_console_output(const char *str)
  {
 -    rt_fdt_earlycon_output(str);
@@ -2874,6 +2897,6 @@ index 7b2dec5e..04c62ecf 100644
      if rtconfig.ARCH not in ['sim']:
 -        LINKFLAGS += ' -Wl,--gc-sections,--print-memory-usage' # remove unused sections and print memory usage
 +        LINKFLAGS += ' --print-memory-usage'
- 
+
  if GetDepend('RT_USING_HOOKLIST') == True:
      if rtconfig.PLATFORM in ['gcc', 'armclang']:

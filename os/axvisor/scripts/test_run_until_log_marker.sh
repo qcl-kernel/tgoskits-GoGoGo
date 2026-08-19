@@ -42,11 +42,146 @@ while :; do sleep 1; done
 EOF
 }
 
+internal_error_log="$TMP_DIR/internal-error.log"
+internal_error_status_file="$TMP_DIR/internal-error.status"
+internal_error_reason_file="$TMP_DIR/internal-error.reason"
+mkdir "$TMP_DIR/pid-file-is-a-directory"
+set +e
+RUN_UNTIL_CHILD_PID_FILE="$TMP_DIR/pid-file-is-a-directory" \
+RUN_UNTIL_CHILD_STATUS_FILE="$internal_error_status_file" \
+RUN_UNTIL_TERMINATION_REASON_FILE="$internal_error_reason_file" \
+"$RUN_UNTIL" 5 "$internal_error_log" 'NEVER WRITTEN' -- sleep 10
+internal_error_rc=$?
+set -e
+if [ "$internal_error_rc" -eq 0 ]; then
+    echo "FAIL: PID-file publication error returned success" >&2
+    exit 1
+fi
+if ! grep -Eq '^([0-9]|[1-9][0-9]|1[0-9][0-9]|2[0-4][0-9]|25[0-5])$' \
+    "$internal_error_status_file" 2>/dev/null; then
+    echo "FAIL: internal error did not atomically publish a valid raw status" >&2
+    exit 1
+fi
+if [ "$(cat "$internal_error_reason_file" 2>/dev/null)" != internal-error ]; then
+    echo "FAIL: internal error reason was not published" >&2
+    exit 1
+fi
+
+publication_failure_log="$TMP_DIR/publication-failure.log"
+publication_failure_status_file="$TMP_DIR/missing-parent/publication-failure.status"
+publication_failure_reason_file="$TMP_DIR/publication-failure.reason"
+set +e
+RUN_UNTIL_CHILD_STATUS_FILE="$publication_failure_status_file" \
+RUN_UNTIL_TERMINATION_REASON_FILE="$publication_failure_reason_file" \
+"$RUN_UNTIL" 5 "$publication_failure_log" 'NEVER WRITTEN' -- sh -c 'exit 7'
+publication_failure_rc=$?
+set -e
+if [ "$publication_failure_rc" -ne 7 ]; then
+    echo "FAIL: status publication failure changed child exit 7 to $publication_failure_rc" >&2
+    exit 1
+fi
+
+early_signal_log="$TMP_DIR/early-signal.log"
+early_signal_status_file="$TMP_DIR/early-signal.status"
+early_signal_reason_file="$TMP_DIR/early-signal.reason"
+early_signal_ready_file="$TMP_DIR/early-signal.ready"
+early_markers=()
+for early_marker_index in $(seq 1 50000); do
+    early_markers+=("marker-$early_marker_index")
+done
+RUN_UNTIL_CHILD_STATUS_FILE="$early_signal_status_file" \
+RUN_UNTIL_TERMINATION_REASON_FILE="$early_signal_reason_file" \
+RUN_UNTIL_PRE_CHILD_READY_FILE="$early_signal_ready_file" \
+    "$RUN_UNTIL" 30 "$early_signal_log" "${early_markers[@]}" -- sleep 10 &
+early_signal_pid=$!
+early_signal_deadline_ns=$(( $(date +%s%N) + 3000000000 ))
+while [ ! -s "$early_signal_ready_file" ]; do
+    if ! kill -0 "$early_signal_pid" 2>/dev/null || \
+       [ "$(date +%s%N)" -ge "$early_signal_deadline_ns" ]; then
+        kill -KILL "$early_signal_pid" 2>/dev/null || true
+        echo "FAIL: early-signal helper did not publish its pre-child ready marker" >&2
+        exit 1
+    fi
+    sleep 0.01
+done
+kill -TERM "$early_signal_pid"
+set +e
+wait "$early_signal_pid"
+early_signal_rc=$?
+set -e
+if [ "$early_signal_rc" -ne 143 ]; then
+    echo "FAIL: early TERM returned $early_signal_rc instead of 143" >&2
+    exit 1
+fi
+if [ "$(cat "$early_signal_status_file" 2>/dev/null)" != 143 ] ||
+   [ "$(cat "$early_signal_reason_file" 2>/dev/null)" != signal ]; then
+    echo "FAIL: early TERM did not publish valid signal completion" >&2
+    exit 1
+fi
+
+launch_signal_log="$TMP_DIR/launch-signal.log"
+launch_signal_status_file="$TMP_DIR/launch-signal.status"
+launch_signal_reason_file="$TMP_DIR/launch-signal.reason"
+launch_signal_pid_file="$TMP_DIR/launch-signal.pid"
+launch_signal_ready_file="$TMP_DIR/launch-signal.ready"
+launch_signal_release_file="$TMP_DIR/launch-signal.release"
+launch_signal_tools="$TMP_DIR/launch-signal-tools"
+mkdir "$launch_signal_tools"
+real_setsid=$(command -v setsid)
+cat > "$launch_signal_tools/setsid" <<'EOF'
+#!/bin/sh
+sleep 0.5
+exec "$RUN_UNTIL_REAL_SETSID" "$@"
+EOF
+chmod +x "$launch_signal_tools/setsid"
+RUN_UNTIL_CHILD_PID_FILE="$launch_signal_pid_file" \
+RUN_UNTIL_CHILD_STATUS_FILE="$launch_signal_status_file" \
+RUN_UNTIL_TERMINATION_REASON_FILE="$launch_signal_reason_file" \
+RUN_UNTIL_LAUNCH_READY_FILE="$launch_signal_ready_file" \
+RUN_UNTIL_LAUNCH_RELEASE_FILE="$launch_signal_release_file" \
+RUN_UNTIL_REAL_SETSID="$real_setsid" \
+PATH="$launch_signal_tools:$PATH" \
+    "$RUN_UNTIL" 30 "$launch_signal_log" 'NEVER WRITTEN' -- sleep 2 &
+launch_signal_helper_pid=$!
+launch_signal_deadline_ns=$(( $(date +%s%N) + 3000000000 ))
+while [ ! -s "$launch_signal_ready_file" ]; do
+    if ! kill -0 "$launch_signal_helper_pid" 2>/dev/null ||
+       [ "$(date +%s%N)" -ge "$launch_signal_deadline_ns" ]; then
+        kill -TERM "$launch_signal_helper_pid" 2>/dev/null || true
+        wait "$launch_signal_helper_pid" 2>/dev/null || true
+        echo "FAIL: helper did not expose its child-launch ownership window" >&2
+        exit 1
+    fi
+    sleep 0.01
+done
+launch_signal_child_pid=$(cat "$launch_signal_pid_file")
+kill -TERM "$launch_signal_helper_pid"
+touch "$launch_signal_release_file"
+set +e
+wait "$launch_signal_helper_pid"
+launch_signal_rc=$?
+set -e
+if [ "$launch_signal_rc" -ne 143 ]; then
+    echo "FAIL: launch-window TERM returned $launch_signal_rc instead of 143" >&2
+    exit 1
+fi
+if [ "$(cat "$launch_signal_status_file" 2>/dev/null)" != 143 ] ||
+   [ "$(cat "$launch_signal_reason_file" 2>/dev/null)" != signal ]; then
+    echo "FAIL: launch-window TERM did not publish valid signal completion" >&2
+    exit 1
+fi
+assert_process_stopped "$launch_signal_child_pid" \
+    'launch-window child process group leader'
+
 marker_log="$TMP_DIR/marker.log"
 child_pid_file="$TMP_DIR/marker.pid"
 reported_pid_file="$TMP_DIR/reported.pid"
+marker_status_file="$TMP_DIR/marker.status"
+marker_reason_file="$TMP_DIR/marker.reason"
 start=$(date +%s)
 RUN_UNTIL_CHILD_PID_FILE="$reported_pid_file" \
+RUN_UNTIL_CHILD_STATUS_FILE="$marker_status_file" \
+RUN_UNTIL_TERMINATION_REASON_FILE="$marker_reason_file" \
 "$RUN_UNTIL" 5 "$marker_log" 'CLIENT COMPLETE' -- sh -c '
     echo $$ > "$1"
     sleep 0.1
@@ -65,6 +200,38 @@ if kill -0 "$(cat "$child_pid_file")" 2>/dev/null; then
 fi
 if [ "$(cat "$reported_pid_file")" != "$(cat "$child_pid_file")" ]; then
     echo "FAIL: helper did not report the exact child PID" >&2
+    exit 1
+fi
+if [ "$(cat "$marker_status_file")" -ne 143 ]; then
+    echo "FAIL: marker completion did not preserve raw child status 143" >&2
+    exit 1
+fi
+if [ "$(cat "$marker_reason_file")" != marker-complete ]; then
+    echo "FAIL: marker completion reason was not recorded" >&2
+    exit 1
+fi
+
+failure_marker_log="$TMP_DIR/failure-marker.log"
+failure_marker_status_file="$TMP_DIR/failure-marker.status"
+failure_marker_reason_file="$TMP_DIR/failure-marker.reason"
+failure_marker_start_ns=$(date +%s%N)
+set +e
+RUN_UNTIL_CHILD_STATUS_FILE="$failure_marker_status_file" \
+RUN_UNTIL_TERMINATION_REASON_FILE="$failure_marker_reason_file" \
+"$RUN_UNTIL" 2 "$failure_marker_log" 'NEVER WRITTEN' \
+    --failure-marker 'TASK123_LINUX_END status=FAIL' -- sh -c '
+    echo "TASK123_LINUX_END status=FAIL" >> "$1"
+    sleep 10
+' sh "$failure_marker_log"
+failure_marker_rc=$?
+set -e
+failure_marker_elapsed_ms=$(( ($(date +%s%N) - failure_marker_start_ns) / 1000000 ))
+if [ "$failure_marker_rc" -eq 0 ] || [ "$failure_marker_elapsed_ms" -ge 1800 ]; then
+    echo "FAIL: failure marker did not stop the child promptly" >&2
+    exit 1
+fi
+if [ "$(cat "$failure_marker_reason_file" 2>/dev/null)" != failure-marker ]; then
+    echo "FAIL: failure marker termination reason was not recorded" >&2
     exit 1
 fi
 
@@ -86,13 +253,47 @@ if kill -0 "$(cat "$multi_pid_file")" 2>/dev/null; then
     exit 1
 fi
 
+timerslack_log="$TMP_DIR/timerslack.log"
+timerslack_value_file="$TMP_DIR/timerslack.value"
+RUN_UNTIL_CHILD_TIMERSLACK_NS=1 \
+"$RUN_UNTIL" 5 "$timerslack_log" 'TIMERSLACK APPLIED' -- sh -c '
+    cat /proc/self/timerslack_ns > "$1"
+    echo "TIMERSLACK APPLIED" >> "$2"
+    sleep 10
+' sh "$timerslack_value_file" "$timerslack_log"
+if [ "$(cat "$timerslack_value_file")" != 1 ]; then
+    echo "FAIL: child timer slack was not applied before exec" >&2
+    exit 1
+fi
+
+timerslack_failure_log="$TMP_DIR/timerslack-failure.log"
+timerslack_failure_exec_file="$TMP_DIR/timerslack-failure.exec"
+set +e
+RUN_UNTIL_CHILD_TIMERSLACK_NS=not-a-number \
+"$RUN_UNTIL" 5 "$timerslack_failure_log" 'NEVER WRITTEN' -- \
+    sh -c ': > "$1"' sh "$timerslack_failure_exec_file"
+timerslack_failure_rc=$?
+set -e
+if [ "$timerslack_failure_rc" -eq 0 ]; then
+    echo "FAIL: timer-slack write failure returned success" >&2
+    exit 1
+fi
+if [ -e "$timerslack_failure_exec_file" ]; then
+    echo "FAIL: command was executed after timer-slack write failure" >&2
+    exit 1
+fi
+
 timeout_log="$TMP_DIR/timeout.log"
 timeout_pid_file="$TMP_DIR/timeout.pid"
+timeout_status_file="$TMP_DIR/timeout.status"
+timeout_reason_file="$TMP_DIR/timeout.reason"
 while [ "$(date +%N)" -lt 700000000 ]; do
     sleep 0.01
 done
 timeout_start_ns=$(date +%s%N)
 set +e
+RUN_UNTIL_CHILD_STATUS_FILE="$timeout_status_file" \
+RUN_UNTIL_TERMINATION_REASON_FILE="$timeout_reason_file" \
 "$RUN_UNTIL" 1 "$timeout_log" 'NEVER WRITTEN' -- sh -c '
     echo $$ > "$1"
     sleep 10
@@ -112,14 +313,28 @@ if kill -0 "$(cat "$timeout_pid_file")" 2>/dev/null; then
     echo "FAIL: timed-out command is still running" >&2
     exit 1
 fi
+if [ "$(cat "$timeout_status_file")" -ne 143 ] ||
+   [ "$(cat "$timeout_reason_file")" != timeout ]; then
+    echo "FAIL: timeout child status/reason evidence is incorrect" >&2
+    exit 1
+fi
 
 exit_log="$TMP_DIR/exit.log"
+exit_status_file="$TMP_DIR/exit.status"
+exit_reason_file="$TMP_DIR/exit.reason"
 set +e
+RUN_UNTIL_CHILD_STATUS_FILE="$exit_status_file" \
+RUN_UNTIL_TERMINATION_REASON_FILE="$exit_reason_file" \
 "$RUN_UNTIL" 5 "$exit_log" 'NEVER WRITTEN' -- sh -c 'exit 7'
 exit_rc=$?
 set -e
 if [ "$exit_rc" -ne 7 ]; then
     echo "FAIL: child exit status changed from 7 to $exit_rc" >&2
+    exit 1
+fi
+if [ "$(cat "$exit_status_file")" -ne 7 ] ||
+   [ "$(cat "$exit_reason_file")" != child-exit ]; then
+    echo "FAIL: child exit status/reason evidence is incorrect" >&2
     exit 1
 fi
 
@@ -202,7 +417,11 @@ for signal_case in HUP:129 INT:130 TERM:143; do
     signal_log="$TMP_DIR/stubborn-signal-$signal_name.log"
     signal_child="$TMP_DIR/stubborn-signal-$signal_name-child.pid"
     signal_grandchild="$TMP_DIR/stubborn-signal-$signal_name-grandchild.pid"
+    signal_status_file="$TMP_DIR/stubborn-signal-$signal_name.status"
+    signal_reason_file="$TMP_DIR/stubborn-signal-$signal_name.reason"
 
+    RUN_UNTIL_CHILD_STATUS_FILE="$signal_status_file" \
+    RUN_UNTIL_TERMINATION_REASON_FILE="$signal_reason_file" \
     setsid bash -c 'trap - HUP INT TERM; exec "$@"' bash \
         "$RUN_UNTIL" 30 "$signal_log" 'NEVER WRITTEN' -- \
         bash "$stubborn_command" "$signal_child" "$signal_grandchild" '' "$signal_log" &
@@ -240,6 +459,17 @@ for signal_case in HUP:129 INT:130 TERM:143; do
         "$signal_name-path child"
     assert_process_stopped "$(cat "$signal_grandchild")" \
         "$signal_name-path grandchild"
+    case "$(cat "$signal_status_file")" in
+        137|143) ;;
+        *)
+            echo "FAIL: $signal_name raw child status was not termination status" >&2
+            exit 1
+            ;;
+    esac
+    if [ "$(cat "$signal_reason_file")" != signal ]; then
+        echo "FAIL: $signal_name termination reason was not recorded" >&2
+        exit 1
+    fi
 done
 
 echo "PASS: run-until-log-marker lifecycle"

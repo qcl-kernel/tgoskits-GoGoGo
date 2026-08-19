@@ -7,32 +7,32 @@
 -        id = (used_id + 1) % queue_rx->num;
 +        id = used_id;
          len = queue_rx->used->ring[queue_rx->used_idx % queue_rx->num].len - VIRTIO_NET_HDR_SIZE;
- 
+
          if (len > VIRTIO_NET_PAYLOAD_MAX_SIZE)
 @@ -99,7 +99,7 @@
- 
+
          if (p != RT_NULL)
          {
 -        rt_memcpy(p->payload, (void *)queue_rx->desc[id].addr + PV_OFFSET, len);
-+        rt_memcpy(p->payload, virtio_net_dev->info[id / 2].rx_buffer, len);
- 
++            rt_memcpy(p->payload, virtio_net_dev->info[id / 2].rx_buffer, len);
+
              queue_rx->used_idx++;
- 
+
 @@ -129,7 +129,7 @@
      for (i = 0; i < (queue_rx->num / 2); ++i)
      {
          rt_uint16_t id = (i * 2) % queue_rx->num;
 -        void *addr = virtio_net_dev->info[i].tx_buffer;
 +        void *addr = &virtio_net_dev->info[i].hdr;
- 
+
          /* Descriptor for net_hdr */
          virtio_fill_desc(virtio_dev, VIRTIO_NET_QUEUE_RX, id,
 @@ -137,7 +137,7 @@
- 
+
          /* Descriptor for data */
          virtio_fill_desc(virtio_dev, VIRTIO_NET_QUEUE_RX, id + 1,
 -                (rt_uint64_t)(rt_ubase_t)addr + VIRTIO_NET_HDR_SIZE, VIRTIO_NET_MSS, VIRTQ_DESC_F_WRITE, 0);
 +                VIRTIO_VA2PA(virtio_net_dev->info[i].rx_buffer), VIRTIO_NET_MSS, VIRTQ_DESC_F_WRITE, 0);
- 
+
          queue_rx->avail->ring[i] = id;
      }

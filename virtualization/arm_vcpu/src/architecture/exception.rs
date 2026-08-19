@@ -70,6 +70,9 @@ core::arch::global_asm!(
     host_pending_irq_ack_offset = const super::vcpu::ARM_VCPU_HOST_PENDING_IRQ_ACK_OFFSET,
     host_busy_wfi_fastpath_delta = const super::vcpu::ARM_VCPU_HOST_BUSY_WFI_FASTPATH_OFFSET
         - super::vcpu::ARM_VCPU_HOST_STACK_TOP_OFFSET,
+    host_fp_simd_offset = const super::vcpu::ARM_VCPU_HOST_FP_SIMD_OFFSET,
+    guest_fp_simd_offset = const super::vcpu::ARM_VCPU_GUEST_FP_SIMD_OFFSET,
+    fp_control_delta = const super::vcpu::FP_SIMD_CONTROL_DELTA,
     host_irq_interface_gicv2_mmio = const super::host::HOST_IRQ_INTERFACE_GICV2_MMIO,
     host_irq_interface_gicv3_sysreg = const super::host::HOST_IRQ_INTERFACE_GICV3_SYSREG,
     timer_virtual_offset_offset = const super::vcpu::ARM_VCPU_TIMER_VIRTUAL_OFFSET_OFFSET,

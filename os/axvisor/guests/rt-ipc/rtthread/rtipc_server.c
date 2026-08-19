@@ -132,16 +132,6 @@ static rtipc_peer_endpoint_t peer_endpoint(const struct sockaddr_in *peer)
     return endpoint;
 }
 
-static void report_protocol_stats(void)
-{
-    rtipc_stats_t stats = rtipc_connection_stats(&s_conn);
-    LOG_I("proto: state=%d tx=%u rx=%u retrans=%u timeouts=%u dup=%u "
-          "reorder=%u errors=%u acks=%u",
-          (int)s_conn.state, stats.tx_packets, stats.rx_packets,
-          stats.retransmissions, stats.timeouts, stats.rx_duplicates,
-          stats.rx_out_of_order, stats.rx_errors, stats.acks_received);
-}
-
 static void rtipc_server_entry(void *param)
 {
     (void)param;
@@ -215,14 +205,12 @@ static void rtipc_server_entry(void *param)
     cfg.heartbeat_timeout_ms = 2000;
     cfg.session_id_seed = (now_ms() << 32) ^ (uint64_t)(uintptr_t)&s_conn;
     rtipc_connection_init(&s_conn, &cfg);
+    rt_kprintf("RTIPC_SERVER_READY ip=%s port=%d\n", SERVER_IP, RTIPC_PORT);
 
     struct sockaddr_in peer = {0};
     socklen_t peer_len = sizeof(peer);
     rtipc_peer_guard_t peer_guard;
     rtipc_peer_guard_init(&peer_guard);
-    uint64_t last_report = now_ms();
-    uint64_t msg_count = 0;
-    uint64_t byte_count = 0;
 
     LOG_I("listening...");
 
@@ -239,8 +227,6 @@ static void rtipc_server_entry(void *param)
             if (accepted) {
                 rtipc_connection_on_recv(&s_conn, s_recv_buf, (size_t)n,
                                          received_at);
-                msg_count++;
-                byte_count += (uint64_t)n;
             } else if (!peer_guard.claimed) {
                 rtipc_header_t control;
                 if (valid_session_fin(s_recv_buf, (size_t)n, &control) &&
@@ -249,8 +235,6 @@ static void rtipc_server_entry(void *param)
                         control.seq_num, received_at)) {
                     rtipc_connection_on_recv(&s_conn, s_recv_buf, (size_t)n,
                                              received_at);
-                    msg_count++;
-                    byte_count += (uint64_t)n;
                 } else if (valid_session_syn(s_recv_buf, (size_t)n,
                                              &control) &&
                            rtipc_peer_guard_claim(
@@ -261,8 +245,6 @@ static void rtipc_server_entry(void *param)
                         s_conn.session_id == control.session_id) {
                         peer = source;
                         peer_len = source_len;
-                        msg_count++;
-                        byte_count += (uint64_t)n;
                     } else {
                         rtipc_peer_guard_release(&peer_guard);
                     }
@@ -294,21 +276,12 @@ static void rtipc_server_entry(void *param)
             }
         }
 
-        uint64_t now = now_ms();
-        if (now - last_report >= 10000) {
-            LOG_I("stats: msgs=%llu bytes=%lluKB conn=%d",
-                  (unsigned long long)msg_count,
-                  (unsigned long long)(byte_count / 1024),
-                  rtipc_connection_is_connected(&s_conn));
-            report_protocol_stats();
-            last_report = now;
-        }
     }
 
     closesocket(sock);
 }
 
-static int rtipc_server_init(void)
+int rtipc_server_start(void)
 {
     rt_thread_t tid = rt_thread_create("rtipic_srv", rtipc_server_entry, NULL,
                                        65536, 15, 10);
@@ -321,4 +294,4 @@ static int rtipc_server_init(void)
         report_server_error("thread_startup", startup_result);
     return startup_result;
 }
-INIT_APP_EXPORT(rtipc_server_init);
+INIT_APP_EXPORT(rtipc_server_start);

@@ -1,0 +1,143 @@
+#!/bin/busybox sh
+
+set -u
+
+console() {
+    printf '%s\n' "$*" > /dev/console
+}
+
+finish() {
+    status=$1
+    /bin/busybox sync || true
+    console "TASK123_STARRY_EXIT status=$status"
+    exit "$status"
+}
+
+invalid_control() {
+    console "TASK123_STARRY_INVALID $1"
+    console 'TASK123_STARRY_END status=FAIL'
+    finish 2
+}
+
+is_decimal() {
+    case "$1" in
+        ''|*[!0-9]*) return 1 ;;
+        *) return 0 ;;
+    esac
+}
+
+parse_command_line() {
+    task2_count=1000
+    task2_fault=none
+    task3_frames=600
+    task3_fault=normal
+
+    for argument in $(/bin/busybox cat /proc/cmdline 2>/dev/null); do
+        case "$argument" in
+            task2.count=*)
+                value=${argument#*=}
+                is_decimal "$value" || invalid_control 'task2.count'
+                [ "$value" -gt 0 ] 2>/dev/null || invalid_control 'task2.count'
+                [ "$value" -le 2147483647 ] 2>/dev/null || invalid_control 'task2.count'
+                task2_count=$value
+                ;;
+            task2.fault=*)
+                value=${argument#*=}
+                case "$value" in
+                    none|reliability) task2_fault=$value ;;
+                    *) invalid_control 'task2.fault' ;;
+                esac
+                ;;
+            task3.frames=*)
+                value=${argument#*=}
+                is_decimal "$value" || invalid_control 'task3.frames'
+                [ "$value" -ge 1 ] 2>/dev/null || invalid_control 'task3.frames'
+                [ "$value" -le 600 ] 2>/dev/null || invalid_control 'task3.frames'
+                task3_frames=$value
+                ;;
+            task3.fault=*)
+                value=${argument#*=}
+                case "$value" in
+                    normal|drop-control|drop-status|duplicate-frame|delayed-server|malformed)
+                        task3_fault=$value
+                        ;;
+                    *) invalid_control 'task3.fault' ;;
+                esac
+                ;;
+            task2.*|task3.*)
+                invalid_control "${argument%%=*}"
+                ;;
+        esac
+    done
+
+    if [ "$task2_fault" = reliability ] && [ "$task2_count" -lt 2 ]; then
+        invalid_control 'task2.count'
+    fi
+}
+
+main() {
+    parse_command_line
+
+    starry_nproc=$(/bin/busybox nproc 2>/dev/null || printf '0')
+    starry_online=$(/bin/busybox cat /sys/devices/system/cpu/online 2>/dev/null || printf 'unknown')
+    console "STARRY_SMP_READY configured=2 online=$starry_online nproc=$starry_nproc"
+    if [ "$starry_nproc" -ne 2 ]; then
+        console 'TASK123_STARRY_END status=FAIL reason=smp'
+        finish 1
+    fi
+
+    if ! /bin/busybox ip addr flush dev eth0 ||
+        ! /bin/busybox ip addr add 192.168.77.11/24 dev eth0 ||
+        ! /bin/busybox ip link set dev eth0 up; then
+        console 'TASK123_STARRY_END status=FAIL reason=network-config'
+        finish 1
+    fi
+    console 'STARRY_NET_READY ip=192.168.77.11 peer=192.168.77.30'
+
+    console 'TASK2_STARRY_BEGIN port=9876'
+    /bin/rtipic-client \
+        --host 192.168.77.30 \
+        --port 9876 \
+        --count "$task2_count" \
+        --fault-profile "$task2_fault" > /dev/console 2>&1
+    task2_status=$?
+    printf 'RT-IPC client exited with rc=%s\n' "$task2_status" > /dev/console
+    if [ "$task2_status" -eq 0 ]; then
+        console 'TASK2_STARRY_END status=PASS'
+    else
+        console "TASK2_STARRY_END status=FAIL exit_status=$task2_status"
+    fi
+
+    set -- \
+        --video /opt/task3/line-follow.y4m \
+        --truth /opt/task3/truth.csv \
+        --peer 192.168.77.30 \
+        --port 9877 \
+        --frames "$task3_frames" \
+        --csv /tmp/task3-frames.csv
+    case "$task3_fault" in
+        drop-control) set -- "$@" --drop-tx-seq 2 ;;
+        duplicate-frame) set -- "$@" --duplicate-frame-once ;;
+        malformed) set -- "$@" --malformed-once ;;
+        normal|drop-status|delayed-server) ;;
+    esac
+
+    console 'TASK3_STARRY_READY ip=192.168.77.11 peer=192.168.77.30:9877'
+    /usr/bin/task3-linux "$@" > /dev/console 2>&1
+    task3_status=$?
+    if [ "$task3_status" -eq 0 ]; then
+        console 'TASK3_STARRY_END status=PASS'
+    else
+        console "TASK3_STARRY_END status=FAIL exit_status=$task3_status"
+    fi
+
+    if [ "$task2_status" -eq 0 ] && [ "$task3_status" -eq 0 ]; then
+        console 'TASK123_STARRY_END status=PASS'
+        finish 0
+    fi
+    console 'TASK123_STARRY_END status=FAIL'
+    [ "$task2_status" -eq 0 ] || finish "$task2_status"
+    finish "$task3_status"
+}
+
+main "$@"

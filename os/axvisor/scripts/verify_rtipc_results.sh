@@ -2,8 +2,8 @@
 
 set -eu
 
-if [ "$#" -lt 3 ] || [ "$#" -gt 4 ]; then
-    echo "usage: $0 LOG EXPECTED_COUNT QEMU_EXIT_CODE [FAULT_PROFILE]" >&2
+if [ "$#" -lt 3 ] || [ "$#" -gt 5 ]; then
+    echo "usage: $0 LOG EXPECTED_COUNT QEMU_EXIT_CODE [FAULT_PROFILE] [APP_GUEST]" >&2
     exit 2
 fi
 
@@ -11,11 +11,25 @@ log=$1
 expected_count=$2
 qemu_rc=$3
 fault_profile=${4:-none}
+app_guest=${5:-linux}
 
 case "$fault_profile" in
     none|reliability) ;;
     *)
         echo "invalid RT-IPC fault profile: $fault_profile" >&2
+        exit 2
+        ;;
+esac
+
+case "$app_guest" in
+    linux)
+        app_smp_marker='LINUX_SMP_READY configured=2 online=0-1 nproc=2'
+        ;;
+    starryos)
+        app_smp_marker='STARRY_SMP_READY configured=2 online=0-1 nproc=2'
+        ;;
+    *)
+        echo "invalid application guest: $app_guest" >&2
         exit 2
         ;;
 esac
@@ -55,10 +69,9 @@ if grep -Eiq \
     exit 1
 fi
 
-linux_smp_marker='LINUX_SMP_READY configured=2 online=0-1 nproc=2'
-linux_smp_count=$(grep -aFo -- "$linux_smp_marker" "$log" | wc -l)
-if [ "$linux_smp_count" -ne 1 ]; then
-    echo "Linux 2-vCPU online marker is missing, duplicated, or invalid" >&2
+app_smp_count=$(grep -aFo -- "$app_smp_marker" "$log" | wc -l)
+if [ "$app_smp_count" -ne 1 ]; then
+    echo "$app_guest 2-vCPU online marker is missing, duplicated, or invalid" >&2
     exit 1
 fi
 

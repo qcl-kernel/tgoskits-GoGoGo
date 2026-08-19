@@ -181,7 +181,7 @@ pub(crate) struct VmRuntimeHandle {
     wait_queue: crate::WaitQueue,
     notification_generation: AtomicUsize,
     vcpu_task_list: Mutex<BTreeMap<usize, crate::AxTaskRef>>,
-    cpu_on_start_acks: StdMutex<BTreeMap<usize, Arc<crate::runtime::vcpus::CpuOnStartAck>>>,
+    cpu_on_start_acks: Mutex<BTreeMap<usize, Arc<crate::runtime::vcpus::CpuOnStartAck>>>,
     cpu_off_exit_reservations: StdMutex<BTreeSet<usize>>,
     pending_interrupts: Mutex<BTreeMap<usize, Vec<PendingInterrupt>>>,
     irq_dispatcher: crate::runtime::VcpuIrqDispatcher,
@@ -223,7 +223,7 @@ impl VmRuntimeHandle {
             wait_queue: crate::WaitQueue::new(),
             notification_generation: AtomicUsize::new(0),
             vcpu_task_list: Mutex::new(BTreeMap::new()),
-            cpu_on_start_acks: StdMutex::new(BTreeMap::new()),
+            cpu_on_start_acks: Mutex::new(BTreeMap::new()),
             cpu_off_exit_reservations: StdMutex::new(BTreeSet::new()),
             pending_interrupts: Mutex::new(BTreeMap::new()),
             irq_dispatcher: crate::runtime::VcpuIrqDispatcher::new(),
@@ -257,7 +257,7 @@ impl VmRuntimeHandle {
         &self,
         vcpu_id: usize,
     ) -> Option<Arc<crate::runtime::vcpus::CpuOnStartAck>> {
-        self.cpu_on_start_acks.lock_unpoisoned().remove(&vcpu_id)
+        self.cpu_on_start_acks.lock().remove(&vcpu_id)
     }
 
     pub(crate) fn remove_vcpu_task(&self, vcpu_id: usize) -> Option<crate::AxTaskRef> {
@@ -272,7 +272,7 @@ impl VmRuntimeHandle {
         vcpu_id: usize,
         ack: Arc<crate::runtime::vcpus::CpuOnStartAck>,
     ) -> AxVmResult {
-        let mut acks = self.cpu_on_start_acks.lock_unpoisoned();
+        let mut acks = self.cpu_on_start_acks.lock();
         if acks.contains_key(&vcpu_id) {
             return ax_err!(
                 AlreadyExists,
@@ -287,10 +287,7 @@ impl VmRuntimeHandle {
         &self,
         vcpu_id: usize,
     ) -> Option<Arc<crate::runtime::vcpus::CpuOnStartAck>> {
-        self.cpu_on_start_acks
-            .lock_unpoisoned()
-            .get(&vcpu_id)
-            .cloned()
+        self.cpu_on_start_acks.lock().get(&vcpu_id).cloned()
     }
 
     pub(crate) fn queue_pending_interrupt(
@@ -474,88 +471,73 @@ impl VmRuntimeHandle {
     }
 }
 
-#[cfg(all(test, feature = "host-test"))]
-mod runtime_handle_tests {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum CpuOnStartCommit {
+    Committed,
+    Deferred,
+}
 
-    #[test]
-    fn runtime_cpu_on_success_publishes_online_count_before_ack() {
-        let runtime = VmRuntimeHandle::new();
-        let ack = crate::runtime::vcpus::CpuOnStartAck::new();
-
-        runtime.mark_vcpu_running();
-        assert!(ack.begin_startup());
-
-        runtime.publish_cpu_on_start_success(&ack);
-
-        assert!(ack.is_complete());
-        assert!(runtime.try_reserve_cpu_off(0));
+fn commit_cpu_on_start<R>(
+    machine: &Mutex<Machine<R, Arc<VmRuntimeHandle>>>,
+    ack: &crate::runtime::vcpus::CpuOnStartAck,
+    start: impl FnOnce() -> AxVmResult,
+) -> AxVmResult<CpuOnStartCommit> {
+    let machine = machine.lock();
+    match machine.status() {
+        VmStatus::Running => {}
+        VmStatus::Pausing | VmStatus::Paused => return Ok(CpuOnStartCommit::Deferred),
+        status => {
+            return ax_err!(
+                BadState,
+                format!("cannot commit CPU_ON startup while VM is {status:?}")
+            );
+        }
     }
 
-    #[test]
-    fn runtime_cpu_on_ack_rejects_duplicate_and_can_be_removed() {
-        let runtime = VmRuntimeHandle::new();
-        let first = Arc::new(crate::runtime::vcpus::CpuOnStartAck::new());
-        let second = Arc::new(crate::runtime::vcpus::CpuOnStartAck::new());
+    start()?;
+    machine
+        .runtime()
+        .expect("running VM must retain a runtime")
+        .publish_cpu_on_start_success(ack);
+    Ok(CpuOnStartCommit::Committed)
+}
 
-        assert!(runtime.insert_cpu_on_start_ack(1, first.clone()).is_ok());
-        assert!(runtime.insert_cpu_on_start_ack(1, second).is_err());
+fn request_vm_stop<R>(
+    machine: &Mutex<Machine<R, Arc<VmRuntimeHandle>>>,
+    reason: StopReason,
+) -> AxVmResult {
+    let runtime = {
+        let mut machine = machine.lock();
+        machine.request_stop_with(reason, |_, _| Ok(()))?;
+        machine.runtime().cloned()
+    };
 
-        let stored = runtime.cpu_on_start_ack(1).unwrap();
-        assert!(Arc::ptr_eq(&stored, &first));
-
-        assert!(runtime.remove_cpu_on_start_ack(1).is_some());
-        assert!(runtime.cpu_on_start_ack(1).is_none());
+    if let Some(runtime) = runtime {
+        runtime.notify_all();
     }
+    Ok(())
+}
 
-    #[test]
-    fn runtime_deferred_reset_request_is_single_consumer() {
-        let runtime = VmRuntimeHandle::new();
+fn resume_machine_and_notify<R>(
+    machine: &Mutex<Machine<R, Arc<VmRuntimeHandle>>>,
+    resume_resources: impl FnOnce(&R) -> AxVmResult,
+) -> AxVmResult {
+    let runtime = {
+        let mut machine = machine.lock();
+        if machine.status() == VmStatus::Paused {
+            let resources = machine
+                .resources()
+                .expect("paused VM must retain resources");
+            resume_resources(resources)?;
+        }
+        machine.resume()?;
+        machine.runtime().cloned()
+    };
 
-        assert!(!runtime.take_deferred_reset_request());
-        assert!(runtime.request_deferred_reset());
-        assert!(!runtime.request_deferred_reset());
-        assert!(runtime.take_deferred_reset_request());
-        assert!(!runtime.take_deferred_reset_request());
-        assert!(runtime.request_deferred_reset());
+    if let Some(runtime) = runtime {
+        runtime.notify_all();
     }
-
-    #[test]
-    fn runtime_cpu_off_reservation_rejects_second_parallel_last_vcpu() {
-        let runtime = VmRuntimeHandle::new();
-
-        runtime.mark_vcpu_running();
-        runtime.mark_vcpu_running();
-
-        assert!(runtime.try_reserve_cpu_off(0));
-        assert!(!runtime.try_reserve_cpu_off(1));
-
-        assert!(runtime.consume_cpu_off_reservation(0));
-        assert!(!runtime.consume_cpu_off_reservation(0));
-
-        assert!(runtime.mark_vcpu_exiting());
-    }
-
-    use super::*;
-
-    #[test]
-    fn remove_vcpu_task_clears_pending_interrupts_and_dispatcher_registration() {
-        let runtime = VmRuntimeHandle::new();
-
-        runtime.pending_interrupts.lock().entry(3).or_default();
-        runtime.irq_dispatcher.register_test_vcpu(3, 11);
-
-        assert!(runtime.pending_interrupts.lock().contains_key(&3));
-        assert_eq!(runtime.irq_dispatcher.test_lookup_cpu_id(3).unwrap(), 11);
-
-        runtime.remove_vcpu_task(3);
-
-        assert!(!runtime.pending_interrupts.lock().contains_key(&3));
-        assert!(runtime.irq_dispatcher.test_lookup_cpu_id(3).is_err());
-
-        runtime.remove_vcpu_task(3);
-        assert!(!runtime.pending_interrupts.lock().contains_key(&3));
-        assert!(runtime.irq_dispatcher.test_lookup_cpu_id(3).is_err());
-    }
+    Ok(())
 }
 
 impl AxVMResources {
@@ -786,7 +768,9 @@ const TEMP_MAX_VCPU_NUM: usize = 64;
 pub struct AxVM {
     id: usize,
     name: String,
+    #[cfg(target_arch = "aarch64")]
     host_vcpu_idle_policy: HostVcpuIdlePolicy,
+    #[cfg(target_arch = "aarch64")]
     guest_tlbi_policy: GuestTlbiPolicy,
     machine: Mutex<Machine<AxVMResources, Arc<VmRuntimeHandle>>>,
     fw_cfg_payload: Arc<FwCfgPayloadSlot>,
@@ -804,7 +788,9 @@ impl AxVM {
     pub fn new(config: AxVMConfig) -> AxVmResult<AxVMRef> {
         let id = config.id();
         let name = config.name();
+        #[cfg(target_arch = "aarch64")]
         let host_vcpu_idle_policy = config.host_vcpu_idle_policy();
+        #[cfg(target_arch = "aarch64")]
         let guest_tlbi_policy = config.guest_tlbi_policy();
         let fw_cfg_payload = Arc::new(FwCfgPayloadSlot::new());
         let resources =
@@ -812,7 +798,9 @@ impl AxVM {
         let result = Arc::new(Self {
             id,
             name,
+            #[cfg(target_arch = "aarch64")]
             host_vcpu_idle_policy,
+            #[cfg(target_arch = "aarch64")]
             guest_tlbi_policy,
             machine: Mutex::new(Machine::Ready(resources)),
             fw_cfg_payload,
@@ -835,11 +823,13 @@ impl AxVM {
     }
 
     /// Returns the immutable host behavior selected for trapped guest WFI exits.
+    #[cfg(target_arch = "aarch64")]
     pub(crate) const fn host_vcpu_idle_policy(&self) -> HostVcpuIdlePolicy {
         self.host_vcpu_idle_policy
     }
 
     /// Returns the immutable guest EL1 TLB-maintenance policy.
+    #[cfg(target_arch = "aarch64")]
     pub(crate) const fn guest_tlbi_policy(&self) -> GuestTlbiPolicy {
         self.guest_tlbi_policy
     }
@@ -908,6 +898,14 @@ impl AxVM {
             .runtime()
             .ok_or_else(|| ax_err_type!(BadState, "VM runtime is not available"))?;
         f(runtime)
+    }
+
+    pub(crate) fn commit_cpu_on_start(
+        &self,
+        ack: &crate::runtime::vcpus::CpuOnStartAck,
+        start: impl FnOnce() -> AxVmResult,
+    ) -> AxVmResult<CpuOnStartCommit> {
+        commit_cpu_on_start(&self.machine, ack, start)
     }
 
     #[cfg_attr(
@@ -1122,24 +1120,18 @@ impl AxVM {
 
     /// Resumes a paused VM.
     pub fn resume(&self) -> AxVmResult {
-        let mut machine = self.machine.lock();
-        if machine.status() != VmStatus::Paused {
-            return machine.resume();
-        }
-        let devices = machine
-            .resources()
-            .expect("paused VM must retain resources")
-            .devices()?;
-        devices
-            .resume_lifecycle_devices()
-            .map_err(|error| AxVmError::device("resume device lifecycle", error))?;
-        machine.resume()
+        resume_machine_and_notify(&self.machine, |resources| {
+            resources
+                .devices()?
+                .resume_lifecycle_devices()
+                .map_err(|error| AxVmError::device("resume device lifecycle", error))
+        })
     }
 
     /// Requests a stop. Running vCPUs observe the Stopping state and exit.
     pub fn stop(&self, reason: StopReason) -> AxVmResult {
         info!("Stopping VM[{}]: {reason:?}", self.id());
-        self.machine.lock().request_stop_with(reason, |_, _| Ok(()))
+        request_vm_stop(&self.machine, reason)
     }
 
     pub(crate) fn finish_stop(&self) -> AxVmResult {
@@ -2111,5 +2103,213 @@ mod tests {
         fn drop(&mut self) {
             self.lock.held.store(false, Ordering::Release);
         }
+    }
+}
+
+#[cfg(all(test, feature = "host-test"))]
+mod runtime_handle_tests {
+
+    #[test]
+    fn runtime_cpu_on_success_publishes_online_count_before_ack() {
+        let runtime = VmRuntimeHandle::new();
+        let ack = crate::runtime::vcpus::CpuOnStartAck::new();
+
+        runtime.mark_vcpu_running();
+        assert!(ack.begin_startup());
+
+        runtime.publish_cpu_on_start_success(&ack);
+
+        assert!(ack.is_complete());
+        assert!(runtime.try_reserve_cpu_off(0));
+    }
+
+    #[test]
+    fn cpu_on_commit_rejects_stopping_vm_before_binding() {
+        let runtime = Arc::new(VmRuntimeHandle::new());
+        runtime.mark_vcpu_running();
+        let machine = Mutex::new(Machine::Stopping {
+            resources: Some(()),
+            runtime: Some(runtime.clone()),
+            reason: StopReason::Forced,
+        });
+        let ack = crate::runtime::vcpus::CpuOnStartAck::new();
+        assert!(ack.begin_startup());
+        let binding_attempted = AtomicBool::new(false);
+
+        let result = commit_cpu_on_start(&machine, &ack, || {
+            binding_attempted.store(true, Ordering::Relaxed);
+            Ok(())
+        });
+
+        assert!(matches!(result, Err(AxVmError::InvalidState { .. })));
+        assert!(!binding_attempted.load(Ordering::Relaxed));
+        assert!(!ack.is_complete());
+        assert!(!runtime.try_reserve_cpu_off(1));
+    }
+
+    #[test]
+    fn cpu_on_commit_defers_paused_vm_without_binding() {
+        let runtime = Arc::new(VmRuntimeHandle::new());
+        runtime.mark_vcpu_running();
+        let machine = Mutex::new(Machine::Paused {
+            resources: (),
+            runtime: runtime.clone(),
+        });
+        let ack = crate::runtime::vcpus::CpuOnStartAck::new();
+        assert!(ack.begin_startup());
+        let binding_attempted = AtomicBool::new(false);
+
+        let result = commit_cpu_on_start(&machine, &ack, || {
+            binding_attempted.store(true, Ordering::Relaxed);
+            Ok(())
+        })
+        .unwrap();
+
+        assert_eq!(result, CpuOnStartCommit::Deferred);
+        assert!(!binding_attempted.load(Ordering::Relaxed));
+        assert!(!ack.is_complete());
+        assert!(!runtime.try_reserve_cpu_off(1));
+    }
+
+    #[test]
+    fn cpu_on_commit_serializes_binding_and_accounting_with_stop() {
+        let runtime = Arc::new(VmRuntimeHandle::new());
+        runtime.mark_vcpu_running();
+        let machine = Arc::new(Mutex::new(Machine::Running {
+            resources: (),
+            runtime: runtime.clone(),
+        }));
+        let ack = Arc::new(crate::runtime::vcpus::CpuOnStartAck::new());
+        assert!(ack.begin_startup());
+        let (bind_entered_tx, bind_entered_rx) = std::sync::mpsc::channel();
+        let (release_bind_tx, release_bind_rx) = std::sync::mpsc::channel();
+        let commit_machine = machine.clone();
+        let commit_ack = ack.clone();
+
+        let commit = std::thread::spawn(move || {
+            commit_cpu_on_start(&commit_machine, &commit_ack, || {
+                bind_entered_tx.send(()).unwrap();
+                release_bind_rx.recv().unwrap();
+                Ok(())
+            })
+        });
+        bind_entered_rx.recv().unwrap();
+        assert!(
+            machine.try_lock().is_none(),
+            "CPU_ON binding must run while holding the lifecycle lock"
+        );
+
+        let (stop_done_tx, stop_done_rx) = std::sync::mpsc::channel();
+        let stop_machine = machine.clone();
+        let stop = std::thread::spawn(move || {
+            let result = request_vm_stop(&stop_machine, StopReason::Forced);
+            stop_done_tx.send(()).unwrap();
+            result
+        });
+
+        release_bind_tx.send(()).unwrap();
+        assert_eq!(commit.join().unwrap().unwrap(), CpuOnStartCommit::Committed);
+        stop.join().unwrap().unwrap();
+        stop_done_rx.recv().unwrap();
+
+        assert_eq!(machine.lock().status(), VmStatus::Stopping);
+        assert!(ack.is_complete());
+        assert!(runtime.try_reserve_cpu_off(0));
+    }
+
+    #[test]
+    fn stop_notifies_cpu_on_start_waiters() {
+        let runtime = Arc::new(VmRuntimeHandle::new());
+        let machine = Mutex::new(Machine::Running {
+            resources: (),
+            runtime: runtime.clone(),
+        });
+        let observed = runtime.notification_generation();
+
+        request_vm_stop(&machine, StopReason::Forced).unwrap();
+
+        assert_eq!(machine.lock().status(), VmStatus::Stopping);
+        assert_ne!(runtime.notification_generation(), observed);
+    }
+
+    #[test]
+    fn resume_notifies_deferred_cpu_on_start_waiters() {
+        let runtime = Arc::new(VmRuntimeHandle::new());
+        let machine = Mutex::new(Machine::Paused {
+            resources: (),
+            runtime: runtime.clone(),
+        });
+        let observed = runtime.notification_generation();
+
+        resume_machine_and_notify(&machine, |_| Ok(())).unwrap();
+
+        assert_eq!(machine.lock().status(), VmStatus::Running);
+        assert_ne!(runtime.notification_generation(), observed);
+    }
+
+    #[test]
+    fn runtime_cpu_on_ack_rejects_duplicate_and_can_be_removed() {
+        let runtime = VmRuntimeHandle::new();
+        let first = Arc::new(crate::runtime::vcpus::CpuOnStartAck::new());
+        let second = Arc::new(crate::runtime::vcpus::CpuOnStartAck::new());
+
+        assert!(runtime.insert_cpu_on_start_ack(1, first.clone()).is_ok());
+        assert!(runtime.insert_cpu_on_start_ack(1, second).is_err());
+
+        let stored = runtime.cpu_on_start_ack(1).unwrap();
+        assert!(Arc::ptr_eq(&stored, &first));
+
+        assert!(runtime.remove_cpu_on_start_ack(1).is_some());
+        assert!(runtime.cpu_on_start_ack(1).is_none());
+    }
+
+    #[test]
+    fn runtime_deferred_reset_request_is_single_consumer() {
+        let runtime = VmRuntimeHandle::new();
+
+        assert!(!runtime.take_deferred_reset_request());
+        assert!(runtime.request_deferred_reset());
+        assert!(!runtime.request_deferred_reset());
+        assert!(runtime.take_deferred_reset_request());
+        assert!(!runtime.take_deferred_reset_request());
+        assert!(runtime.request_deferred_reset());
+    }
+
+    #[test]
+    fn runtime_cpu_off_reservation_rejects_second_parallel_last_vcpu() {
+        let runtime = VmRuntimeHandle::new();
+
+        runtime.mark_vcpu_running();
+        runtime.mark_vcpu_running();
+
+        assert!(runtime.try_reserve_cpu_off(0));
+        assert!(!runtime.try_reserve_cpu_off(1));
+
+        assert!(runtime.consume_cpu_off_reservation(0));
+        assert!(!runtime.consume_cpu_off_reservation(0));
+
+        assert!(runtime.mark_vcpu_exiting());
+    }
+
+    use super::*;
+
+    #[test]
+    fn remove_vcpu_task_clears_pending_interrupts_and_dispatcher_registration() {
+        let runtime = VmRuntimeHandle::new();
+
+        runtime.pending_interrupts.lock().entry(3).or_default();
+        runtime.irq_dispatcher.register_test_vcpu(3, 11);
+
+        assert!(runtime.pending_interrupts.lock().contains_key(&3));
+        assert_eq!(runtime.irq_dispatcher.test_lookup_cpu_id(3).unwrap(), 11);
+
+        runtime.remove_vcpu_task(3);
+
+        assert!(!runtime.pending_interrupts.lock().contains_key(&3));
+        assert!(runtime.irq_dispatcher.test_lookup_cpu_id(3).is_err());
+
+        runtime.remove_vcpu_task(3);
+        assert!(!runtime.pending_interrupts.lock().contains_key(&3));
+        assert!(runtime.irq_dispatcher.test_lookup_cpu_id(3).is_err());
     }
 }

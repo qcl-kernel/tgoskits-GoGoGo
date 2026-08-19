@@ -228,6 +228,10 @@ impl NetworkBackend for SwitchBackend {
 
 struct IngressState {
     frames: VecDeque<alloc::vec::Vec<u8>>,
+    // DMA RX work is event-driven. A switch ingress notification or an
+    // effective guest RX kick grants one poll pass; routine vCPU iterations
+    // must not touch the guest queue without that qualification.
+    poll_pending: bool,
     // A retained front frame is either waiting for a guest kick
     // (`deferred_retry`), eligible for one delivery attempt, or in flight.
     // A kick observed in flight is consumed by that attempt's completion.
@@ -279,6 +283,7 @@ impl PortEndpoint {
             mac,
             ingress: Mutex::new(IngressState {
                 frames: VecDeque::new(),
+                poll_pending: false,
                 deferred_retry: false,
                 rx_attempt_in_flight: false,
                 retry_kick_pending: false,
@@ -306,6 +311,10 @@ impl PortEndpoint {
         frame
     }
 
+    fn take_poll_qualification(&self) -> bool {
+        core::mem::take(&mut self.lock_ingress().poll_pending)
+    }
+
     fn requeue_deferred_ingress(&self, frame: alloc::vec::Vec<u8>) {
         let should_wake = {
             let mut ingress = self.lock_ingress();
@@ -313,6 +322,9 @@ impl PortEndpoint {
             ingress.rx_attempt_in_flight = false;
             let should_wake = core::mem::take(&mut ingress.retry_kick_pending);
             ingress.deferred_retry = !should_wake;
+            if should_wake {
+                ingress.poll_pending = true;
+            }
             should_wake
         };
         if should_wake {
@@ -332,6 +344,7 @@ impl PortEndpoint {
             let should_wake = ingress.deferred_retry && !ingress.frames.is_empty();
             if should_wake {
                 ingress.deferred_retry = false;
+                ingress.poll_pending = true;
             } else if ingress.rx_attempt_in_flight {
                 ingress.retry_kick_pending = true;
             }
@@ -372,6 +385,7 @@ impl SwitchPort for PortEndpoint {
     }
 
     fn notify_ingress(&self) {
+        self.lock_ingress().poll_pending = true;
         self.wake_target.notify();
     }
 }
@@ -451,6 +465,9 @@ impl DmaPollableDeviceOps for VirtioNetRuntimeDevice {
         access: &mut dyn DeviceAccess,
         grant: &DmaGrant,
     ) -> DeviceManagerResult {
+        if !self.endpoint.take_poll_qualification() {
+            return Ok(());
+        }
         let mut memory = ScopedDeviceMemory { access, grant };
         while let Some(frame) = self.endpoint.pop_ingress() {
             match self.model.receive_frame_with_memory(&frame, &mut memory) {
@@ -684,6 +701,85 @@ mod tests {
 
     #[cfg_attr(axtest, axtest::axtest)]
     #[cfg_attr(not(axtest), test)]
+    fn runtime_poll_dma_requires_ingress_notification() {
+        let switch = VirtualSwitch::new();
+        let wake_target = Arc::new(CountingWakeTarget {
+            notifications: AtomicUsize::new(0),
+        });
+        let endpoint = PortEndpoint::new(
+            SwitchPortId::new(1, 0, 0),
+            [0x02, 0, 0, 0, 0, 1],
+            switch.clone(),
+            wake_target.clone(),
+        );
+        let registration = switch.register_owned(endpoint.clone()).unwrap();
+        endpoint.activate();
+        let backend = SwitchBackend {
+            endpoint: endpoint.clone(),
+            switch,
+        };
+        let model = Arc::new(
+            VirtioMmioNetDevice::new(
+                GuestPhysAddr::from(TEST_BASE_IPA),
+                TEST_REGION_LEN,
+                backend,
+                VirtioNetConfig::new([0x02, 0, 0, 0, 0, 1]),
+                NoGuestMemoryAccessor,
+            )
+            .unwrap(),
+        );
+        let irq_sink = Arc::new(CountingIrqSink {
+            pulses: AtomicUsize::new(0),
+        });
+        let irq = WiredIrqInput::new(
+            InterruptControllerId::new(0),
+            ControllerInputId::new(48),
+            InterruptTrigger::EdgeTriggered,
+            irq_sink.clone(),
+        )
+        .connect()
+        .unwrap();
+        let grant = DmaGrant::new();
+        let device = VirtioNetRuntimeDevice {
+            model,
+            irq,
+            grant: grant.clone(),
+            endpoint: endpoint.clone(),
+            _registration: registration,
+            resources: alloc::vec![].into_boxed_slice(),
+        };
+        let mut memory = TestDeviceAccess::new(0x8000);
+        configure_empty_rx_queue(&device, &mut memory);
+        install_rx_descriptor(&mut memory);
+        assert!(endpoint.deliver_ingress(&[0x5a; 64]));
+
+        for now_ns in 0..3 {
+            device.poll_dma(now_ns, &mut memory, &grant).unwrap();
+        }
+
+        assert_eq!(memory.read_u16(TEST_RX_USED + 2), 0);
+        assert_eq!(irq_sink.pulses.load(Ordering::Relaxed), 0);
+        {
+            let ingress = endpoint.lock_ingress();
+            assert_eq!(ingress.frames.len(), 1);
+            assert!(!ingress.rx_attempt_in_flight);
+        }
+
+        endpoint.notify_ingress();
+        assert_eq!(wake_target.notifications.load(Ordering::Relaxed), 1);
+        device.poll_dma(3, &mut memory, &grant).unwrap();
+
+        assert_eq!(memory.read_u16(TEST_RX_USED + 2), 1);
+        assert_eq!(irq_sink.pulses.load(Ordering::Relaxed), 1);
+        assert_eq!(
+            &memory.bytes[TEST_RX_BUFFER + axvirtio_net::VIRTIO_NET_HDR_MODERN_SIZE
+                ..TEST_RX_BUFFER + axvirtio_net::VIRTIO_NET_HDR_MODERN_SIZE + 64],
+            &[0x5a; 64]
+        );
+    }
+
+    #[cfg_attr(axtest, axtest::axtest)]
+    #[cfg_attr(not(axtest), test)]
     fn runtime_no_buffer_waits_for_mmio_rx_kick_before_delivery() {
         let switch = VirtualSwitch::new();
         let wake_target = Arc::new(CountingWakeTarget {
@@ -734,6 +830,7 @@ mod tests {
         let mut memory = TestDeviceAccess::new(0x8000);
         configure_empty_rx_queue(&device, &mut memory);
         assert!(endpoint.deliver_ingress(&[0x5a; 64]));
+        endpoint.notify_ingress();
 
         device.poll_dma(0, &mut memory, &grant).unwrap();
         assert_eq!(memory.read_u16(TEST_RX_USED + 2), 0);
@@ -742,7 +839,7 @@ mod tests {
         assert_eq!(memory.read_u16(TEST_RX_USED + 2), 0);
 
         runtime_mmio_write(&device, &mut memory, vc::VIRTIO_MMIO_QUEUE_NOTIFY, 0);
-        assert_eq!(wake_target.notifications.load(Ordering::Relaxed), 1);
+        assert_eq!(wake_target.notifications.load(Ordering::Relaxed), 2);
         device.poll_dma(0, &mut memory, &grant).unwrap();
 
         assert_eq!(memory.read_u16(TEST_RX_USED + 2), 1);

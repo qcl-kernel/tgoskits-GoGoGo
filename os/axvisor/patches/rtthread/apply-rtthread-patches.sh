@@ -10,30 +10,22 @@ if [ -z "$RTDIR" ]; then
 fi
 
 BSPDIR="$RTDIR/bsp/qemu-virt64-aarch64"
-DRVDIR="$RTDIR/components/drivers/virtio"
-GTIMER="$RTDIR/libcpu/aarch64/common/gtimer.c"
-GTIMER_HEADER="$RTDIR/libcpu/aarch64/common/include/gtimer.h"
-CPU_ASM="$RTDIR/libcpu/aarch64/common/cpu_gcc.S"
 PATCHDIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
 BASE_PORT_PATCH="$PATCHDIR/0000-axvisor-aarch64-port.patch"
 RTCONFIG="$BSPDIR/rtconfig.h"
 RTBENCH="$(cd "$PATCHDIR/../../guests/rt-benchmark/rtthread" && pwd)"
+TASK3DIR="$(cd "$PATCHDIR/../../guests/task3" && pwd)"
 BENCHMARK_APPDIR="$BSPDIR/applications"
+
+# shellcheck source=patch_helpers.sh
+source "$PATCHDIR/patch_helpers.sh"
 
 echo "Applying RT-Thread patches for axvisor..."
 
 # Start from the complete AArch64 guest port. This patch contains the BSP,
 # MMU, toolchain, GIC, and virtio foundations that the focused fixes below
 # build on. Verify the reverse form as well so repeated builds are idempotent.
-if git -C "$RTDIR" apply --check "$BASE_PORT_PATCH"; then
-  git -C "$RTDIR" apply "$BASE_PORT_PATCH"
-  echo "Applied the AxVisor AArch64 base port"
-elif git -C "$RTDIR" apply --check --reverse "$BASE_PORT_PATCH"; then
-  echo "AxVisor AArch64 base port is already applied"
-else
-  echo "RT-Thread source does not match the pinned base port" >&2
-  exit 1
-fi
+apply_patch_exactly "$RTDIR" "$BASE_PORT_PATCH" "the AxVisor AArch64 base port"
 
 # 0. Remove RT_USING_VIRTIO_MMIO_ALIGN: with this macro enabled, the compiler
 #    may emit sub-32-bit volatile loads/stores for virtio_mmio_config fields,
@@ -66,27 +58,14 @@ if ! grep -q '^#define MEMP_NUM_NETBUF' "$RTCONFIG"; then
 fi
 
 # 2. virtio.h: VA2PA safe fallback
-# 3. virtio.c: 64-bit queue address setup  
+# 3. virtio.c: 64-bit queue address setup
 # 4. virtio_net.c: Volatile feature negotiation and interrupt-only RX
-
-NO_POLL_PATCH="$PATCHDIR/0001-virtio-net-remove-rx-polling.patch"
-if patch --dry-run --forward --silent -d "$RTDIR" -p1 < "$NO_POLL_PATCH"; then
-    patch --silent -d "$RTDIR" -p1 < "$NO_POLL_PATCH"
-elif rg -q 'g_virtio_net_poll_timer|virtio_net_poll_timer_cb' "$DRVDIR/virtio_net.c"; then
-    echo "RT-Thread virtio-net source is not in the interrupt-only state" >&2
-    exit 1
-fi
 
 # 4b. lwIP RX notification must remain recoverable when the Ethernet RX
 # mailbox is momentarily full. Keep interrupt-only RX, but do not leave
 # rx_notice set after a failed nonblocking mailbox send.
 RX_MAILBOX_PATCH="$PATCHDIR/0002-lwip-rx-mailbox-recover-notice.patch"
-if patch --dry-run --forward --silent -d "$RTDIR" -p1 < "$RX_MAILBOX_PATCH"; then
-    patch --silent -d "$RTDIR" -p1 < "$RX_MAILBOX_PATCH"
-elif ! rg -q 'Clear the coalescing flag' "$RTDIR/components/net/lwip/port/ethernetif.c"; then
-    echo "Failed to verify RT-Thread lwIP RX mailbox fix" >&2
-    exit 1
-fi
+apply_patch_exactly "$RTDIR" "$RX_MAILBOX_PATCH" "the lwIP RX mailbox fix"
 
 # Do not unconditionally wake the RX thread from every virtio-net interrupt.
 # That change was tested with the mailbox fix and regressed to a first-request
@@ -94,64 +73,33 @@ fi
 # recoverable rx_notice coalescing fix above.
 
 TX_USED_RECLAIM_PATCH="$PATCHDIR/0003-virtio-net-reclaim-tx-used-ring.patch"
-if patch --dry-run --forward --silent -d "$RTDIR" -p1 < "$TX_USED_RECLAIM_PATCH"; then
-    patch --silent -d "$RTDIR" -p1 < "$TX_USED_RECLAIM_PATCH"
-elif ! rg -q 'Reclaim completed TX chains' "$DRVDIR/virtio_net.c"; then
-    echo "Failed to verify RT-Thread virtio-net TX used-ring reclaim fix" >&2
-    exit 1
-fi
+apply_patch_exactly "$RTDIR" "$TX_USED_RECLAIM_PATCH" \
+    "the virtio-net TX used-ring reclaim fix"
 
 # 3b. Virtio-net RX completions must use the exact chain head published in the
 # used ring.  Deriving the data descriptor as used_id + 1 reads the wrong
 # descriptor after any non-zero head and corrupts packet reassembly.  Initial
 # RX descriptors must also reference info[i].hdr, not info[i].tx_buffer.
 RX_USED_HEAD_PATCH="$PATCHDIR/0004-virtio-net-use-rx-used-ring-head.patch"
-if patch --dry-run --forward --silent -d "$RTDIR" -p1 < "$RX_USED_HEAD_PATCH"; then
-    patch --silent -d "$RTDIR" -p1 < "$RX_USED_HEAD_PATCH"
-elif ! rg -q 'id = used_id' "$DRVDIR/virtio_net.c"; then
-    echo "Failed to verify RT-Thread virtio-net RX used-ring head fix" >&2
-    exit 1
-fi
+apply_patch_exactly "$RTDIR" "$RX_USED_HEAD_PATCH" \
+    "the virtio-net RX used-ring head fix"
 
 UDP_RECV_MBOX_PATCH="$PATCHDIR/0005-lwip-configurable-udp-recv-mailbox.patch"
-if patch --dry-run --forward --silent -d "$RTDIR" -p1 < "$UDP_RECV_MBOX_PATCH"; then
-    patch --silent -d "$RTDIR" -p1 < "$UDP_RECV_MBOX_PATCH"
-elif ! rg -q 'DEFAULT_UDP_RECVMBOX_SIZE[[:space:]]+RT_LWIP_UDP_RECVMBOX_SIZE' \
-    "$RTDIR/components/net/lwip/port/lwipopts.h"; then
-    echo "Failed to verify RT-Thread lwIP UDP receive mailbox configuration" >&2
-    exit 1
-fi
+apply_patch_exactly "$RTDIR" "$UDP_RECV_MBOX_PATCH" \
+    "the lwIP UDP receive mailbox configuration"
 
 # RT-Thread 5.2.2 uses the removed GICv2 SPENDSGIR/CPENDSGIR registers for
 # local SGI pending operations even when the BSP selects GICv3.  Use the
 # current CPU's redistributor pending registers for SGIs and PPIs instead.
 GICV3_PENDING_PATCH="$PATCHDIR/0006-gicv3-use-redistributor-pending-registers.patch"
-if patch --dry-run --forward --silent -d "$RTDIR" -p1 < "$GICV3_PENDING_PATCH"; then
-    patch --silent -d "$RTDIR" -p1 < "$GICV3_PENDING_PATCH"
-elif ! rg -q 'arm_gic_get_pending_irq' \
-        "$RTDIR/libcpu/aarch64/common/gicv3.c" || \
-    ! rg -q 'GIC_RDISTSGI_ISPENDR0.*redist_hw_base\[cpu_id\]' \
-        "$RTDIR/libcpu/aarch64/common/gicv3.c" || \
-    ! rg -q 'GIC_RDISTSGI_ICPENDR0.*redist_hw_base\[cpu_id\].*= mask' \
-        "$RTDIR/libcpu/aarch64/common/gicv3.c"; then
-    echo "Failed to verify RT-Thread GICv3 pending-register fix" >&2
-    exit 1
-fi
+apply_patch_exactly "$RTDIR" "$GICV3_PENDING_PATCH" \
+    "the GICv3 pending-register fix"
 
 # The SGI latency benchmark temporarily owns INTID 7. Query the pre-existing
 # enable bit so cleanup can restore both enabled and disabled callers exactly.
 GIC_ENABLE_QUERY_PATCH="$PATCHDIR/0007-gicv3-query-interrupt-enable-state.patch"
-if patch --dry-run --forward --silent -d "$RTDIR" -p1 < "$GIC_ENABLE_QUERY_PATCH"; then
-    patch --silent -d "$RTDIR" -p1 < "$GIC_ENABLE_QUERY_PATCH"
-elif ! rg -q 'rt_hw_interrupt_get_enable' \
-        "$RTDIR/libcpu/aarch64/common/interrupt.c" || \
-    ! rg -q 'arm_gic_get_enable_irq' \
-        "$RTDIR/libcpu/aarch64/common/gic.c" || \
-    ! rg -q 'arm_gic_get_enable_irq' \
-        "$RTDIR/libcpu/aarch64/common/gicv3.c"; then
-    echo "Failed to verify RT-Thread interrupt enable-state query" >&2
-    exit 1
-fi
+apply_patch_exactly "$RTDIR" "$GIC_ENABLE_QUERY_PATCH" \
+    "the GICv3 interrupt enable-state query"
 
 # The upstream AArch64 BSP rearms its periodic timer with a relative TVAL from
 # inside the ISR. Every interrupt-delivery delay therefore lengthens the next
@@ -159,17 +107,8 @@ fi
 # account for every elapsed tick instead. The BSP must also consistently use
 # the virtual timer for enable, disable, value access, and PPI 27 delivery.
 GTIMER_DEADLINE_PATCH="$PATCHDIR/0008-aarch64-gtimer-use-absolute-deadlines.patch"
-if patch --dry-run --forward --silent -d "$RTDIR" -p1 < "$GTIMER_DEADLINE_PATCH"; then
-    patch --silent -d "$RTDIR" -p1 < "$GTIMER_DEADLINE_PATCH"
-elif ! rg -q 'timer_deadline \+= timer_step' "$GTIMER" || \
-    ! rg -q 'while \(timer_deadline <= now\)' "$GTIMER" || \
-    ! rg -q 'rt_hw_sysreg_write\(CNTV_CVAL_EL0, timer_deadline\)' "$GTIMER" || \
-    ! rg -q 'msr[[:space:]]+CNTV_CTL_EL0, xzr' "$GTIMER_HEADER" || \
-    ! rg -q 'msr[[:space:]]+CNTV_CTL_EL0, x0' "$CPU_ASM" || \
-    ! rg -q 'msr[[:space:]]+CNTV_TVAL_EL0, x0' "$CPU_ASM"; then
-    echo "Failed to verify RT-Thread absolute virtual-timer deadline fix" >&2
-    exit 1
-fi
+apply_patch_exactly "$RTDIR" "$GTIMER_DEADLINE_PATCH" \
+    "the absolute virtual-timer deadline fix"
 
 # 5. Install RT-IPC server into BSP applications
 GUESTDIR="$(cd "$PATCHDIR/../../guests/rt-ipc" && pwd)"
@@ -189,6 +128,23 @@ cp "$GUESTDIR/common/rt_ipc.h" "$APPDIR/"
 cp "$GUESTDIR/rtthread/SConscript" "$APPDIR/"
 echo "Installed RT-IPC server into $APPDIR"
 
+# Task 3 reuses the RT-IPC implementation compiled by rt-ipc-test. Install
+# only its application sources and the shared v2 header to avoid duplicate
+# protocol symbols in the final image.
+TASK3_APPDIR="$BSPDIR/applications/task3"
+mkdir -p "$TASK3_APPDIR"
+cp "$TASK3DIR/src/rtthread/task3_server.c" "$TASK3_APPDIR/"
+cp "$TASK3DIR/src/rtthread/SConscript" "$TASK3_APPDIR/"
+cp "$TASK3DIR/src/common/controller.c" "$TASK3_APPDIR/"
+cp "$TASK3DIR/src/common/controller.h" "$TASK3_APPDIR/"
+cp "$TASK3DIR/src/common/task3_protocol.c" "$TASK3_APPDIR/"
+cp "$TASK3DIR/src/common/task3_protocol.h" "$TASK3_APPDIR/"
+cp "$TASK3DIR/src/common/session.c" "$TASK3_APPDIR/"
+cp "$TASK3DIR/src/common/session.h" "$TASK3_APPDIR/"
+cp "$GUESTDIR/common/rt_ipc.h" "$TASK3_APPDIR/"
+rm -f -- "$TASK3_APPDIR/rt_ipc.c"
+echo "Installed Task 3 server into $TASK3_APPDIR"
+
 # 6. Install the canonical benchmark source.  Keeping this in tgoskits makes
 # benchmark fixes reviewable and prevents a previously generated RT-Thread
 # source tree from silently supplying stale measurement code.
@@ -202,9 +158,11 @@ echo "  - rtconfig.h: SAL/socket support enabled for RT-IPC"
 echo "  - virtio.h: _virtio_va2pa_safe() with identity mapping fallback"  
 echo "  - virtio.c: 64-bit queue registers with 44-bit PA mask"
 echo "  - virtio_net.c: volatile feature negotiation, interrupt-only RX"
+echo "  - virtio_net.c: separate TX and RX descriptor buffers"
 echo "  - lwIP: 16-slot UDP receive mailbox and matching netbuf pool"
 echo "  - GICv3: local SGI/PPI pending state uses redistributor registers"
 echo "  - AArch64 GIC: interrupt enable state is queryable for benchmark cleanup"
 echo "  - AArch64 timer: absolute CNTV deadlines with elapsed-tick compensation"
 echo "  - applications/rt-ipc-test/: RT-IPC UDP server installed"
+echo "  - applications/task3/: Task 3 UDP/9877 control server installed"
 echo "  - applications/rt_benchmark.c: canonical real-time benchmark installed"

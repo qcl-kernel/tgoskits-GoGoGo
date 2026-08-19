@@ -20,8 +20,12 @@ LWIPOPTS="$RTDIR/components/net/lwip/port/lwipopts.h"
 RTCONFIG="$RTDIR/bsp/qemu-virt64-aarch64/rtconfig.h"
 APPLY_SCRIPT="$ROOT/os/axvisor/patches/rtthread/apply-rtthread-patches.sh"
 GTIMER_PATCH="$ROOT/os/axvisor/patches/rtthread/0008-aarch64-gtimer-use-absolute-deadlines.patch"
+LEGACY_NO_POLL_PATCH="$ROOT/os/axvisor/patches/rtthread/0001-virtio-net-remove-rx-polling.patch"
 BENCHMARK="$ROOT/os/axvisor/guests/rt-benchmark/rtthread/rt_benchmark.c"
 INSTALLED_BENCHMARK="$RTDIR/bsp/qemu-virt64-aarch64/applications/rt_benchmark.c"
+APPLICATION_SCONSCRIPT="$RTDIR/bsp/qemu-virt64-aarch64/applications/SConscript"
+TASK3_SOURCE="$ROOT/os/axvisor/guests/task3"
+TASK3_APPDIR="$RTDIR/bsp/qemu-virt64-aarch64/applications/task3"
 
 if [[ ! -f "$DRIVER" ]]; then
     echo "FAIL: RT-Thread source not available: $DRIVER" >&2
@@ -29,6 +33,10 @@ if [[ ! -f "$DRIVER" ]]; then
 fi
 
 failures=0
+if [[ -e "$LEGACY_NO_POLL_PATCH" ]]; then
+    echo "FAIL: obsolete virtio-net polling/debug cleanup patch must be removed" >&2
+    failures=$((failures + 1))
+fi
 if ! git apply --numstat "$GTIMER_PATCH" >/dev/null 2>&1; then
     echo "FAIL: AArch64 absolute-deadline patch is syntactically valid" >&2
     failures=$((failures + 1))
@@ -70,6 +78,28 @@ require_order() {
         failures=$((failures + 1))
     fi
 }
+extract_function() {
+    local function_name="$1"
+    local file="$2"
+
+    awk -v function_name="$function_name" '
+        !in_function && $0 ~ "^[[:space:]]*static[[:space:]].*[[:space:]]" function_name "[[:space:]]*\\(" {
+            in_function = 1
+        }
+        in_function {
+            print
+            line = $0
+            opens = gsub(/\{/, "{", line)
+            line = $0
+            closes = gsub(/\}/, "}", line)
+            depth += opens - closes
+            if (opens > 0)
+                saw_body = 1
+            if (saw_body && depth == 0)
+                exit
+        }
+    ' "$file"
+}
 require_function_pattern() {
     local description="$1"
     local function_name="$2"
@@ -77,7 +107,7 @@ require_function_pattern() {
     local file="$4"
     local body
 
-    body="$(sed -n "/^static .* ${function_name}(/,/^}/p" "$file")"
+    body="$(extract_function "$function_name" "$file")"
     if [[ -z "$body" ]] || ! grep -Eq -- "$pattern" <<<"$body"; then
         echo "FAIL: $description" >&2
         failures=$((failures + 1))
@@ -90,9 +120,25 @@ reject_function_pattern() {
     local file="$4"
     local body
 
-    body="$(sed -n "/^static .* ${function_name}(/,/^}/p" "$file")"
+    body="$(extract_function "$function_name" "$file")"
     if [[ -z "$body" ]] || grep -Eq -- "$pattern" <<<"$body"; then
         echo "FAIL: $description" >&2
+        failures=$((failures + 1))
+    fi
+}
+require_function_count() {
+    local description="$1"
+    local function_name="$2"
+    local pattern="$3"
+    local expected="$4"
+    local file="$5"
+    local body
+    local actual
+
+    body="$(extract_function "$function_name" "$file")"
+    actual="$( { grep -Eo -- "$pattern" <<<"$body" || true; } | wc -l)"
+    if [[ -z "$body" || "$actual" -ne "$expected" ]]; then
+        echo "FAIL: $description (expected $expected, found $actual)" >&2
         failures=$((failures + 1))
     fi
 }
@@ -117,6 +163,21 @@ require_pattern \
 require_pattern \
     "RX completion copies the matching receive buffer" \
     'rt_memcpy\(p->payload, virtio_net_dev->info\[id / 2\]\.rx_buffer, len\);'
+require_function_pattern \
+    "TX copies each frame into TX-owned storage" \
+    'virtio_net_tx' \
+    'pbuf_copy_partial\(p, virtio_net_dev->info\[id\]\.tx_buffer, p->tot_len, 0\);' \
+    "$DRIVER"
+require_function_pattern \
+    "TX data descriptors reference TX-owned storage" \
+    'virtio_net_tx' \
+    'VIRTIO_VA2PA\(virtio_net_dev->info\[id\]\.tx_buffer\), p->tot_len' \
+    "$DRIVER"
+reject_function_pattern \
+    "TX must not alias buffers owned by the RX queue" \
+    'virtio_net_tx' \
+    'info\[id\]\.rx_buffer' \
+    "$DRIVER"
 require_pattern \
     "UDP receive mailbox size is configurable per BSP" \
     '#define DEFAULT_UDP_RECVMBOX_SIZE[[:space:]]+RT_LWIP_UDP_RECVMBOX_SIZE' \
@@ -129,6 +190,15 @@ require_pattern \
     "RT-IPC guest has one netbuf for every UDP receive mailbox slot" \
     '#define MEMP_NUM_NETBUF[[:space:]]+16' \
     "$RTCONFIG"
+require_pattern \
+    "RT benchmark worker uses a background priority below the network threads" \
+    '#define RTBENCH_WORKER_PRIORITY[[:space:]]+20U' \
+    "$INSTALLED_BENCHMARK"
+require_function_pattern \
+    "RT benchmark worker uses the background priority constant" \
+    'rtbench_start_job' \
+    'RTBENCH_WORKER_PRIORITY' \
+    "$INSTALLED_BENCHMARK"
 require_pattern \
     "GICv3 set-pending uses the current CPU redistributor for SGIs and PPIs" \
     'GIC_RDISTSGI_ISPENDR0\(_gic_table\[index\]\.redist_hw_base\[cpu_id\]\) = mask;' \
@@ -161,13 +231,62 @@ require_pattern \
     "AArch64 tick timer advances an absolute virtual deadline" \
     'timer_deadline \+= timer_step;' \
     "$GTIMER"
-require_pattern \
-    "AArch64 tick timer programs CNTV_CVAL rather than a relative TVAL" \
+require_function_pattern \
+    "AArch64 tick ISR programs CNTV_CVAL rather than a relative TVAL" \
+    'rt_hw_timer_isr' \
     'rt_hw_sysreg_write\(CNTV_CVAL_EL0, timer_deadline\);' \
     "$GTIMER"
 require_pattern \
-    "AArch64 tick timer compensates every elapsed period" \
-    'while \(timer_deadline <= now\)' \
+    "AArch64 tick timer computes elapsed periods arithmetically" \
+    '\(rt_uint64_t\)lateness / timer_step' \
+    "$GTIMER"
+require_pattern \
+    "AArch64 tick timer handles generic-counter wrap with a signed delta" \
+    'lateness = \(rt_int64_t\)\(now - timer_deadline\);' \
+    "$GTIMER"
+require_pattern \
+    "AArch64 tick timer bounds one kernel tick jump below half the tick range" \
+    'GTIMER_MAX_ELAPSED_TICKS.*RT_TICK_MAX / 2 - 1' \
+    "$GTIMER"
+require_pattern \
+    "AArch64 tick timer detects an out-of-range elapsed tick count" \
+    'elapsed_ticks >= GTIMER_MAX_ELAPSED_TICKS' \
+    "$GTIMER"
+require_pattern \
+    "AArch64 tick timer saturates elapsed ticks before the kernel update" \
+    'elapsed_ticks = GTIMER_MAX_ELAPSED_TICKS;' \
+    "$GTIMER"
+require_order \
+    "AArch64 tick saturation precedes the bulk kernel tick update" \
+    'elapsed_ticks = GTIMER_MAX_ELAPSED_TICKS;' \
+    'rt_tick_increase_tick\(\(rt_tick_t\)elapsed_ticks\);' \
+    "$GTIMER"
+require_pattern \
+    "AArch64 tick timer resynchronizes after an out-of-range pause" \
+    'timer_deadline = now \+ timer_step;' \
+    "$GTIMER"
+require_pattern \
+    "AArch64 tick timer advances the deadline in one bounded operation" \
+    'timer_deadline \+= elapsed_ticks \* timer_step;' \
+    "$GTIMER"
+require_function_count \
+    "AArch64 tick ISR accounts elapsed periods in exactly one kernel call" \
+    'rt_hw_timer_isr' \
+    'rt_tick_increase_tick\(\(rt_tick_t\)elapsed_ticks\);' \
+    1 \
+    "$GTIMER"
+reject_function_pattern \
+    "AArch64 tick ISR contains no loop proportional to delayed work" \
+    'rt_hw_timer_isr' \
+    '(^|[[:space:]])(while|for)[[:space:]]*\(' \
+    "$GTIMER"
+reject_pattern \
+    "AArch64 tick timer does not use a non-wrap-safe raw counter comparison" \
+    'if \(now >= timer_deadline\)' \
+    "$GTIMER"
+require_pattern \
+    "AArch64 tick timer establishes a nonzero timer-step invariant" \
+    'RT_ASSERT\(timer_step > 0\);' \
     "$GTIMER"
 require_pattern \
     "AArch64 virtual timer disable writes CNTV_CTL" \
@@ -188,6 +307,10 @@ reject_pattern \
 reject_pattern \
     "virtio-net TX exhaustion path contains no temporary debug print" \
     'VNET_TX FULL' \
+    "$DRIVER"
+reject_pattern \
+    "virtio-net uses interrupt-driven RX without a polling timer fallback" \
+    'g_virtio_net_poll_timer|virtio_net_poll_timer_cb' \
     "$DRIVER"
 require_pattern \
     "virtio DMA translation has the rt_kmem_v2p declaration on AArch64" \
@@ -270,6 +393,14 @@ else
     require_pattern \
         "benchmark suite export uses the documented shell command" \
         'MSH_CMD_EXPORT\(benchmark,' \
+        "$BENCHMARK"
+    require_pattern \
+        "stability benchmark exposes a stable ELF entry symbol" \
+        '^int[[:space:]]+rtbench_stability\(int argc, char \*\*argv\)' \
+        "$BENCHMARK"
+    reject_pattern \
+        "stability benchmark entry is not private to one translation unit" \
+        '^static[[:space:]]+int[[:space:]]+rtbench_stability\(' \
         "$BENCHMARK"
     require_pattern \
         "benchmark worker rejects overlapping jobs" \
@@ -369,13 +500,22 @@ require_pattern \
     "apply script installs the canonical RT benchmark" \
     'cp .*RTBENCH.*rt_benchmark\.c.*APPDIR' \
     "$APPLY_SCRIPT"
-require_pattern \
-    "apply script verifies the GICv3 get-pending fallback" \
-    'arm_gic_get_pending_irq' \
-    "$APPLY_SCRIPT"
-require_pattern \
-    "apply script verifies the GICv3 clear-pending fallback" \
-    'GIC_RDISTSGI_ICPENDR0' \
+for patch_variable in \
+    RX_MAILBOX_PATCH \
+    TX_USED_RECLAIM_PATCH \
+    RX_USED_HEAD_PATCH \
+    UDP_RECV_MBOX_PATCH \
+    GICV3_PENDING_PATCH \
+    GIC_ENABLE_QUERY_PATCH \
+    GTIMER_DEADLINE_PATCH; do
+    require_pattern \
+        "apply script checks the exact state of $patch_variable" \
+        "apply_patch_exactly .*\\\$$patch_variable" \
+        "$APPLY_SCRIPT"
+done
+reject_pattern \
+    "apply script does not accept marker text as proof of complete patches" \
+    'elif[[:space:]]+![[:space:]]+rg' \
     "$APPLY_SCRIPT"
 require_pattern \
     "apply script installs the GICv3 enable-state query" \
@@ -392,6 +532,79 @@ if [[ ! -f "$INSTALLED_BENCHMARK" ]]; then
 elif [[ -f "$BENCHMARK" ]] && ! cmp -s "$BENCHMARK" "$INSTALLED_BENCHMARK"; then
     echo "FAIL: installed RT benchmark differs from canonical source" >&2
     failures=$((failures + 1))
+fi
+
+require_pattern \
+    "RT-Thread applications include the Task 3 SCons group" \
+    "group[[:space:]]*\+=[[:space:]]*SConscript\('task3/SConscript'\)" \
+    "$APPLICATION_SCONSCRIPT"
+for task3_file in \
+    task3_server.c SConscript controller.c controller.h task3_protocol.c \
+    task3_protocol.h session.c session.h rt_ipc.h; do
+    if [[ ! -f "$TASK3_APPDIR/$task3_file" ]]; then
+        echo "FAIL: installed Task 3 file is missing: $task3_file" >&2
+        failures=$((failures + 1))
+    fi
+done
+if [[ -e "$TASK3_APPDIR/rt_ipc.c" ]]; then
+    echo "FAIL: Task 3 must reuse the RT-IPC server's protocol implementation" >&2
+    failures=$((failures + 1))
+fi
+for mapping in \
+    "src/rtthread/task3_server.c:task3_server.c" \
+    "src/rtthread/SConscript:SConscript" \
+    "src/common/controller.c:controller.c" \
+    "src/common/controller.h:controller.h" \
+    "src/common/task3_protocol.c:task3_protocol.c" \
+    "src/common/task3_protocol.h:task3_protocol.h" \
+    "src/common/session.c:session.c" \
+    "src/common/session.h:session.h"; do
+    source_file="${mapping%%:*}"
+    installed_file="${mapping#*:}"
+    if [[ -f "$TASK3_APPDIR/$installed_file" ]] && \
+       ! cmp -s "$TASK3_SOURCE/$source_file" "$TASK3_APPDIR/$installed_file"; then
+        echo "FAIL: installed Task 3 file differs from canonical source: $installed_file" >&2
+        failures=$((failures + 1))
+    fi
+done
+if [[ -f "$TASK3_APPDIR/rt_ipc.h" ]] && \
+   ! cmp -s "$ROOT/os/axvisor/guests/rt-ipc/common/rt_ipc.h" \
+       "$TASK3_APPDIR/rt_ipc.h"; then
+    echo "FAIL: installed Task 3 RT-IPC header differs from v2 common header" >&2
+    failures=$((failures + 1))
+fi
+if [[ -f "$TASK3_APPDIR/SConscript" ]]; then
+    require_pattern \
+        "Task 3 SCons supports one dropped status packet" \
+        'TASK3_FAULT_DROP_STATUS_ONCE' \
+        "$TASK3_APPDIR/SConscript"
+    require_pattern \
+        "Task 3 SCons supports delayed server startup" \
+        'TASK3_FAULT_DELAY_START_MS' \
+        "$TASK3_APPDIR/SConscript"
+fi
+if [[ -f "$TASK3_APPDIR/task3_server.c" ]]; then
+    require_pattern \
+        "Task 3 delayed startup emits RT-Thread evidence" \
+        'TASK3_FAULT_DELAYED_SERVER delay_ms=%d' \
+        "$TASK3_APPDIR/task3_server.c"
+    require_pattern \
+        "Task 3 delayed startup stays in the server application thread" \
+        'rt_thread_mdelay\(TASK3_FAULT_DELAY_START_MS\);' \
+        "$TASK3_APPDIR/task3_server.c"
+    require_order \
+        "Task 3 delayed startup evidence precedes the application-thread delay" \
+        'TASK3_FAULT_DELAYED_SERVER delay_ms=%d' \
+        'rt_thread_mdelay\(TASK3_FAULT_DELAY_START_MS\);' \
+        "$TASK3_APPDIR/task3_server.c"
+    require_pattern \
+        "Task 3 waits for the shared static address" \
+        'ip_addr_cmp\(&device->ip_addr, &address\)' \
+        "$TASK3_APPDIR/task3_server.c"
+    reject_pattern \
+        "Task 3 does not compete with Task 2 for netdev configuration" \
+        'netdev_set_(ipaddr|netmask|gw)\(' \
+        "$TASK3_APPDIR/task3_server.c"
 fi
 
 if (( failures != 0 )); then

@@ -1,0 +1,22 @@
+from building import *
+import os
+
+cwd = GetCurrentDir()
+src = Glob('*.c')
+defines = []
+if os.environ.get('TASK3_FAULT_DROP_STATUS_ONCE') == '1':
+    defines += ['TASK3_FAULT_DROP_STATUS_ONCE=1']
+delay_start_ms = int(os.environ.get('TASK3_FAULT_DELAY_START_MS', '0'))
+if delay_start_ms < 0:
+    raise ValueError('TASK3_FAULT_DELAY_START_MS must be non-negative')
+if delay_start_ms > 0:
+    defines += ['TASK3_FAULT_DELAY_START_MS=%d' % delay_start_ms]
+group = DefineGroup(
+    'task3-server',
+    src,
+    depend=['RT_USING_LWIP'],
+    CPPPATH=[cwd],
+    CPPDEFINES=defines,
+)
+
+Return('group')

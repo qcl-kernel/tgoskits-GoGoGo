@@ -7992,6 +7992,7 @@ name = "starryos"
 version = "0.5.28"
 dependencies = [
  "anyhow",
+ "ax-crate-interface",
  "ax-driver",
  "ax-hal",
  "ax-runtime",

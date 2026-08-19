@@ -15,6 +15,7 @@ pub(crate) struct VcpuRunAction {
 
 impl VcpuRunAction {
     /// Selects the host scheduler effect after a trapped guest WFI.
+    #[cfg(any(target_arch = "aarch64", test))]
     pub(crate) const fn for_guest_wfi(policy: axvmconfig::HostVcpuIdlePolicy) -> Self {
         Self {
             waits_for_event: matches!(policy, axvmconfig::HostVcpuIdlePolicy::Halt),

@@ -14,6 +14,8 @@
 
 use std::{format, sync::Arc};
 
+use ax_std::os::arceos::sync::IrqSafeMutex;
+
 use crate::{
     AsVCpuTask, AxVmResult, GuestPhysAddr, StopReason, VCpuTask, VmStatus, VmVcpuState,
     arch::{ArchOps, CurrentArch, VcpuRunAction},
@@ -40,6 +42,59 @@ where
 
 fn vcpu_start_is_ready(vm_running: bool, task_registered: bool) -> bool {
     vm_running && task_registered
+}
+
+fn cpu_on_start_wait_is_complete(
+    vm_running: bool,
+    vm_terminating: bool,
+    task_registered: bool,
+    startup_cancelled: bool,
+) -> bool {
+    vcpu_start_is_ready(vm_running, task_registered) || vm_terminating || startup_cancelled
+}
+
+fn vm_terminates_vcpu_start(status: VmStatus) -> bool {
+    matches!(
+        status,
+        VmStatus::Stopping
+            | VmStatus::Stopped
+            | VmStatus::Destroying
+            | VmStatus::Destroyed
+            | VmStatus::Failed
+    )
+}
+
+fn cpu_on_start_failure_reason(
+    vm_id: usize,
+    vcpu_id: usize,
+    error: &crate::AxVmError,
+) -> StopReason {
+    StopReason::Fault(format!(
+        "VM[{vm_id}] VCpu[{vcpu_id}] CPU_ON startup failed: {error}"
+    ))
+}
+
+fn handle_cpu_on_start_failure<A: axvm_types::VmArchVcpuOps>(
+    vm_id: usize,
+    vcpu_id: usize,
+    runtime: &VmRuntimeHandle,
+    vcpu: &crate::vcpu::AxVCpu<A>,
+    ack: &CpuOnStartAck,
+    error: crate::AxVmError,
+    stop: impl FnOnce(StopReason) -> AxVmResult,
+) {
+    let stop_reason = cpu_on_start_failure_reason(vm_id, vcpu_id, &error);
+    ack.complete(Err(error));
+    runtime.remove_cpu_on_start_ack(vcpu_id);
+    vcpu.rollback_cpu_on();
+    runtime.remove_vcpu_task(vcpu_id);
+    if let Err(stop_error) = stop(stop_reason) {
+        warn!(
+            "VM[{vm_id}] failed to stop after VCpu[{vcpu_id}] CPU_ON startup failure: \
+             {stop_error:?}"
+        );
+    }
+    runtime.notify_all();
 }
 
 /// Notifies the primary VCpu task associated with the specified VM to wake up and resume execution.
@@ -170,7 +225,7 @@ fn mark_vcpu_running(vm: &VMRef) {
     });
 }
 
-type CpuOnStartAckLock<T> = std::sync::Mutex<T>;
+type CpuOnStartAckLock<T> = IrqSafeMutex<T>;
 
 #[allow(dead_code)]
 pub(crate) struct CpuOnStartAck {
@@ -232,8 +287,7 @@ impl CpuOnStartAck {
     }
 
     fn lock_inner(&self) -> impl std::ops::DerefMut<Target = CpuOnStartAckInner> + '_ {
-        use crate::sync::MutexExt;
-        self.inner.lock_unpoisoned()
+        self.inner.lock()
     }
 }
 
@@ -414,37 +468,73 @@ fn vcpu_run() {
     info!("VM[{}] VCpu[{}] waiting for running", vm.id(), vcpu.id());
     let cpu_on_start_ack = runtime.cpu_on_start_ack(vcpu_id);
     wait_for(&runtime, || {
-        vcpu_start_is_ready(vm.running(), runtime.has_vcpu_task(vcpu_id))
-            || cpu_on_start_ack
+        cpu_on_start_wait_is_complete(
+            vm.running(),
+            vm_terminates_vcpu_start(vm.status()),
+            runtime.has_vcpu_task(vcpu_id),
+            cpu_on_start_ack
                 .as_ref()
-                .is_some_and(|ack| ack.is_cancelled())
+                .is_some_and(|ack| ack.is_cancelled()),
+        )
     });
 
     if let Some(ack) = &cpu_on_start_ack {
-        if !ack.begin_startup() {
-            ack.complete(Err(ax_err_type!(
-                BadState,
-                format!("vCPU {vcpu_id} CPU_ON startup was cancelled")
-            )));
+        let fail_start = |error| {
+            ack.complete(Err(error));
             runtime.remove_cpu_on_start_ack(vcpu_id);
             vcpu.rollback_cpu_on();
+            runtime.remove_vcpu_task(vcpu_id);
+        };
+
+        if vm_terminates_vcpu_start(vm.status()) {
+            fail_start(ax_err_type!(
+                BadState,
+                format!("VM[{vm_id}] stopped before VCpu[{vcpu_id}] CPU_ON startup")
+            ));
             runtime.notify_all();
             return;
         }
 
-        match vcpu.bind_after_cpu_on_or_rollback() {
+        if !ack.begin_startup() {
+            fail_start(ax_err_type!(
+                BadState,
+                format!("vCPU {vcpu_id} CPU_ON startup was cancelled")
+            ));
+            runtime.notify_all();
+            return;
+        }
+
+        let start_result = loop {
+            match vm.commit_cpu_on_start(ack, || vcpu.bind_after_cpu_on_or_rollback()) {
+                Ok(crate::vm::CpuOnStartCommit::Committed) => break Ok(()),
+                Ok(crate::vm::CpuOnStartCommit::Deferred) => {
+                    wait_for(&runtime, || {
+                        vm.running() || vm_terminates_vcpu_start(vm.status())
+                    });
+                    if vm_terminates_vcpu_start(vm.status()) {
+                        break Err(ax_err_type!(
+                            BadState,
+                            format!(
+                                "VM[{vm_id}] stopped while VCpu[{vcpu_id}] CPU_ON startup was \
+                                 deferred"
+                            )
+                        ));
+                    }
+                }
+                Err(err) => break Err(err),
+            }
+        };
+
+        match start_result {
             Ok(()) => {
                 CurrentArch::before_first_run(&vm, &vcpu);
-                runtime.publish_cpu_on_start_success(ack);
                 runtime.remove_cpu_on_start_ack(vcpu_id);
                 runtime.notify_all();
             }
             Err(err) => {
-                ack.complete(Err(err));
-                runtime.remove_cpu_on_start_ack(vcpu_id);
-                vcpu.rollback_cpu_on();
-                runtime.notify_all();
-                runtime.remove_vcpu_task(vcpu_id);
+                handle_cpu_on_start_failure(vm_id, vcpu_id, &runtime, &vcpu, ack, err, |reason| {
+                    vm.stop(reason)
+                });
                 return;
             }
         }
@@ -604,13 +694,174 @@ fn poll_vm_dma_devices(vm: &VMRef) {
 
 #[cfg(test)]
 mod tests {
+    use std::cell::RefCell;
+
     use super::*;
+
+    struct CleanupTestVcpu;
+
+    impl axvm_types::VmArchVcpuOps for CleanupTestVcpu {
+        type CreateConfig = ();
+        type SetupConfig = ();
+        type Exit = ();
+
+        fn new(
+            _vm_id: axvm_types::VMId,
+            _vcpu_id: axvm_types::VCpuId,
+            _config: Self::CreateConfig,
+        ) -> axvm_types::VmBackendResult<Self> {
+            Ok(Self)
+        }
+
+        fn set_entry(&mut self, _entry: GuestPhysAddr) -> axvm_types::VmBackendResult {
+            Ok(())
+        }
+
+        fn set_nested_page_table(
+            &mut self,
+            _config: axvm_types::NestedPagingConfig,
+        ) -> axvm_types::VmBackendResult {
+            Ok(())
+        }
+
+        fn setup(&mut self, _config: Self::SetupConfig) -> axvm_types::VmBackendResult {
+            Ok(())
+        }
+
+        fn run(&mut self) -> axvm_types::VmBackendResult<Self::Exit> {
+            Ok(())
+        }
+
+        fn bind(&mut self) -> axvm_types::VmBackendResult {
+            Ok(())
+        }
+
+        fn unbind(&mut self) -> axvm_types::VmBackendResult {
+            Ok(())
+        }
+
+        fn set_gpr(&mut self, _reg: usize, _val: usize) {}
+
+        fn inject_interrupt(&mut self, _vector: usize) -> axvm_types::VmBackendResult {
+            Ok(())
+        }
+
+        fn set_return_value(&mut self, _val: usize) {}
+    }
+
+    fn starting_test_vcpu(vcpu_id: usize) -> crate::vcpu::AxVCpu<CleanupTestVcpu> {
+        let vcpu = crate::vcpu::AxVCpu::new(7, vcpu_id, None, ()).unwrap();
+        vcpu.transition_state(VmVcpuState::Created, VmVcpuState::Starting)
+            .unwrap();
+        vcpu
+    }
 
     #[test]
     fn vcpu_waits_for_runtime_registration_before_entering_guest() {
         assert!(!vcpu_start_is_ready(true, false));
         assert!(vcpu_start_is_ready(true, true));
         assert!(!vcpu_start_is_ready(false, true));
+    }
+
+    #[test]
+    fn cpu_on_start_wait_terminates_when_vm_stops() {
+        assert!(!cpu_on_start_wait_is_complete(true, false, false, false));
+        assert!(cpu_on_start_wait_is_complete(true, false, true, false));
+        assert!(cpu_on_start_wait_is_complete(true, false, false, true));
+        assert!(cpu_on_start_wait_is_complete(false, true, false, false));
+    }
+
+    #[test]
+    fn every_terminal_vm_state_cancels_cpu_on_startup() {
+        for status in [
+            VmStatus::Stopping,
+            VmStatus::Stopped,
+            VmStatus::Destroying,
+            VmStatus::Destroyed,
+            VmStatus::Failed,
+        ] {
+            assert!(vm_terminates_vcpu_start(status), "status={status:?}");
+        }
+        for status in [
+            VmStatus::Ready,
+            VmStatus::Running,
+            VmStatus::Pausing,
+            VmStatus::Paused,
+        ] {
+            assert!(!vm_terminates_vcpu_start(status), "status={status:?}");
+        }
+    }
+
+    #[test]
+    fn cpu_on_bind_failure_requires_fault_stop() {
+        let error = ax_err_type!(BadState, "backend bind rejected vCPU");
+
+        let reason = cpu_on_start_failure_reason(7, 1, &error);
+
+        let StopReason::Fault(detail) = reason else {
+            panic!("CPU_ON bind failure must stop the VM as a fault");
+        };
+        assert!(detail.contains("VM[7]"));
+        assert!(detail.contains("VCpu[1]"));
+        assert!(detail.contains("backend bind rejected vCPU"));
+    }
+
+    #[test]
+    fn cpu_on_start_failure_cleans_concrete_runtime_and_vcpu_state() {
+        let runtime = crate::vm::VmRuntimeHandle::new();
+        let vcpu = starting_test_vcpu(1);
+        let ack = Arc::new(CpuOnStartAck::new());
+        assert!(ack.begin_startup());
+        runtime.insert_cpu_on_start_ack(1, ack.clone()).unwrap();
+        runtime
+            .queue_pending_interrupt_for_cpu(1, 2, crate::vm::PendingInterrupt::Normal(9))
+            .unwrap();
+        let observed_generation = runtime.notification_generation();
+        let stop_reason = RefCell::new(None);
+
+        handle_cpu_on_start_failure(
+            7,
+            1,
+            &runtime,
+            &vcpu,
+            &ack,
+            ax_err_type!(BadState, "backend bind rejected vCPU"),
+            |reason| {
+                *stop_reason.borrow_mut() = Some(reason);
+                Ok(())
+            },
+        );
+
+        assert_eq!(vcpu.state(), VmVcpuState::Free);
+        assert!(runtime.cpu_on_start_ack(1).is_none());
+        assert!(runtime.drain_pending_interrupts(1).is_empty());
+        assert!(matches!(ack.take_result(), Some(Err(_))));
+        assert!(matches!(*stop_reason.borrow(), Some(StopReason::Fault(_))));
+        assert_ne!(runtime.notification_generation(), observed_generation);
+    }
+
+    #[test]
+    fn cpu_on_start_failure_notifies_even_when_fault_stop_fails() {
+        let runtime = crate::vm::VmRuntimeHandle::new();
+        let vcpu = starting_test_vcpu(1);
+        let ack = Arc::new(CpuOnStartAck::new());
+        assert!(ack.begin_startup());
+        runtime.insert_cpu_on_start_ack(1, ack.clone()).unwrap();
+        let observed_generation = runtime.notification_generation();
+
+        handle_cpu_on_start_failure(
+            7,
+            1,
+            &runtime,
+            &vcpu,
+            &ack,
+            ax_err_type!(BadState, "backend bind rejected vCPU"),
+            |_| Err(ax_err_type!(BadState, "VM already destroyed")),
+        );
+
+        assert_eq!(vcpu.state(), VmVcpuState::Free);
+        assert!(runtime.cpu_on_start_ack(1).is_none());
+        assert_ne!(runtime.notification_generation(), observed_generation);
     }
 
     #[test]

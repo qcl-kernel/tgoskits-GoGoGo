@@ -61,4 +61,4 @@ disabled = [
 [[devices.virtual]]
 id = "net0"
 model = "virtio-net"
-guest_mac = [52, 84, 0, 77, 0, 3]
+guest_mac = [0x52, 0x54, 0x00, 0x77, 0x00, 0x03]

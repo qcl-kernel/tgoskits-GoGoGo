@@ -1,145 +1,343 @@
 #!/usr/bin/env bash
 
-set -euo pipefail
+set -Eeuo pipefail
 
 ROOT="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-INPUT_DIR="${NATIVE_INPUT_DIR:-}"
-MODE="${1:-smoke}"
+TASK123_RUNNER="${NATIVE_TASK123_RUNNER:-$ROOT/os/axvisor/scripts/run_task123.sh}"
+RTTHREAD_COMMIT="${NATIVE_RTTHREAD_COMMIT:-ddf52e2cdd977f14fc04035c88672ac204aec713}"
+mode=smoke
+mode_was_set=0
+input_dir="${NATIVE_INPUT_DIR:-}"
+output_candidate="${NATIVE_OUTPUT_DIR:-}"
 
 usage() {
-    cat <<'EOF'
-Usage: ./run-native.sh [smoke|suite|stability] [--input-dir DIR]
+    local status=${1:-2}
+    cat >&2 <<EOF
+Usage: ./run-native.sh [smoke|suite|stability] [--input-dir DIR] [--output DIR]
 
-Native one-click runner: builds AxVisor and RT-Thread inputs, boots one
-2-vCPU Linux guest and one RT-Thread guest, then runs RT-IPC over virtio-net.
-
-Environment:
-  QEMU                 Override the AArch64 QEMU binary.
-  NATIVE_INPUT_DIR     Reuse a guest input directory.
-  RTTHREAD_SRC         Reuse a pinned RT-Thread source/cache.
+Native one-command runner for one 2-vCPU Linux guest and one RT-Thread guest.
+No environment exports are required.
 
 Modes:
-  smoke       100 requests per payload (default)
-  suite       1000 requests plus 1000-sample realtime suite
-  stability   30000 requests plus 300-second stability test
+  smoke       Short Linux/RT-Thread network and protocol verification (default)
+  suite       1000-sample realtime suite
+  stability   300-second stability test
 EOF
+    exit "$status"
 }
 
-while (($# > 0)); do
-    case "$1" in
-        smoke|suite|stability) MODE="$1" ;;
-        --input-dir)
-            (($# >= 2)) || { echo "--input-dir requires an argument" >&2; exit 2; }
-            INPUT_DIR="$2"; shift ;;
-        -h|--help) usage; exit 0 ;;
-        *) echo "Unknown argument: $1" >&2; usage >&2; exit 2 ;;
-    esac
-    shift
-done
+fail() {
+    echo "native task123 runner: $*" >&2
+    return 1
+}
 
-for tool in cargo uv git make cpio debugfs dtc file gzip rg socat uclampset \
-    aarch64-linux-gnu-gcc aarch64-linux-musl-gcc; do
-    command -v "$tool" >/dev/null 2>&1 || {
-        echo "Missing native dependency: $tool" >&2
-        exit 1
+parse_arguments() {
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            smoke|suite|stability)
+                [[ "$mode_was_set" -eq 0 ]] || usage
+                mode=$1
+                mode_was_set=1
+                shift
+                ;;
+            --input-dir)
+                [[ $# -ge 2 && -z "$input_dir" ]] || usage
+                input_dir=$2
+                shift 2
+                ;;
+            --output)
+                [[ $# -ge 2 && -z "$output_candidate" ]] || usage
+                output_candidate=$2
+                shift 2
+                ;;
+            -h|--help) usage 0 ;;
+            *) usage ;;
+        esac
+    done
+}
+
+canonical_file() {
+    local label=$1
+    local candidate=$2
+    local resolved
+    resolved="$(realpath -e -- "$candidate")" || return 1
+    [[ -f "$resolved" && -r "$resolved" && -s "$resolved" ]] || {
+        fail "$label is not a readable nonempty file: $candidate"
+        return 1
     }
-done
-
-if [[ -z "${QEMU:-}" ]]; then
-    for candidate in \
-        /home/yfblock/.local/qemu-arm/bin/qemu-system-aarch64 \
-        "$(command -v qemu-system-aarch64 || true)"; do
-        if [[ -n "$candidate" && -x "$candidate" ]]; then
-            QEMU="$candidate"
-            break
-        fi
-    done
-fi
-QEMU="${QEMU:-}"
-[[ -n "$QEMU" && -x "$QEMU" ]] || {
-    echo "Set QEMU to an executable qemu-system-aarch64" >&2
-    exit 1
-}
-export QEMU
-
-validate_inputs() {
-    local missing=0 artifact
-    for artifact in linux-kernel linux-1-initramfs.cpio rootfs.img; do
-        if [[ ! -r "$1/$artifact" ]]; then
-            echo "Missing guest input: $1/$artifact" >&2
-            missing=1
-        fi
-    done
-    ((missing == 0))
+    printf '%s\n' "$resolved"
 }
 
-prepare_inputs() {
-    local -a candidates=()
-    [[ -z "$INPUT_DIR" ]] || candidates+=("$INPUT_DIR")
-    candidates+=(
-        "$ROOT/tmp/vmconfigs/three-guest-net/current"
-        "/home/yfblock/Code/hyper-rtos/tgoskits/tmp/vmconfigs/three-guest-net/current"
+canonical_executable() {
+    local label=$1
+    local candidate=$2
+    local resolved
+    resolved="$(realpath -e -- "$candidate")" || {
+        fail "$label does not exist: $candidate"
+        return 1
+    }
+    [[ -f "$resolved" && -x "$resolved" ]] || {
+        fail "$label is not executable: $resolved"
+        return 1
+    }
+    printf '%s\n' "$resolved"
+}
+
+first_file() {
+    local label=$1
+    shift
+    local candidate
+    local resolved
+    for candidate in "$@"; do
+        [[ -n "$candidate" && -e "$candidate" ]] || continue
+        if resolved="$(canonical_file "$label" "$candidate")"; then
+            printf '%s\n' "$resolved"
+            return 0
+        fi
+    done
+    return 1
+}
+
+workspace_root() {
+    local common_dir
+    local primary_repository
+    if common_dir="$(git -C "$ROOT" rev-parse --git-common-dir 2>/dev/null)"; then
+        [[ "$common_dir" == /* ]] || common_dir="$ROOT/$common_dir"
+        common_dir="$(realpath -e -- "$common_dir")"
+        primary_repository="$(dirname -- "$common_dir")"
+        dirname -- "$primary_repository"
+    else
+        dirname -- "$ROOT"
+    fi
+}
+
+primary_repository() {
+    local common_dir
+    common_dir="$(git -C "$ROOT" rev-parse --git-common-dir 2>/dev/null)" ||
+        return 1
+    [[ "$common_dir" == /* ]] || common_dir="$ROOT/$common_dir"
+    common_dir="$(realpath -e -- "$common_dir")" || return 1
+    dirname -- "$common_dir"
+}
+
+prepare_output() {
+    local output_parent
+    if [[ -z "$output_candidate" ]]; then
+        output_candidate="$ROOT/tmp/native-runs/$mode-$(date -u +%Y%m%dT%H%M%SZ)"
+    fi
+    OUTPUT="$(realpath -m -- "$output_candidate")"
+    [[ "$OUTPUT" != / && "$OUTPUT" != "$ROOT" ]] ||
+        fail "unsafe output directory: $OUTPUT"
+    output_parent="$(dirname -- "$OUTPUT")"
+    mkdir -p -- "$output_parent"
+    [[ -d "$output_parent" && -w "$output_parent" ]] ||
+        fail "output parent is not writable: $output_parent"
+    if [[ -e "$OUTPUT" ]]; then
+        [[ -d "$OUTPUT" && -w "$OUTPUT" ]] ||
+            fail "output is not a writable directory: $OUTPUT"
+        [[ -z "$(find "$OUTPUT" -mindepth 1 -maxdepth 1 -print -quit)" ]] ||
+            fail "output directory must be empty: $OUTPUT"
+    fi
+}
+
+resolve_explicit_inputs() {
+    local directory
+    directory="$(realpath -e -- "$input_dir")" || {
+        fail "input directory does not exist: $input_dir"
+        return 1
+    }
+    [[ -d "$directory" ]] || fail "input is not a directory: $directory"
+    LINUX_KERNEL_IMAGE="$(first_file linux-kernel \
+        "$directory/linux-kernel" "$directory/Image")" ||
+        fail "input directory has no Linux kernel: $directory"
+    LINUX_INITRAMFS_IMAGE="$(first_file linux-initramfs \
+        "$directory/linux-initramfs.cpio" \
+        "$directory/linux-1-initramfs.cpio" \
+        "$directory/rootfs.cpio")" ||
+        fail "input directory has no Linux initramfs: $directory"
+    ROOTFS_IMAGE="$(first_file rootfs "$directory/rootfs.img")" ||
+        fail "input directory has no rootfs.img: $directory"
+    TASK123_MODEL_IMAGE="$(first_file model \
+        "$directory/model_weights.h" 2>/dev/null || true)"
+}
+
+resolve_local_inputs() {
+    local workspace=$1
+    local primary_repository
+    primary_repository="$(primary_repository 2>/dev/null || true)"
+    local local_inputs="$ROOT/tmp/task123-native-inputs"
+
+    LINUX_KERNEL_IMAGE="$(first_file linux-kernel \
+        "$local_inputs/linux-kernel" \
+        "$ROOT/tmp/task123-linux-build-v3/images/linux/Image" \
+        "$primary_repository/tmp/vmconfigs/two-guest-net/current/linux-kernel" \
+        2>/dev/null || true)"
+    LINUX_INITRAMFS_IMAGE="$(first_file linux-initramfs \
+        "$local_inputs/linux-initramfs.cpio" \
+        "$local_inputs/linux-1-initramfs.cpio" \
+        "$ROOT/tmp/task123-linux-build-v3/images/linux/rootfs.cpio" \
+        "$primary_repository/tmp/vmconfigs/two-guest-net/current/linux-1-initramfs.cpio" \
+        2>/dev/null || true)"
+    TASK123_MODEL_IMAGE="$(first_file model \
+        "$local_inputs/model_weights.h" \
+        "$ROOT/tmp/task123-linux-build-v3/model/model_weights.h" \
+        2>/dev/null || true)"
+    ROOTFS_IMAGE="$(first_file rootfs \
+        "$local_inputs/rootfs.img" \
+        "$ROOT/tmp/vmconfigs/two-guest-net/current/rootfs.img" \
+        "$primary_repository/tmp/vmconfigs/two-guest-net/current/rootfs.img" \
+        2>/dev/null || true)"
+}
+
+resolve_evidence_inputs() {
+    [[ -z "${LINUX_KERNEL_IMAGE:-}" || \
+       -z "${LINUX_INITRAMFS_IMAGE:-}" || \
+       -z "${TASK123_MODEL_IMAGE:-}" || \
+       -z "${ROOTFS_IMAGE:-}" ]] || return 0
+
+    local resolver="$ROOT/os/axvisor/scripts/task123_artifacts.py"
+    local lock_file="$ROOT/os/axvisor/guests/task3/configs/dependencies.lock"
+    [[ -f "$resolver" && -f "$lock_file" ]] || return 0
+    local resolution
+    resolution="$(mktemp "$ROOT/tmp/.native-resolution.XXXXXX.json")"
+    if ! python3 "$resolver" resolve \
+        --root "$ROOT" \
+        --cache "$ROOT/tmp/task123-cache" \
+        --evidence-root "$ROOT/tmp/task123-results" \
+        --output "$resolution" \
+        --lock-file "$lock_file" \
+        --rtthread-commit "$RTTHREAD_COMMIT"; then
+        rm -f -- "$resolution"
+        return 1
+    fi
+
+    local resolved=()
+    mapfile -d '' -t resolved < <(python3 - "$resolution" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+data = json.loads(Path(sys.argv[1]).read_text(encoding="ascii"))
+for name in ("linux_kernel", "linux_initramfs", "model", "rootfs"):
+    artifact = data["artifacts"].get(name, {})
+    sys.stdout.write(artifact.get("path", "") + "\0")
+PY
     )
+    rm -f -- "$resolution"
+    [[ -z "${LINUX_KERNEL_IMAGE:-}" ]] && LINUX_KERNEL_IMAGE=${resolved[0]:-}
+    [[ -z "${LINUX_INITRAMFS_IMAGE:-}" ]] &&
+        LINUX_INITRAMFS_IMAGE=${resolved[1]:-}
+    [[ -z "${TASK123_MODEL_IMAGE:-}" ]] && TASK123_MODEL_IMAGE=${resolved[2]:-}
+    [[ -z "${ROOTFS_IMAGE:-}" ]] && ROOTFS_IMAGE=${resolved[3]:-}
+}
 
-    for candidate in "${candidates[@]}"; do
-        if [[ -d "$candidate" ]] && validate_inputs "$candidate"; then
-            INPUT_DIR="$candidate"
-            return
-        fi
+valid_rtthread_repository() {
+    local repository=$1
+    local missing_objects
+    [[ -d "$repository" ]] || return 1
+    GIT_NO_LAZY_FETCH=1 git -C "$repository" cat-file -e \
+        "$RTTHREAD_COMMIT^{commit}" 2>/dev/null || return 1
+    [[ -z "$(git -C "$repository" status --porcelain=v1 --untracked-files=all 2>/dev/null)" ]] ||
+        return 1
+    local required_path
+    for required_path in bsp/qemu-virt64-aarch64 components src; do
+        [[ "$(GIT_NO_LAZY_FETCH=1 git -C "$repository" cat-file -t \
+            "$RTTHREAD_COMMIT:$required_path" 2>/dev/null)" == tree ]] || return 1
     done
+    missing_objects="$(GIT_NO_LAZY_FETCH=1 git -C "$repository" \
+        rev-list --objects --missing=print "$RTTHREAD_COMMIT" 2>/dev/null |
+        sed -n '/^?/p')" || return 1
+    [[ -z "$missing_objects" ]] || return 1
+    GIT_NO_LAZY_FETCH=1 git -C "$repository" archive --format=tar \
+        "$RTTHREAD_COMMIT" >/dev/null 2>&1
+}
 
-    if [[ -n "$INPUT_DIR" ]]; then
-        validate_inputs "$INPUT_DIR"
+resolve_rtthread_repository() {
+    local workspace=$1
+    local candidate
+    if [[ -n "${RTTHREAD_SRC:-}" ]]; then
+        candidate="$(realpath -e -- "$RTTHREAD_SRC")" ||
+            fail "explicit RT-Thread source does not exist: $RTTHREAD_SRC"
+        valid_rtthread_repository "$candidate" ||
+            fail "explicit RT-Thread source is incomplete, dirty, or unpinned: $candidate"
+        RTTHREAD_REPOSITORY=$candidate
         return
     fi
 
-    RTTHREAD_BUILD="${RTTHREAD_SRC:-$ROOT/.native-cache/rt-thread-5.2.2}"
-    bash os/axvisor/patches/rtthread/prepare_rtthread_source.sh "$RTTHREAD_BUILD"
-    bash os/axvisor/patches/rtthread/apply-rtthread-patches.sh "$RTTHREAD_BUILD"
-    uv run --with 'scons==4.10.1' scons -j"$(nproc)" \
-        -C "$RTTHREAD_BUILD/bsp/qemu-virt64-aarch64"
-    AXVISOR_THREE_GUEST_RTOS_IMAGE="$RTTHREAD_BUILD/bsp/qemu-virt64-aarch64/rtthread.bin" \
-    AXVISOR_THREE_GUEST_RTOS_ENTRY_POINT=0xa0000000 \
-        bash os/axvisor/scripts/setup_qemu_three_guest_net.sh
-    INPUT_DIR="$ROOT/tmp/vmconfigs/three-guest-net/current"
-    validate_inputs "$INPUT_DIR"
+    while IFS= read -r candidate; do
+        candidate="$(dirname -- "$candidate")"
+        if valid_rtthread_repository "$candidate"; then
+            RTTHREAD_REPOSITORY="$(realpath -e -- "$candidate")"
+            return
+        fi
+    done < <(
+        find "$ROOT/tmp" "$workspace" -maxdepth 6 \
+            \( -type d -o -type f \) -name .git -print 2>/dev/null | sort -u
+    )
+    RTTHREAD_REPOSITORY=
 }
 
-prepare_inputs
-mkdir -p tmp/native-runs
-RUN_ID="$(date -u +%Y%m%dT%H%M%SZ)"
+runner_arguments() {
+    case "$mode" in
+        smoke)
+            RUNNER_ARGS=(--mode smoke --task2-count 100 --task3-frames 3)
+            ;;
+        suite)
+            RUNNER_ARGS=(
+                --mode realtime-suite --rtbench-samples 1000 --task2-count 1000
+            )
+            ;;
+        stability)
+            RUNNER_ARGS=(
+                --mode stability --seconds 300 --task2-count 30000
+            )
+            ;;
+    esac
+}
 
-case "$MODE" in
-    smoke)
-        RTIPC_COUNT=100 RTIPC_TIMEOUT_S=480 ;;
-    suite)
-        RTIPC_COUNT=1000 RTIPC_TIMEOUT_S=480
-        RTBENCH_SUITE_SAMPLES=1000 RTBENCH_START_MODE=concurrent ;;
-    stability)
-        RTIPC_COUNT=30000 RTIPC_TIMEOUT_S=480
-        RTBENCH_STABILITY_SECONDS=300 RTBENCH_START_MODE=concurrent ;;
-esac
+run_native() {
+    local environment=(env -u QEMU)
+    [[ -z "${LINUX_KERNEL_IMAGE:-}" ]] ||
+        environment+=("LINUX_KERNEL_IMAGE=$LINUX_KERNEL_IMAGE")
+    [[ -z "${LINUX_INITRAMFS_IMAGE:-}" ]] ||
+        environment+=("LINUX_INITRAMFS_IMAGE=$LINUX_INITRAMFS_IMAGE")
+    [[ -z "${TASK123_MODEL_IMAGE:-}" ]] ||
+        environment+=("TASK123_MODEL_IMAGE=$TASK123_MODEL_IMAGE")
+    [[ -z "${ROOTFS_IMAGE:-}" ]] ||
+        environment+=("ROOTFS_IMAGE=$ROOTFS_IMAGE")
+    [[ -z "${RTTHREAD_REPOSITORY:-}" ]] ||
+        environment+=("RTTHREAD_REPOSITORY=$RTTHREAD_REPOSITORY")
 
-export RTIPC_COUNT RTIPC_TIMEOUT_S QEMU_UCLAMP_MIN=1024
-export LOG="$ROOT/tmp/native-runs/$MODE-$RUN_ID.log"
-export QEMU_LOG="$ROOT/tmp/native-runs/$MODE-$RUN_ID.qemu.log"
-export ARTIFACT_LOG="$ROOT/tmp/native-runs/$MODE-$RUN_ID.artifacts"
-if [[ "$MODE" != smoke ]]; then
-    export RTBENCH_SUITE_SAMPLES RTBENCH_START_MODE
-    export RTBENCH_TIMING_LOG="$ROOT/tmp/native-runs/$MODE-$RUN_ID.timing"
-    export CPU_LOAD_LOG="$ROOT/tmp/native-runs/$MODE-$RUN_ID-cpu.log"
-fi
-if [[ "$MODE" == stability ]]; then
-    export RTBENCH_STABILITY_SECONDS
-fi
+    printf 'Native mode: %s\n' "$mode"
+    printf 'Output: %s\n' "$OUTPUT"
+    printf 'QEMU: qemu-system-aarch64 (PATH)\n'
+    printf 'Linux kernel: %s\n' "${LINUX_KERNEL_IMAGE:-runner fallback}"
+    printf 'Linux initramfs: %s\n' "${LINUX_INITRAMFS_IMAGE:-runner fallback}"
+    printf 'Rootfs: %s\n' "${ROOTFS_IMAGE:-runner fallback}"
+    printf 'Model: %s\n' "${TASK123_MODEL_IMAGE:-runner fallback}"
+    printf 'RT-Thread source: %s\n' "${RTTHREAD_REPOSITORY:-runner fallback}"
 
-export LINUX_KERNEL_IMAGE="$INPUT_DIR/linux-kernel"
-export LINUX_INITRAMFS_SOURCE="$INPUT_DIR/linux-1-initramfs.cpio"
-export ROOTFS_IMAGE="$INPUT_DIR/rootfs.img"
+    "${environment[@]}" "$TASK123_RUNNER" "${RUNNER_ARGS[@]}" --output "$OUTPUT"
+}
 
-printf 'Native mode: %s\\n' "$MODE"
-printf 'Guest inputs: %s\\n' "$INPUT_DIR"
-printf 'QEMU: %s\\n' "$QEMU"
-printf 'Guest log: %s\\n' "$LOG"
+main() {
+    parse_arguments "$@"
+    command -v qemu-system-aarch64 >/dev/null ||
+        fail "required command not found in PATH: qemu-system-aarch64"
+    command -v git >/dev/null || fail "required command not found in PATH: git"
+    TASK123_RUNNER="$(canonical_executable task123-runner "$TASK123_RUNNER")"
+    prepare_output
+    local workspace
+    workspace="$(workspace_root)"
+    if [[ -n "$input_dir" ]]; then
+        resolve_explicit_inputs
+    else
+        resolve_local_inputs "$workspace"
+        resolve_evidence_inputs
+    fi
+    resolve_rtthread_repository "$workspace"
+    runner_arguments
+    run_native
+}
 
-bash os/axvisor/scripts/run_rtipc_test.sh
+main "$@"

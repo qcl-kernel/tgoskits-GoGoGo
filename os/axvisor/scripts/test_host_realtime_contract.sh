@@ -86,12 +86,12 @@ rg -q '^cpu_num = 2$' "$LINUX_VM_CONFIG" || {
     echo "Linux VM must expose exactly two vCPUs" >&2
     exit 1
 }
-rg -q '^phys_cpu_sets = \[0b11, 0b11\]$' "$LINUX_VM_CONFIG" || {
-    echo "both Linux vCPUs must remain bounded to pCPU0/1" >&2
+rg -q '^phys_cpu_sets = \[0b1011, 0b1011\]$' "$LINUX_VM_CONFIG" || {
+    echo "both Linux vCPUs must remain bounded to pCPU0/1/3" >&2
     exit 1
 }
 rg -q '^guest_tlbi_policy = "vm_scoped"$' "$LINUX_VM_CONFIG" || {
-    echo "Linux VM must use VM-scoped TLBI on pCPU0/1" >&2
+    echo "Linux VM must use VM-scoped TLBI on pCPU0/1/3" >&2
     exit 1
 }
 if rg -q '^guest_tlbi_policy[[:space:]]*=' "$RTTHREAD_VM_CONFIG"; then

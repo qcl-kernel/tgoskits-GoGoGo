@@ -8,7 +8,7 @@
      struct virtio_net_device *virtio_net_dev = (struct virtio_net_device *)dev;
      struct virtio_device *virtio_dev = &virtio_net_dev->virtio_dev;
      struct virtq *queue_tx = &virtio_dev->queues[VIRTIO_NET_QUEUE_TX];
- 
+
 -    id = (queue_tx->avail->idx * 2) % queue_tx->num;
 +    /* Reclaim completed TX chains before allocating new descriptors. The
 +     * device owns a chain until it publishes its head in the used ring. */
@@ -31,27 +31,27 @@
 +            virtio_free_desc(virtio_dev, VIRTIO_NET_QUEUE_TX, id);
 +        return -RT_EFULL;
 +    }
- 
+
      virtio_net_dev->info[id].hdr.flags = 0;
      virtio_net_dev->info[id].hdr.gso_type = 0;
 @@ -43,12 +64,10 @@
-             VIRTIO_VA2PA(virtio_net_dev->info[id].rx_buffer), p->tot_len, 0, 0);
- 
+             VIRTIO_VA2PA(virtio_net_dev->info[id].tx_buffer), p->tot_len, 0, 0);
+
      virtio_submit_chain(virtio_dev, VIRTIO_NET_QUEUE_TX, id);
 +    rt_hw_dsb();
- 
+
      virtio_queue_notify(virtio_dev, VIRTIO_NET_QUEUE_TX);
- 
+
 -    virtio_alloc_desc(virtio_dev, VIRTIO_NET_QUEUE_TX);
 -    virtio_alloc_desc(virtio_dev, VIRTIO_NET_QUEUE_TX);
 -
      return RT_EOK;
  }
- 
+
 @@ -129,6 +148,15 @@
      queue_tx->avail->flags = VIRTQ_AVAIL_F_NO_INTERRUPT;
      queue_tx->avail->idx = 0;
- 
+
 +    /* The initial allocation only reserves TX descriptors; none have been
 +     * submitted. Return them to the free pool so the TX path can allocate and
 +     * own exactly the chains it submits. */
@@ -62,5 +62,5 @@
 +    }
 +
      virtio_queue_notify(virtio_dev, VIRTIO_NET_QUEUE_RX);
- 
+
      return eth_device_linkchange(&virtio_net_dev->parent, RT_TRUE);

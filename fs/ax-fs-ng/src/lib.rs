@@ -18,6 +18,7 @@ use axfs_ng_vfs::{Filesystem, Location};
 
 pub mod api;
 pub mod block;
+pub mod embedded;
 pub mod file;
 pub mod fops;
 mod fs;
@@ -95,7 +96,8 @@ pub(crate) fn init_detected_filesystem(
     finish_filesystem_init(fs, source)
 }
 
-fn finish_filesystem_init(fs: axfs_ng_vfs::Filesystem, source: &str) -> Location {
+/// Installs an already constructed filesystem as the process root.
+pub fn install_root_filesystem(fs: axfs_ng_vfs::Filesystem, source: &str) -> Location {
     info!("  filesystem type: {:?}", fs.name());
 
     let mp = axfs_ng_vfs::Mountpoint::new_root_with_source(&fs, source);
@@ -103,6 +105,10 @@ fn finish_filesystem_init(fs: axfs_ng_vfs::Filesystem, source: &str) -> Location
     register_mounted_filesystem(fs);
     highlevel::ROOT_FS_CONTEXT.call_once(|| highlevel::FsContext::new(root.clone()));
     root
+}
+
+fn finish_filesystem_init(fs: axfs_ng_vfs::Filesystem, source: &str) -> Location {
+    install_root_filesystem(fs, source)
 }
 
 pub fn shutdown_filesystems() -> ax_errno::AxResult {
