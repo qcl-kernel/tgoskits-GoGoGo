@@ -343,12 +343,24 @@ main() {
 
     temporary_log="$(mktemp "$(dirname -- "$OUTPUT")/.task123-run.${mode}.XXXXXX")"
     pipeline_status_file="$(mktemp "$(dirname -- "$OUTPUT")/.task123-status.${mode}.XXXXXX")"
+    set +e
     {
+        printf 'UTC_TIMESTAMP %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+        "$GIT" --version
+        "$QEMU" --version
         printf 'MODE %s\n' "$mode"
         printf 'RUNNER %s\n' "$RUNNER"
         printf 'OUTPUT %s\n' "$OUTPUT"
         quote_command "$RUNNER" "${runner_args[@]}"
     } | tee "$temporary_log"
+    header_status=("${PIPESTATUS[@]}")
+    set -e
+
+    if [[ "${header_status[1]}" -ne 0 ]]; then
+        pipeline_result=1
+        save_run_log || true
+        return "$pipeline_result"
+    fi
 
     TASK123_PIPELINE_LOG="$temporary_log" \
         TASK123_PIPELINE_STATUS="$pipeline_status_file" \
@@ -356,12 +368,18 @@ main() {
             set +e
             "$@" 2>&1 | tee -a "$TASK123_PIPELINE_LOG"
             pipeline_status=("${PIPESTATUS[@]}")
-            printf "%s\n%s\n" "${pipeline_status[0]}" "${pipeline_status[1]}" > \
-                "$TASK123_PIPELINE_STATUS"
+            status_write_status=0
+            if ! printf "%s\n%s\n" "${pipeline_status[0]}" "${pipeline_status[1]}" > \
+                "$TASK123_PIPELINE_STATUS"; then
+                status_write_status=1
+            fi
             if [[ "${pipeline_status[0]}" -ne 0 ]]; then
                 exit "${pipeline_status[0]}"
             fi
-            exit "${pipeline_status[1]}"
+            if [[ "${pipeline_status[1]}" -ne 0 || "$status_write_status" -ne 0 ]]; then
+                exit 1
+            fi
+            exit 0
         ' task123-pipeline "$RUNNER" "${runner_args[@]}" &
     pipeline_pid=$!
     if [[ "$interrupted" -eq 1 ]]; then
@@ -372,12 +390,17 @@ main() {
     wait_status=$WAIT_STATUS
     pipeline_status=()
     read_pipeline_status pipeline_status
+    pipeline_log_status=0
     if [[ "${#pipeline_status[@]}" -eq 2 ]]; then
-        printf 'PIPESTATUS runner=%s tee=%s\n' \
-            "${pipeline_status[0]}" "${pipeline_status[1]}" >> "$temporary_log"
+        if ! printf 'PIPESTATUS runner=%s tee=%s\n' \
+            "${pipeline_status[0]}" "${pipeline_status[1]}" >> "$temporary_log"; then
+            pipeline_log_status=1
+        fi
     else
-        printf 'PIPESTATUS unavailable wait=%s signal=%s\n' \
-            "$wait_status" "${pending_signal:-none}" >> "$temporary_log"
+        if ! printf 'PIPESTATUS unavailable wait=%s signal=%s\n' \
+            "$wait_status" "${pending_signal:-none}" >> "$temporary_log"; then
+            pipeline_log_status=1
+        fi
     fi
 
     if [[ "$interrupted" -eq 1 ]]; then
@@ -388,10 +411,9 @@ main() {
         pipeline_result=0
         if [[ "$runner_status" -ne 0 ]]; then
             pipeline_result=$runner_status
-        elif [[ "$tee_status" -ne 0 ]]; then
-            pipeline_result=$tee_status
-        elif [[ "$wait_status" -ne 0 ]]; then
-            pipeline_result=$wait_status
+        elif [[ "$tee_status" -ne 0 || "$pipeline_log_status" -ne 0 ||
+            "$wait_status" -ne 0 ]]; then
+            pipeline_result=1
         fi
     else
         pipeline_result=$wait_status
