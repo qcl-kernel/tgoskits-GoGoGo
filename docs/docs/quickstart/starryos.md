@@ -392,6 +392,26 @@ tmp/starryos-task123/run/axvisor-cmdline-console.log
 AxVisor、QEMU、RT-Thread 镜像、协议源码和模型运行 Linux 与 StarryOS，并在最后生成
 机器可读的 `comparison.json` 和 Markdown 汇总。
 
+从仓库根目录也可以使用统一入口；不带模式参数时默认为 quick：
+
+```bash
+# 默认 quick：300 秒，每种 Task2 载荷 30000 次
+./run-task123.sh
+
+# long：3600 秒，每种 Task2 载荷 240000 次
+./run-task123.sh --long --allow-qemu-timer-limit
+```
+
+入口只接受 PATH 中解析到的真实 `qemu-system-aarch64`，不会下载依赖，也不会使用
+fake-QEMU；请在运行前准备好本地构建依赖和 guest 输入镜像。`--output` 指定的目录
+必须为空。入口会在该目录保留顶层 `run.log`，以及 `linux/`、`starryos/` 两套 guest
+结果和 `comparison/` 下的 `comparison.json`、`comparison-report.md`；
+`comparison-manifest.txt`、`orchestrator.log` 与 comparison 报告会记录 QEMU TCG timer
+条件门禁。启用 `--allow-qemu-timer-limit` 后，允许的条件状态为
+`PASS_WITH_QEMU_TIMER_LIMIT`，不代表通过物理硬实时门限。
+
+需要分别控制底层比较脚本参数时，也可以直接执行：
+
 ```bash
 # 300 秒快速回归：每种 Task2 载荷 30000 次
 os/axvisor/scripts/run_task123_guest_comparison.sh \
