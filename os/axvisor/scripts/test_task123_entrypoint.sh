@@ -83,6 +83,8 @@ TASK123_TEST_ARGUMENTS="$long_arguments" \
 printf '%s\0' --full --output "$long" --cache "$cache" > "$tmp/long-expected-arguments"
 cmp -s "$tmp/long-expected-arguments" "$long_arguments" ||
     fail 'long invocation forwarded an unexpected argv sequence'
+grep -Fxq '1' "$long_environment" ||
+    fail 'long invocation did not pass TASK123_NO_NETWORK=1 to the comparison runner'
 [[ -s "$long/fake-runner-called" ]] || fail 'long output is missing fake marker'
 [[ -s "$long/run.log" ]] || fail 'long output is missing run.log'
 

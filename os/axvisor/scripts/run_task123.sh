@@ -331,6 +331,14 @@ resolve_input_artifact() {
     fi
 }
 
+resolve_legacy_model_fallback() {
+    [[ -n "${TASK123_MODEL_IMAGE:-}" ]] && return 0
+    local fallback="$TASK3_ROOT/build/model/model_weights.h"
+    if [[ -f "$fallback" && -r "$fallback" && -s "$fallback" ]]; then
+        TASK123_MODEL_IMAGE="$fallback"
+    fi
+}
+
 check_no_network_artifacts() {
     [[ "${TASK123_NO_NETWORK:-0}" == 1 ]] || return 0
 
@@ -660,6 +668,7 @@ resolve_or_build_images() {
     resolve_input_artifact RTTHREAD_DELAYED_SERVER_IMAGE rtthread-delayed-server rtthread-delayed-server.bin
     resolve_input_artifact ROOTFS_IMAGE rootfs rootfs.img
     resolve_input_artifact TASK123_MODEL_IMAGE model model_weights.h
+    resolve_legacy_model_fallback
     check_no_network_artifacts || return $?
     if [[ "$app_guest" == linux ]]; then
         build_linux_images_if_needed

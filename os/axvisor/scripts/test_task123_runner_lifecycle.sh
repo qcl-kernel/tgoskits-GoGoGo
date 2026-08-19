@@ -508,6 +508,58 @@ for forbidden_step in build_linux_images_if_needed build_rtthread_images_if_need
         fail "no-network StarryOS run invoked $forbidden_step"
 done
 
+no_network_local_output="$tmp/no-network-local-output"
+if ! (
+    source "$RUNNER"
+    app_guest=linux
+    mode=smoke
+    TASK123_NO_NETWORK=1
+    SHARED_ARTIFACT_DIR=
+    OUTPUT="$tmp/no-network-local-result"
+    mkdir -p -- "$OUTPUT"
+    TASK3_ROOT="$tmp/task3-fallback"
+    mkdir -p -- "$TASK3_ROOT/build/model"
+    printf 'local model fallback\n' > "$TASK3_ROOT/build/model/model_weights.h"
+    LINUX_KERNEL_IMAGE="$fixtures/linux-kernel"
+    LINUX_INITRAMFS_IMAGE="$fixtures/initramfs.cpio"
+    RTTHREAD_NORMAL_IMAGE="$fixtures/rtthread-normal.bin"
+    RTTHREAD_DROP_STATUS_IMAGE="$fixtures/rtthread-drop-status.bin"
+    RTTHREAD_DELAYED_SERVER_IMAGE="$fixtures/rtthread-delayed-server.bin"
+    ROOTFS_IMAGE="$fixtures/rootfs.img"
+    unset STARRYOS_IMAGE TASK123_MODEL_IMAGE
+    phase() { printf 'PHASE %s\n' "$1"; }
+    build_linux_images_if_needed() {
+        printf 'CONTINUE build_linux_images_if_needed\n'
+    }
+    build_rtthread_images_if_needed() {
+        printf 'CONTINUE build_rtthread_images_if_needed\n'
+    }
+    resolve_rootfs_image() {
+        printf 'CONTINUE resolve_rootfs_image\n'
+    }
+    if ! resolve_or_build_images; then
+        exit 90
+    fi
+    printf 'MODEL %s\n' "$TASK123_MODEL_IMAGE"
+    printf 'TASK123_NO_NETWORK_LOCAL_SUCCESS\n'
+) > "$no_network_local_output" 2>&1; then
+    cat "$no_network_local_output" >&2
+    fail 'complete local artifacts were rejected with TASK123_NO_NETWORK=1'
+fi
+grep -Fxq 'TASK123_NO_NETWORK_LOCAL_SUCCESS' "$no_network_local_output" ||
+    fail 'no-network local artifact path did not complete the old image flow'
+grep -Fxq 'CONTINUE build_linux_images_if_needed' "$no_network_local_output" ||
+    fail 'no-network local artifact path did not continue after the guard'
+grep -Fxq 'CONTINUE build_rtthread_images_if_needed' "$no_network_local_output" ||
+    fail 'no-network local artifact path skipped the RT-Thread image flow'
+grep -Fxq 'CONTINUE resolve_rootfs_image' "$no_network_local_output" ||
+    fail 'no-network local artifact path skipped the rootfs flow'
+grep -Fxq "MODEL $(realpath -e -- "$tmp/task3-fallback/build/model/model_weights.h")" \
+    "$no_network_local_output" ||
+    fail 'no-network local artifact path did not select the legacy model fallback'
+! grep -Fq 'model-build' "$no_network_local_output" ||
+    fail 'no-network local artifact path attempted a model build'
+
 normal_output="$tmp/normal-output"
 if ! run_runner "$normal_output" > "$tmp/normal.stdout"; then
     [[ ! -f "$normal_output/runner.log" ]] || cat "$normal_output/runner.log" >&2
