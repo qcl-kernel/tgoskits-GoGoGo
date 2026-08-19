@@ -153,13 +153,39 @@ path_is_within() {
 canonical_candidate() {
     local label=$1
     local candidate=$2
+    local candidate_absolute
+    local existing_parent
+    local parent_real
+    local suffix
     local resolved
 
     [[ -n "$candidate" ]] || fail "$label path is empty"
-    resolved="$(realpath -m -- "$candidate")" ||
+    case "$candidate" in
+        /*) candidate_absolute=$candidate ;;
+        *) candidate_absolute="$PWD/$candidate" ;;
+    esac
+    existing_parent=$candidate_absolute
+    while [[ "$existing_parent" != / ]]; do
+        [[ ! -L "$existing_parent" ]] ||
+            fail "$label path contains a symbolic link: $existing_parent"
+        existing_parent="$(dirname -- "$existing_parent")"
+    done
+
+    resolved="$(realpath -m -- "$candidate_absolute")" ||
         fail "$label path could not be resolved: $candidate"
     [[ "$resolved" != / && "$resolved" != "$ROOT" ]] ||
         fail "unsafe $label directory: $resolved"
+
+    existing_parent=$resolved
+    while [[ ! -e "$existing_parent" && ! -L "$existing_parent" ]]; do
+        existing_parent="$(dirname -- "$existing_parent")"
+    done
+    [[ -d "$existing_parent" && -w "$existing_parent" ]] ||
+        fail "$label parent is missing or unwritable: $existing_parent"
+    parent_real="$(realpath -e -- "$existing_parent")" ||
+        fail "$label parent could not be resolved: $existing_parent"
+    suffix=${resolved#"$existing_parent"}
+    resolved="$parent_real$suffix"
     printf '%s\n' "$resolved"
 }
 
@@ -186,6 +212,15 @@ prepare_output() {
         OUTPUT="$(canonical_candidate output "$candidate")"
     fi
 
+    if [[ "$cache_set" -eq 1 ]]; then
+        CACHE="$(canonical_candidate cache "$cache_candidate")"
+    fi
+
+    if [[ "$cache_set" -eq 1 ]] &&
+        { path_is_within "$OUTPUT" "$CACHE" || path_is_within "$CACHE" "$OUTPUT"; }; then
+        fail "output and cache directories must be separate"
+    fi
+
     output_parent="$(dirname -- "$OUTPUT")"
     mkdir -p -- "$output_parent"
     [[ -d "$output_parent" && -w "$output_parent" ]] ||
@@ -206,7 +241,6 @@ prepare_output() {
     fi
 
     if [[ "$cache_set" -eq 1 ]]; then
-        CACHE="$(canonical_candidate cache "$cache_candidate")"
         local cache_parent
         cache_parent="$(dirname -- "$CACHE")"
         mkdir -p -- "$cache_parent"
@@ -219,11 +253,9 @@ prepare_output() {
             mkdir -- "$CACHE"
         fi
         CACHE="$(realpath -e -- "$CACHE")"
-    fi
-
-    if [[ "$cache_set" -eq 1 ]] &&
-        { path_is_within "$OUTPUT" "$CACHE" || path_is_within "$CACHE" "$OUTPUT"; }; then
-        fail "output and cache directories must be separate"
+        if path_is_within "$OUTPUT" "$CACHE" || path_is_within "$CACHE" "$OUTPUT"; then
+            fail "output and cache directories must be separate"
+        fi
     fi
 }
 
