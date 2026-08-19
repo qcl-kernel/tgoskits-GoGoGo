@@ -47,7 +47,7 @@ if TASK123_TEST_ARGUMENTS="$tmp/invalid-arguments" \
     > "$tmp/invalid.out" 2>&1; then
     fail 'invalid option was accepted'
 fi
-[[ ! -s "$tmp/invalid-arguments" ]] ||
+[[ ! -e "$tmp/invalid-arguments" ]] ||
     fail 'invalid invocation started the comparison runner'
 
 quick="$tmp/quick"
@@ -56,15 +56,9 @@ TASK123_TEST_ARGUMENTS="$quick_arguments" \
     TASK123_COMPARISON_RUNNER="$fake_runner" "$ENTRYPOINT" \
     --quick --allow-qemu-timer-limit --output "$quick" > "$tmp/quick.out"
 
-tr '\0' '\n' < "$quick_arguments" > "$tmp/quick-arguments.txt"
-grep -Fxq -- '--quick' "$tmp/quick-arguments.txt" ||
-    fail 'quick invocation did not forward --quick'
-grep -Fxq -- '--allow-qemu-timer-limit' "$tmp/quick-arguments.txt" ||
-    fail 'quick invocation did not forward --allow-qemu-timer-limit'
-grep -Fxq -- '--output' "$tmp/quick-arguments.txt" ||
-    fail 'quick invocation did not forward --output'
-grep -Fxq -- "$quick" "$tmp/quick-arguments.txt" ||
-    fail 'quick invocation forwarded the wrong output directory'
+printf '%s\0' --quick --allow-qemu-timer-limit --output "$quick" > "$tmp/quick-expected-arguments"
+cmp -s "$tmp/quick-expected-arguments" "$quick_arguments" ||
+    fail 'quick invocation forwarded an unexpected argv sequence'
 [[ -s "$quick/fake-runner-called" ]] || fail 'quick output is missing fake marker'
 [[ -s "$quick/run.log" ]] || fail 'quick output is missing run.log'
 
@@ -75,13 +69,9 @@ TASK123_TEST_ARGUMENTS="$long_arguments" \
     TASK123_COMPARISON_RUNNER="$fake_runner" "$ENTRYPOINT" \
     --long --cache "$cache" --output "$long" > "$tmp/long.out"
 
-tr '\0' '\n' < "$long_arguments" > "$tmp/long-arguments.txt"
-grep -Fxq -- '--full' "$tmp/long-arguments.txt" ||
-    fail 'long invocation did not map to --full'
-grep -Fxq -- '--cache' "$tmp/long-arguments.txt" ||
-    fail 'long invocation did not forward --cache'
-grep -Fxq -- "$cache" "$tmp/long-arguments.txt" ||
-    fail 'long invocation forwarded the wrong cache directory'
+printf '%s\0' --full --output "$long" --cache "$cache" > "$tmp/long-expected-arguments"
+cmp -s "$tmp/long-expected-arguments" "$long_arguments" ||
+    fail 'long invocation forwarded an unexpected argv sequence'
 [[ -s "$long/fake-runner-called" ]] || fail 'long output is missing fake marker'
 [[ -s "$long/run.log" ]] || fail 'long output is missing run.log'
 
