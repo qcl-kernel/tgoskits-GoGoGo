@@ -109,6 +109,41 @@ resolve_runner() {
     printf '%s\n' "$resolved"
 }
 
+canonical_existing_file() {
+    local label=$1
+    local candidate=$2
+    local resolved
+
+    [[ -n "$candidate" ]] || fail "$label path is empty"
+    resolved="$(realpath -e -- "$candidate")" ||
+        fail "$label does not exist: $candidate"
+    [[ -f "$resolved" && -r "$resolved" && -s "$resolved" ]] ||
+        fail "$label must be a readable, non-empty file: $resolved"
+    printf '%s\n' "$resolved"
+}
+
+resolve_local_rootfs() {
+    local candidate
+    local -a candidates=(
+        "$ROOT/tmp/task123-native-inputs/rootfs.img"
+        "$ROOT/tmp/vmconfigs/two-guest-net/current/rootfs.img"
+        "$ROOT/tmp/rootfs-task12.img"
+        "$ROOT/tmp/rootfs.img"
+    )
+
+    if [[ -n "${ROOTFS_IMAGE:-}" ]]; then
+        ROOTFS_IMAGE="$(canonical_existing_file rootfs "$ROOTFS_IMAGE")"
+        return 0
+    fi
+    for candidate in "${candidates[@]}"; do
+        if [[ -e "$candidate" || -L "$candidate" ]]; then
+            ROOTFS_IMAGE="$(canonical_existing_file rootfs "$candidate")"
+            return 0
+        fi
+    done
+    fail "no local readable non-empty rootfs.img found; prepare a local rootfs.img and set ROOTFS_IMAGE or place it under tmp/"
+}
+
 path_is_within() {
     local child=$1
     local parent=$2
@@ -327,6 +362,9 @@ main() {
     QEMU="$(resolve_executable qemu-system-aarch64 qemu-system-aarch64)"
     GIT="$(resolve_executable git git)"
     RUNNER="$(resolve_runner)"
+    if [[ "$RUNNER" == "$(realpath -e -- "$DEFAULT_RUNNER")" ]]; then
+        resolve_local_rootfs
+    fi
     prepare_output
 
     runner_args=("--$mode")
@@ -348,6 +386,10 @@ main() {
         printf 'UTC_TIMESTAMP %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
         "$GIT" --version
         "$QEMU" --version
+        printf 'QEMU %s\n' "$QEMU"
+        if [[ -n "${ROOTFS_IMAGE:-}" ]]; then
+            printf 'ROOTFS_IMAGE %s\n' "$ROOTFS_IMAGE"
+        fi
         printf 'MODE %s\n' "$mode"
         printf 'RUNNER %s\n' "$RUNNER"
         printf 'OUTPUT %s\n' "$OUTPUT"
@@ -362,9 +404,15 @@ main() {
         return "$pipeline_result"
     fi
 
-    TASK123_PIPELINE_LOG="$temporary_log" \
-        TASK123_PIPELINE_STATUS="$pipeline_status_file" \
-        setsid --wait bash -c '
+    pipeline_environment=(
+        "QEMU=$QEMU"
+        "TASK123_PIPELINE_LOG=$temporary_log"
+        "TASK123_PIPELINE_STATUS=$pipeline_status_file"
+    )
+    if [[ -n "${ROOTFS_IMAGE:-}" ]]; then
+        pipeline_environment+=("ROOTFS_IMAGE=$ROOTFS_IMAGE")
+    fi
+    env "${pipeline_environment[@]}" setsid --wait bash -c '
             set +e
             "$@" 2>&1 | tee -a "$TASK123_PIPELINE_LOG"
             pipeline_status=("${PIPESTATUS[@]}")
