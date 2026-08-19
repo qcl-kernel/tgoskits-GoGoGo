@@ -406,8 +406,9 @@ AxVisor、QEMU、RT-Thread 镜像、协议源码和模型运行 Linux 与 Starry
 fake-QEMU；请在运行前准备好本地构建依赖和 guest 输入镜像。`--output` 指定的目录
 必须为空。入口会在该目录保留顶层 `run.log`，以及 `linux/`、`starryos/` 两套 guest
 结果和 `comparison/` 下的 `comparison.json`、`comparison-report.md`；
-`comparison-manifest.txt`、`orchestrator.log` 与 comparison 报告会记录 QEMU TCG timer
-条件门禁。启用 `--allow-qemu-timer-limit` 后，允许的条件状态为
+顶层 `run.log`/`orchestrator.log` 记录编排过程，`linux/manifest.txt` 和
+`starryos/manifest.txt` 记录各自的 `result_gate`，comparison manifest/report 汇总条件
+状态。启用 `--allow-qemu-timer-limit` 后，允许的条件状态为
 `PASS_WITH_QEMU_TIMER_LIMIT`，不代表通过物理硬实时门限。
 
 需要分别控制底层比较脚本参数时，也可以直接执行：
