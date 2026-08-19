@@ -208,8 +208,45 @@ pipeline_pid=
 interrupted=0
 interrupt_status=0
 pending_signal=
+run_log_saved=0
+
+save_run_log() {
+    local resolved_output
+
+    [[ "$run_log_saved" -eq 0 ]] || return 0
+    [[ -n "${temporary_log:-}" && -f "$temporary_log" ]] || return 1
+    [[ -n "${OUTPUT:-}" ]] || return 1
+    if [[ ! -e "$OUTPUT" && ! -L "$OUTPUT" ]]; then
+        mkdir -- "$OUTPUT" || return 1
+    fi
+    [[ -d "$OUTPUT" && ! -L "$OUTPUT" && -w "$OUTPUT" ]] || return 1
+    resolved_output="$(realpath -e -- "$OUTPUT")" || return 1
+    [[ "$resolved_output" == "$OUTPUT" ]] || return 1
+    cp -- "$temporary_log" "$OUTPUT/run.log" || return 1
+    run_log_saved=1
+}
+
 cleanup() {
+    set +e
+    if [[ -n "${pipeline_pid:-}" ]] &&
+        kill -0 -- "-$pipeline_pid" 2>/dev/null; then
+        kill -KILL -- "-$pipeline_pid" 2>/dev/null || true
+    fi
+    if [[ -n "${pipeline_pid:-}" ]]; then
+        while kill -0 "$pipeline_pid" 2>/dev/null; do
+            wait "$pipeline_pid" 2>/dev/null || true
+        done
+        local cleanup_attempts=0
+        while kill -0 -- "-$pipeline_pid" 2>/dev/null &&
+            [[ "$cleanup_attempts" -lt 100 ]]; do
+            if ! sleep 0.05; then
+                :
+            fi
+            cleanup_attempts=$((cleanup_attempts + 1))
+        done
+    fi
     if [[ -n "${temporary_log:-}" ]]; then
+        save_run_log || true
         rm -f -- "$temporary_log"
     fi
     if [[ -n "${pipeline_status_file:-}" ]]; then
@@ -255,9 +292,11 @@ wait_for_pipeline() {
     while kill -0 -- "-$pipeline_pid" 2>/dev/null; do
         if [[ "$group_attempts" -ge 100 ]]; then
             kill -KILL -- "-$pipeline_pid" 2>/dev/null || true
-            break
+            group_attempts=0
         fi
-        sleep 0.05
+        if ! sleep 0.05; then
+            :
+        fi
         group_attempts=$((group_attempts + 1))
     done
 
@@ -360,16 +399,7 @@ main() {
     fi
 
     log_copy_status=0
-    if [[ ! -e "$OUTPUT" && ! -L "$OUTPUT" ]]; then
-        mkdir -- "$OUTPUT" || log_copy_status=1
-    fi
-    if [[ "$log_copy_status" -eq 0 ]]; then
-        if [[ ! -d "$OUTPUT" || -L "$OUTPUT" || ! -w "$OUTPUT" ]]; then
-            log_copy_status=1
-        elif ! cp -- "$temporary_log" "$OUTPUT/run.log"; then
-            log_copy_status=1
-        fi
-    fi
+    save_run_log || log_copy_status=1
     if [[ "$log_copy_status" -ne 0 && "$pipeline_result" -eq 0 ]]; then
         pipeline_result=1
     fi
