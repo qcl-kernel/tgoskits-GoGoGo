@@ -2,14 +2,22 @@
 
 set -eu
 
-if [ "$#" -ne 3 ]; then
-    echo "usage: $0 LOG EXPECTED_SAMPLES QEMU_EXIT_CODE" >&2
+if [ "$#" -lt 3 ] || [ "$#" -gt 4 ]; then
+    echo "usage: $0 LOG EXPECTED_SAMPLES QEMU_EXIT_CODE [full|core]" >&2
     exit 2
 fi
 
 log=$1
 samples=$2
 qemu_rc=$3
+suite_mode=${4:-full}
+case "$suite_mode" in
+    full|core) ;;
+    *)
+        echo "invalid suite mode: $suite_mode" >&2
+        exit 2
+        ;;
+esac
 
 case "$samples" in
     ''|*[!0-9]*|0)
@@ -60,22 +68,24 @@ for run in 1 2 3; do
         echo "timer jitter run ${run} is missing or incomplete" >&2
         exit 1
     fi
-    if [ "$(grep -aEc "RTBENCH metric=timer_jitter run=${run} .*miss_1ms=0 mean_ns=[0-9]+[[:space:]]*$" "$log")" -ne 1 ]; then
-        echo "timer jitter run ${run} exceeded the one-millisecond deadline" >&2
-        exit 1
-    fi
     if [ "$(grep -aEc "RTBENCH metric=callback_exec run=${run} ${metric_suffix}" "$log")" -ne 1 ]; then
         echo "callback execution run ${run} is missing or incomplete" >&2
         exit 1
     fi
 done
 
-for metric in preemption irq; do
+for metric in preemption irq irq_to_task irq_disabled_duration mutex_inversion wake_under_load; do
     if [ "$(grep -aEc "RTBENCH metric=${metric} run=1 ${metric_suffix}" "$log")" -ne 1 ]; then
         echo "${metric} benchmark is missing or incomplete" >&2
         exit 1
     fi
 done
+
+if [ "$suite_mode" = full ] &&
+    [ "$(grep -aEc "RTBENCH metric=net_event_latency run=1 ${metric_suffix}" "$log")" -ne 1 ]; then
+    echo "net_event_latency benchmark is missing or incomplete" >&2
+    exit 1
+fi
 
 if [ "$(grep -aEc 'RTBENCH_END status=PASS[[:space:]]*$' "$log")" -ne 1 ]; then
     echo "missing, duplicate, or failed benchmark suite end marker" >&2

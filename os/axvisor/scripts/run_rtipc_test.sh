@@ -30,6 +30,7 @@ RTBENCH_START_MODE="${RTBENCH_START_MODE:-concurrent}"
 CPU_LOAD_LOG="${CPU_LOAD_LOG:-}"
 RTBENCH_TIMING_LOG="${RTBENCH_TIMING_LOG:-${LOG}.timing}"
 QEMU_UCLAMP_MIN="${QEMU_UCLAMP_MIN:-1024}"
+QEMU_TCG_THREAD="${QEMU_TCG_THREAD:-multi}"
 RTBENCH_MODE=none
 RTBENCH_COMMAND=
 RTBENCH_DONE_MARKER=
@@ -40,6 +41,11 @@ RTTHREAD_RUNTIME_DIR=
 LINUX_RUNTIME_DIR=
 STAGING=
 STRIP_TMP_DIR=
+
+case "$QEMU_TCG_THREAD" in
+  single|multi) ;;
+  *) echo "QEMU_TCG_THREAD must be single or multi" >&2; exit 2 ;;
+esac
 
 cleanup_build_artifacts() {
   if [ -n "$STAGING" ]; then
@@ -564,6 +570,8 @@ qemu_args=(
   -display none
   -monitor none
   -snapshot
+  -name 'tgoskits,debug-threads=on'
+  -accel "tcg,thread=$QEMU_TCG_THREAD"
   -cpu cortex-a72
   -machine virt,virtualization=on,gic-version=3
   -global virtio-mmio.force-legacy=false

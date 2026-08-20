@@ -8,11 +8,12 @@ INIT="$ROOT/os/axvisor/guests/linux-net/init-task123"
 SERVICE="$TASK3_ROOT/buildroot/rootfs-overlay/etc/init.d/S99task3"
 PACKAGE="$TASK3_ROOT/buildroot/package/task3-linux/task3-linux.mk"
 BUILD="$TASK3_ROOT/scripts/build_linux.sh"
+RUNNER="$ROOT/os/axvisor/scripts/run_task123.sh"
 TASK2_MAKE="$ROOT/os/axvisor/guests/rt-ipc/linux/Makefile"
 MODEL_DIR="$TASK3_ROOT/build/model"
-INITRAMFS=${TASK123_INITRAMFS:-"$TASK3_ROOT/build/images/linux/rootfs.cpio"}
-EXPECTED_TASK2_BIN=${TASK123_EXPECTED_TASK2_BIN:-"$TASK3_ROOT/build/buildroot/target/bin/rtipic-client"}
-EXPECTED_TASK3_BIN=${TASK123_EXPECTED_TASK3_BIN:-"$TASK3_ROOT/build/buildroot/target/usr/bin/task3-linux"}
+INITRAMFS=${TASK123_INITRAMFS:-"$TASK3_ROOT/build/images/linux/rootfs.cpio.gz"}
+EXPECTED_TASK2_BIN=${TASK123_EXPECTED_TASK2_BIN:-"$TASK3_ROOT/build/alpine-root/bin/rtipic-client"}
+EXPECTED_TASK3_BIN=${TASK123_EXPECTED_TASK3_BIN:-"$TASK3_ROOT/build/alpine-root/usr/bin/task3-linux"}
 
 fail() {
     printf 'test_task123_linux_image_contract: %s\n' "$*" >&2
@@ -38,9 +39,18 @@ assert_init_wrapper() {
 
 test -x "$INIT" || fail 'combined /init source is missing or not executable'
 test -x "$SERVICE" || fail 'S99task3 is missing or not executable'
+test -x "$RUNNER" || fail 'Task123 runner is missing or not executable'
 sh -n "$INIT"
 sh -n "$SERVICE"
 sh -n "$BUILD"
+bash -n "$RUNNER"
+
+require_line 'TASK123_LINUX_IMAGE_CACHE' "$RUNNER"
+require_line 'linux_image_has_task123_probe' "$RUNNER"
+require_line 'usr/bin/rtbench-net-probe' "$RUNNER"
+if grep -F 'TGOS_SOURCE_CACHE/linux/6.12.21/rootfs.cpio.gz' "$RUNNER" >/dev/null; then
+    fail 'runner still prefers the legacy Linux rootfs cache'
+fi
 
 for marker in \
     'LINUX_SMP_READY configured=2 online=%s nproc=%s' \

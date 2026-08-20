@@ -70,6 +70,8 @@ build_apps() {
         "$app/main.c" "$app/rtipc_client.c" "$app/deadline.c" \
         "$app/metrics.c" "$app/y4m.c" "$app/cnn.c" "$app/session.c" \
         "$app/task3_protocol.c" "$app/task2/common/rt_ipc.c"
+    aarch64-linux-gnu-gcc -std=c11 -O2 -static -Wall -Wextra \
+        -o "$app/rtbench-net-probe" "$app/rtbench_net_probe.c"
 }
 
 build_initramfs() {
@@ -85,6 +87,8 @@ build_initramfs() {
         "$root/bin/rtipic-client"
     install -D -m 0755 "$BUILD_DIR/linux-app/task3-linux" \
         "$root/usr/bin/task3-linux"
+    install -D -m 0755 "$BUILD_DIR/linux-app/rtbench-net-probe" \
+        "$root/usr/bin/rtbench-net-probe"
     install -D -m 0755 "$REPO_ROOT/os/axvisor/guests/linux-net/init-task123" \
         "$root/init"
     install -d -m 0755 "$root/opt/task3"

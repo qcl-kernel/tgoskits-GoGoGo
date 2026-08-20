@@ -43,7 +43,7 @@ while (($#)); do
     esac
 done
 
-for command in cpio find sort touch install readelf sha256sum realpath; do
+for command in cpio find sort touch install readelf sha256sum realpath gzip; do
     command -v "$command" >/dev/null 2>&1 || {
         printf 'missing required command: %s\n' "$command" >&2
         exit 1
@@ -65,12 +65,22 @@ archive_tmp="$output.tmp.$$"
 patterns="$stage/../.starryos-patterns.$$"
 trap 'rm -rf -- "$stage"; rm -f -- "$archive_tmp" "$patterns"' EXIT
 
-cpio --list --quiet < "$source_cpio" |
+source_archive="$source_cpio"
+if [[ "$source_cpio" == *.gz ]] || gzip -t -- "$source_cpio" >/dev/null 2>&1; then
+    gzip -t -- "$source_cpio" || {
+        printf 'Task123 source CPIO gzip archive is invalid: %s\n' "$source_cpio" >&2
+        exit 1
+    }
+    source_archive="$stage/source.cpio"
+    gzip -dc -- "$source_cpio" > "$source_archive"
+fi
+
+cpio --list --quiet < "$source_archive" |
     sed -e '/^dev\(\/\|$\)/d' -e '/^proc\(\/\|$\)/d' -e '/^sys\(\/\|$\)/d' > "$patterns"
 (
     cd "$stage"
     cpio --extract --make-directories --no-absolute-filenames --no-preserve-owner \
-        --pattern-file="$patterns" --quiet < "$source_cpio"
+        --pattern-file="$patterns" --quiet < "$source_archive"
 )
 for mountpoint in dev proc sys tmp; do
     mkdir -p "$stage/$mountpoint"

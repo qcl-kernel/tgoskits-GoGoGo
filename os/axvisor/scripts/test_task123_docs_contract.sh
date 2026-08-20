@@ -3,9 +3,14 @@
 set -euo pipefail
 
 ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/../../.." && pwd)"
-REALTIME="$ROOT/docs/docs/build/axvisor/rtthread-realtime-report.md"
-REPORT="$ROOT/docs/docs/build/axvisor/task123-test-report.md"
-GUIDE="$ROOT/docs/docs/build/axvisor/task123-reproduction-cn.md"
+HISTORY_DOCS_ROOT="${HISTORY_DOCS_ROOT:-$ROOT/../history-docs}"
+if [[ ! -d "$HISTORY_DOCS_ROOT" ]]; then
+    printf 'SKIP: history docs archive is not present: %s\n' "$HISTORY_DOCS_ROOT"
+    exit 0
+fi
+REALTIME="$HISTORY_DOCS_ROOT/task12/report/2026-08-17/starryos-replace/docs/docs/build/axvisor/rtthread-realtime-report.md"
+REPORT="$HISTORY_DOCS_ROOT/task123/report/2026-08-17/starryos-replace/docs/docs/build/axvisor/task123-test-report.md"
+GUIDE="$HISTORY_DOCS_ROOT/task123/guide/2026-08-18/starryos-replace/docs/docs/build/axvisor/task123-reproduction-cn.md"
 REPRODUCER="$ROOT/os/axvisor/scripts/reproduce_task123.sh"
 REPRODUCER_TEST="$ROOT/os/axvisor/scripts/test_reproduce_task123.sh"
 NATIVE_RUNNER="$ROOT/run-native.sh"

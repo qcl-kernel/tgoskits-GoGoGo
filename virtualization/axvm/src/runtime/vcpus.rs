@@ -150,10 +150,9 @@ pub(crate) fn queue_pending_interrupt(
         ));
     }
 
-    let cpu_id = vm.with_runtime(|runtime| runtime.queue_pending_interrupt(vcpu_id, interrupt))?;
-    vm.with_runtime(|runtime| {
-        runtime.notify_all();
-        Ok(())
+    let cpu_id = vm.with_runtime(|runtime| {
+        runtime.queue_pending_interrupt(vcpu_id, interrupt)?;
+        runtime.notify_vcpu(vcpu_id)
     })?;
     crate::host::task::send_ipi(cpu_id);
     Ok(())
@@ -172,8 +171,7 @@ pub(crate) fn notify_vcpu(vm_id: usize, vcpu_id: usize) -> AxVmResult {
     }
 
     let runtime = vm.with_runtime(|runtime| Ok(runtime.clone()))?;
-    let cpu_id = runtime.vcpu_cpu_id(vcpu_id)?;
-    runtime.notify_all();
+    let cpu_id = runtime.notify_vcpu(vcpu_id)?;
     crate::host::task::send_ipi(cpu_id);
     Ok(())
 }
@@ -550,7 +548,14 @@ fn vcpu_run() {
             poll_vm_devices(&vm);
         }
 
-        match CurrentArch::run_vcpu(&vm, &vcpu) {
+        #[cfg(target_arch = "aarch64")]
+        let run_result = crate::runtime::run_vcpu_with_host_timer_policy(&vm, || {
+            CurrentArch::run_vcpu(&vm, &vcpu)
+        });
+        #[cfg(not(target_arch = "aarch64"))]
+        let run_result = CurrentArch::run_vcpu(&vm, &vcpu);
+
+        match run_result {
             Ok(VcpuRunAction {
                 exits_vcpu: true, ..
             }) => {

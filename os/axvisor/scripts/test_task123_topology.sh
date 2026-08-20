@@ -70,8 +70,13 @@ require(rtthread_base.get("phys_cpu_sets"), [0b0100], "RT-Thread allowed pCPU ma
 require(rtthread_base.get("host_vcpu_idle_policy"), "busy", "RT-Thread idle policy")
 require(
     rtthread["kernel"].get("memory_regions"),
-    [[0xA0000000, 0x10000000, 0x7, 2]],
+    [[0x40000000, 0x40000000, 0x7, 0]],
     "RT-Thread RAM",
+)
+require(
+    rtthread["kernel"].get("load_policy"),
+    "keep_configured",
+    "RT-Thread kernel load policy",
 )
 require(
     virtual_net_mac(rtthread, "RT-Thread"),

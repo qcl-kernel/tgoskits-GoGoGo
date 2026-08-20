@@ -7,7 +7,7 @@ index 2a4a5fc2..bc8f9113 100644
  SECTIONS
  {
 -    _text_offset = 0;
--    . = 0xa0000000 + _text_offset;
+-    . = 0x40000000 + _text_offset;
 +    _text_offset = 0x200000;
 +    . = 0x40000000 + _text_offset;
      .text :
@@ -24,8 +24,7 @@ index 1b2c0742..f517f234 100644
 -#define ARCH_TEXT_OFFSET 0x0
 +#define ARCH_TEXT_OFFSET 0x200000
  #define KERNEL_ASPACE_START 0x1
--#define ARCH_RAM_OFFSET 0xa0000000
-+#define ARCH_RAM_OFFSET 0x40000000
+ #define ARCH_RAM_OFFSET 0x40000000
  #define ARCH_SECONDARY_CPU_STACK_SIZE 4096
  #define ARCH_HEAP_SIZE 0x4000000
  #define ARCH_INIT_PAGE_SIZE 0x200000

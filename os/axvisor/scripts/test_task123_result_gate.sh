@@ -117,7 +117,7 @@ emit_suite() {
         printf '[VM 3] RTBENCH metric=callback_exec run=%s expected=%s collected=%s missing=0 p50_ns=1 p95_ns=2 p99_ns=3 p99_9_ns=4 max_ns=5 miss_100us=0 miss_500us=0 miss_1ms=0 mean_ns=2\n' \
             "$run" "$samples" "$samples"
     done
-    for metric in preemption irq; do
+    for metric in preemption irq irq_to_task irq_disabled_duration mutex_inversion wake_under_load net_event_latency; do
         printf '[VM 3] RTBENCH metric=%s run=1 expected=%s collected=%s missing=0 p50_ns=1 p95_ns=2 p99_ns=3 p99_9_ns=4 max_ns=5 miss_100us=0 miss_500us=0 miss_1ms=0 mean_ns=2\n' \
             "$metric" "$samples" "$samples"
     done
@@ -218,6 +218,79 @@ make_fixture "$tmp/realtime-suite"
 emit_suite 2 >> "$tmp/realtime-suite/console.log"
 run_gate "$tmp/realtime-suite" realtime-suite --rtbench-samples 2 >/dev/null ||
     fail "realtime-suite fixture was rejected"
+
+cp -a "$tmp/realtime-suite" "$tmp/realtime-suite-interleaved"
+python3 - "$tmp/realtime-suite-interleaved/console.log" <<'PY'
+import sys
+from pathlib import Path
+
+path = Path(sys.argv[1])
+text = path.read_text(encoding="utf-8")
+needle = "RTBENCH metric=irq_to_task run=1 expected=2 collected=2"
+replacement = "RTBENCH metric=irq_to_task run=1 expected=2 collected=2\x1b[32m[I/rtipic.srv] client connected\x1b[0m\n6 p95_ns=2 missing=0"
+if text.count(needle) != 1:
+    raise SystemExit("interleaving fixture marker not found")
+path.write_text(text.replace(needle, replacement, 1), encoding="utf-8")
+PY
+rm -f -- "$tmp/realtime-suite-interleaved/linux.log" \
+    "$tmp/realtime-suite-interleaved/summary.json" \
+    "$tmp/realtime-suite-interleaved/frames.csv" \
+    "$tmp/realtime-suite-interleaved/summary.raw.json"
+run_gate "$tmp/realtime-suite-interleaved" realtime-suite --rtbench-samples 2 >/dev/null ||
+    fail "interleaved RTBENCH records were rejected"
+
+cp -a "$tmp/realtime-suite" "$tmp/realtime-suite-field-name-interleaved"
+python3 - "$tmp/realtime-suite-field-name-interleaved/console.log" <<'PY'
+import sys
+from pathlib import Path
+
+path = Path(sys.argv[1])
+text = path.read_text(encoding="utf-8")
+needle = "p99_9_ns=4 max_ns=5"
+replacement = "p99_9_n\x1b[32m[I/rtipic.srv] client connected\x1b[0ms=4 max_ns=5"
+if text.count(needle) != 13:
+    raise SystemExit("field-name interleaving fixture marker count changed")
+path.write_text(text.replace(needle, replacement, 1), encoding="utf-8")
+PY
+rm -f -- "$tmp/realtime-suite-field-name-interleaved/linux.log" \
+    "$tmp/realtime-suite-field-name-interleaved/summary.json" \
+    "$tmp/realtime-suite-field-name-interleaved/frames.csv" \
+    "$tmp/realtime-suite-field-name-interleaved/summary.raw.json"
+run_gate "$tmp/realtime-suite-field-name-interleaved" realtime-suite --rtbench-samples 2 >/dev/null ||
+    fail "field-name interleaved RTBENCH records were rejected"
+
+cp -a "$tmp/realtime-suite" "$tmp/realtime-suite-host-log-interleaved"
+python3 - "$tmp/realtime-suite-host-log-interleaved/console.log" <<'PY'
+import sys
+from pathlib import Path
+
+path = Path(sys.argv[1])
+data = path.read_bytes()
+metric = (
+    b"[VM 3] RTBENCH metric=net_event_latency run=1 expected=2 collected=2 "
+    b"missing=0 p50_ns=1 p95_ns=2 p99_ns=3 p99_9_ns=4 max_ns=5 "
+    b"miss_100us=0 miss_500us=0 miss_1ms=0 mean_ns=2\n"
+)
+fragmented_metric = metric.replace(
+    b"mean_ns=2\n",
+    b"mean_ns=\x1b[37m[ 1.000000 0:2 axvm::vm:1] \x1b[33mstop\x1b[m\r\n"
+    b"2\x1b[37m[ 1.000001 0:2 axvm::vm:2] \x1b[32mdone\x1b[m\r\n\r\n",
+)
+end = b"[VM 3] RTBENCH_END status=PASS\n"
+fragmented_end = (
+    b"[VM 3] RTBE\x1b[37m[ 1.000002 0:2 axvm::vm:3] \x1b[32ndone\x1b[m\r\n"
+    b"NCH_END status=PASS\n"
+)
+if data.count(metric) != 1 or data.count(end) != 1:
+    raise SystemExit("host-log interleaving fixture marker not found")
+path.write_bytes(data.replace(metric, fragmented_metric, 1).replace(end, fragmented_end, 1))
+PY
+rm -f -- "$tmp/realtime-suite-host-log-interleaved/linux.log" \
+    "$tmp/realtime-suite-host-log-interleaved/summary.json" \
+    "$tmp/realtime-suite-host-log-interleaved/frames.csv" \
+    "$tmp/realtime-suite-host-log-interleaved/summary.raw.json"
+run_gate "$tmp/realtime-suite-host-log-interleaved" realtime-suite --rtbench-samples 2 >/dev/null ||
+    fail "host-log interleaved RTBENCH records were rejected"
 
 make_fixture "$tmp/stability"
 emit_stability 1 >> "$tmp/stability/console.log"

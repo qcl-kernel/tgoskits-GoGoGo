@@ -52,6 +52,7 @@ fn parses_structured_guest_config() {
     assert_eq!(config.base.phys_cpu_ids, Some(vec![0x500, 0x501]));
     assert_eq!(config.base.phys_cpu_sets, Some(vec![3, 4]));
     assert_eq!(config.base.host_vcpu_idle_policy, HostVcpuIdlePolicy::Halt);
+    assert_eq!(config.base.host_timer_policy, HostTimerPolicy::Periodic);
     assert_eq!(config.base.guest_tlbi_policy, GuestTlbiPolicy::Native);
 
     assert_eq!(config.kernel.entry_point, 0xdeadbeef);
@@ -89,6 +90,41 @@ host_vcpu_idle_policy = "busy"
 
     let encoded = toml::to_string(&config).unwrap();
     assert!(encoded.contains("host_vcpu_idle_policy = \"busy\""));
+}
+
+#[test]
+fn parses_tickless_host_timer_policy() {
+    let config = GuestConfig::from_toml(
+        r#"
+[base]
+host_timer_policy = "tickless"
+"#,
+    )
+    .unwrap();
+
+    assert_eq!(config.base.host_timer_policy, HostTimerPolicy::Tickless);
+
+    let encoded = toml::to_string(&config).unwrap();
+    assert!(encoded.contains("host_timer_policy = \"tickless\""));
+}
+
+#[test]
+fn parses_configured_kernel_load_policy() {
+    let config = GuestConfig::from_toml(
+        r#"
+[kernel]
+load_policy = "keep_configured"
+"#,
+    )
+    .unwrap();
+
+    assert_eq!(config.kernel.load_policy, KernelLoadPolicy::KeepConfigured);
+    assert_eq!(
+        VMKernelConfig::default().load_policy,
+        KernelLoadPolicy::AdjustToMemory
+    );
+    let encoded = toml::to_string(&config).unwrap();
+    assert!(encoded.contains("load_policy = \"keep_configured\""));
 }
 
 #[test]

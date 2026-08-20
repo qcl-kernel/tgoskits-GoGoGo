@@ -14,12 +14,15 @@ LINUX_VMCONFIG_GENERATOR="${LINUX_VMCONFIG_GENERATOR:-$SCRIPT_DIR/generate_linux
 STARRYOS_VMCONFIG_GENERATOR="${STARRYOS_VMCONFIG_GENERATOR:-$SCRIPT_DIR/generate_starryos_vmconfig.sh}"
 RTTHREAD_VMCONFIG_GENERATOR="${RTTHREAD_VMCONFIG_GENERATOR:-$SCRIPT_DIR/generate_rtthread_vmconfig.sh}"
 RESULT_GATE="${RESULT_GATE:-$SCRIPT_DIR/verify_task123_results.sh}"
+TIMED_COMMAND_HELPER="${TIMED_COMMAND_HELPER:-$SCRIPT_DIR/run_timed_foreground.sh}"
+IMAGE_METADATA="${IMAGE_METADATA:-$SCRIPT_DIR/rtthread_image_metadata.py}"
 LINUX_VMCONFIG_TEMPLATE="$ROOT/os/axvisor/configs/vms/qemu/aarch64/linux-net.toml"
 STARRYOS_VMCONFIG_TEMPLATE="$ROOT/os/axvisor/configs/vms/qemu/aarch64/starryos-task123.toml"
 RTTHREAD_VMCONFIG_TEMPLATE="$ROOT/os/axvisor/configs/vms/qemu/aarch64/rtthread-net.toml"
 STARRYOS_BUILDER="$ROOT/os/axvisor/guests/starryos-task123/build.sh"
 PROTOCOL_SOURCE="$ROOT/os/axvisor/guests/rt-ipc/common/rt_ipc.c"
 PROTOCOL_HEADER="$ROOT/os/axvisor/guests/rt-ipc/common/rt_ipc.h"
+RTTHREAD_IMAGE_METADATA=
 
 usage() {
     cat >&2 <<EOF
@@ -47,6 +50,24 @@ require_integer() {
         echo "$label must be an integer from $minimum to $maximum" >&2
         return 2
     }
+}
+
+default_task123_timeout() {
+    case "$mode" in
+        realtime-suite)
+            # The network probe is paced at roughly 2 ms/sample, while the
+            # IRQ/preemption workloads also contain controlled 1 ms waits.
+            # Scale the default with the requested suite size so a formal
+            # run does not get killed while its final network metric is live.
+            echo $((rtbench_samples / 100 + 900))
+            ;;
+        stability)
+            echo $((stability_seconds + 600))
+            ;;
+        *)
+            echo 600
+            ;;
+    esac
 }
 
 mode=
@@ -185,13 +206,18 @@ validate_mode_options() {
           "${TASK123_ALLOW_QEMU_TIMER_LIMIT:-0}" -eq 1 ]]; then
         failure_markers=()
     fi
-    require_integer "${TASK123_TIMEOUT_S:-600}" 1 86400 TASK123_TIMEOUT_S
+    require_integer "${TASK123_TIMEOUT_S:-$(default_task123_timeout)}" 1 86400 TASK123_TIMEOUT_S
     require_integer "${TASK123_BUILD_TIMEOUT_S:-1800}" 1 86400 TASK123_BUILD_TIMEOUT_S
     require_integer "${TASK123_PHASE_TIMEOUT_S:-600}" 1 86400 TASK123_PHASE_TIMEOUT_S
     require_integer "${QEMU_UCLAMP_MIN:-1024}" 0 1024 QEMU_UCLAMP_MIN
     require_integer "${QEMU_TIMER_SLACK_NS:-1}" 1 1000000000 QEMU_TIMER_SLACK_NS
+    case "${QEMU_TCG_THREAD:-multi}" in
+        single|multi) ;;
+        *) fail "QEMU_TCG_THREAD must be single or multi"; return 2 ;;
+    esac
     require_integer "${QEMU_RESOURCE_SAMPLE_INTERVAL_MS:-100}" 1 60000 QEMU_RESOURCE_SAMPLE_INTERVAL_MS
     require_integer "${TASK123_ALLOW_QEMU_TIMER_LIMIT:-0}" 0 1 TASK123_ALLOW_QEMU_TIMER_LIMIT
+    require_integer "${RTTHREAD_REQUIRE_IMAGE_METADATA:-0}" 0 1 RTTHREAD_REQUIRE_IMAGE_METADATA
     if [[ "${TASK123_ALLOW_QEMU_TIMER_LIMIT:-0}" -eq 1 && "$mode" != stability ]]; then
         fail "TASK123_ALLOW_QEMU_TIMER_LIMIT is only valid for stability mode"
         return 2
@@ -422,7 +448,9 @@ APP_GUEST_LOG=
 APP_GUEST_SMP_MARKER=
 APP_GUEST_NET_MARKER=
 APP_GUEST_TASK2_END_MARKER=
+APP_GUEST_TASK2_FAILURE_MARKER=
 APP_GUEST_TASK3_END_MARKER=
+APP_GUEST_TASK3_FAILURE_MARKER=
 APP_GUEST_TASK123_END_MARKER=
 APP_GUEST_FAILURE_MARKER=
 HOST_METRICS=
@@ -444,6 +472,11 @@ cleanup_owned_processes() {
     feeder_pid=
     terminate_owned_pid "$resource_sampler_pid"
     resource_sampler_pid=
+    # The marker watcher owns QEMU through a separate process group. Kill the
+    # recorded child explicitly as well so cleanup remains bounded when the
+    # watcher is interrupted from an error path.
+    terminate_owned_pid "$qemu_pid"
+    qemu_pid=
     terminate_owned_pid "$watcher_pid"
     watcher_pid=
     if [[ "$serial_fd_open" -eq 1 ]]; then
@@ -493,7 +526,7 @@ run_timed() {
 
     progress "STEP $phase_name timeout_s=$timeout_s"
     if timeout --foreground --signal TERM --kill-after 5s \
-        "$timeout_s" "$@"; then
+        "$timeout_s" "$TIMED_COMMAND_HELPER" "$@"; then
         return 0
     else
         phase_rc=$?
@@ -509,14 +542,18 @@ configure_app_guest_markers() {
         APP_GUEST_SMP_MARKER='LINUX_SMP_READY configured=2'
         APP_GUEST_NET_MARKER='TASK123_LINUX_NET_READY'
         APP_GUEST_TASK2_END_MARKER='TASK2_LINUX_END status=PASS'
+        APP_GUEST_TASK2_FAILURE_MARKER='TASK2_LINUX_END status=FAIL'
         APP_GUEST_TASK3_END_MARKER='TASK3_LINUX_END status=PASS'
+        APP_GUEST_TASK3_FAILURE_MARKER='TASK3_LINUX_END status=FAIL'
         APP_GUEST_TASK123_END_MARKER='TASK123_LINUX_END status=PASS'
         APP_GUEST_FAILURE_MARKER='TASK123_LINUX_END status=FAIL'
     else
         APP_GUEST_SMP_MARKER='STARRY_SMP_READY configured=2'
         APP_GUEST_NET_MARKER='STARRY_NET_READY'
         APP_GUEST_TASK2_END_MARKER='TASK2_STARRY_END status=PASS'
+        APP_GUEST_TASK2_FAILURE_MARKER='TASK2_STARRY_END status=FAIL'
         APP_GUEST_TASK3_END_MARKER='TASK3_STARRY_END status=PASS'
+        APP_GUEST_TASK3_FAILURE_MARKER='TASK3_STARRY_END status=FAIL'
         APP_GUEST_TASK123_END_MARKER='TASK123_STARRY_END status=PASS'
         APP_GUEST_FAILURE_MARKER='TASK123_STARRY_END status=FAIL'
     fi
@@ -525,7 +562,7 @@ configure_app_guest_markers() {
 resolve_dependencies() {
     phase dependency-check
     local command_name
-    for command_name in realpath sha256sum awk sed grep find mktemp cp chmod cmp date python3 timeout tee; do
+    for command_name in realpath sha256sum awk sed grep find mktemp cp chmod cmp date python3 timeout tee gzip cpio; do
         command -v "$command_name" >/dev/null || fail "required command not found: $command_name"
     done
     RUN_UNTIL="$(canonical_tool run-until "$RUN_UNTIL")"
@@ -539,6 +576,7 @@ resolve_dependencies() {
     fi
     RTTHREAD_VMCONFIG_GENERATOR="$(canonical_tool rtthread-vmconfig-generator "$RTTHREAD_VMCONFIG_GENERATOR")"
     RESULT_GATE="$(canonical_tool result-gate "$RESULT_GATE")"
+    IMAGE_METADATA="$(canonical_existing_file rtthread-image-metadata "$IMAGE_METADATA")"
     QEMU="$(canonical_tool qemu "${QEMU:-qemu-system-aarch64}")"
     CARGO="$(canonical_tool cargo "${CARGO:-cargo}")"
     AARCH64_STRIP="$(canonical_tool strip "${AARCH64_STRIP:-aarch64-linux-gnu-strip}")"
@@ -565,24 +603,40 @@ resolve_rootfs_image() {
     ROOTFS_IMAGE="$(canonical_existing_file rootfs "${rootfs_candidates[0]}")"
 }
 
+linux_image_has_task123_probe() {
+    local initramfs=$1
+    local members
+    [[ -s "$initramfs" ]] || return 1
+    members="$(gzip -dc -- "$initramfs" 2>/dev/null | cpio -it --quiet 2>/dev/null)" ||
+        return 1
+    grep -Fxq 'usr/bin/rtbench-net-probe' <<<"$members"
+}
+
 build_linux_images_if_needed() {
     if [[ -n "${LINUX_KERNEL_IMAGE:-}" && -n "${LINUX_INITRAMFS_IMAGE:-}" ]]; then
         return
     fi
-    if [[ -s "$TGOS_SOURCE_CACHE/linux/6.12.21/Image" &&
-          -s "$TGOS_SOURCE_CACHE/linux/6.12.21/rootfs.cpio.gz" ]]; then
-        LINUX_KERNEL_IMAGE="$TGOS_SOURCE_CACHE/linux/6.12.21/Image"
-        LINUX_INITRAMFS_IMAGE="$TGOS_SOURCE_CACHE/linux/6.12.21/rootfs.cpio.gz"
+    local image_cache="${TASK123_LINUX_IMAGE_CACHE:-$TGOS_SOURCE_CACHE/task3-alpine-linux/6.12.21-alpine-3.23.0}"
+    local cached_kernel="$image_cache/images/linux/Image"
+    local cached_initramfs="$image_cache/images/linux/rootfs.cpio.gz"
+    if [[ -s "$cached_kernel" && -s "$cached_initramfs" ]] &&
+        linux_image_has_task123_probe "$cached_initramfs"; then
+        LINUX_KERNEL_IMAGE="$cached_kernel"
+        LINUX_INITRAMFS_IMAGE="$cached_initramfs"
         TASK123_MODEL_IMAGE="${TASK123_MODEL_IMAGE:-$TGOS_SOURCE_CACHE/task3-model/model_weights.h}"
         return
     fi
-    local build_root="$RUNTIME_DIR/task3-linux-build"
+    local build_root="$image_cache"
     local model_dir="$TGOS_SOURCE_CACHE/task3-model"
     run_timed "$TASK123_BUILD_TIMEOUT_S" linux-image-build \
         env BUILD_DIR="$build_root" TASK3_MODEL_DIR="$model_dir" \
             "$TASK3_ROOT/scripts/build_alpine_linux.sh"
     LINUX_KERNEL_IMAGE="$build_root/images/linux/Image"
     LINUX_INITRAMFS_IMAGE="$build_root/images/linux/rootfs.cpio.gz"
+    linux_image_has_task123_probe "$LINUX_INITRAMFS_IMAGE" || {
+        fail "Linux initramfs is missing usr/bin/rtbench-net-probe: $LINUX_INITRAMFS_IMAGE"
+        return 1
+    }
     TASK123_MODEL_IMAGE="${TASK123_MODEL_IMAGE:-$model_dir/model_weights.h}"
 }
 
@@ -603,12 +657,18 @@ build_starryos_image_if_needed() {
 build_rtthread_variant() {
     local source_tree=$1
     local output=$2
+    local metadata_output=$3
     local bsp="$source_tree/bsp/qemu-virt64-aarch64"
     run_timed "$TASK123_BUILD_TIMEOUT_S" rtthread-clean \
             uv run --with scons scons -C "$bsp" -c
     run_timed "$TASK123_BUILD_TIMEOUT_S" rtthread-build \
             uv run --with scons scons -C "$bsp" -j"$(getconf _NPROCESSORS_ONLN)"
     cp -- "$bsp/rtthread.bin" "$output"
+    run_timed "$TASK123_BUILD_TIMEOUT_S" rtthread-image-metadata \
+        python3 "$IMAGE_METADATA" write \
+            --image "$output" \
+            --source "$source_tree" \
+            --output "$metadata_output"
 }
 
 build_rtthread_images_if_needed() {
@@ -624,7 +684,8 @@ build_rtthread_images_if_needed() {
     run_timed "$TASK123_PHASE_TIMEOUT_S" apply-rtthread-patches \
         "$ROOT/os/axvisor/patches/rtthread/apply-rtthread-patches.sh" "$source_tree"
     RTTHREAD_IMAGE="$image_dir/rtthread.bin"
-    build_rtthread_variant "$source_tree" "$RTTHREAD_IMAGE"
+    RTTHREAD_IMAGE_METADATA="${RTTHREAD_IMAGE_META:-$image_dir/rtthread.bin.meta.json}"
+    build_rtthread_variant "$source_tree" "$RTTHREAD_IMAGE" "$RTTHREAD_IMAGE_METADATA"
 }
 
 resolve_or_build_images() {
@@ -651,6 +712,13 @@ resolve_or_build_images() {
         APP_GUEST_IMAGE="$STARRYOS_IMAGE"
     fi
     RTTHREAD_IMAGE="$(canonical_existing_file rtthread "$RTTHREAD_IMAGE")"
+    RTTHREAD_IMAGE_METADATA="${RTTHREAD_IMAGE_META:-${RTTHREAD_IMAGE}.meta.json}"
+    if [[ "${RTTHREAD_REQUIRE_IMAGE_METADATA:-0}" -eq 1 ]]; then
+        run_timed "$TASK123_PHASE_TIMEOUT_S" rtthread-image-metadata-check \
+            python3 "$IMAGE_METADATA" check \
+                --image "$RTTHREAD_IMAGE" \
+                --metadata "$RTTHREAD_IMAGE_METADATA"
+    fi
     resolve_rootfs_image
 
     if [[ -z "${TASK123_MODEL_IMAGE:-}" ]]; then
@@ -712,6 +780,9 @@ generate_vmconfigs() {
     local guest_cmdline
     if [[ "$app_guest" == linux ]]; then
         guest_cmdline="console=ttyAMA0 rdinit=/init task2.count=$task2_count task2.fault=none task3.frames=$task3_frames task3.fault=$guest_fault"
+        if [[ "$mode" == realtime-suite ]]; then
+            guest_cmdline+=" rtbench.net.count=$rtbench_samples"
+        fi
         phase linux-vmconfig
         LINUX_VMCONFIG="$(
             timeout --foreground --signal TERM --kill-after 5s \
@@ -747,11 +818,14 @@ build_axvisor() {
     export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-$ROOT/target}"
     local build_log="$RUNTIME_DIR/axvisor-build.log"
     local axvisor_elf
-    run_timed "$TASK123_BUILD_TIMEOUT_S" cargo-xtask-axvisor-build \
+    if ! run_timed "$TASK123_BUILD_TIMEOUT_S" cargo-xtask-axvisor-build \
         "$CARGO" xtask axvisor build --config qemu-aarch64-two-guest-net \
         --smp 4 \
         --vmconfigs "$APP_GUEST_VMCONFIG" \
-        --vmconfigs "$RTTHREAD_VMCONFIG" 2>&1 | tee "$build_log"
+        --vmconfigs "$RTTHREAD_VMCONFIG" 2>&1 | tee "$build_log"; then
+        fail "AxVisor build failed"
+        return 1
+    fi
     axvisor_elf="$(sed -n 's/^\[axbuild\] cargo build elf=//p' "$build_log" | tail -n 1)"
     [[ -n "$axvisor_elf" ]] || {
         fail "AxVisor build did not report its ELF artifact"
@@ -761,10 +835,16 @@ build_axvisor() {
 
     phase strip-objcopy
     local stripped="$RUNTIME_DIR/axvisor.stripped"
-    run_timed "$TASK123_BUILD_TIMEOUT_S" strip \
-        "$AARCH64_STRIP" -o "$stripped" "$axvisor_elf"
-    run_timed "$TASK123_BUILD_TIMEOUT_S" objcopy \
-        "$AARCH64_OBJCOPY" -O binary "$stripped" "$AXVISOR_BIN"
+    if ! run_timed "$TASK123_BUILD_TIMEOUT_S" strip \
+        "$AARCH64_STRIP" -o "$stripped" "$axvisor_elf"; then
+        fail "AxVisor strip failed"
+        return 1
+    fi
+    if ! run_timed "$TASK123_BUILD_TIMEOUT_S" objcopy \
+        "$AARCH64_OBJCOPY" -O binary "$stripped" "$AXVISOR_BIN"; then
+        fail "AxVisor objcopy failed"
+        return 1
+    fi
     [[ -s "$AXVISOR_BIN" ]] || fail "AxVisor binary conversion produced no output"
 }
 
@@ -783,9 +863,11 @@ record_artifact() {
 prepare_manifest() {
     MANIFEST_TMP="$OUTPUT/.manifest.txt.tmp"
     : > "$MANIFEST_TMP"
-    printf 'schema=1\napp_guest=%s\nmode=%s\ntask2_count=%s\ntask3_frames=%s\ntask3_fault=%s\nqemu_timer_slack_ns=%s\n' \
+    printf 'schema=1\napp_guest=%s\nmode=%s\ntask2_count=%s\ntask3_frames=%s\ntask3_fault=%s\nqemu_timer_slack_ns=%s\nqemu_cpu_affinity=%s\nqemu_sched_policy=%s\nqemu_sched_priority=%s\nqemu_tcg_thread=%s\n' \
         "$app_guest" "$mode" "$task2_count" "$task3_frames" "${task3_fault:-normal}" \
-        "$QEMU_TIMER_SLACK_NS" >> "$MANIFEST_TMP"
+        "$QEMU_TIMER_SLACK_NS" "${QEMU_CPU_AFFINITY:-}" "${QEMU_SCHED_POLICY:-}" \
+        "${QEMU_SCHED_PRIORITY:-0}" "${QEMU_TCG_THREAD:-multi}" >> "$MANIFEST_TMP"
+    printf 'qemu_vcpu_affinity=%s\n' "${QEMU_VCPU_AFFINITY:-}" >> "$MANIFEST_TMP"
     record_artifact qemu "$QEMU"
     record_artifact axvisor "$AXVISOR_BIN"
     if [[ "$app_guest" == linux ]]; then
@@ -803,6 +885,9 @@ prepare_manifest() {
         record_artifact starryos-vmconfig "$APP_GUEST_VMCONFIG"
     fi
     record_artifact rtthread "$SELECTED_RTTHREAD_IMAGE"
+    if [[ "${RTTHREAD_REQUIRE_IMAGE_METADATA:-0}" -eq 1 ]]; then
+        record_artifact rtthread-metadata "$RTTHREAD_IMAGE_METADATA"
+    fi
     record_artifact rtthread-vmconfig "$RTTHREAD_VMCONFIG"
     record_artifact model "$TASK123_MODEL_IMAGE"
     record_artifact protocol-source "$PROTOCOL_SOURCE"
@@ -925,7 +1010,11 @@ launch_one_qemu() {
         "$APP_GUEST_TASK123_END_MARKER"
         'TASK3_RTOS_FINAL requests='
     )
-    local failure_markers=("$APP_GUEST_FAILURE_MARKER")
+    local failure_markers=(
+        "$APP_GUEST_FAILURE_MARKER"
+        "$APP_GUEST_TASK2_FAILURE_MARKER"
+        "$APP_GUEST_TASK3_FAILURE_MARKER"
+    )
     if [[ "$mode" == realtime-suite ]]; then
         markers+=('RTBENCH_END status=PASS')
         failure_markers+=('RTBENCH_END status=FAIL')
@@ -947,7 +1036,9 @@ launch_one_qemu() {
         -display none
         -monitor none
         -snapshot
+        -name "tgoskits,debug-threads=on"
         -cpu cortex-a72
+        -accel "tcg,thread=${QEMU_TCG_THREAD:-multi}"
         -machine virt,virtualization=on,gic-version=3
         -global virtio-mmio.force-legacy=false
         -smp 4
@@ -981,8 +1072,12 @@ launch_one_qemu() {
     resource_sampler_pid=$!
 
     phase apply-qemu-realtime-controls
-    run_timed "$TASK123_PHASE_TIMEOUT_S" apply-qemu-realtime-controls \
-        "$QEMU_REALTIME_CONTROL" "$qemu_pid" "$QEMU_UCLAMP_MIN"
+    if ! run_timed "$TASK123_PHASE_TIMEOUT_S" apply-qemu-realtime-controls \
+        "$QEMU_REALTIME_CONTROL" "$qemu_pid" "$QEMU_UCLAMP_MIN"; then
+        cleanup_owned_processes
+        fail "QEMU realtime controls failed"
+        return 1
+    fi
     if [[ "$mode" == realtime-suite || "$mode" == stability ]]; then
         feed_benchmark_command &
         feeder_pid=$!
@@ -1069,11 +1164,12 @@ main() {
     prepare_output_directory
     cd "$ROOT"
 
-    TASK123_TIMEOUT_S=${TASK123_TIMEOUT_S:-600}
+    TASK123_TIMEOUT_S=${TASK123_TIMEOUT_S:-$(default_task123_timeout)}
     TASK123_BUILD_TIMEOUT_S=${TASK123_BUILD_TIMEOUT_S:-1800}
     TASK123_PHASE_TIMEOUT_S=${TASK123_PHASE_TIMEOUT_S:-600}
     QEMU_UCLAMP_MIN=${QEMU_UCLAMP_MIN:-1024}
     QEMU_TIMER_SLACK_NS=${QEMU_TIMER_SLACK_NS:-1}
+    QEMU_TCG_THREAD=${QEMU_TCG_THREAD:-multi}
     configure_app_guest_markers
     mkdir -p -- "$ROOT/tmp"
     RUNTIME_DIR="$(mktemp -d "$ROOT/tmp/task123-runtime.XXXXXX")"

@@ -25,7 +25,9 @@ pub fn guest_boot_policy(
     config: &axvmconfig::GuestConfig,
     provider: &dyn BootImageProvider,
 ) -> crate::config::GuestBootPolicy {
-    if crate::boot::is_x86_linux_image_config(config, provider) {
+    if config.kernel.load_policy == axvmconfig::KernelLoadPolicy::KeepConfigured
+        || crate::boot::is_x86_linux_image_config(config, provider)
+    {
         crate::config::GuestBootPolicy::KeepConfigured
     } else {
         crate::config::GuestBootPolicy::AdjustKernelForBootProtocol {

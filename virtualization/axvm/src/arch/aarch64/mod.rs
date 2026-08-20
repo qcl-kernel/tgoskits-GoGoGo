@@ -77,6 +77,14 @@ impl ArchOps for Aarch64Arch {
         vgic_runtime(vm)?.deactivate()
     }
 
+    fn bind_runtime(
+        vm: &crate::AxVM,
+        runtime: std::sync::Arc<crate::vm::VmRuntimeHandle>,
+    ) -> AxVmResult {
+        vgic_runtime(vm)?.bind_runtime(&runtime);
+        Ok(())
+    }
+
     fn before_vcpu_run(
         _vm: &crate::AxVMRef,
         vcpu: &crate::vm::AxVCpuRef<Self::VCpu>,
@@ -257,7 +265,7 @@ impl ArchOps for Aarch64Arch {
         vcpu: &crate::vm::AxVCpuRef<Self::VCpu>,
         runtime: &crate::vm::VmRuntimeHandle,
     ) {
-        let observed_generation = runtime.notification_generation();
+        let observed_generation = runtime.vcpu_notification_generation(vcpu.id());
         if !vm.running() {
             return;
         }
@@ -294,8 +302,8 @@ impl ArchOps for Aarch64Arch {
             }
         }
 
-        runtime.wait_until(|| {
-            !vm.running() || runtime.notification_generation() != observed_generation
+        runtime.wait_vcpu_until(vcpu.id(), || {
+            !vm.running() || runtime.vcpu_notification_generation(vcpu.id()) != observed_generation
         });
     }
 }

@@ -6,8 +6,8 @@ use std::sync::{Mutex, MutexGuard};
 
 use axdevice::*;
 use axdevice_base::{
-    BusAccess, BusKind, BusResponse, Device, DeviceAccess, DeviceError, DmaGrant, InterruptSharing,
-    InterruptTrigger, IrqLine, Resource,
+    BusAccess, BusKind, BusResponse, ControllerInputId, Device, DeviceAccess, DeviceError,
+    DmaGrant, InterruptSharing, InterruptTrigger, IrqLine, Resource,
 };
 use axvirtio_common::{GuestMemory, NoGuestMemoryAccessor, VirtioError};
 use axvirtio_net::{
@@ -22,6 +22,9 @@ use axvmconfig::VirtualDeviceRequest;
 const MMIO_SLOT: &str = "mmio";
 const IRQ_SLOT: &str = "irq";
 const MMIO_SIZE: u64 = 0x200;
+const GUEST_MMIO_BASE: u64 = 0x0a00_0000;
+const GUEST_IRQ_INPUT: usize = 48;
+const QEMU_VIRTIO_MMIO_VENDOR_ID: u32 = 0x554d_4551;
 const INGRESS_CAPACITY: usize = 64;
 
 static NEXT_PORT_ID: AtomicUsize = AtomicUsize::new(0);
@@ -114,14 +117,14 @@ impl DeviceModel for VirtioNetModel {
                 ResourceSlot::new(MMIO_SLOT)?,
                 MMIO_SIZE,
                 4,
-                ResourceRequest::Auto,
+                ResourceRequest::Fixed(GUEST_MMIO_BASE),
             )?
             .with_wired_irq(
                 ResourceSlot::new(IRQ_SLOT)?,
                 self.controller,
                 InterruptTrigger::EdgeTriggered,
                 InterruptSharing::Exclusive,
-                ResourceRequest::Auto,
+                ResourceRequest::Fixed(ControllerInputId::new(GUEST_IRQ_INPUT)),
             )
     }
 
@@ -157,12 +160,13 @@ impl DeviceModel for VirtioNetModel {
             switch,
         };
         let model = Arc::new(
-            VirtioMmioNetDevice::new(
+            VirtioMmioNetDevice::new_with_vendor_id(
                 GuestPhysAddr::from(base as usize),
                 size as usize,
                 backend,
                 VirtioNetConfig::new(self.guest_mac),
                 NoGuestMemoryAccessor,
+                QEMU_VIRTIO_MMIO_VENDOR_ID,
             )
             .map_err(|error| DeviceManagerError::InvalidConfig {
                 operation: "construct virtio-net device",
@@ -849,6 +853,42 @@ mod tests {
                 ..TEST_RX_BUFFER + axvirtio_net::VIRTIO_NET_HDR_MODERN_SIZE + 64],
             &[0x5a; 64]
         );
+    }
+
+    #[test]
+    fn virtio_net_declares_the_rtthread_guest_abi_resources() {
+        let model = VirtioNetModel {
+            guest_mac: [0x52, 0x54, 0, 0x77, 0, 3],
+            controller: InterruptControllerId::new(0),
+            vm_id: 3,
+        };
+        let requirements = model.requirements().unwrap();
+
+        assert!(requirements.entries().iter().any(|requirement| {
+            matches!(
+                requirement,
+                DeviceRequirement::Mmio {
+                    slot,
+                    size: 0x200,
+                    alignment: 4,
+                    request: ResourceRequest::Fixed(0x0a00_0000),
+                } if slot.as_str() == MMIO_SLOT
+            )
+        }));
+        assert!(requirements.entries().iter().any(|requirement| {
+            matches!(
+                requirement,
+                DeviceRequirement::WiredIrq {
+                    slot,
+                    controller,
+                    trigger: InterruptTrigger::EdgeTriggered,
+                    sharing: InterruptSharing::Exclusive,
+                    request: ResourceRequest::Fixed(input),
+                } if slot.as_str() == IRQ_SLOT
+                    && *controller == InterruptControllerId::new(0)
+                    && input.value() == 48
+            )
+        }));
     }
 
     #[cfg_attr(axtest, axtest::axtest)]

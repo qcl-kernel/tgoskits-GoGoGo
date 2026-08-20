@@ -181,6 +181,7 @@ pub(crate) struct VmRuntimeHandle {
     wait_queue: crate::WaitQueue,
     notification_generation: AtomicUsize,
     vcpu_task_list: Mutex<BTreeMap<usize, crate::AxTaskRef>>,
+    vcpu_wait_states: Mutex<BTreeMap<usize, Arc<VcpuWaitState>>>,
     cpu_on_start_acks: Mutex<BTreeMap<usize, Arc<crate::runtime::vcpus::CpuOnStartAck>>>,
     cpu_off_exit_reservations: StdMutex<BTreeSet<usize>>,
     pending_interrupts: Mutex<BTreeMap<usize, Vec<PendingInterrupt>>>,
@@ -188,6 +189,40 @@ pub(crate) struct VmRuntimeHandle {
     running_halting_vcpu_count: AtomicUsize,
     lifecycle_error: StdMutex<Option<AxVmError>>,
     deferred_reset_requested: AtomicBool,
+}
+
+/// Per-vCPU wait state used for guest WFI wakeups.
+///
+/// Lifecycle transitions still use [`VmRuntimeHandle::wait_queue`], while
+/// interrupt delivery uses this state so a notification for one vCPU does not
+/// wake every vCPU belonging to the VM.
+struct VcpuWaitState {
+    wait_queue: crate::WaitQueue,
+    notification_generation: AtomicUsize,
+}
+
+impl VcpuWaitState {
+    fn new() -> Self {
+        Self {
+            wait_queue: crate::WaitQueue::new(),
+            notification_generation: AtomicUsize::new(0),
+        }
+    }
+
+    fn notification_generation(&self) -> usize {
+        self.notification_generation.load(Ordering::Acquire)
+    }
+
+    fn wait_until(&self, condition: impl Fn() -> bool) {
+        self.wait_queue.wait_until(condition);
+    }
+}
+
+fn notify_vcpu_wait_state(state: &VcpuWaitState) {
+    state
+        .notification_generation
+        .fetch_add(1, Ordering::Release);
+    state.wait_queue.notify_one(false);
 }
 
 pub(crate) fn dispatch_vcpu_interrupt_with(
@@ -223,6 +258,7 @@ impl VmRuntimeHandle {
             wait_queue: crate::WaitQueue::new(),
             notification_generation: AtomicUsize::new(0),
             vcpu_task_list: Mutex::new(BTreeMap::new()),
+            vcpu_wait_states: Mutex::new(BTreeMap::new()),
             cpu_on_start_acks: Mutex::new(BTreeMap::new()),
             cpu_off_exit_reservations: StdMutex::new(BTreeSet::new()),
             pending_interrupts: Mutex::new(BTreeMap::new()),
@@ -249,6 +285,9 @@ impl VmRuntimeHandle {
         vcpu_task_list.insert(vcpu_id, vcpu_task);
         drop(vcpu_task_list);
 
+        self.vcpu_wait_states
+            .lock()
+            .insert(vcpu_id, Arc::new(VcpuWaitState::new()));
         self.pending_interrupts.lock().entry(vcpu_id).or_default();
         Ok(())
     }
@@ -262,6 +301,7 @@ impl VmRuntimeHandle {
 
     pub(crate) fn remove_vcpu_task(&self, vcpu_id: usize) -> Option<crate::AxTaskRef> {
         self.pending_interrupts.lock().remove(&vcpu_id);
+        self.vcpu_wait_states.lock().remove(&vcpu_id);
         self.irq_dispatcher.unregister_vcpu_task(vcpu_id);
         self.vcpu_task_list.lock().remove(&vcpu_id)
     }
@@ -318,12 +358,42 @@ impl VmRuntimeHandle {
         Ok(cpu_id)
     }
 
-    pub(crate) fn vcpu_cpu_id(&self, vcpu_id: usize) -> AxVmResult<usize> {
-        self.vcpu_task_list
+    pub(crate) fn vcpu_notification_generation(&self, vcpu_id: usize) -> usize {
+        self.vcpu_wait_states
             .lock()
             .get(&vcpu_id)
-            .map(|task| task.cpu_id() as usize)
-            .ok_or_else(|| ax_err_type!(NotFound, format!("vCPU {vcpu_id} task not found")))
+            .map_or(0, |state| state.notification_generation())
+    }
+
+    pub(crate) fn wait_vcpu_until(&self, vcpu_id: usize, condition: impl Fn() -> bool) {
+        let state = self.vcpu_wait_states.lock().get(&vcpu_id).cloned();
+        if let Some(state) = state {
+            state.wait_until(condition);
+        } else {
+            // Startup and teardown can race with task registration. Keep the
+            // lifecycle queue as a correctness fallback for that short window.
+            self.wait_until(condition);
+        }
+    }
+
+    /// Wakes one registered vCPU and returns its current host CPU.
+    pub(crate) fn notify_vcpu(&self, vcpu_id: usize) -> AxVmResult<usize> {
+        let task = self
+            .vcpu_task_list
+            .lock()
+            .get(&vcpu_id)
+            .cloned()
+            .ok_or_else(|| ax_err_type!(NotFound, format!("vCPU {vcpu_id} task not found")))?;
+        let state = self
+            .vcpu_wait_states
+            .lock()
+            .get(&vcpu_id)
+            .cloned()
+            .ok_or_else(|| {
+                ax_err_type!(NotFound, format!("vCPU {vcpu_id} wait state not found"))
+            })?;
+        notify_vcpu_wait_state(&state);
+        Ok(task.cpu_id() as usize)
     }
 
     /// New delivery path: enqueue → notify → host IPI.
@@ -341,7 +411,9 @@ impl VmRuntimeHandle {
     ) -> AxVmResult {
         dispatch_vcpu_interrupt_with(
             || self.irq_dispatcher.enqueue(vcpu_id, interrupt),
-            || self.notify_all(),
+            || {
+                let _ = self.notify_vcpu(vcpu_id);
+            },
             crate::host::task::send_ipi,
         )
     }
@@ -381,6 +453,11 @@ impl VmRuntimeHandle {
     pub(crate) fn notify_all(&self) {
         self.notification_generation.fetch_add(1, Ordering::Release);
         self.wait_queue.notify_all(false);
+
+        let states: Vec<_> = self.vcpu_wait_states.lock().values().cloned().collect();
+        for state in states {
+            notify_vcpu_wait_state(&state);
+        }
     }
 
     pub(crate) fn mark_vcpu_running(&self) {
@@ -769,6 +846,8 @@ pub struct AxVM {
     id: usize,
     name: String,
     #[cfg(target_arch = "aarch64")]
+    host_timer_policy: HostTimerPolicy,
+    #[cfg(target_arch = "aarch64")]
     host_vcpu_idle_policy: HostVcpuIdlePolicy,
     #[cfg(target_arch = "aarch64")]
     guest_tlbi_policy: GuestTlbiPolicy,
@@ -789,6 +868,8 @@ impl AxVM {
         let id = config.id();
         let name = config.name();
         #[cfg(target_arch = "aarch64")]
+        let host_timer_policy = config.host_timer_policy();
+        #[cfg(target_arch = "aarch64")]
         let host_vcpu_idle_policy = config.host_vcpu_idle_policy();
         #[cfg(target_arch = "aarch64")]
         let guest_tlbi_policy = config.guest_tlbi_policy();
@@ -798,6 +879,8 @@ impl AxVM {
         let result = Arc::new(Self {
             id,
             name,
+            #[cfg(target_arch = "aarch64")]
+            host_timer_policy,
             #[cfg(target_arch = "aarch64")]
             host_vcpu_idle_policy,
             #[cfg(target_arch = "aarch64")]
@@ -820,6 +903,12 @@ impl AxVM {
     /// Returns the configured VM name.
     pub fn name(&self) -> String {
         self.name.clone()
+    }
+
+    /// Returns the host timer policy applied while this VM's vCPU executes.
+    #[cfg(target_arch = "aarch64")]
+    pub(crate) const fn host_timer_policy(&self) -> HostTimerPolicy {
+        self.host_timer_policy
     }
 
     /// Returns the immutable host behavior selected for trapped guest WFI exits.
@@ -1061,6 +1150,7 @@ impl AxVM {
             Ok(())
         })?;
 
+        crate::arch::CurrentArch::bind_runtime(self, runtime.clone())?;
         crate::arch::CurrentArch::activate_devices(self)?;
         let start_result = self
             .machine
@@ -2292,6 +2382,19 @@ mod runtime_handle_tests {
     }
 
     use super::*;
+
+    #[test]
+    fn vcpu_notification_is_scoped_to_the_target_wait_state() {
+        let target = VcpuWaitState::new();
+        let sibling = VcpuWaitState::new();
+        let target_before = target.notification_generation();
+        let sibling_before = sibling.notification_generation();
+
+        notify_vcpu_wait_state(&target);
+
+        assert_ne!(target.notification_generation(), target_before);
+        assert_eq!(sibling.notification_generation(), sibling_before);
+    }
 
     #[test]
     fn remove_vcpu_task_clears_pending_interrupts_and_dispatcher_registration() {

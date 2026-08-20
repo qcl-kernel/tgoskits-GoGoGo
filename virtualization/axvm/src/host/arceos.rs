@@ -175,6 +175,10 @@ pub(crate) fn send_ipi(cpu_id: usize) {
     .unwrap_or_else(|err| panic!("failed to deliver AxVM IPI to CPU {cpu_id}: {err:?}"));
 }
 
+pub(crate) fn set_current_cpu_periodic_timer_enabled(enabled: bool) {
+    modules::ax_runtime::set_current_cpu_periodic_timer_enabled(enabled);
+}
+
 pub(crate) fn run_on_cpu_sync(
     cpu_id: usize,
     f: unsafe fn(*mut ()),

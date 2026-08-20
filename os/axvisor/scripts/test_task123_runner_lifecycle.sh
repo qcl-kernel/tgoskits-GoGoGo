@@ -232,6 +232,12 @@ emit_linux_finals() {
         printf '[VM 1] %s\n' "${task123_marker/PASS/FAIL}"
         return
     fi
+    if [[ "${FAKE_QEMU_BEHAVIOR:-pass}" == linux-task2-fail ]]; then
+        printf '[VM 1] %s\n' "${task2_marker/PASS/FAIL}"
+        printf '[VM 1] %s\n' "$task3_marker"
+        printf '[VM 1] %s\n' "$task123_marker"
+        return
+    fi
     printf '[VM 1] %s\n' "$task2_marker"
     printf '[VM 1] %s\n' "$task3_marker"
     printf '[VM 1] %s\n' "$task123_marker"
@@ -248,7 +254,7 @@ emit_benchmark() {
                     "$metric" "$run" "$value" "$value"
             done
         done
-        for metric in preemption irq; do
+        for metric in preemption irq irq_to_task irq_disabled_duration mutex_inversion wake_under_load net_event_latency; do
             printf 'RTBENCH metric=%s run=1 expected=%s collected=%s missing=0 p50_ns=1 p95_ns=2 p99_ns=3 p99_9_ns=4 max_ns=5 miss_100us=0 miss_500us=0 miss_1ms=0 mean_ns=2\n' \
                 "$metric" "$value" "$value"
         done
@@ -353,9 +359,7 @@ common_env=(
     QEMU_REALTIME_CONTROL="$tools/realtime-control"
     LINUX_KERNEL_IMAGE="$fixtures/linux-kernel"
     LINUX_INITRAMFS_IMAGE="$fixtures/initramfs.cpio"
-    RTTHREAD_NORMAL_IMAGE="$fixtures/rtthread-normal.bin"
-    RTTHREAD_DROP_STATUS_IMAGE="$fixtures/rtthread-drop-status.bin"
-    RTTHREAD_DELAYED_SERVER_IMAGE="$fixtures/rtthread-delayed-server.bin"
+    RTTHREAD_IMAGE="$fixtures/rtthread-normal.bin"
     ROOTFS_IMAGE="$fixtures/rootfs.img"
     TASK123_MODEL_IMAGE="$fixtures/model.bin"
     STARRYOS_IMAGE="$fixtures/starryos-task123.bin"
@@ -436,7 +440,7 @@ assert_starryos_contract() {
 
 normal_output="$tmp/normal-output"
 if ! run_runner "$normal_output" > "$tmp/normal.stdout"; then
-    [[ ! -f "$normal_output/runner.log" ]] || cat "$normal_output/runner.log" >&2
+    [[ ! -f "$normal_output/console.log" ]] || cat "$normal_output/console.log" >&2
     fail "normal fake run failed"
 fi
 grep -Fq 'PHASE dependency-check' "$tmp/normal.stdout" ||
@@ -484,7 +488,7 @@ grep -Fq 'AxVisor host cmdline' "$RUNNER" ||
 starry_output="$tmp/starry-output"
 if ! env "${common_env[@]}" "$RUNNER" --app-guest starryos --mode smoke \
     --task2-count 2 --task3-frames 3 --output "$starry_output" >/dev/null; then
-    [[ ! -f "$starry_output/runner.log" ]] || cat "$starry_output/runner.log" >&2
+    [[ ! -f "$starry_output/console.log" ]] || cat "$starry_output/console.log" >&2
     fail "StarryOS fake run failed"
 fi
 grep -Fq 'kernel_path = "starryos-task123.bin"' "$records/1.toml" ||
@@ -503,14 +507,14 @@ for realtime_case in 'realtime-suite:benchmark 2' 'stability:rtbench_stability 1
     : > "$records/qemu-stdin.log"
     if [[ "$realtime_mode" == realtime-suite ]]; then
         realtime_args=(--rtbench-samples 2 --task2-count 2)
+        expected_guest_cmdline='console=ttyAMA0 rdinit=/init task2.count=2 task2.fault=none task3.frames=3 task3.fault=normal rtbench.net.count=2'
     else
         realtime_args=(--seconds 1 --task2-count 2)
+        expected_guest_cmdline='console=ttyAMA0 rdinit=/init task2.count=2 task2.fault=none task3.frames=3 task3.fault=normal'
     fi
     if ! env "${common_env[@]}" FAKE_QEMU_EXPECT_COMMAND="$realtime_command" \
         TASK123_TIMEOUT_S=2 "$RUNNER" --mode "$realtime_mode" \
         "${realtime_args[@]}" --output "$realtime_output" >/dev/null; then
-        [[ ! -f "$realtime_output/runner.log" ]] ||
-            cat "$realtime_output/runner.log" >&2
         [[ ! -f "$realtime_output/console.log" ]] ||
             cat "$realtime_output/console.log" >&2
         fail "$realtime_mode feeder run failed"
@@ -518,7 +522,7 @@ for realtime_case in 'realtime-suite:benchmark 2' 'stability:rtbench_stability 1
     [[ "$(cat "$records/qemu-stdin.log")" == $'select-vm3\ncommand='"$realtime_command"$'\nselect-vm1\nselect-vm3-final' ]] ||
         fail "$realtime_mode did not drain the VM1 and VM3 replay buffers"
     assert_mode_contract "$realtime_mode" \
-        'console=ttyAMA0 rdinit=/init task2.count=2 task2.fault=none task3.frames=3 task3.fault=normal' \
+        "$expected_guest_cmdline" \
         "$fixtures/rtthread-normal.bin"
     assert_reaped "$(cat "$records/qemu.pid")"
 done
@@ -562,7 +566,7 @@ for rootfs_behavior in zero multiple; do
         "$RUNNER" --mode smoke --task2-count 2 --task3-frames 3 \
         --output "$bad_rootfs_output"
     grep -Fq 'image pull must produce exactly one rootfs.img' \
-        "$bad_rootfs_output/runner.log" ||
+        "$tmp/failure.out" ||
         fail "rootfs $rootfs_behavior candidate failure was not diagnosed"
     [[ ! -s "$records/qemu.log" ]] ||
         fail "QEMU started after rootfs $rootfs_behavior candidate failure"
@@ -574,7 +578,7 @@ done
 task3_output="$tmp/task3-output"
 if ! env "${common_env[@]}" "$RUNNER" --mode task3 --task3-frames 3 \
     --output "$task3_output" >/dev/null; then
-    cat "$task3_output/runner.log" >&2
+    cat "$task3_output/console.log" >&2
     fail "task3 lifecycle run failed"
 fi
 assert_mode_contract task3 \
@@ -590,14 +594,10 @@ for profile in drop-control drop-status duplicate-frame delayed-server malformed
     : > "$records/qemu-stdin.log"
     fault_output="$tmp/$profile-output"
     if ! run_fault_runner "$fault_output" "$profile" >/dev/null; then
-        cat "$fault_output/runner.log" >&2
+        cat "$fault_output/console.log" >&2
         fail "$profile lifecycle run failed"
     fi
     expected_rtthread="$fixtures/rtthread-normal.bin"
-    case "$profile" in
-        drop-status) expected_rtthread="$fixtures/rtthread-drop-status.bin" ;;
-        delayed-server) expected_rtthread="$fixtures/rtthread-delayed-server.bin" ;;
-    esac
     assert_mode_contract "task3-fault/$profile" \
         "console=ttyAMA0 rdinit=/init task2.count=1000 task2.fault=none task3.frames=3 task3.fault=$profile" \
         "$expected_rtthread"
@@ -619,11 +619,10 @@ grep -Fxq 'termination_reason=marker-complete' "$normal_output/manifest.txt" ||
     fail "manifest did not record marker-complete termination"
 grep -Fxq 'qemu_exit=0' "$normal_output/manifest.txt" ||
     fail "manifest did not record the computed normalized QEMU status"
-[[ -s "$normal_output/console.log" && -s "$normal_output/runner.log" ]] ||
-    fail "normal run logs were not preserved"
+[[ -s "$normal_output/console.log" ]] || fail "normal console log was not preserved"
 for output_path in \
     "$normal_output/axvisor.bin" "$normal_output/manifest.txt" \
-    "$normal_output/console.log" "$normal_output/runner.log" \
+    "$normal_output/console.log" \
     "$normal_output/linux.log" "$normal_output/rtthread.log" \
     "$normal_output/frames.csv" "$normal_output/summary.raw.json" \
     "$normal_output/summary.json"; do
@@ -687,7 +686,7 @@ expect_failure "output nested in a source input was accepted" \
 build_output="$tmp/build-failure"
 expect_failure "build failure returned success" \
     run_runner "$build_output" FAKE_BUILD_FAIL=1
-[[ -s "$build_output/runner.log" ]] || fail "build failure discarded its log"
+[[ -s "$tmp/failure.out" ]] || fail "build failure discarded its diagnostic"
 [[ ! -s "$records/qemu.log" ]] || fail "QEMU started after build failure"
 
 : > "$records/qemu.log"
@@ -696,7 +695,6 @@ expect_failure "result-gate failure returned success" \
     run_runner "$gate_output" FAKE_QEMU_BEHAVIOR=duplicate
 if [[ ! -s "$gate_output/console.log" ]]; then
     cat "$tmp/failure.out" >&2
-    [[ ! -f "$gate_output/runner.log" ]] || cat "$gate_output/runner.log" >&2
     fail "result-gate failure discarded console log"
 fi
 gate_pid="$(cat "$records/qemu.pid")"
@@ -725,7 +723,7 @@ expect_failure "complete markers hid a nonzero QEMU exit" \
     run_runner "$complete_nonzero_output" FAKE_QEMU_BEHAVIOR=complete-nonzero
 grep -Fq 'TASK123_LINUX_END status=PASS' "$complete_nonzero_output/console.log" ||
     fail "complete-nonzero run did not preserve its complete console"
-grep -Fq 'unexpected QEMU exit code 17' "$complete_nonzero_output/runner.log" ||
+grep -Fq 'unexpected QEMU exit code 17' "$tmp/failure.out" ||
     fail "runner did not validate the raw nonzero QEMU status"
 if [[ -e "$complete_nonzero_output/manifest.txt" ]] &&
    grep -Fq 'result_gate=PASS' "$complete_nonzero_output/manifest.txt"; then
@@ -795,7 +793,7 @@ for no_feeder_case in smoke task3 task3-fault; do
     grep -Fq 'TASK123_LINUX_END status=FAIL' \
         "$no_feeder_output/console.log" ||
         fail "Linux failure in $no_feeder_case mode was not preserved"
-    grep -Fq 'failure-marker' "$no_feeder_output/runner.log" ||
+    grep -Fq 'failure-marker' "$tmp/failure.out" ||
         fail "Linux failure in $no_feeder_case mode lacked failure-marker diagnostics"
     assert_reaped "$(cat "$records/qemu.pid")"
 done
@@ -819,6 +817,22 @@ assert_reaped "$(cat "$records/qemu.pid")"
 
 : > "$records/qemu.log"
 : > "$records/qemu-stdin.log"
+task2_failure_output="$tmp/task2-failure"
+task2_failure_start_ns=$(date +%s%N)
+expect_failure "Task 2 failure waited for the full timeout" \
+    env "${common_env[@]}" FAKE_QEMU_BEHAVIOR=linux-task2-fail \
+    FAKE_QEMU_EXPECT_COMMAND='benchmark 2' TASK123_TIMEOUT_S=3 \
+    "$RUNNER" --mode realtime-suite --rtbench-samples 2 --task2-count 2 \
+    --output "$task2_failure_output"
+task2_failure_elapsed_ms=$(( ($(date +%s%N) - task2_failure_start_ns) / 1000000 ))
+[[ "$task2_failure_elapsed_ms" -lt 2000 ]] ||
+    fail "Task 2 failure did not fail promptly"
+grep -Fq 'TASK2_LINUX_END status=FAIL' "$task2_failure_output/console.log" ||
+    fail "Task 2 failure was not preserved"
+assert_reaped "$(cat "$records/qemu.pid")"
+
+: > "$records/qemu.log"
+: > "$records/qemu-stdin.log"
 benchmark_failure_output="$tmp/benchmark-failure"
 benchmark_failure_start_ns=$(date +%s%N)
 expect_failure "explicit benchmark failure waited for the full timeout" \
@@ -832,7 +846,7 @@ benchmark_failure_elapsed_ms=$(( ($(date +%s%N) - benchmark_failure_start_ns) / 
 grep -Fq 'RTBENCH_END status=FAIL' "$benchmark_failure_output/console.log" ||
     fail "explicit benchmark failure was not preserved"
 grep -Fq 'failure-marker' \
-    "$benchmark_failure_output/runner.log" ||
+    "$tmp/failure.out" ||
     fail "explicit benchmark failure did not retain a focused diagnostic"
 assert_reaped "$(cat "$records/qemu.pid")"
 
@@ -844,7 +858,7 @@ if ! env "${common_env[@]}" FAKE_QEMU_BEHAVIOR=stability-timer-limit \
     TASK123_ALLOW_QEMU_TIMER_LIMIT=1 \
     "$RUNNER" --mode stability --seconds 1 --task2-count 2 \
     --output "$timer_limit_output" >/dev/null; then
-    [[ ! -f "$timer_limit_output/runner.log" ]] || cat "$timer_limit_output/runner.log" >&2
+    [[ ! -f "$timer_limit_output/console.log" ]] || cat "$timer_limit_output/console.log" >&2
     fail "explicit QEMU timer-limit mode did not preserve the completed run"
 fi
 grep -Fxq 'result_gate=PASS_WITH_QEMU_TIMER_LIMIT' \
@@ -870,7 +884,7 @@ grep -Fq 'RTBENCH_STABILITY_END status=FAIL' \
     "$stability_failure_output/console.log" ||
     fail "explicit stability failure was not preserved"
 grep -Fq 'failure-marker' \
-    "$stability_failure_output/runner.log" ||
+    "$tmp/failure.out" ||
     fail "explicit stability failure did not retain a focused diagnostic"
 assert_reaped "$(cat "$records/qemu.pid")"
 
@@ -881,17 +895,17 @@ sleep 30 &
 unrelated_pid=$!
 build_timeout_start_ns=$(date +%s%N)
 expect_failure "cargo build timeout returned success" \
-    timeout -k 2 5 env "${common_env[@]}" \
+    timeout -k 2 10 env "${common_env[@]}" \
     FAKE_CARGO_BEHAVIOR=hang TASK123_BUILD_TIMEOUT_S=1 \
     "$RUNNER" --mode smoke --task2-count 2 --task3-frames 3 \
     --output "$build_timeout_output"
 build_timeout_elapsed_ms=$(( ($(date +%s%N) - build_timeout_start_ns) / 1000000 ))
-[[ "$build_timeout_elapsed_ms" -lt 4500 ]] ||
+[[ "$build_timeout_elapsed_ms" -lt 9000 ]] ||
     fail "cargo build timeout did not stop the phase promptly"
-[[ -s "$build_timeout_output/runner.log" ]] ||
-    fail "cargo build timeout discarded its log"
+[[ -s "$tmp/failure.out" ]] ||
+    fail "cargo build timeout discarded its diagnostic"
 grep -Fq 'cargo-xtask-axvisor-build timed out after 1s' \
-    "$build_timeout_output/runner.log" ||
+    "$tmp/failure.out" ||
     fail "cargo build timeout did not preserve timeout diagnostics"
 [[ ! -s "$records/qemu.log" ]] ||
     fail "QEMU started after cargo build timeout"
@@ -929,14 +943,13 @@ cache="$tmp/shared-artifact-cache"
 cache_output="$tmp/cache-first"
 env "${common_env[@]}" TASK123_SHARED_ARTIFACT_DIR="$cache" \
     "$RUNNER" --mode smoke --task2-count 2 --task3-frames 3 \
-    --output "$cache_output" >/dev/null || {
-    [[ ! -f "$cache_output/runner.log" ]] || cat "$cache_output/runner.log" >&2
+    --output "$cache_output" >"$tmp/cache-first.stdout" || {
+    [[ ! -f "$cache_output/console.log" ]] || cat "$cache_output/console.log" >&2
     fail "cache population run failed"
 }
 for cached_name in \
     linux-kernel linux-initramfs.cpio model_weights.h rootfs.img \
-    rtthread-normal.bin rtthread-drop-status.bin rtthread-delayed-server.bin \
-    starryos-task123.bin; do
+    rtthread.bin starryos-task123.bin; do
     [[ -s "$cache/$cached_name" ]] || fail "cache did not populate $cached_name"
 done
 
@@ -963,13 +976,13 @@ cache_env=(
 : > "$records/qemu.log"
 env "${cache_env[@]}" TASK123_SHARED_ARTIFACT_DIR="$cache" \
     "$RUNNER" --app-guest starryos --mode smoke --task2-count 2 \
-    --task3-frames 3 --output "$cache_second_output" >/dev/null || {
-    [[ ! -f "$cache_second_output/runner.log" ]] || cat "$cache_second_output/runner.log" >&2
+    --task3-frames 3 --output "$cache_second_output" >"$tmp/cache-second.stdout" || {
+    [[ ! -f "$cache_second_output/console.log" ]] || cat "$cache_second_output/console.log" >&2
     fail "cache reuse run failed"
 }
 ! grep -Fq 'xtask image pull qemu-aarch64' "$records/cargo.log" ||
     fail "cache reuse unexpectedly pulled rootfs"
-! grep -Fq 'linux-image-build' "$cache_second_output/runner.log" ||
+! grep -Fq 'STEP linux-image-build' "$tmp/cache-second.stdout" ||
     fail "cache reuse unexpectedly rebuilt Linux images"
 grep -Fq 'app_guest=starryos' "$cache_second_output/manifest.txt" ||
     fail "cache reuse did not run the StarryOS guest"

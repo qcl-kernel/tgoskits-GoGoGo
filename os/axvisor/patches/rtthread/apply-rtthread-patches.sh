@@ -22,10 +22,43 @@ source "$PATCHDIR/patch_helpers.sh"
 
 echo "Applying RT-Thread patches for axvisor..."
 
+PATCH_STATE="$RTDIR/.axvisor-rtthread-patch-state"
+PATCH_SET_DIGEST="$({
+    sha256sum \
+    "$PATCHDIR/0000-axvisor-aarch64-port.patch" \
+    "$PATCHDIR/0009-native-qemu-memory-layout.patch" \
+    "$PATCHDIR/0002-lwip-rx-mailbox-recover-notice.patch" \
+    "$PATCHDIR/0003-virtio-net-reclaim-tx-used-ring.patch" \
+    "$PATCHDIR/0004-virtio-net-use-rx-used-ring-head.patch" \
+    "$PATCHDIR/0005-lwip-configurable-udp-recv-mailbox.patch" \
+    "$PATCHDIR/0006-gicv3-use-redistributor-pending-registers.patch" \
+    "$PATCHDIR/0007-gicv3-query-interrupt-enable-state.patch" \
+    "$PATCHDIR/0008-aarch64-gtimer-use-absolute-deadlines.patch" \
+    "$PATCHDIR/0010-virtio-net-benchmark-packet-hook.patch"
+} | sha256sum | awk '{print $1}')"
+if [[ -f "$PATCH_STATE" ]]; then
+    if [[ "$(<"$PATCH_STATE")" != "$PATCH_SET_DIGEST" ]]; then
+        echo "RT-Thread source patch state is stale; prepare a fresh source tree" >&2
+        exit 1
+    fi
+    export TGOSKITS_SKIP_PATCH_APPLICATION=1
+    echo "Validated existing RT-Thread patch-set state"
+else
+    export TGOSKITS_SKIP_PATCH_APPLICATION=0
+fi
+
 # Start from the complete AArch64 guest port. This patch contains the BSP,
 # MMU, toolchain, GIC, and virtio foundations that the focused fixes below
 # build on. Verify the reverse form as well so repeated builds are idempotent.
 apply_patch_exactly "$RTDIR" "$BASE_PORT_PATCH" "the AxVisor AArch64 base port"
+
+# The guest image is loaded from the 0x40000000 RAM region, while AxVisor
+# reserves its low guest address space for firmware and runtime mappings. Keep
+# the image's linked entry at the configured 2 MiB offset so the raw binary
+# and the VM configuration describe the same address.
+GUEST_MEMORY_LAYOUT_PATCH="$PATCHDIR/0009-native-qemu-memory-layout.patch"
+apply_patch_exactly "$RTDIR" "$GUEST_MEMORY_LAYOUT_PATCH" \
+    "the RT-Thread guest memory layout"
 
 # 0. Remove RT_USING_VIRTIO_MMIO_ALIGN: with this macro enabled, the compiler
 #    may emit sub-32-bit volatile loads/stores for virtio_mmio_config fields,
@@ -109,6 +142,18 @@ apply_patch_exactly "$RTDIR" "$GIC_ENABLE_QUERY_PATCH" \
 GTIMER_DEADLINE_PATCH="$PATCHDIR/0008-aarch64-gtimer-use-absolute-deadlines.patch"
 apply_patch_exactly "$RTDIR" "$GTIMER_DEADLINE_PATCH" \
     "the absolute virtual-timer deadline fix"
+
+# Expose the RX packet bytes alongside the used-ring position to the
+# benchmark-only hook. This lets the benchmark select its UDP probe packets
+# without counting concurrent Task 2/3 traffic as IRQ samples.
+NET_BENCH_HOOK_PATCH="$PATCHDIR/0010-virtio-net-benchmark-packet-hook.patch"
+apply_patch_exactly "$RTDIR" "$NET_BENCH_HOOK_PATCH" \
+    "the virtio-net benchmark packet hook"
+
+if [[ "$TGOSKITS_SKIP_PATCH_APPLICATION" == 0 ]]; then
+    printf '%s\n' "$PATCH_SET_DIGEST" >"$PATCH_STATE"
+    echo "Recorded RT-Thread patch-set state"
+fi
 
 # 5. Install RT-IPC server into BSP applications
 GUESTDIR="$(cd "$PATCHDIR/../../guests/rt-ipc" && pwd)"

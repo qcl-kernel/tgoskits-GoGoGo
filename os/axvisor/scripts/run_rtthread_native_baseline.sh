@@ -9,16 +9,60 @@ APPLY_PATCHES="$ROOT/os/axvisor/patches/rtthread/apply-rtthread-patches.sh"
 LAYOUT_PATCH="$ROOT/os/axvisor/patches/rtthread/0009-native-qemu-memory-layout.patch"
 RUN_UNTIL="$SCRIPT_DIR/run_until_log_marker.sh"
 VERIFY="$SCRIPT_DIR/verify_rtbench_stability.sh"
+VERIFY_SUITE="$SCRIPT_DIR/verify_rtbench_suite.sh"
 QEMU_REALTIME_CONTROL="$SCRIPT_DIR/apply_qemu_realtime_controls.sh"
+NET_PROBE="$SCRIPT_DIR/send_rtbench_net_probe.py"
+IMAGE_METADATA="$SCRIPT_DIR/rtthread_image_metadata.py"
 
 QEMU="${QEMU:-$(command -v qemu-system-aarch64 || true)}"
 RTTHREAD_NATIVE_SRC="${RTTHREAD_NATIVE_SRC:-$ROOT/tmp/rt-thread-5.2.2-native-current}"
 RTBENCH_STABILITY_SECONDS="${RTBENCH_STABILITY_SECONDS:-300}"
-RTBENCH_TIMEOUT_S="${RTBENCH_TIMEOUT_S:-$((RTBENCH_STABILITY_SECONDS + 120))}"
-NATIVE_GUEST_LOG="${NATIVE_GUEST_LOG:-$ROOT/tmp/rtthread-native-${RTBENCH_STABILITY_SECONDS}s.log}"
+RTBENCH_MODE="${RTBENCH_MODE:-stability}"
+RTBENCH_SUITE_SAMPLES="${RTBENCH_SUITE_SAMPLES:-1000}"
+VIRTIO_NATIVE_IRQ_BASE="${VIRTIO_NATIVE_IRQ_BASE:-48}"
+VIRTIO_NATIVE_VENDOR_ID="${VIRTIO_NATIVE_VENDOR_ID:-0x554d4551}"
+case "$RTBENCH_SUITE_SAMPLES" in
+    ''|*[!0-9]*|0)
+        echo "RTBENCH_SUITE_SAMPLES must be an integer from 1 to 100000" >&2
+        exit 2
+        ;;
+esac
+if [ "$RTBENCH_SUITE_SAMPLES" -gt 100000 ]; then
+    echo "RTBENCH_SUITE_SAMPLES must be an integer from 1 to 100000" >&2
+    exit 2
+fi
+case "$RTBENCH_MODE" in
+    stability)
+        RTBENCH_TIMEOUT_S="${RTBENCH_TIMEOUT_S:-$((RTBENCH_STABILITY_SECONDS + 120))}"
+        NATIVE_GUEST_LOG="${NATIVE_GUEST_LOG:-$ROOT/tmp/rtthread-native-${RTBENCH_STABILITY_SECONDS}s.log}"
+        RTBENCH_END_MARKER=RTBENCH_STABILITY_DONE
+        ;;
+    suite)
+        RTBENCH_TIMEOUT_S="${RTBENCH_TIMEOUT_S:-$((RTBENCH_SUITE_SAMPLES / 100 + 300))}"
+        NATIVE_GUEST_LOG="${NATIVE_GUEST_LOG:-$ROOT/tmp/rtthread-native-suite-${RTBENCH_SUITE_SAMPLES}.log}"
+        RTBENCH_END_MARKER=RTBENCH_END
+        ;;
+    *)
+        echo "RTBENCH_MODE must be stability or suite (got $RTBENCH_MODE)" >&2
+        exit 2
+        ;;
+esac
 NATIVE_QEMU_LOG="${NATIVE_QEMU_LOG:-${NATIVE_GUEST_LOG}.qemu}"
 NATIVE_CPU_LOAD_LOG="${NATIVE_CPU_LOAD_LOG:-}"
 QEMU_UCLAMP_MIN="${QEMU_UCLAMP_MIN:-1024}"
+QEMU_TCG_THREAD="${QEMU_TCG_THREAD:-multi}"
+QEMU_NATIVE_VCPU_AFFINITY="${QEMU_NATIVE_VCPU_AFFINITY:-}"
+RTBENCH_ALLOW_QEMU_TIMER_LIMIT="${RTBENCH_ALLOW_QEMU_TIMER_LIMIT:-0}"
+RTBENCH_NET_HOST_PORT="${RTBENCH_NET_HOST_PORT:-19878}"
+
+case "$QEMU_TCG_THREAD" in
+    single|multi) ;;
+    *) echo "QEMU_TCG_THREAD must be single or multi" >&2; exit 2 ;;
+esac
+case "$RTBENCH_ALLOW_QEMU_TIMER_LIMIT" in
+    0|1) ;;
+    *) echo "RTBENCH_ALLOW_QEMU_TIMER_LIMIT must be 0 or 1" >&2; exit 2 ;;
+esac
 
 case "$RTBENCH_STABILITY_SECONDS" in
     ''|*[!0-9]*|0)
@@ -39,6 +83,29 @@ esac
 if [ -z "$QEMU" ] || [ ! -x "$QEMU" ]; then
     echo "qemu-system-aarch64 is not available: $QEMU" >&2
     exit 1
+fi
+case "$VIRTIO_NATIVE_IRQ_BASE" in
+    ''|*[!0-9]*)
+        echo "VIRTIO_NATIVE_IRQ_BASE must be a decimal IRQ number" >&2
+        exit 2
+        ;;
+esac
+case "$VIRTIO_NATIVE_VENDOR_ID" in
+    0x[0-9a-fA-F]*|[0-9]*) ;;
+    *)
+        echo "VIRTIO_NATIVE_VENDOR_ID must be a hexadecimal or decimal vendor ID" >&2
+        exit 2
+        ;;
+esac
+case "$RTBENCH_NET_HOST_PORT" in
+    ''|*[!0-9]*|0)
+        echo "RTBENCH_NET_HOST_PORT must be a decimal port" >&2
+        exit 2
+        ;;
+esac
+if [ "$RTBENCH_NET_HOST_PORT" -gt 65535 ]; then
+    echo "RTBENCH_NET_HOST_PORT must be below 65536" >&2
+    exit 2
 fi
 for command_name in uv socat git; do
     if ! command -v "$command_name" >/dev/null; then
@@ -74,27 +141,43 @@ echo "=== Native RT-Thread hard-timer baseline ==="
 echo "[1/3] Preparing the pinned RT-Thread source..."
 bash "$PREPARE" "$RTTHREAD_NATIVE_SRC"
 
-# The native layout touches files that are also introduced by the base port.
-# Remove it before the base-port idempotency check, then apply it again below.
-if git -C "$RTTHREAD_NATIVE_SRC" apply --check --reverse "$LAYOUT_PATCH"; then
-    git -C "$RTTHREAD_NATIVE_SRC" apply --reverse "$LAYOUT_PATCH"
-    echo "Temporarily removed native QEMU memory layout"
-fi
 bash "$APPLY_PATCHES" "$RTTHREAD_NATIVE_SRC"
+
+# QEMU's AArch64 -kernel loader places the raw image at the RAM base but
+# starts it at the image's 2 MiB text offset.  Keep the same raw image usable
+# by AxVisor: it loads at 0x40000000 and enters at 0x40200000.
 if git -C "$RTTHREAD_NATIVE_SRC" apply --check "$LAYOUT_PATCH"; then
     git -C "$RTTHREAD_NATIVE_SRC" apply "$LAYOUT_PATCH"
-    echo "Applied native QEMU memory layout"
+    echo "Applied Native QEMU memory layout"
 elif git -C "$RTTHREAD_NATIVE_SRC" apply --check --reverse "$LAYOUT_PATCH"; then
     echo "Native QEMU memory layout is already applied"
 else
-    echo "RT-Thread source does not match the native memory-layout patch" >&2
+    echo "RT-Thread source does not match the native QEMU memory-layout patch" >&2
     exit 1
 fi
 
+VIRTIO_HEADER="$RTTHREAD_NATIVE_SRC/bsp/qemu-virt64-aarch64/drivers/virt.h"
+grep -Eq '^#define[[:space:]]+VIRTIO_IRQ_BASE[[:space:]]+' "$VIRTIO_HEADER" || {
+    echo "RT-Thread virtio IRQ definition is missing: $VIRTIO_HEADER" >&2
+    exit 1
+}
+sed -i -E \
+    "s/^#define[[:space:]]+VIRTIO_IRQ_BASE[[:space:]]+.*/#define VIRTIO_IRQ_BASE     (${VIRTIO_NATIVE_IRQ_BASE})/" \
+    "$VIRTIO_HEADER"
+sed -i -E \
+    "s/^#define[[:space:]]+VIRTIO_VENDOR_ID[[:space:]]+.*/#define VIRTIO_VENDOR_ID    (${VIRTIO_NATIVE_VENDOR_ID})/" \
+    "$VIRTIO_HEADER"
+echo "Configured native QEMU virtio IRQ base: $VIRTIO_NATIVE_IRQ_BASE"
+echo "Configured native QEMU virtio vendor ID: $VIRTIO_NATIVE_VENDOR_ID"
 BSP_DIR="$RTTHREAD_NATIVE_SRC/bsp/qemu-virt64-aarch64"
 echo "[2/3] Building the canonical hard-timer benchmark..."
 uv run --with scons scons -C "$BSP_DIR" -c
 uv run --with scons scons -C "$BSP_DIR" -j4
+RTTHREAD_IMAGE_METADATA="${RTTHREAD_IMAGE_METADATA:-$BSP_DIR/rtthread.bin.meta.json}"
+python3 "$IMAGE_METADATA" write \
+    --image "$BSP_DIR/rtthread.bin" \
+    --source "$RTTHREAD_NATIVE_SRC" \
+    --output "$RTTHREAD_IMAGE_METADATA"
 
 mkdir -p -- "$(dirname -- "$NATIVE_GUEST_LOG")" "$(dirname -- "$NATIVE_QEMU_LOG")"
 : > "$NATIVE_GUEST_LOG"
@@ -136,20 +219,44 @@ feed_command() {
         fi
         sleep 0.1
     done
-    printf 'rtbench_stability %s\r' "$RTBENCH_STABILITY_SECONDS"
+    case "$RTBENCH_MODE" in
+        stability)
+            printf 'rtbench_stability %s\r' "$RTBENCH_STABILITY_SECONDS"
+            ;;
+        suite)
+            printf 'benchmark %s\r' "$RTBENCH_SUITE_SAMPLES"
+            deadline_ns=$(( $(date +%s%N) + RTBENCH_TIMEOUT_S * 1000000000 ))
+            while ! grep -aFq -- 'RTBENCH_NET_READY port=9878' "$NATIVE_GUEST_LOG"; do
+                if [ "$(date +%s%N)" -ge "$deadline_ns" ]; then
+                    echo "timed out waiting for RTBENCH_NET_READY" >&2
+                    return 1
+                fi
+                sleep 0.05
+            done
+            python3 "$NET_PROBE" \
+                --port "$RTBENCH_NET_HOST_PORT" \
+                --count "$RTBENCH_SUITE_SAMPLES" \
+                --interval-us 2000 >&2
+            ;;
+    esac
 }
 
-echo "[3/3] Running ${RTBENCH_STABILITY_SECONDS}s on QEMU virt/GICv3/Cortex-A72..."
+echo "[3/3] Running ${RTBENCH_MODE} benchmark on QEMU virt/GICv3/Cortex-A72..."
 cd "$BSP_DIR"
 RUN_UNTIL_CHILD_PID_FILE="$qemu_pid_file" \
-"$RUN_UNTIL" "$RTBENCH_TIMEOUT_S" "$NATIVE_GUEST_LOG" RTBENCH_STABILITY_DONE -- \
+"$RUN_UNTIL" "$RTBENCH_TIMEOUT_S" "$NATIVE_GUEST_LOG" "$RTBENCH_END_MARKER" -- \
     "$QEMU" \
         -display none \
         -monitor none \
+        -name 'tgoskits,debug-threads=on' \
+        -accel "tcg,thread=$QEMU_TCG_THREAD" \
         -machine virt,gic-version=3 \
+        -global virtio-mmio.force-legacy=false \
         -cpu cortex-a72 \
         -smp 1 \
         -m 1G \
+        -netdev "user,id=net0,net=192.168.77.0/24,hostfwd=udp:127.0.0.1:${RTBENCH_NET_HOST_PORT}-192.168.77.30:9878" \
+        -device virtio-net-device,netdev=net0,bus=virtio-mmio-bus.0,mac=52:54:00:77:00:01 \
         -serial "unix:$serial_socket,server=on,wait=on" \
         -kernel rtthread.bin \
     > "$NATIVE_QEMU_LOG" 2>&1 &
@@ -183,7 +290,8 @@ if [ ! -s "$qemu_pid_file" ]; then
     exit 1
 fi
 qemu_pid="$(cat "$qemu_pid_file")"
-qemu_realtime_control_status="$("$QEMU_REALTIME_CONTROL" "$qemu_pid" "$QEMU_UCLAMP_MIN")"
+qemu_realtime_control_status="$(QEMU_VCPU_AFFINITY="$QEMU_NATIVE_VCPU_AFFINITY" \
+    "$QEMU_REALTIME_CONTROL" "$qemu_pid" "$QEMU_UCLAMP_MIN")"
 printf '%s\n' "$qemu_realtime_control_status"
 if [ -n "$NATIVE_CPU_LOAD_LOG" ]; then
     pidstat -h -t -p "$qemu_pid" 1 > "$NATIVE_CPU_LOAD_LOG" &
@@ -211,9 +319,22 @@ if [ -n "$socat_pid" ]; then
     socat_pid=
 fi
 
-grep -aE 'RTBENCH_STABILITY|RTBENCH metric=stability_jitter|RTBENCH metric=callback_exec' \
-    "$NATIVE_GUEST_LOG" || true
-"$VERIFY" "$NATIVE_GUEST_LOG" "$RTBENCH_STABILITY_SECONDS" "$qemu_rc"
+case "$RTBENCH_MODE" in
+    stability)
+        grep -aE 'RTBENCH_STABILITY|RTBENCH metric=stability_jitter|RTBENCH metric=callback_exec' \
+            "$NATIVE_GUEST_LOG" || true
+        if [ "$RTBENCH_ALLOW_QEMU_TIMER_LIMIT" -eq 1 ]; then
+            "$VERIFY" "$NATIVE_GUEST_LOG" "$RTBENCH_STABILITY_SECONDS" \
+                "$qemu_rc" allow-qemu-timer-limit
+        else
+            "$VERIFY" "$NATIVE_GUEST_LOG" "$RTBENCH_STABILITY_SECONDS" "$qemu_rc"
+        fi
+        ;;
+    suite)
+        grep -aE 'RTBENCH_BEGIN|RTBENCH metric=|RTBENCH_END' "$NATIVE_GUEST_LOG" || true
+        "$VERIFY_SUITE" "$NATIVE_GUEST_LOG" "$RTBENCH_SUITE_SAMPLES" "$qemu_rc"
+        ;;
+esac
 
 echo "Native guest log: $NATIVE_GUEST_LOG"
 echo "Native QEMU log: $NATIVE_QEMU_LOG"

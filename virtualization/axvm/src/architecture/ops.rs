@@ -46,6 +46,14 @@ pub(crate) trait ArchOps {
         Ok(())
     }
 
+    /// Registers the running VM runtime with architecture-owned IRQ kickers.
+    fn bind_runtime(
+        _vm: &crate::AxVM,
+        _runtime: std::sync::Arc<crate::vm::VmRuntimeHandle>,
+    ) -> AxVmResult {
+        Ok(())
+    }
+
     fn before_vcpu_run(
         _vm: &crate::AxVMRef,
         _vcpu: &crate::vm::AxVCpuRef<Self::VCpu>,

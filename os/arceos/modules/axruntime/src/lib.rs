@@ -468,6 +468,34 @@ fn periodic_interval_nanos() -> u64 {
 static NEXT_PERIODIC_DEADLINE_NANOS: u64 = 0;
 
 #[cfg(feature = "irq")]
+#[ax_percpu::def_percpu]
+static PERIODIC_TIMER_DISABLE_DEPTH: usize = 0;
+
+#[cfg(any(feature = "irq", test))]
+fn next_periodic_disable_depth(depth: usize, enable_periodic: bool) -> usize {
+    if enable_periodic {
+        depth.saturating_sub(1)
+    } else {
+        depth.saturating_add(1)
+    }
+}
+
+#[cfg(any(feature = "irq", test))]
+fn next_timer_deadline_for_policy(
+    periodic_enabled: bool,
+    periodic_deadline: u64,
+    task_deadline: Option<u64>,
+) -> Option<u64> {
+    let periodic_deadline = periodic_enabled.then_some(periodic_deadline);
+    match (periodic_deadline, task_deadline) {
+        (Some(periodic), Some(task)) => Some(core::cmp::min(periodic, task)),
+        (Some(periodic), None) => Some(periodic),
+        (None, Some(task)) => Some(task),
+        (None, None) => None,
+    }
+}
+
+#[cfg(feature = "irq")]
 fn with_periodic_deadline<R>(
     operation: impl for<'scope> FnOnce(&ax_percpu::CpuPin<'scope>) -> R,
 ) -> R {
@@ -490,7 +518,35 @@ fn init_timer() {
 }
 
 #[cfg(feature = "irq")]
+fn periodic_timer_enabled() -> bool {
+    with_periodic_deadline(|pin| PERIODIC_TIMER_DISABLE_DEPTH.read_current(pin) == 0)
+}
+
+/// Enables or disables the periodic scheduler timer on the current CPU.
+///
+/// Disabling the periodic timer leaves the hardware timer IRQ and all task or
+/// AxVM one-shot deadlines active. The default state is enabled for every CPU.
+#[cfg(feature = "irq")]
+pub fn set_current_cpu_periodic_timer_enabled(enabled: bool) {
+    let _guard = ax_task::sync::PreemptIrqSaveGuard::new();
+    with_periodic_deadline(|pin| {
+        let depth = PERIODIC_TIMER_DISABLE_DEPTH.read_current(pin);
+        PERIODIC_TIMER_DISABLE_DEPTH
+            .write_current(pin, next_periodic_disable_depth(depth, enabled));
+        if enabled && depth == 1 {
+            let now_ns = ax_hal::time::monotonic_time_nanos();
+            NEXT_PERIODIC_DEADLINE_NANOS
+                .write_current(pin, now_ns.saturating_add(periodic_interval_nanos()));
+        }
+    });
+    program_next_timer();
+}
+
+#[cfg(feature = "irq")]
 fn advance_periodic_timer(now_ns: u64) -> bool {
+    if !periodic_timer_enabled() {
+        return false;
+    }
     let mut deadline = with_periodic_deadline(|pin| NEXT_PERIODIC_DEADLINE_NANOS.read_current(pin));
     if deadline == 0 {
         with_periodic_deadline(|pin| {
@@ -515,18 +571,25 @@ fn advance_periodic_timer(now_ns: u64) -> bool {
 
 #[cfg(feature = "irq")]
 fn program_next_timer() {
-    let mut deadline = with_periodic_deadline(|pin| NEXT_PERIODIC_DEADLINE_NANOS.read_current(pin));
-    if deadline == 0 {
+    let mut periodic_deadline =
+        with_periodic_deadline(|pin| NEXT_PERIODIC_DEADLINE_NANOS.read_current(pin));
+    if periodic_deadline == 0 {
         let now_ns = ax_hal::time::monotonic_time_nanos();
-        deadline = now_ns.saturating_add(periodic_interval_nanos());
-        with_periodic_deadline(|pin| NEXT_PERIODIC_DEADLINE_NANOS.write_current(pin, deadline));
+        periodic_deadline = now_ns.saturating_add(periodic_interval_nanos());
+        with_periodic_deadline(|pin| {
+            NEXT_PERIODIC_DEADLINE_NANOS.write_current(pin, periodic_deadline)
+        });
     }
     #[cfg(feature = "multitask")]
     let task_deadline = ax_task::next_timer_deadline_nanos();
-    #[cfg(feature = "multitask")]
-    if let Some(task_deadline) = task_deadline {
-        deadline = core::cmp::min(deadline, task_deadline);
-    }
+    #[cfg(not(feature = "multitask"))]
+    let task_deadline = None;
+
+    let deadline =
+        next_timer_deadline_for_policy(periodic_timer_enabled(), periodic_deadline, task_deadline)
+            .unwrap_or_else(|| {
+                ax_hal::time::monotonic_time_nanos().saturating_add(ax_hal::time::NANOS_PER_SEC)
+            });
 
     ax_hal::time::set_oneshot_timer(deadline);
     #[cfg(feature = "multitask")]
@@ -576,6 +639,39 @@ fn init_tls() {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn periodic_timer_disable_depth_is_nested_and_saturating() {
+        assert_eq!(super::next_periodic_disable_depth(0, false), 1);
+        assert_eq!(super::next_periodic_disable_depth(1, false), 2);
+        assert_eq!(super::next_periodic_disable_depth(2, true), 1);
+        assert_eq!(super::next_periodic_disable_depth(1, true), 0);
+        assert_eq!(super::next_periodic_disable_depth(0, true), 0);
+    }
+
+    #[test]
+    fn tickless_timer_selection_keeps_task_deadlines() {
+        assert_eq!(
+            super::next_timer_deadline_for_policy(false, 1_000, Some(800)),
+            Some(800)
+        );
+        assert_eq!(
+            super::next_timer_deadline_for_policy(false, 1_000, None),
+            None
+        );
+    }
+
+    #[test]
+    fn periodic_timer_selection_keeps_the_earliest_deadline() {
+        assert_eq!(
+            super::next_timer_deadline_for_policy(true, 1_000, Some(800)),
+            Some(800)
+        );
+        assert_eq!(
+            super::next_timer_deadline_for_policy(true, 1_000, Some(1_200)),
+            Some(1_000)
+        );
+    }
+
     #[test]
     fn fs_init_accepts_bootargs_without_fs_feature() {
         crate::fs::init(Some("root=/dev/nvme0n1"));

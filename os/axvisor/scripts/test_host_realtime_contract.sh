@@ -78,12 +78,20 @@ rg -q '^host_vcpu_idle_policy = "busy"$' "$RTTHREAD_VM_CONFIG" || {
     echo "RT-Thread VM must select busy WFI on its dedicated pCPU" >&2
     exit 1
 }
+rg -q '^host_timer_policy = "tickless"$' "$RTTHREAD_VM_CONFIG" || {
+    echo "RT-Thread VM must disable the host periodic scheduler timer while running" >&2
+    exit 1
+}
 if rg -q '^host_vcpu_idle_policy[[:space:]]*=' "$LINUX_VM_CONFIG"; then
     echo "Linux VM must retain the default halt host vCPU idle policy" >&2
     exit 1
 fi
 rg -q '^cpu_num = 2$' "$LINUX_VM_CONFIG" || {
     echo "Linux VM must expose exactly two vCPUs" >&2
+    exit 1
+}
+rg -q '^host_timer_policy = "periodic"$' "$LINUX_VM_CONFIG" || {
+    echo "Linux VM must retain the host periodic scheduler timer" >&2
     exit 1
 }
 rg -q '^phys_cpu_sets = \[0b1011, 0b1011\]$' "$LINUX_VM_CONFIG" || {

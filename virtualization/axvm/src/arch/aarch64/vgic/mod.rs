@@ -72,6 +72,10 @@ impl Aarch64VgicRuntime {
         &self.core
     }
 
+    pub(crate) fn bind_runtime(&self, runtime: &Arc<crate::vm::VmRuntimeHandle>) {
+        self.kick.bind_runtime(runtime);
+    }
+
     pub(crate) fn attach_vcpu(
         &self,
         vcpu_id: usize,

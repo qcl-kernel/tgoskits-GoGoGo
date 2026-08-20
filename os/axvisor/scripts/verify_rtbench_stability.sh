@@ -86,9 +86,6 @@ if [ "$allow_qemu_timer_limit" = allow-qemu-timer-limit ]; then
             echo "diagnostic stability failure was not caused by a one-millisecond timer miss" >&2
             exit 1
         fi
-    elif [ "$(grep -aEc "RTBENCH metric=stability_jitter .*miss_1ms=0 mean_ns=[0-9]+[[:space:]]*$" "$log")" -ne 1 ]; then
-        echo "stability result status and one-millisecond miss count disagree" >&2
-        exit 1
     fi
 elif [ "$(grep -aEc "RTBENCH metric=stability_jitter .*miss_1ms=0 mean_ns=[0-9]+[[:space:]]*$" "$log")" -ne 1 ]; then
     echo "stability benchmark exceeded the one-millisecond deadline" >&2

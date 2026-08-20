@@ -3,6 +3,7 @@ id = 1
 name = "linux-net"
 guest_type = "virtualized"
 cpu_num = 2
+host_timer_policy = "periodic"
 guest_tlbi_policy = "vm_scoped"
 phys_cpu_ids = [0, 1]
 phys_cpu_sets = [0b1011, 0b1011]

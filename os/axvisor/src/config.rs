@@ -227,6 +227,7 @@ pub(crate) fn build_axvm_config(cfg: &GuestConfig) -> AxVMConfig {
         reserved_address_ranges: Vec::new(),
         pass_through_ports: Vec::new(),
         address_space_policy: cfg.base.guest_type.address_space_policy(),
+        host_timer_policy: cfg.base.host_timer_policy,
         host_vcpu_idle_policy: cfg.base.host_vcpu_idle_policy,
         guest_tlbi_policy: cfg.base.guest_tlbi_policy,
         memory_regions: cfg.kernel.memory_regions.clone(),
@@ -354,12 +355,14 @@ mod tests {
     #[test]
     fn build_axvm_config_preserves_host_vcpu_idle_policy() {
         let mut crate_config = GuestConfig::default();
+        crate_config.base.host_timer_policy = HostTimerPolicy::Tickless;
         crate_config.base.host_vcpu_idle_policy = HostVcpuIdlePolicy::Busy;
         crate_config.base.guest_tlbi_policy = GuestTlbiPolicy::VmScoped;
 
         let vm_config = build_axvm_config(&crate_config);
 
         assert_eq!(vm_config.host_vcpu_idle_policy(), HostVcpuIdlePolicy::Busy);
+        assert_eq!(vm_config.host_timer_policy(), HostTimerPolicy::Tickless);
         assert_eq!(vm_config.guest_tlbi_policy(), GuestTlbiPolicy::VmScoped);
     }
 }

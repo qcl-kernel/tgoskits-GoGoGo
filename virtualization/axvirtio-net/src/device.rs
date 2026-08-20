@@ -64,6 +64,30 @@ impl<B: NetworkBackend, T: GuestMemoryAccessor + Clone> VirtioMmioNetDevice<B, T
         net_config: VirtioNetConfig,
         accessor: T,
     ) -> VirtioResult<Self> {
+        Self::new_with_vendor_id(
+            base_ipa,
+            length,
+            backend,
+            net_config,
+            accessor,
+            vc::VIRTIO_VENDOR_ID,
+        )
+    }
+
+    /// Create a device with an explicit transport vendor ID.
+    ///
+    /// QEMU's virtio-mmio transport reports `0x554d4551` while the generic
+    /// AxVisor transport historically used `0x1af4`. Both values are valid
+    /// vendor identifiers; exposing the choice lets a guest driver that
+    /// matches QEMU's identity continue to work under AxVisor.
+    pub fn new_with_vendor_id(
+        base_ipa: GuestPhysAddr,
+        length: usize,
+        backend: B,
+        net_config: VirtioNetConfig,
+        accessor: T,
+        vendor_id: u32,
+    ) -> VirtioResult<Self> {
         let accessor = Arc::new(accessor);
         let mut queues = Vec::with_capacity(NUM_QUEUES as usize);
         queues.push(VirtioQueue::new(
@@ -80,7 +104,7 @@ impl<B: NetworkBackend, T: GuestMemoryAccessor + Clone> VirtioMmioNetDevice<B, T
             base_ipa,
             length,
             axvirtio_common::VirtioDeviceID::Network.to_device_id(),
-            vc::VIRTIO_VENDOR_ID,
+            vendor_id,
             AXVIRTIO_NET_FEATURES,
             queues,
         );

@@ -23,7 +23,7 @@ pub use axvm_types::{
     HostPortAssignment, ReservedAddressConfig, VMBootProtocol, VmMemConfig, VmMemMappingType,
 };
 use axvmconfig::VirtualDeviceRequest;
-pub use axvmconfig::{GuestTlbiPolicy, HostVcpuIdlePolicy};
+pub use axvmconfig::{GuestTlbiPolicy, HostTimerPolicy, HostVcpuIdlePolicy};
 
 use crate::{arch::*, machine::*};
 
@@ -96,6 +96,7 @@ pub struct AxVMConfig {
     reserved_address_ranges: Vec<ReservedAddressConfig>,
     pass_through_ports: Vec<HostPortAssignment>,
     address_space_policy: AddressSpacePolicy,
+    host_timer_policy: HostTimerPolicy,
     host_vcpu_idle_policy: HostVcpuIdlePolicy,
     guest_tlbi_policy: GuestTlbiPolicy,
     memory_regions: Vec<VmMemConfig>,
@@ -126,6 +127,7 @@ pub struct AxVMConfigParams {
     pub reserved_address_ranges: Vec<ReservedAddressConfig>,
     pub pass_through_ports: Vec<HostPortAssignment>,
     pub address_space_policy: AddressSpacePolicy,
+    pub host_timer_policy: HostTimerPolicy,
     pub host_vcpu_idle_policy: HostVcpuIdlePolicy,
     pub guest_tlbi_policy: GuestTlbiPolicy,
     pub memory_regions: Vec<VmMemConfig>,
@@ -156,6 +158,7 @@ impl AxVMConfig {
             reserved_address_ranges: params.reserved_address_ranges,
             pass_through_ports: params.pass_through_ports,
             address_space_policy: params.address_space_policy,
+            host_timer_policy: params.host_timer_policy,
             host_vcpu_idle_policy: params.host_vcpu_idle_policy,
             guest_tlbi_policy: params.guest_tlbi_policy,
             memory_regions: params.memory_regions,
@@ -278,6 +281,11 @@ impl AxVMConfig {
     /// Returns the host behavior selected for trapped guest WFI exits.
     pub const fn host_vcpu_idle_policy(&self) -> HostVcpuIdlePolicy {
         self.host_vcpu_idle_policy
+    }
+
+    /// Returns the host timer policy applied while this VM's vCPU executes.
+    pub const fn host_timer_policy(&self) -> HostTimerPolicy {
+        self.host_timer_policy
     }
 
     /// Returns the guest EL1 TLB-maintenance policy.
@@ -583,17 +591,26 @@ mod tests {
             default_config.guest_tlbi_policy(),
             axvmconfig::GuestTlbiPolicy::Native
         );
+        assert_eq!(
+            default_config.host_timer_policy(),
+            axvmconfig::HostTimerPolicy::Periodic
+        );
 
         let busy_config = AxVMConfig::new(AxVMConfigParams {
             id: 3,
             name: String::from("rtthread"),
             phys_cpu_ls: PhysCpuList::new(1, None, Some(vec![1 << 2])),
+            host_timer_policy: axvmconfig::HostTimerPolicy::Tickless,
             host_vcpu_idle_policy: axvmconfig::HostVcpuIdlePolicy::Busy,
             ..Default::default()
         });
         assert_eq!(
             busy_config.host_vcpu_idle_policy(),
             axvmconfig::HostVcpuIdlePolicy::Busy
+        );
+        assert_eq!(
+            busy_config.host_timer_policy(),
+            axvmconfig::HostTimerPolicy::Tickless
         );
 
         let vm_scoped_config = AxVMConfig::new(AxVMConfigParams {

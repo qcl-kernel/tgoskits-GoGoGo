@@ -32,10 +32,6 @@ verify_combined_symbols() {
     done
 }
 
-task3_object_hash() {
-    sha256sum "$BSP/build/applications/task3/task3_server.o" | cut -d' ' -f1
-}
-
 if [[ -n "${RTTHREAD_TEST_REPOSITORY:-}" ]]; then
     RTTHREAD_REPOSITORY="$RTTHREAD_TEST_REPOSITORY" "$PREPARE" "$SOURCE"
 else
@@ -64,22 +60,9 @@ if [[ "${RTTHREAD_TEST_BUILD:-1}" == 1 ]]; then
         echo "FAIL: combined RT-Thread ELF contains virtio-net polling" >&2
         exit 1
     fi
-    normal_task3_hash="$(task3_object_hash)"
-
-    TASK3_FAULT_DROP_STATUS_ONCE=1 build_rtthread
-    verify_combined_symbols
-    drop_status_task3_hash="$(task3_object_hash)"
-    if [[ "$drop_status_task3_hash" == "$normal_task3_hash" ]]; then
-        echo "FAIL: drop-status fault did not change the Task 3 object" >&2
-        exit 1
-    fi
-
-    TASK3_FAULT_DELAY_START_MS=3000 build_rtthread
-    verify_combined_symbols
-    delayed_task3_hash="$(task3_object_hash)"
-    if [[ "$delayed_task3_hash" == "$normal_task3_hash" ||
-          "$delayed_task3_hash" == "$drop_status_task3_hash" ]]; then
-        echo "FAIL: delayed-server fault did not produce a distinct Task 3 object" >&2
+    if ! grep -Fq 'rt_ofw_bootargs_select("task3.fault="' \
+        "$SOURCE/bsp/qemu-virt64-aarch64/applications/task3/task3_server.c"; then
+        echo "FAIL: Task 3 runtime fault selection is missing" >&2
         exit 1
     fi
 fi

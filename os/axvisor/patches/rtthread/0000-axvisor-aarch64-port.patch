@@ -61,9 +61,10 @@ diff --git a/bsp/qemu-virt64-aarch64/applications/SConscript b/bsp/qemu-virt64-a
 index c583d301..df07af34 100644
 --- a/bsp/qemu-virt64-aarch64/applications/SConscript
 +++ b/bsp/qemu-virt64-aarch64/applications/SConscript
-@@ -1,9 +1,10 @@
+@@ -1,9 +1,11 @@
  from building import *
 
++Import('RTT_ROOT')
  cwd     = GetCurrentDir()
 -src     = Glob('*.c') + Glob('*.cpp')
 +src     = Glob('*.c') + Glob('*.cpp') + Glob('rt-ipc-test/*.c')
@@ -945,7 +946,7 @@ index 801e889b..b8f134a9 100644
 -#define VIRTIO_IRQ_BASE     (32 + 16)
 -#define VIRTIO_VENDOR_ID    0x554d4551  /* "QEMU" */
 +#define VIRTIO_MAX_NR       1
-+#define VIRTIO_IRQ_BASE     (224)
++#define VIRTIO_IRQ_BASE     (48)
 +#define VIRTIO_VENDOR_ID    0x1AF4      /* Red Hat (standard virtio PCI vendor) */
 
  /* GIC */
@@ -974,7 +975,7 @@ index 00000000..9d20a36f
 +SECTIONS
 +{
 +    _text_offset = 0;
-+    . = 0xa0000000 + _text_offset;
++    . = 0x40000000 + _text_offset;
 +    .text :
 +    {
 +        PROVIDE(__text_start = .);
@@ -1544,7 +1545,7 @@ index 7a4f7103..63a9c40e 100644
 +#define BSP_USING_VIRTIO_NET 1
 +#define ARCH_TEXT_OFFSET 0x0
 +#define KERNEL_ASPACE_START 0x1
-+#define ARCH_RAM_OFFSET 0xa0000000
++#define ARCH_RAM_OFFSET 0x40000000
 +#define ARCH_SECONDARY_CPU_STACK_SIZE 4096
 +#define ARCH_HEAP_SIZE 0x4000000
 +#define ARCH_INIT_PAGE_SIZE 0x200000
@@ -2080,7 +2081,12 @@ diff --git a/components/drivers/virtio/virtio_net.c b/components/drivers/virtio/
 index d92421b6..29e0de1b 100644
 --- a/components/drivers/virtio/virtio_net.c
 +++ b/components/drivers/virtio/virtio_net.c
-@@ -20,11 +20,32 @@
+@@ -20,11 +20,37 @@
++__attribute__((weak)) void rt_virtio_net_rx_irq_hook(rt_uint16_t used_idx)
++{
++    (void)used_idx;
++}
++
  static rt_err_t virtio_net_tx(rt_device_t dev, struct pbuf *p)
  {
      rt_uint16_t id;
@@ -2210,11 +2216,12 @@ index d92421b6..29e0de1b 100644
      virtio_queue_notify(virtio_dev, VIRTIO_NET_QUEUE_RX);
 
      return eth_device_linkchange(&virtio_net_dev->parent, RT_TRUE);
-@@ -184,7 +210,6 @@ static void virtio_net_isr(int irqno, void *param)
+@@ -184,7 +210,7 @@ static void virtio_net_isr(int irqno, void *param)
      if (queue_rx->used_idx != queue_rx->used->idx)
      {
          rt_hw_dsb();
 -
++        rt_virtio_net_rx_irq_hook(queue_rx->used->idx);
          eth_device_ready(&virtio_net_dev->parent);
      }
  }

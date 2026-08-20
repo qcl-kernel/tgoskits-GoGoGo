@@ -88,9 +88,80 @@ data = source.read_bytes()
 # QEMU serial capture can insert CSI color sequences between a VM prefix and
 # an authenticated marker. Normalize only presentation bytes; keep payloads
 # and marker text unchanged for the strict checks below.
+# AxVisor host logs use the gray `ESC[37m[` prefix. They can be interleaved
+# at arbitrary byte offsets, including inside a decimal benchmark value or a
+# marker. Remove the host record and its logger-generated line break first so
+# the guest bytes on either side are joined again.
+host_log = re.compile(rb"\x1b\[37m\[[^\r\n]*?\x1b\[m\r?\n?")
+data = host_log.sub(b"", data)
+# RT-Thread's colored component logs can be written concurrently with the
+# benchmark printf and land inside a field name or value on the same line.
+# Remove only a complete colored RT-Thread log record so benchmark bytes on
+# either side are joined before the strict field parser runs.
+guest_log = re.compile(
+    rb"\x1b\[[0-?]*[ -/]*m\[[A-Z]/[^\r\n]*?\x1b\[[0-?]*[ -/]*m"
+)
+data = guest_log.sub(b"", data)
 data = re.sub(rb"\x1b\[[0-?]*[ -/]*[@-~]", b"", data)
 data = data.replace(b"\r", b"")
-destination.write_bytes(data)
+# The observed RT-Thread logger split the `p99_9_ns` field exactly between
+# `n` and `s`; join that field only and keep other line boundaries intact.
+data = re.sub(rb"(?<=p99_9_n)\n(?=s=)", b"", data)
+
+# RT-Thread and the RT-IPC server can write to the shared serial console from
+# different tasks. If a server log lands between two fields of one benchmark
+# record, recover the record from its numeric fields before strict validation.
+metric_marker = re.compile(rb"RTBENCH metric=([A-Za-z0-9_]+) run=([0-9]+)")
+metric_boundary = re.compile(rb"RTBENCH(?:_END|_STABILITY_|_ERROR)")
+field_names = (
+    b"expected", b"collected", b"missing", b"p50_ns", b"p95_ns",
+    b"p99_ns", b"p99_9_ns", b"max_ns", b"miss_100us", b"miss_500us",
+    b"miss_1ms", b"mean_ns",
+)
+lines = data.splitlines()
+normalized = []
+index = 0
+while index < len(lines):
+    line = lines[index]
+    marker = metric_marker.search(line)
+    if marker is None:
+        normalized.append(line)
+        index += 1
+        continue
+
+    # A concurrent RT-Thread task can inject bytes into the middle of a
+    # console line. The remainder may therefore start with a digit, rather
+    # than whitespace, and may contain an ANSI-wrapped log message. Collect
+    # only up to the next benchmark record/end marker, then rebuild the
+    # record from its named numeric fields.
+    block = [line]
+    cursor = index + 1
+    while cursor < len(lines):
+        continuation = lines[cursor]
+        if metric_marker.search(continuation) or metric_boundary.search(continuation):
+            break
+        block.append(continuation)
+        candidate = b" ".join(block)
+        if all(re.search(rb"\b" + re.escape(name) + rb"=([0-9]+)", candidate)
+               for name in field_names):
+            cursor += 1
+            break
+        cursor += 1
+    chunk = b" ".join(block)
+    values = {}
+    for name in field_names:
+        match = re.search(rb"\b" + re.escape(name) + rb"=([0-9]+)", chunk)
+        if match is not None:
+            values[name] = match.group(1)
+    if len(values) == len(field_names):
+        normalized.append(
+            b"RTBENCH metric=" + marker.group(1) + b" run=" + marker.group(2) + b" " +
+            b" ".join(name + b"=" + values[name] for name in field_names)
+        )
+    else:
+        normalized.append(chunk)
+    index = cursor
+destination.write_bytes(b"\n".join(normalized) + b"\n")
 PY
 log="$normalized_log"
 trap 'rm -f -- "$normalized_log"' EXIT

@@ -220,6 +220,19 @@ fn boot_protocol_name(protocol: VMBootProtocol) -> &'static str {
     }
 }
 
+/// Host timer policy applied to the physical CPU running a VM vCPU.
+#[cfg_attr(all(feature = "std", any(windows, unix)), derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum HostTimerPolicy {
+    /// Keep the ArceOS periodic scheduler timer enabled.
+    #[default]
+    Periodic,
+    /// Disable the periodic scheduler timer while guest code is running,
+    /// while retaining task and AxVM one-shot deadlines.
+    Tickless,
+}
+
 /// Guest WFI execution and host-idle behavior for a VM vCPU.
 #[cfg_attr(all(feature = "std", any(windows, unix)), derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -230,6 +243,19 @@ pub enum HostVcpuIdlePolicy {
     Halt,
     /// Trap guest WFI and immediately re-enter the guest.
     Busy,
+}
+
+/// Controls whether AxVM adjusts a kernel image to the primary guest memory
+/// base or preserves the addresses declared by the VM configuration.
+#[cfg_attr(all(feature = "std", any(windows, unix)), derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum KernelLoadPolicy {
+    /// Use the boot protocol's default placement relative to primary memory.
+    #[default]
+    AdjustToMemory,
+    /// Preserve `kernel_load_addr` and `entry_point` exactly as configured.
+    KeepConfigured,
 }
 
 /// Guest EL1 TLB-maintenance behavior.
@@ -258,6 +284,8 @@ pub struct VMBaseConfig {
     // Resources.
     /// The number of virtual CPUs.
     pub cpu_num: usize,
+    /// Host timer policy applied while this VM's vCPU executes guest code.
+    pub host_timer_policy: HostTimerPolicy,
     /// Guest WFI execution and host-idle behavior.
     pub host_vcpu_idle_policy: HostVcpuIdlePolicy,
     /// Guest EL1 TLB-maintenance behavior.
@@ -293,6 +321,9 @@ pub struct VMKernelConfig {
     pub kernel_path: String,
     /// The load address of the kernel image.
     pub kernel_load_addr: usize,
+    /// Policy for deriving the effective kernel load and entry addresses.
+    #[serde(default)]
+    pub load_policy: KernelLoadPolicy,
     /// Whether to enable BIOS boot flow for this VM.
     #[serde(default)]
     pub enable_bios: bool,

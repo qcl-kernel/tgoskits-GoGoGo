@@ -8,6 +8,7 @@ ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/../../../.." && pwd)"
 RTDIR="${1:-$ROOT/tmp/rt-thread-5.2.2-full}"
 DRIVER="$RTDIR/components/drivers/virtio/virtio_net.c"
 VIRTIO_HEADER="$RTDIR/components/drivers/virtio/virtio.h"
+VIRTIO_BSP_HEADER="$RTDIR/bsp/qemu-virt64-aarch64/drivers/virt.h"
 GICV3="$RTDIR/libcpu/aarch64/common/gicv3.c"
 INTERRUPT="$RTDIR/libcpu/aarch64/common/interrupt.c"
 INTERRUPT_HEADER="$RTDIR/libcpu/aarch64/common/include/interrupt.h"
@@ -33,6 +34,16 @@ if [[ ! -f "$DRIVER" ]]; then
 fi
 
 failures=0
+if ! grep -Eq '^#define[[:space:]]+VIRTIO_VENDOR_ID[[:space:]]+\(?0x1AF4\)?' \
+    "$VIRTIO_BSP_HEADER"; then
+    echo "FAIL: RT-Thread virtio vendor ID must match AxVisor's standard 0x1AF4" >&2
+    failures=$((failures + 1))
+fi
+if ! grep -Eq '^#define[[:space:]]+VIRTIO_IRQ_BASE[[:space:]]+\(?48\)?' \
+    "$VIRTIO_BSP_HEADER"; then
+    echo "FAIL: RT-Thread virtio IRQ must match AxVisor input 48" >&2
+    failures=$((failures + 1))
+fi
 if [[ -e "$LEGACY_NO_POLL_PATCH" ]]; then
     echo "FAIL: obsolete virtio-net polling/debug cleanup patch must be removed" >&2
     failures=$((failures + 1))
@@ -525,7 +536,6 @@ require_pattern \
     "apply script installs absolute AArch64 tick deadlines" \
     '0008-aarch64-gtimer-use-absolute-deadlines\.patch' \
     "$APPLY_SCRIPT"
-
 if [[ ! -f "$INSTALLED_BENCHMARK" ]]; then
     echo "FAIL: installed RT benchmark source is missing: $INSTALLED_BENCHMARK" >&2
     failures=$((failures + 1))
@@ -537,6 +547,10 @@ fi
 require_pattern \
     "RT-Thread applications include the Task 3 SCons group" \
     "group[[:space:]]*\+=[[:space:]]*SConscript\('task3/SConscript'\)" \
+    "$APPLICATION_SCONSCRIPT"
+require_pattern \
+    "RT-Thread applications import the exported root path for clean SCons builds" \
+    "^Import\\('RTT_ROOT'\\)$" \
     "$APPLICATION_SCONSCRIPT"
 for task3_file in \
     task3_server.c SConscript controller.c controller.h task3_protocol.c \
@@ -573,29 +587,27 @@ if [[ -f "$TASK3_APPDIR/rt_ipc.h" ]] && \
     echo "FAIL: installed Task 3 RT-IPC header differs from v2 common header" >&2
     failures=$((failures + 1))
 fi
-if [[ -f "$TASK3_APPDIR/SConscript" ]]; then
-    require_pattern \
-        "Task 3 SCons supports one dropped status packet" \
-        'TASK3_FAULT_DROP_STATUS_ONCE' \
-        "$TASK3_APPDIR/SConscript"
-    require_pattern \
-        "Task 3 SCons supports delayed server startup" \
-        'TASK3_FAULT_DELAY_START_MS' \
-        "$TASK3_APPDIR/SConscript"
-fi
 if [[ -f "$TASK3_APPDIR/task3_server.c" ]]; then
+    reject_pattern \
+        "Task 3 faults are not compile-time SCons switches" \
+        'TASK3_FAULT_(DROP_STATUS_ONCE|DELAY_START_MS)' \
+        "$TASK3_APPDIR/SConscript"
+    require_pattern \
+        "Task 3 faults are selected from boot arguments" \
+        'rt_ofw_bootargs_select\("task3\.fault="' \
+        "$TASK3_APPDIR/task3_server.c"
     require_pattern \
         "Task 3 delayed startup emits RT-Thread evidence" \
         'TASK3_FAULT_DELAYED_SERVER delay_ms=%d' \
         "$TASK3_APPDIR/task3_server.c"
     require_pattern \
         "Task 3 delayed startup stays in the server application thread" \
-        'rt_thread_mdelay\(TASK3_FAULT_DELAY_START_MS\);' \
+        'rt_thread_mdelay\(3000\);' \
         "$TASK3_APPDIR/task3_server.c"
     require_order \
         "Task 3 delayed startup evidence precedes the application-thread delay" \
         'TASK3_FAULT_DELAYED_SERVER delay_ms=%d' \
-        'rt_thread_mdelay\(TASK3_FAULT_DELAY_START_MS\);' \
+        'rt_thread_mdelay\(3000\);' \
         "$TASK3_APPDIR/task3_server.c"
     require_pattern \
         "Task 3 waits for the shared static address" \

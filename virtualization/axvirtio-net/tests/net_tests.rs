@@ -293,6 +293,30 @@ fn device_identity_and_features() {
 }
 
 #[test]
+fn device_identity_can_use_qemu_virtio_mmio_vendor_id() {
+    let mem = Arc::new(MockMem::new(0x3000));
+    let (backend, _) = RecordBackend::new();
+    let dev = VirtioMmioNetDevice::new_with_vendor_id(
+        GuestPhysAddr::from(BASE_IPA),
+        REGION_LEN,
+        backend,
+        VirtioNetConfig::default(),
+        SharedMem(mem),
+        0x554d_4551,
+    )
+    .unwrap();
+
+    assert_eq!(
+        dev.mmio_read(
+            GuestPhysAddr::from(BASE_IPA + vc::VIRTIO_MMIO_VENDOR_ID),
+            AccessWidth::Dword,
+        )
+        .unwrap(),
+        0x554d_4551
+    );
+}
+
+#[test]
 fn mac_and_status_config_reads() {
     let mem = Arc::new(MockMem::new(0x3000));
     let cfg = VirtioNetConfig::new([0x00, 0x11, 0x22, 0x33, 0x44, 0x55]);
