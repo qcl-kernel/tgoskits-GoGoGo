@@ -34,9 +34,9 @@ if [[ ! -f "$DRIVER" ]]; then
 fi
 
 failures=0
-if ! grep -Eq '^#define[[:space:]]+VIRTIO_VENDOR_ID[[:space:]]+\(?0x1AF4\)?' \
+if ! grep -Eq '^#define[[:space:]]+VIRTIO_VENDOR_ID[[:space:]]+\(?0x554d4551\)?' \
     "$VIRTIO_BSP_HEADER"; then
-    echo "FAIL: RT-Thread virtio vendor ID must match AxVisor's standard 0x1AF4" >&2
+    echo "FAIL: RT-Thread virtio-mmio vendor ID must match QEMU's 0x554d4551" >&2
     failures=$((failures + 1))
 fi
 if ! grep -Eq '^#define[[:space:]]+VIRTIO_IRQ_BASE[[:space:]]+\(?48\)?' \
@@ -94,7 +94,7 @@ extract_function() {
     local file="$2"
 
     awk -v function_name="$function_name" '
-        !in_function && $0 ~ "^[[:space:]]*static[[:space:]].*[[:space:]]" function_name "[[:space:]]*\\(" {
+        !in_function && $0 ~ "^[[:space:]]*static[[:space:]].*([[:space:]]|\\*)" function_name "[[:space:]]*\\(" {
             in_function = 1
         }
         in_function {
@@ -174,6 +174,30 @@ require_pattern \
 require_pattern \
     "RX completion copies the matching receive buffer" \
     'rt_memcpy\(p->payload, virtio_net_dev->info\[id / 2\]\.rx_buffer, len\);'
+require_function_pattern \
+    "RX consumer invalidates the device-written used index before polling" \
+    'virtio_net_rx' \
+    'virtio_net_invalidate_used\(queue_rx\);' \
+    "$DRIVER"
+require_function_pattern \
+    "RX ISR invalidates the device-written used index before interrupt gating" \
+    'virtio_net_isr' \
+    'virtio_net_invalidate_used\(queue_rx\);' \
+    "$DRIVER"
+require_pattern \
+    "RX used-ring helper invalidates DMA-visible cache lines" \
+    'rt_hw_cpu_dcache_ops\(RT_HW_CACHE_INVALIDATE' \
+    "$DRIVER"
+require_function_pattern \
+    "TX producer flushes the device header before notify" \
+    'virtio_net_tx' \
+    'rt_hw_cpu_dcache_ops\(RT_HW_CACHE_FLUSH, &virtio_net_dev->info\[id\]\.hdr' \
+    "$DRIVER"
+require_function_pattern \
+    "TX producer flushes the payload before notify" \
+    'virtio_net_tx' \
+    'rt_hw_cpu_dcache_ops\(RT_HW_CACHE_FLUSH, virtio_net_dev->info\[id\]\.tx_buffer' \
+    "$DRIVER"
 require_function_pattern \
     "TX copies each frame into TX-owned storage" \
     'virtio_net_tx' \

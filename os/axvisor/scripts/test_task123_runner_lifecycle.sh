@@ -163,19 +163,11 @@ cat <<'LOG'
 [VM 3] TASK3_RTOS_READY ip=192.168.77.30 port=9877
 [VM 3] msh />
 LOG
-printf '[VM 1] [client] fault injection: force disconnect at request=%s\n' \
-    "$((task2_count / 2))"
-echo '[VM 1] [client] reconnect complete recovery_ms=1 attempts=1'
 for payload in 64 256 1024; do
     printf '[VM 1] --- Payload %sB ---\n' "$payload"
     printf '[VM 1] sent=%s recv=%s\n' "$task2_count" "$task2_count"
-    if [[ "$payload" == 64 ]]; then
-        echo '[VM 1] request_timeouts=0 protocol_errors=0 reconnects=1'
-        echo '[VM 1] transport: retrans=1 timeouts=0 dup=0 reorder=0 errors=0'
-    else
-        echo '[VM 1] request_timeouts=0 protocol_errors=0 reconnects=0'
-        echo '[VM 1] transport: retrans=0 timeouts=0 dup=0 reorder=0 errors=0'
-    fi
+    echo '[VM 1] request_timeouts=0 protocol_errors=0 reconnects=0'
+    echo '[VM 1] transport: retrans=0 timeouts=0 dup=0 reorder=0 errors=0'
 done
 echo '[VM 1] RT-IPC client exited with rc=0'
 echo '[VM 1] ALL TESTS COMPLETE'
@@ -211,6 +203,11 @@ case "$task3_fault" in
     delayed-server) echo '[VM 3] TASK3_FAULT_DELAYED_SERVER delay_ms=3000' ;;
     malformed) echo '[VM 1] TASK3_FAULT_MALFORMED schema2=rejected short=rejected crc=rejected rejected=3 actuator_before=0 actuator_after=0 applied_delta=0' ;;
 esac
+if [[ -n "${FAKE_QEMU_EXPECT_COMMAND:-}" &&
+      "${FAKE_QEMU_BENCHMARK_AFTER_LINUX:-0}" != 1 ]]; then
+    emit_linux_finals
+    linux_finals_emitted=1
+fi
 }
 
 emit_linux_finals() {
@@ -247,16 +244,20 @@ emit_benchmark() {
     local command=$1
     local value=${command##* }
     if [[ "$command" == benchmark\ * ]]; then
-        printf 'RTBENCH_BEGIN samples=%s frequency=1000000\n' "$value"
+        local counters='p50_cycles=1 p95_cycles=2 p99_cycles=3 p99_9_cycles=4 max_cycles=5 mean_cycles=2 p50_instructions=1 p95_instructions=2 p99_instructions=3 p99_9_instructions=4 max_instructions=5 mean_instructions=2'
+        printf 'RTBENCH_BEGIN samples=%s frequency=1000000 pmu_event=0x8\n' "$value"
+        echo 'RTBENCH_PMU status=ready event=0x8 cycles_delta=100 instructions_delta=100'
         for run in 1 2 3; do
             for metric in timer_jitter callback_exec; do
-                printf 'RTBENCH metric=%s run=%s expected=%s collected=%s missing=0 p50_ns=1 p95_ns=2 p99_ns=3 p99_9_ns=4 max_ns=5 miss_100us=0 miss_500us=0 miss_1ms=0 mean_ns=2\n' \
-                    "$metric" "$run" "$value" "$value"
+                printf 'RTBENCH metric=%s run=%s expected=%s collected=%s missing=0 p50_ns=1 p95_ns=2 p99_ns=3 p99_9_ns=4 max_ns=5 miss_100us=0 miss_500us=0 miss_1ms=0 mean_ns=2 %s\n' \
+                    "$metric" "$run" "$value" "$value" "$counters"
             done
         done
-        for metric in preemption irq irq_to_task irq_disabled_duration mutex_inversion wake_under_load net_event_latency; do
-            printf 'RTBENCH metric=%s run=1 expected=%s collected=%s missing=0 p50_ns=1 p95_ns=2 p99_ns=3 p99_9_ns=4 max_ns=5 miss_100us=0 miss_500us=0 miss_1ms=0 mean_ns=2\n' \
-                "$metric" "$value" "$value"
+        for metric in preemption irq irq_to_task irq_disabled_duration mutex_inversion wake_under_load \
+            context_switch scheduler_decision sync_sem sync_mutex sync_mailbox irq_handler_exec \
+            deadline_miss_under_load net_event_latency; do
+            printf 'RTBENCH metric=%s run=1 expected=%s collected=%s missing=0 p50_ns=1 p95_ns=2 p99_ns=3 p99_9_ns=4 max_ns=5 miss_100us=0 miss_500us=0 miss_1ms=0 mean_ns=2 %s\n' \
+                "$metric" "$value" "$value" "$counters"
         done
         if [[ "${FAKE_QEMU_BEHAVIOR:-pass}" == benchmark-fail ]]; then
             echo 'RTBENCH_END status=FAIL'
@@ -265,15 +266,17 @@ emit_benchmark() {
         fi
     else
         local expected=$((value * 1000 - 1))
-        printf 'RTBENCH_STABILITY_BEGIN seconds=%s expected=%s\n' "$value" "$expected"
+        local counters='p50_cycles=1 p95_cycles=2 p99_cycles=3 p99_9_cycles=4 max_cycles=5 mean_cycles=2 p50_instructions=1 p95_instructions=2 p99_instructions=3 p99_9_instructions=4 max_instructions=5 mean_instructions=2'
+        printf 'RTBENCH_STABILITY_BEGIN seconds=%s expected=%s frequency=1000000 pmu_event=0x8\n' "$value" "$expected"
+        echo 'RTBENCH_PMU status=ready event=0x8 cycles_delta=100 instructions_delta=100'
         for metric in stability_jitter callback_exec; do
             local miss_1ms=0
             if [[ "$metric" == stability_jitter &&
                   "${FAKE_QEMU_BEHAVIOR:-pass}" == stability-timer-limit ]]; then
                 miss_1ms=1
             fi
-            printf 'RTBENCH metric=%s run=1 expected=%s collected=%s missing=0 p50_ns=1 p95_ns=2 p99_ns=3 p99_9_ns=4 max_ns=5 miss_100us=0 miss_500us=0 miss_1ms=%s mean_ns=2\n' \
-                "$metric" "$expected" "$expected" "$miss_1ms"
+            printf 'RTBENCH metric=%s run=1 expected=%s collected=%s missing=0 p50_ns=1 p95_ns=2 p99_ns=3 p99_9_ns=4 max_ns=5 miss_100us=0 miss_500us=0 miss_1ms=%s mean_ns=2 %s\n' \
+                "$metric" "$expected" "$expected" "$miss_1ms" "$counters"
         done
         if [[ "${FAKE_QEMU_BEHAVIOR:-pass}" == stability-fail ||
               "${FAKE_QEMU_BEHAVIOR:-pass}" == stability-timer-limit ]]; then
@@ -323,8 +326,13 @@ if [[ -n "${FAKE_QEMU_EXPECT_COMMAND:-}" ]]; then
         linux_finals_emitted=1
     elif [[ "${FAKE_QEMU_BEHAVIOR:-pass}" != missing-benchmark ]]; then
         emit_benchmark "$benchmark_command"
+        if [[ "$benchmark_command" == benchmark\ * ]]; then
+            printf 'TASK3_RTOS_FINAL requests=%s errors=%s duplicates=%s applied_steps=%s retries=%s\n' \
+                "$records" "$rtos_errors" "$rtos_duplicates" "$records" "$rtos_retries"
+        fi
     fi
-    if [[ "${FAKE_QEMU_BENCHMARK_AFTER_LINUX:-0}" != 1 ]]; then
+    if [[ "${FAKE_QEMU_BENCHMARK_AFTER_LINUX:-0}" != 1 &&
+          "${FAKE_QEMU_EXPECT_COMMAND:-}" == rtbench_stability\ * ]]; then
         wait_for_control '['
         echo 'select-vm1' >> "$FAKE_QEMU_STDIN_LOG"
     fi
@@ -333,7 +341,8 @@ if [[ "${linux_finals_emitted:-0}" != 1 ]]; then
     emit_linux_finals
 fi
 if [[ -n "${FAKE_QEMU_EXPECT_COMMAND:-}" &&
-      "${FAKE_QEMU_BENCHMARK_AFTER_LINUX:-0}" != 1 ]]; then
+      "${FAKE_QEMU_BENCHMARK_AFTER_LINUX:-0}" != 1 &&
+      "${FAKE_QEMU_EXPECT_COMMAND:-}" == rtbench_stability\ * ]]; then
     wait_for_control ']'
     echo 'select-vm3-final' >> "$FAKE_QEMU_STDIN_LOG"
     printf 'TASK3_RTOS_FINAL requests=%s errors=%s duplicates=%s applied_steps=%s retries=%s\n' \
@@ -519,8 +528,13 @@ for realtime_case in 'realtime-suite:benchmark 2' 'stability:rtbench_stability 1
             cat "$realtime_output/console.log" >&2
         fail "$realtime_mode feeder run failed"
     fi
-    [[ "$(cat "$records/qemu-stdin.log")" == $'select-vm3\ncommand='"$realtime_command"$'\nselect-vm1\nselect-vm3-final' ]] ||
-        fail "$realtime_mode did not drain the VM1 and VM3 replay buffers"
+    if [[ "$realtime_mode" == realtime-suite ]]; then
+        [[ "$(cat "$records/qemu-stdin.log")" == $'select-vm3\ncommand='"$realtime_command" ]] ||
+            fail "$realtime_mode did not preserve the VM3 benchmark stream"
+    else
+        [[ "$(cat "$records/qemu-stdin.log")" == $'select-vm3\ncommand='"$realtime_command"$'\nselect-vm1\nselect-vm3-final' ]] ||
+            fail "$realtime_mode did not drain the VM1 and VM3 replay buffers"
+    fi
     assert_mode_contract "$realtime_mode" \
         "$expected_guest_cmdline" \
         "$fixtures/rtthread-normal.bin"

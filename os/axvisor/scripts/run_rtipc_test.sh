@@ -31,6 +31,9 @@ CPU_LOAD_LOG="${CPU_LOAD_LOG:-}"
 RTBENCH_TIMING_LOG="${RTBENCH_TIMING_LOG:-${LOG}.timing}"
 QEMU_UCLAMP_MIN="${QEMU_UCLAMP_MIN:-1024}"
 QEMU_TCG_THREAD="${QEMU_TCG_THREAD:-multi}"
+# RTBENCH requires QEMU's precise icount mode so INST_RETIRED (0x08) is
+# available alongside the virtual timer and cycle counters.
+QEMU_ICOUNT="${QEMU_ICOUNT:-shift=3}"
 RTBENCH_MODE=none
 RTBENCH_COMMAND=
 RTBENCH_DONE_MARKER=
@@ -46,6 +49,21 @@ case "$QEMU_TCG_THREAD" in
   single|multi) ;;
   *) echo "QEMU_TCG_THREAD must be single or multi" >&2; exit 2 ;;
 esac
+
+validate_precise_icount() {
+  local value=${QEMU_ICOUNT:-}
+  local shift
+  [[ "$value" =~ ^shift=[0-9]+(,.*)?$ ]] || {
+    echo "QEMU_ICOUNT must use precise fixed-shift mode for RTBENCH (for example shift=3), got: $value" >&2
+    return 2
+  }
+  shift=${value#shift=}
+  shift=${shift%%,*}
+  if [ "$shift" -gt 10 ]; then
+    echo "QEMU_ICOUNT shift must be between 0 and 10 for RTBENCH, got: $shift" >&2
+    return 2
+  fi
+}
 
 cleanup_build_artifacts() {
   if [ -n "$STAGING" ]; then
@@ -398,6 +416,7 @@ elif [ -n "$RTBENCH_SUITE_SAMPLES" ]; then
 fi
 
 if [ "$RTBENCH_MODE" != none ]; then
+  validate_precise_icount || return 2
   case "$RTBENCH_START_MODE" in
     concurrent|after-rtipc) ;;
     *)
@@ -563,6 +582,10 @@ record_runtime_artifact axvisor-bin "$AXVISOR_BIN"
 # 5. Launch QEMU
 echo "[5/5] Launching QEMU..."
 
+if [ "$RTBENCH_MODE" != none ]; then
+  QEMU_TCG_THREAD=single
+fi
+
 : > "$LOG"
 : > "$QEMU_LOG"
 completion_markers=('RT-IPC client exited with rc=0')
@@ -572,7 +595,7 @@ qemu_args=(
   -snapshot
   -name 'tgoskits,debug-threads=on'
   -accel "tcg,thread=$QEMU_TCG_THREAD"
-  -cpu cortex-a72
+  -cpu cortex-a72,pmu=on
   -machine virt,virtualization=on,gic-version=3
   -global virtio-mmio.force-legacy=false
   -smp 4
@@ -586,6 +609,9 @@ qemu_args=(
   -device virtio-net-device,netdev=net2,bus=virtio-mmio-bus.2,mac=52:54:00:77:00:03
   -kernel "$AXVISOR_BIN"
 )
+if [ "$RTBENCH_MODE" != none ]; then
+  qemu_args+=( -icount "$QEMU_ICOUNT" )
+fi
 if [ "$RTBENCH_MODE" != none ]; then
   completion_markers+=("$RTBENCH_DONE_MARKER")
   if create_serial_session; then

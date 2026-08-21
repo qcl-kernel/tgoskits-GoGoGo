@@ -412,7 +412,6 @@ static int run_test(int sock, struct sockaddr_in *peer,
         return -1;
     uint64_t last_progress = test_start;
     uint64_t last_receive = test_start;
-    int disconnect_done = payload_size != 64;
     int start_index = 0;
 
     if (faults->profile == RTIPC_FAULT_PROFILE_RELIABILITY &&
@@ -428,12 +427,12 @@ static int run_test(int sock, struct sockaddr_in *peer,
 
     for (int i = start_index; i < count; i++) {
         /* Inject one connection failure between requests. */
-        if (!disconnect_done && i == count / 2 && payload_size == 64) {
+        if (rtipc_fault_should_force_disconnect(
+                faults->profile, payload_size, i, count)) {
             if (force_disconnect_and_reconnect(sock, peer, conn, i, result) != 0) {
                 result->protocol_errors++;
                 return -1;
             }
-            disconnect_done = 1;
         }
 
         if (!rtipc_connection_is_connected(conn)) {

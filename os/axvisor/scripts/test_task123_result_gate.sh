@@ -33,12 +33,10 @@ emit_task2() {
 [VM 1] TASK123_LINUX_NET_READY ip=192.168.77.11 peer=192.168.77.30
 [VM 3] RTIPC_SERVER_READY ip=192.168.77.30 port=9876
 [VM 3] TASK3_RTOS_READY ip=192.168.77.30 port=9877
-[VM 1] [client] fault injection: force disconnect at request=1
-[VM 1] [client] reconnect complete recovery_ms=1 attempts=1
 [VM 1] --- Payload 64B ---
 [VM 1] sent=2 recv=2
-[VM 1] request_timeouts=0 protocol_errors=0 reconnects=1
-[VM 1] transport: retrans=1 timeouts=0 dup=0 reorder=0 errors=0
+[VM 1] request_timeouts=0 protocol_errors=0 reconnects=0
+[VM 1] transport: retrans=0 timeouts=0 dup=0 reorder=0 errors=0
 [VM 1] --- Payload 256B ---
 [VM 1] sent=2 recv=2
 [VM 1] request_timeouts=0 protocol_errors=0 reconnects=0
@@ -110,16 +108,19 @@ EOF
 
 emit_suite() {
     local samples=$1
-    printf '[VM 3] RTBENCH_BEGIN samples=%s frequency=1000000\n' "$samples"
+    local counters='p50_cycles=1 p95_cycles=2 p99_cycles=3 p99_9_cycles=4 max_cycles=5 mean_cycles=2 p50_instructions=1 p95_instructions=2 p99_instructions=3 p99_9_instructions=4 max_instructions=5 mean_instructions=2'
+    printf '[VM 3] RTBENCH_BEGIN samples=%s frequency=1000000 pmu_event=0x8\n' "$samples"
     for run in 1 2 3; do
-        printf '[VM 3] RTBENCH metric=timer_jitter run=%s expected=%s collected=%s missing=0 p50_ns=1 p95_ns=2 p99_ns=3 p99_9_ns=4 max_ns=5 miss_100us=0 miss_500us=0 miss_1ms=0 mean_ns=2\n' \
-            "$run" "$samples" "$samples"
-        printf '[VM 3] RTBENCH metric=callback_exec run=%s expected=%s collected=%s missing=0 p50_ns=1 p95_ns=2 p99_ns=3 p99_9_ns=4 max_ns=5 miss_100us=0 miss_500us=0 miss_1ms=0 mean_ns=2\n' \
-            "$run" "$samples" "$samples"
+        printf '[VM 3] RTBENCH metric=timer_jitter run=%s expected=%s collected=%s missing=0 p50_ns=1 p95_ns=2 p99_ns=3 p99_9_ns=4 max_ns=5 miss_100us=0 miss_500us=0 miss_1ms=0 mean_ns=2 %s\n' \
+            "$run" "$samples" "$samples" "$counters"
+        printf '[VM 3] RTBENCH metric=callback_exec run=%s expected=%s collected=%s missing=0 p50_ns=1 p95_ns=2 p99_ns=3 p99_9_ns=4 max_ns=5 miss_100us=0 miss_500us=0 miss_1ms=0 mean_ns=2 %s\n' \
+            "$run" "$samples" "$samples" "$counters"
     done
-    for metric in preemption irq irq_to_task irq_disabled_duration mutex_inversion wake_under_load net_event_latency; do
-        printf '[VM 3] RTBENCH metric=%s run=1 expected=%s collected=%s missing=0 p50_ns=1 p95_ns=2 p99_ns=3 p99_9_ns=4 max_ns=5 miss_100us=0 miss_500us=0 miss_1ms=0 mean_ns=2\n' \
-            "$metric" "$samples" "$samples"
+    for metric in preemption irq irq_to_task irq_disabled_duration mutex_inversion wake_under_load \
+        context_switch scheduler_decision sync_sem sync_mutex sync_mailbox irq_handler_exec \
+        deadline_miss_under_load net_event_latency; do
+        printf '[VM 3] RTBENCH metric=%s run=1 expected=%s collected=%s missing=0 p50_ns=1 p95_ns=2 p99_ns=3 p99_9_ns=4 max_ns=5 miss_100us=0 miss_500us=0 miss_1ms=0 mean_ns=2 %s\n' \
+            "$metric" "$samples" "$samples" "$counters"
     done
     echo '[VM 3] RTBENCH_END status=PASS'
 }
@@ -127,11 +128,12 @@ emit_suite() {
 emit_stability() {
     local seconds=$1
     local expected=$((seconds * 1000 - 1))
-    printf '[VM 3] RTBENCH_STABILITY_BEGIN seconds=%s expected=%s\n' \
+    local counters='p50_cycles=1 p95_cycles=2 p99_cycles=3 p99_9_cycles=4 max_cycles=5 mean_cycles=2 p50_instructions=1 p95_instructions=2 p99_instructions=3 p99_9_instructions=4 max_instructions=5 mean_instructions=2'
+    printf '[VM 3] RTBENCH_STABILITY_BEGIN seconds=%s expected=%s frequency=1000000 pmu_event=0x8\n' \
         "$seconds" "$expected"
     for metric in stability_jitter callback_exec; do
-        printf '[VM 3] RTBENCH metric=%s run=1 expected=%s collected=%s missing=0 p50_ns=1 p95_ns=2 p99_ns=3 p99_9_ns=4 max_ns=5 miss_100us=0 miss_500us=0 miss_1ms=0 mean_ns=2\n' \
-            "$metric" "$expected" "$expected"
+        printf '[VM 3] RTBENCH metric=%s run=1 expected=%s collected=%s missing=0 p50_ns=1 p95_ns=2 p99_ns=3 p99_9_ns=4 max_ns=5 miss_100us=0 miss_500us=0 miss_1ms=0 mean_ns=2 %s\n' \
+            "$metric" "$expected" "$expected" "$counters"
     done
     printf '[VM 3] RTBENCH_STABILITY_END status=PASS expected=%s collected=%s missing=0\n' \
         "$expected" "$expected"
@@ -248,7 +250,7 @@ path = Path(sys.argv[1])
 text = path.read_text(encoding="utf-8")
 needle = "p99_9_ns=4 max_ns=5"
 replacement = "p99_9_n\x1b[32m[I/rtipic.srv] client connected\x1b[0ms=4 max_ns=5"
-if text.count(needle) != 13:
+if text.count(needle) != 20:
     raise SystemExit("field-name interleaving fixture marker count changed")
 path.write_text(text.replace(needle, replacement, 1), encoding="utf-8")
 PY
@@ -269,7 +271,9 @@ data = path.read_bytes()
 metric = (
     b"[VM 3] RTBENCH metric=net_event_latency run=1 expected=2 collected=2 "
     b"missing=0 p50_ns=1 p95_ns=2 p99_ns=3 p99_9_ns=4 max_ns=5 "
-    b"miss_100us=0 miss_500us=0 miss_1ms=0 mean_ns=2\n"
+    b"miss_100us=0 miss_500us=0 miss_1ms=0 mean_ns=2 "
+    b"p50_cycles=1 p95_cycles=2 p99_cycles=3 p99_9_cycles=4 max_cycles=5 mean_cycles=2 "
+    b"p50_instructions=1 p95_instructions=2 p99_instructions=3 p99_9_instructions=4 max_instructions=5 mean_instructions=2\n"
 )
 fragmented_metric = metric.replace(
     b"mean_ns=2\n",
@@ -291,6 +295,26 @@ rm -f -- "$tmp/realtime-suite-host-log-interleaved/linux.log" \
     "$tmp/realtime-suite-host-log-interleaved/summary.raw.json"
 run_gate "$tmp/realtime-suite-host-log-interleaved" realtime-suite --rtbench-samples 2 >/dev/null ||
     fail "host-log interleaved RTBENCH records were rejected"
+
+cp -a "$tmp/realtime-suite" "$tmp/realtime-suite-qemu-exit-after-cr"
+python3 - "$tmp/realtime-suite-qemu-exit-after-cr/console.log" <<'PY'
+import sys
+from pathlib import Path
+
+path = Path(sys.argv[1])
+data = path.read_bytes()
+marker = b"[VM 3] RTBENCH_END status=PASS\n"
+replacement = marker[:-1] + b"\rqemu-system-aarch64: terminating on signal 15\n"
+if data.count(marker) != 1:
+    raise SystemExit("QEMU exit-after-CR fixture marker not found")
+path.write_bytes(data.replace(marker, replacement, 1))
+PY
+rm -f -- "$tmp/realtime-suite-qemu-exit-after-cr/linux.log" \
+    "$tmp/realtime-suite-qemu-exit-after-cr/summary.json" \
+    "$tmp/realtime-suite-qemu-exit-after-cr/frames.csv" \
+    "$tmp/realtime-suite-qemu-exit-after-cr/summary.raw.json"
+run_gate "$tmp/realtime-suite-qemu-exit-after-cr" realtime-suite --rtbench-samples 2 >/dev/null ||
+    fail "QEMU exit text after a carriage-return benchmark marker was rejected"
 
 make_fixture "$tmp/stability"
 emit_stability 1 >> "$tmp/stability/console.log"

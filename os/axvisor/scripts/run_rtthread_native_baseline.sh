@@ -51,14 +51,32 @@ NATIVE_QEMU_LOG="${NATIVE_QEMU_LOG:-${NATIVE_GUEST_LOG}.qemu}"
 NATIVE_CPU_LOAD_LOG="${NATIVE_CPU_LOAD_LOG:-}"
 QEMU_UCLAMP_MIN="${QEMU_UCLAMP_MIN:-1024}"
 QEMU_TCG_THREAD="${QEMU_TCG_THREAD:-multi}"
+# INST_RETIRED is only exposed by QEMU in precise icount mode. A fixed
+# shift keeps the instruction-derived virtual clock deterministic enough for
+# the three-counter benchmark; shift=auto is adaptive and disables event 0x08.
+QEMU_ICOUNT="${QEMU_ICOUNT:-shift=3}"
 QEMU_NATIVE_VCPU_AFFINITY="${QEMU_NATIVE_VCPU_AFFINITY:-}"
 RTBENCH_ALLOW_QEMU_TIMER_LIMIT="${RTBENCH_ALLOW_QEMU_TIMER_LIMIT:-0}"
 RTBENCH_NET_HOST_PORT="${RTBENCH_NET_HOST_PORT:-19878}"
+
+if [ "$RTBENCH_MODE" = suite ] || [ "$RTBENCH_MODE" = stability ]; then
+    QEMU_TCG_THREAD=single
+fi
 
 case "$QEMU_TCG_THREAD" in
     single|multi) ;;
     *) echo "QEMU_TCG_THREAD must be single or multi" >&2; exit 2 ;;
 esac
+if [[ ! "$QEMU_ICOUNT" =~ ^shift=[0-9]+(,.*)?$ ]]; then
+    echo "QEMU_ICOUNT must use precise fixed-shift mode for RTBENCH (for example shift=3), got: $QEMU_ICOUNT" >&2
+    exit 2
+fi
+icount_shift="${QEMU_ICOUNT#shift=}"
+icount_shift="${icount_shift%%,*}"
+if [ "$icount_shift" -gt 10 ]; then
+    echo "QEMU_ICOUNT shift must be between 0 and 10 for RTBENCH, got: $icount_shift" >&2
+    exit 2
+fi
 case "$RTBENCH_ALLOW_QEMU_TIMER_LIMIT" in
     0|1) ;;
     *) echo "RTBENCH_ALLOW_QEMU_TIMER_LIMIT must be 0 or 1" >&2; exit 2 ;;
@@ -242,6 +260,8 @@ feed_command() {
 }
 
 echo "[3/3] Running ${RTBENCH_MODE} benchmark on QEMU virt/GICv3/Cortex-A72..."
+echo "QEMU PMU: on (event=0x8 INST_RETIRED)"
+echo "QEMU icount: ${QEMU_ICOUNT} (precise fixed-shift)"
 cd "$BSP_DIR"
 RUN_UNTIL_CHILD_PID_FILE="$qemu_pid_file" \
 "$RUN_UNTIL" "$RTBENCH_TIMEOUT_S" "$NATIVE_GUEST_LOG" "$RTBENCH_END_MARKER" -- \
@@ -252,7 +272,8 @@ RUN_UNTIL_CHILD_PID_FILE="$qemu_pid_file" \
         -accel "tcg,thread=$QEMU_TCG_THREAD" \
         -machine virt,gic-version=3 \
         -global virtio-mmio.force-legacy=false \
-        -cpu cortex-a72 \
+        -cpu cortex-a72,pmu=on \
+        -icount "$QEMU_ICOUNT" \
         -smp 1 \
         -m 1G \
         -netdev "user,id=net0,net=192.168.77.0/24,hostfwd=udp:127.0.0.1:${RTBENCH_NET_HOST_PORT}-192.168.77.30:9878" \

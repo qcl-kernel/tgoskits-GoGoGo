@@ -27,16 +27,49 @@ SUIT_METRICS = (
     "irq_disabled_duration",
     "mutex_inversion",
     "wake_under_load",
+    "context_switch",
+    "scheduler_decision",
+    "sync_sem",
+    "sync_mutex",
+    "sync_mailbox",
+    "irq_handler_exec",
+    "deadline_miss_under_load",
     "net_event_latency",
 )
 STABILITY_METRICS = ("stability_jitter", "callback_exec")
-STAT_FIELDS = (
+UNIT_STAT_FIELDS = {
+    "ns": (
+        "p50_ns", "p95_ns", "p99_ns", "p99_9_ns", "max_ns", "mean_ns",
+    ),
+    "cycles": (
+        "p50_cycles", "p95_cycles", "p99_cycles", "p99_9_cycles",
+        "max_cycles", "mean_cycles",
+    ),
+    "instructions": (
+        "p50_instructions", "p95_instructions", "p99_instructions",
+        "p99_9_instructions", "max_instructions", "mean_instructions",
+    ),
+}
+STAT_FIELDS = UNIT_STAT_FIELDS["ns"]
+ALL_STAT_FIELDS = (
     "p50_ns",
     "p95_ns",
     "p99_ns",
     "p99_9_ns",
     "max_ns",
     "mean_ns",
+    "p50_cycles",
+    "p95_cycles",
+    "p99_cycles",
+    "p99_9_cycles",
+    "max_cycles",
+    "mean_cycles",
+    "p50_instructions",
+    "p95_instructions",
+    "p99_instructions",
+    "p99_9_instructions",
+    "max_instructions",
+    "mean_instructions",
 )
 COUNT_FIELDS = (
     "miss_100us",
@@ -47,7 +80,15 @@ LINE_RE = re.compile(r"RTBENCH metric=([A-Za-z0-9_]+) run=([0-9]+)(.*)$")
 FIELD_NAMES = (
     b"expected", b"collected", b"missing", b"p50_ns", b"p95_ns",
     b"p99_ns", b"p99_9_ns", b"max_ns", b"miss_100us", b"miss_500us",
-    b"miss_1ms", b"mean_ns",
+    b"miss_1ms", b"mean_ns", b"p50_cycles", b"p95_cycles",
+    b"p99_cycles", b"p99_9_cycles", b"max_cycles", b"mean_cycles",
+    b"p50_instructions", b"p95_instructions", b"p99_instructions",
+    b"p99_9_instructions", b"max_instructions", b"mean_instructions",
+)
+FIELD_NAME_TEXT = tuple(name.decode("ascii") for name in FIELD_NAMES)
+FIELD_VALUE_RE = re.compile(
+    r"(?<![A-Za-z_])(" + "|".join(re.escape(name) for name in FIELD_NAME_TEXT) +
+    r")=([0-9]+)"
 )
 METRIC_MARKER = re.compile(rb"RTBENCH metric=([A-Za-z0-9_]+) run=([0-9]+)")
 METRIC_BOUNDARY = re.compile(rb"RTBENCH(?:_END|_STABILITY_|_ERROR)")
@@ -60,6 +101,12 @@ def parse_value(value: str) -> int:
 
 
 REPEATED_RUNS = {"timer_jitter", "callback_exec"}
+JOINT_SCENARIO_COMPARISONS = (
+    ("A_native", "B_axvisor_rtthread", "B_over_A"),
+    ("A_native", "C_axvisor_linux_rtthread", "C_over_A"),
+    ("B_axvisor_rtthread", "C_axvisor_linux_rtthread", "C_over_B"),
+)
+JOINT_CHANGE_THRESHOLD = 1.20
 
 
 def normalized_log_lines(path: Path) -> list[str]:
@@ -76,6 +123,16 @@ def normalized_log_lines(path: Path) -> list[str]:
     # benchmark fields such as the remainder of a split metric name.
     data = re.sub(
         rb"\[(?:I|W)/rtipic\.[^]]+\]\s+client\s+(?:connected|disconnected)[\r\n\x00 ]*",
+        b"",
+        data,
+    )
+    # Task 3 status can be emitted by the other guest while RTBENCH is
+    # printing a field. Remove the bounded status record so a split field
+    # such as "pTASK3_RTOS_FINAL...99_cycles" can be reconstructed.
+    data = re.sub(
+        rb"TASK3_RTOS_FINAL\s+requests=[0-9]+\s+errors=[0-9]+\s+"
+        rb"duplicates=[0-9]+\s+applied_steps=[0-9]+\s+retries=[0-9]+"
+        rb"[\r\n\x00 ]*",
         b"",
         data,
     )
@@ -108,7 +165,7 @@ def normalized_log_lines(path: Path) -> list[str]:
             block.append(continuation)
             candidate = b" ".join(block)
             if all(
-                re.search(rb"\b" + re.escape(name) + rb"=([0-9]+)", candidate)
+                re.search(rb"(?<![A-Za-z_])" + re.escape(name) + rb"=([0-9]+)", candidate)
                 for name in FIELD_NAMES
             ):
                 cursor += 1
@@ -117,7 +174,9 @@ def normalized_log_lines(path: Path) -> list[str]:
         chunk = b" ".join(block)
         values = {}
         for name in FIELD_NAMES:
-            match = re.search(rb"\b" + re.escape(name) + rb"=([0-9]+)", chunk)
+            match = re.search(
+                rb"(?<![A-Za-z_])" + re.escape(name) + rb"=([0-9]+)", chunk
+            )
             if match is not None:
                 values[name] = match.group(1)
         if len(values) == len(FIELD_NAMES):
@@ -141,16 +200,13 @@ def parse_log(path: Path) -> dict[str, dict[str, int]]:
         if metric in records and metric not in REPEATED_RUNS:
             raise ValueError(f"duplicate metric in {path}: {metric}")
         fields: dict[str, int] = {}
-        for item in fields_text.split():
-            if "=" not in item:
-                continue
-            key, value = item.split("=", 1)
-            fields[key] = parse_value(value)
+        for field_match in FIELD_VALUE_RE.finditer(fields_text):
+            fields[field_match.group(1)] = parse_value(field_match.group(2))
         required = (
             "expected",
             "collected",
             "missing",
-            *STAT_FIELDS,
+            *ALL_STAT_FIELDS,
             *COUNT_FIELDS,
         )
         missing = [key for key in required if key not in fields]
@@ -174,8 +230,135 @@ def require_metrics(records: dict[str, dict[str, int]], metrics: tuple[str, ...]
         raise ValueError(f"{label} has unexpected metrics: {', '.join(sorted(extra))}")
 
 
-def ratio(left: int, right: int) -> float | None:
-    return left / right if right else None
+def ratio(left: int | float | None, right: int | float | None) -> float | None:
+    return left / right if left is not None and right else None
+
+
+def joint_record(record: dict[str, int]) -> dict[str, Any]:
+    """Build a same-window view of the three counter domains.
+
+    Percentiles are independently calculated in the guest, so they are
+    reported as parallel values.  The efficiency ratios use the three means,
+    which are totals over the same sample set and therefore remain paired at
+    aggregate level.
+    """
+    return {
+        "p99": {
+            "ns": record["p99_ns"],
+            "cycles": record["p99_cycles"],
+            "instructions": record["p99_instructions"],
+        },
+        "max": {
+            "ns": record["max_ns"],
+            "cycles": record["max_cycles"],
+            "instructions": record["max_instructions"],
+        },
+        "mean": {
+            "ns": record["mean_ns"],
+            "cycles": record["mean_cycles"],
+            "instructions": record["mean_instructions"],
+        },
+        "aggregate_efficiency": {
+            "mean_ns_per_instruction": ratio(
+                record["mean_ns"], record["mean_instructions"]
+            ),
+            "mean_cycles_per_instruction": ratio(
+                record["mean_cycles"], record["mean_instructions"]
+            ),
+            "mean_ns_per_cycle": ratio(record["mean_ns"], record["mean_cycles"]),
+        },
+    }
+
+
+def classify_joint(
+    baseline: dict[str, int], candidate: dict[str, int]
+) -> tuple[str, dict[str, float | None]]:
+    """Classify a candidate using all three P99 counter domains.
+
+    This is an attribution heuristic, not a hard-real-time guarantee.  The
+    latency gate remains based on absolute nanoseconds elsewhere.
+    """
+    p99_ratios = {
+        "ns": ratio(candidate["p99_ns"], baseline["p99_ns"]),
+        "cycles": ratio(candidate["p99_cycles"], baseline["p99_cycles"]),
+        "instructions": ratio(
+            candidate["p99_instructions"], baseline["p99_instructions"]
+        ),
+    }
+    if any(value is None for value in p99_ratios.values()):
+        return "insufficient_baseline", p99_ratios
+
+    latency_high = p99_ratios["ns"] > JOINT_CHANGE_THRESHOLD
+    cycles_high = p99_ratios["cycles"] > JOINT_CHANGE_THRESHOLD
+    instructions_high = p99_ratios["instructions"] > JOINT_CHANGE_THRESHOLD
+    if latency_high and not cycles_high and not instructions_high:
+        classification = "latency_only"
+    elif latency_high and cycles_high and instructions_high:
+        classification = "path_expansion"
+    elif latency_high:
+        classification = "mixed"
+    elif cycles_high or instructions_high:
+        classification = "work_increase_without_latency_regression"
+    else:
+        classification = "stable"
+    return classification, p99_ratios
+
+
+def compare_joint(
+    baseline: dict[str, int], candidate: dict[str, int]
+) -> dict[str, Any]:
+    classification, p99_ratios = classify_joint(baseline, candidate)
+    baseline_joint = joint_record(baseline)
+    candidate_joint = joint_record(candidate)
+    return {
+        "classification": classification,
+        "p99_ratio": p99_ratios,
+        "max_ratio": {
+            unit: ratio(candidate_joint["max"][unit], baseline_joint["max"][unit])
+            for unit in ("ns", "cycles", "instructions")
+        },
+        "aggregate_efficiency_ratio": {
+            key: ratio(
+                candidate_joint["aggregate_efficiency"][key],
+                baseline_joint["aggregate_efficiency"][key],
+            )
+            for key in (
+                "mean_ns_per_instruction",
+                "mean_cycles_per_instruction",
+                "mean_ns_per_cycle",
+            )
+        },
+    }
+
+
+def build_joint_analysis(
+    scenarios: dict[str, dict[str, dict[str, int]]],
+    metrics: tuple[str, ...],
+) -> dict[str, Any]:
+    result: dict[str, Any] = {}
+    for metric in metrics:
+        result[metric] = {
+            "scenarios": {
+                label: joint_record(scenarios[label][metric])
+                for label in scenarios
+            },
+            "comparisons": {
+                output: compare_joint(
+                    scenarios[baseline][metric], scenarios[candidate][metric]
+                )
+                for baseline, candidate, output in JOINT_SCENARIO_COMPARISONS
+                if baseline in scenarios and candidate in scenarios
+            },
+        }
+    return result
+
+
+def fmt(value: Any) -> str:
+    if value is None:
+        return "n/a"
+    if isinstance(value, float):
+        return f"{value:.4f}".rstrip("0").rstrip(".")
+    return str(value)
 
 
 def markdown_report(result: dict[str, Any]) -> str:
@@ -197,28 +380,55 @@ def markdown_report(result: dict[str, Any]) -> str:
 
     lines.extend([
         "",
-        "## Percentiles",
+        "## 联合三指标分析",
         "",
-        "| Metric | Scenario | P50 (ns) | P95 (ns) | P99 (ns) | P99.9 (ns) | Max (ns) | >100us | >500us | >1ms |",
-        "|---|---|---:|---:|---:|---:|---:|---:|---:|---:|",
+        "纳秒用于实时性门禁；cycles 和 instructions 用于解释执行工作量。P99 分位数是三类"
+        "独立分布，均值效率比来自同一批样本。归因分类是定位启发式，不是硬实时证明。",
+        "",
+        "| Metric | Comparison | P99 ns ratio | P99 cycles ratio | P99 instructions ratio | "
+        "Mean ns/instruction ratio | Mean cycles/instruction ratio | Mean ns/cycle ratio | "
+        "Classification |",
+        "|---|---|---:|---:|---:|---:|---:|---:|---|",
     ])
-    network = result.get("network_comparison")
     for metric in result["metrics"]:
-        metric_comparison = result["comparison"].get(metric)
-        if metric_comparison is None and network and network.get("metric") == metric:
-            metric_comparison = network
-        if metric_comparison is None:
-            continue
-        for label in ("A_native", "B_axvisor_rtthread", "C_axvisor_linux_rtthread"):
-            record = metric_comparison.get(label)
-            if record is None:
-                lines.append(f"| {metric} | {label} | N/A | N/A | N/A | N/A | N/A | N/A | N/A | N/A |")
-                continue
+        joint = result.get("joint_analysis", {}).get(metric, {})
+        for comparison, values in joint.get("comparisons", {}).items():
             lines.append(
-                f"| {metric} | {label} | {record['p50_ns']} | {record['p95_ns']} | "
-                f"{record['p99_ns']} | {record['p99_9_ns']} | {record['max_ns']} | "
-                f"{record['miss_100us']} | {record['miss_500us']} | {record['miss_1ms']} |"
+                f"| {metric} | {comparison} | {fmt(values['p99_ratio']['ns'])} | "
+                f"{fmt(values['p99_ratio']['cycles'])} | "
+                f"{fmt(values['p99_ratio']['instructions'])} | "
+                f"{fmt(values['aggregate_efficiency_ratio']['mean_ns_per_instruction'])} | "
+                f"{fmt(values['aggregate_efficiency_ratio']['mean_cycles_per_instruction'])} | "
+                f"{fmt(values['aggregate_efficiency_ratio']['mean_ns_per_cycle'])} | "
+                f"{values['classification']} |"
             )
+
+    network = result.get("network_comparison")
+    for unit, fields in UNIT_STAT_FIELDS.items():
+        suffix = unit
+        lines.extend([
+            "",
+            f"## Percentiles ({unit})",
+            "",
+            f"| Metric | Scenario | P50 ({suffix}) | P95 ({suffix}) | P99 ({suffix}) | P99.9 ({suffix}) | Max ({suffix}) |",
+            "|---|---|---:|---:|---:|---:|---:|",
+        ])
+        for metric in result["metrics"]:
+            metric_comparison = result["comparison"].get(metric)
+            if metric_comparison is None and network and network.get("metric") == metric:
+                metric_comparison = network
+            if metric_comparison is None:
+                continue
+            p50, p95, p99, p99_9, maximum, _mean = fields
+            for label in ("A_native", "B_axvisor_rtthread", "C_axvisor_linux_rtthread"):
+                record = metric_comparison.get(label)
+                if record is None:
+                    lines.append(f"| {metric} | {label} | N/A | N/A | N/A | N/A | N/A |")
+                    continue
+                lines.append(
+                    f"| {metric} | {label} | {record[p50]} | {record[p95]} | "
+                    f"{record[p99]} | {record[p99_9]} | {record[maximum]} |"
+                )
 
     if result.get("network_metric_status"):
         lines.extend([
@@ -253,6 +463,7 @@ def main() -> int:
     )
     parser.add_argument("--json-output", type=Path)
     parser.add_argument("--csv-output", type=Path)
+    parser.add_argument("--joint-csv-output", type=Path)
     parser.add_argument("--markdown-output", type=Path)
     args = parser.parse_args()
 
@@ -292,23 +503,25 @@ def main() -> int:
             "C_axvisor_linux_rtthread": c,
             "B_over_A": {
                 field: ratio(b[field], a[field])
-                for field in (*STAT_FIELDS, *COUNT_FIELDS)
+                for field in (*ALL_STAT_FIELDS, *COUNT_FIELDS)
             },
             "C_over_B": {
                 field: ratio(c[field], b[field])
-                for field in (*STAT_FIELDS, *COUNT_FIELDS)
+                for field in (*ALL_STAT_FIELDS, *COUNT_FIELDS)
             },
         }
 
     result = {
         "schema": 1,
         "metrics": list(metric_filter),
+        "units": list(UNIT_STAT_FIELDS),
         "core_metrics": list(core_filter),
         "comparison": comparison,
         "assessment": {
             label: classify(records)
             for label, records in scenarios.items()
         },
+        "joint_analysis": build_joint_analysis(scenarios, comparison_metrics),
     }
 
     if args.axvisor_only_core:
@@ -325,7 +538,7 @@ def main() -> int:
                     scenarios["C_axvisor_linux_rtthread"][network][field],
                     scenarios["A_native"][network][field],
                 )
-                for field in (*STAT_FIELDS, *COUNT_FIELDS)
+                for field in (*ALL_STAT_FIELDS, *COUNT_FIELDS)
             },
         }
 
@@ -336,14 +549,42 @@ def main() -> int:
         args.csv_output.parent.mkdir(parents=True, exist_ok=True)
         with args.csv_output.open("w", encoding="utf-8", newline="") as stream:
             writer = csv.writer(stream)
-            writer.writerow(["metric", "scenario", *STAT_FIELDS, *COUNT_FIELDS])
+            writer.writerow(["metric", "scenario", *ALL_STAT_FIELDS, *COUNT_FIELDS])
             for metric in metric_filter:
                 for label in scenarios:
                     record = scenarios[label].get(metric)
                     writer.writerow([
                         metric,
                         label,
-                        *([record[field] for field in (*STAT_FIELDS, *COUNT_FIELDS)] if record else [""] * (len(STAT_FIELDS) + len(COUNT_FIELDS))),
+                        *([record[field] for field in (*ALL_STAT_FIELDS, *COUNT_FIELDS)] if record else [""] * (len(ALL_STAT_FIELDS) + len(COUNT_FIELDS))),
+                    ])
+    if args.joint_csv_output:
+        args.joint_csv_output.parent.mkdir(parents=True, exist_ok=True)
+        with args.joint_csv_output.open("w", encoding="utf-8", newline="") as stream:
+            writer = csv.writer(stream)
+            writer.writerow([
+                "metric", "baseline", "candidate", "classification",
+                "p99_ns_ratio", "p99_cycles_ratio", "p99_instructions_ratio",
+                "max_ns_ratio", "max_cycles_ratio", "max_instructions_ratio",
+                "mean_ns_per_instruction_ratio", "mean_cycles_per_instruction_ratio",
+                "mean_ns_per_cycle_ratio",
+            ])
+            for metric in comparison_metrics:
+                comparisons = result["joint_analysis"][metric]["comparisons"]
+                for output, values in comparisons.items():
+                    baseline, candidate = {
+                        "B_over_A": ("A_native", "B_axvisor_rtthread"),
+                        "C_over_A": ("A_native", "C_axvisor_linux_rtthread"),
+                        "C_over_B": ("B_axvisor_rtthread", "C_axvisor_linux_rtthread"),
+                    }[output]
+                    writer.writerow([
+                        metric, baseline, candidate, values["classification"],
+                        values["p99_ratio"]["ns"], values["p99_ratio"]["cycles"],
+                        values["p99_ratio"]["instructions"], values["max_ratio"]["ns"],
+                        values["max_ratio"]["cycles"], values["max_ratio"]["instructions"],
+                        values["aggregate_efficiency_ratio"]["mean_ns_per_instruction"],
+                        values["aggregate_efficiency_ratio"]["mean_cycles_per_instruction"],
+                        values["aggregate_efficiency_ratio"]["mean_ns_per_cycle"],
                     ])
     if args.markdown_output:
         args.markdown_output.parent.mkdir(parents=True, exist_ok=True)

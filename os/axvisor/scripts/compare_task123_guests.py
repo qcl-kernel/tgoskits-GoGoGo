@@ -10,6 +10,8 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
+from summarize_rtthread_realtime import compare_joint, joint_record
+
 
 NUMBER = r"[0-9]+(?:\.[0-9]+)?"
 RTT_KEYS = ("min", "avg", "p50", "p95", "p99", "p99.9", "max")
@@ -36,7 +38,30 @@ RTBENCH_FIELDS = (
     "miss_500us",
     "miss_1ms",
     "mean_ns",
+    "p50_cycles",
+    "p95_cycles",
+    "p99_cycles",
+    "p99_9_cycles",
+    "max_cycles",
+    "mean_cycles",
+    "p50_instructions",
+    "p95_instructions",
+    "p99_instructions",
+    "p99_9_instructions",
+    "max_instructions",
+    "mean_instructions",
 )
+RTBENCH_UNIT_FIELDS = {
+    "ns": ("p50_ns", "p95_ns", "p99_ns", "p99_9_ns", "max_ns", "mean_ns"),
+    "cycles": (
+        "p50_cycles", "p95_cycles", "p99_cycles", "p99_9_cycles",
+        "max_cycles", "mean_cycles",
+    ),
+    "instructions": (
+        "p50_instructions", "p95_instructions", "p99_instructions",
+        "p99_9_instructions", "max_instructions", "mean_instructions",
+    ),
+}
 
 
 def fail(message: str) -> None:
@@ -147,11 +172,12 @@ def parse_rtbench(path: Path) -> dict[str, Any]:
         if any(field not in values for field in RTBENCH_FIELDS):
             fail(f"incomplete RTBench metric {metric_name} in {path}")
         metric = {field: int(values[field]) for field in RTBENCH_FIELDS}
-        require_non_decreasing(
-            {field: float(metric[field]) for field in ("p50_ns", "p95_ns", "p99_ns", "p99_9_ns", "max_ns")},
-            ("p50_ns", "p95_ns", "p99_ns", "p99_9_ns", "max_ns"),
-            f"RTBench {metric_name} in {path}",
-        )
+        for unit, fields in RTBENCH_UNIT_FIELDS.items():
+            require_non_decreasing(
+                {field: float(metric[field]) for field in fields[:5]},
+                fields[:5],
+                f"RTBench {metric_name} {unit} in {path}",
+            )
         metrics[metric_name] = metric
     if "stability_jitter" not in metrics or "callback_exec" not in metrics:
         fail(f"stability_jitter and callback_exec are required in {path}")
@@ -303,28 +329,50 @@ def compare_guests(linux: dict[str, Any], starryos: dict[str, Any]) -> dict[str,
     )
 
     rtbench: dict[str, Any] = {}
+    joint_analysis: dict[str, Any] = {}
     for metric_name in sorted(set(linux["rtbench"]) & set(starryos["rtbench"])):
+        units: dict[str, Any] = {}
+        for unit, fields in RTBENCH_UNIT_FIELDS.items():
+            units[unit] = {
+                output_field: compare_values(
+                    linux["rtbench"][metric_name][source_field],
+                    starryos["rtbench"][metric_name][source_field],
+                )
+                for output_field, source_field in zip(
+                    ("p50", "p95", "p99", "p99.9", "max", "mean"), fields
+                )
+            }
+        # Keep the historical nanosecond keys as aliases while exposing all
+        # three counter domains explicitly to new report consumers.
         rtbench[metric_name] = {
-            output_field: compare_values(
-                linux["rtbench"][metric_name][source_field],
-                starryos["rtbench"][metric_name][source_field],
-            )
-            for output_field, source_field in {
-                "p50": "p50_ns",
-                "p95": "p95_ns",
-                "p99": "p99_ns",
-                "p99.9": "p99_9_ns",
-                "max": "max_ns",
-                "mean": "mean_ns",
-                "miss_1ms": "miss_1ms",
-            }.items()
+            **units["ns"],
+            "miss_1ms": compare_values(
+                linux["rtbench"][metric_name]["miss_1ms"],
+                starryos["rtbench"][metric_name]["miss_1ms"],
+            ),
+            "ns": units["ns"],
+            "cycles": units["cycles"],
+            "instructions": units["instructions"],
+        }
+        joint_analysis[metric_name] = {
+            "linux": joint_record(linux["rtbench"][metric_name]),
+            "starryos": joint_record(starryos["rtbench"][metric_name]),
+            "starryos_vs_linux": compare_joint(
+                linux["rtbench"][metric_name], starryos["rtbench"][metric_name]
+            ),
         }
 
     host = {
         field: compare_values(linux["host"][field], starryos["host"][field])
         for field in ("elapsed_ms", "cpu_time_ms", "peak_rss_kb", "max_threads", "sample_count")
     }
-    return {"task2": task2, "task3": task3, "rtbench": rtbench, "host": host}
+    return {
+        "task2": task2,
+        "task3": task3,
+        "rtbench": rtbench,
+        "rtbench_joint_analysis": joint_analysis,
+        "host": host,
+    }
 
 
 def fmt(value: Any) -> str:
@@ -381,10 +429,30 @@ def report(data: dict[str, Any]) -> str:
             f"{fmt(value['starryos'])} | {fmt(value['starryos_vs_linux_percent'])}% |"
         )
     for metric_name in ("stability_jitter", "callback_exec"):
-        value = comparison["rtbench"][metric_name]["p99"]
+        for unit in ("ns", "cycles", "instructions"):
+            value = comparison["rtbench"][metric_name][unit]["p99"]
+            lines.append(
+                f"| RTBench {metric_name} P99 ({unit}) | {fmt(value['linux'])} | "
+                f"{fmt(value['starryos'])} | {fmt(value['starryos_vs_linux_percent'])}% |"
+            )
+    lines += [
+        "",
+        "## RTBench 三指标联合归因",
+        "",
+        "| 指标 | P99 ns 比例 | P99 cycles 比例 | P99 instructions 比例 | "
+        "均值 ns/instruction 比例 | 均值 cycles/instruction 比例 | 均值 ns/cycle 比例 | 归因 |",
+        "|---|---:|---:|---:|---:|---:|---:|---|",
+    ]
+    for metric_name, values in comparison["rtbench_joint_analysis"].items():
+        joint = values["starryos_vs_linux"]
         lines.append(
-            f"| RTBench {metric_name} P99 (ns) | {fmt(value['linux'])} | "
-            f"{fmt(value['starryos'])} | {fmt(value['starryos_vs_linux_percent'])}% |"
+            f"| {metric_name} | {fmt(joint['p99_ratio']['ns'])} | "
+            f"{fmt(joint['p99_ratio']['cycles'])} | "
+            f"{fmt(joint['p99_ratio']['instructions'])} | "
+            f"{fmt(joint['aggregate_efficiency_ratio']['mean_ns_per_instruction'])} | "
+            f"{fmt(joint['aggregate_efficiency_ratio']['mean_cycles_per_instruction'])} | "
+            f"{fmt(joint['aggregate_efficiency_ratio']['mean_ns_per_cycle'])} | "
+            f"{joint['classification']} |"
         )
     lines += [
         "",

@@ -10,6 +10,9 @@ TASK3_ROOT="$ROOT/os/axvisor/guests/task3"
 RUN_UNTIL="${RUN_UNTIL:-$SCRIPT_DIR/run_until_log_marker.sh}"
 QEMU_REALTIME_CONTROL="${QEMU_REALTIME_CONTROL:-$SCRIPT_DIR/apply_qemu_realtime_controls.sh}"
 QEMU_RESOURCE_SAMPLER="${QEMU_RESOURCE_SAMPLER:-$SCRIPT_DIR/sample_qemu_resources.sh}"
+# RTBENCH requires QEMU's precise icount mode so INST_RETIRED (0x08) is
+# available alongside the virtual timer and cycle counters.
+QEMU_ICOUNT="${QEMU_ICOUNT:-shift=3}"
 LINUX_VMCONFIG_GENERATOR="${LINUX_VMCONFIG_GENERATOR:-$SCRIPT_DIR/generate_linux_vmconfig.sh}"
 STARRYOS_VMCONFIG_GENERATOR="${STARRYOS_VMCONFIG_GENERATOR:-$SCRIPT_DIR/generate_starryos_vmconfig.sh}"
 RTTHREAD_VMCONFIG_GENERATOR="${RTTHREAD_VMCONFIG_GENERATOR:-$SCRIPT_DIR/generate_rtthread_vmconfig.sh}"
@@ -48,6 +51,21 @@ require_integer() {
     local label=$4
     [[ "$value" =~ ^[0-9]+$ && "$value" -ge "$minimum" && "$value" -le "$maximum" ]] || {
         echo "$label must be an integer from $minimum to $maximum" >&2
+        return 2
+    }
+}
+
+validate_precise_icount() {
+    local value=${QEMU_ICOUNT:-}
+    local shift
+    [[ "$value" =~ ^shift=[0-9]+(,.*)?$ ]] || {
+        fail "QEMU_ICOUNT must use precise fixed-shift mode for RTBENCH (for example shift=3), got: $value"
+        return 2
+    }
+    shift=${value#shift=}
+    shift=${shift%%,*}
+    [[ "$shift" -le 10 ]] || {
+        fail "QEMU_ICOUNT shift must be between 0 and 10 for RTBENCH, got: $shift"
         return 2
     }
 }
@@ -197,6 +215,9 @@ validate_mode_options() {
         require_integer "$rtbench_samples" 1 100000 rtbench-samples
     elif [[ "$mode" == stability ]]; then
         require_integer "$stability_seconds" 1 3600 seconds
+    fi
+    if [[ "$mode" == realtime-suite || "$mode" == stability ]]; then
+        validate_precise_icount || return 2
     fi
 
     # A diagnostic stability run intentionally lets RT-Thread report a FAIL
@@ -863,10 +884,10 @@ record_artifact() {
 prepare_manifest() {
     MANIFEST_TMP="$OUTPUT/.manifest.txt.tmp"
     : > "$MANIFEST_TMP"
-    printf 'schema=1\napp_guest=%s\nmode=%s\ntask2_count=%s\ntask3_frames=%s\ntask3_fault=%s\nqemu_timer_slack_ns=%s\nqemu_cpu_affinity=%s\nqemu_sched_policy=%s\nqemu_sched_priority=%s\nqemu_tcg_thread=%s\n' \
+    printf 'schema=1\napp_guest=%s\nmode=%s\ntask2_count=%s\ntask3_frames=%s\ntask3_fault=%s\nqemu_cpu=cortex-a72\nqemu_timer_slack_ns=%s\nqemu_cpu_affinity=%s\nqemu_sched_policy=%s\nqemu_sched_priority=%s\nqemu_tcg_thread=%s\nqemu_icount=%s\nqemu_pmu=on\nrtbench_pmu_event=0x8\nrtbench_units=ns,cycles,instructions\n' \
         "$app_guest" "$mode" "$task2_count" "$task3_frames" "${task3_fault:-normal}" \
         "$QEMU_TIMER_SLACK_NS" "${QEMU_CPU_AFFINITY:-}" "${QEMU_SCHED_POLICY:-}" \
-        "${QEMU_SCHED_PRIORITY:-0}" "${QEMU_TCG_THREAD:-multi}" >> "$MANIFEST_TMP"
+        "${QEMU_SCHED_PRIORITY:-0}" "${QEMU_TCG_THREAD:-multi}" "$QEMU_ICOUNT" >> "$MANIFEST_TMP"
     printf 'qemu_vcpu_affinity=%s\n' "${QEMU_VCPU_AFFINITY:-}" >> "$MANIFEST_TMP"
     record_artifact qemu "$QEMU"
     record_artifact axvisor "$AXVISOR_BIN"
@@ -911,6 +932,14 @@ feed_benchmark_command() {
     local ready='[VM 3] msh />'
     local command=
     wait_for_console_marker "$ready"
+    if [[ "$mode" == realtime-suite ]]; then
+        # The Linux guest keeps its network probe alive after publishing this
+        # marker. Start the RT-Thread benchmark only after Task 2/3 have
+        # stopped sharing the virtio-net queue with the measured probe.
+        if ! wait_for_console_marker "$APP_GUEST_TASK123_END_MARKER"; then
+            return 1
+        fi
+    fi
     printf '\030]' >&3
     sleep 0.1
     if [[ "$mode" == realtime-suite ]]; then
@@ -921,14 +950,17 @@ feed_benchmark_command() {
         ready='RTBENCH_STABILITY_DONE'
     fi
     printf '%s\r' "$command" >&3
-    # Keep Linux in the foreground until it emits its final evidence. Stopped
-    # guests are removed from the mux together with any buffered output.
-    printf '\030[' >&3
-    if ! wait_for_console_marker "$APP_GUEST_TASK123_END_MARKER"; then
-        return 1
+    if [[ "$mode" != realtime-suite ]]; then
+        # Keep Linux in the foreground until it emits its final evidence.
+        # Stopped guests are removed from the mux together with buffered
+        # output.
+        printf '\030[' >&3
+        if ! wait_for_console_marker "$APP_GUEST_TASK123_END_MARKER"; then
+            return 1
+        fi
+        # Replay VM 3's benchmark output and final counters.
+        printf '\030]' >&3
     fi
-    # Replay VM 3's benchmark output and final counters.
-    printf '\030]' >&3
     if ! wait_for_console_marker "$ready"; then
         return 1
     fi
@@ -1032,13 +1064,20 @@ launch_one_qemu() {
         failure_marker_args+=(--failure-marker "$failure_marker")
     done
 
+    local qemu_pmu_args=()
+    local qemu_tcg_thread="${QEMU_TCG_THREAD:-multi}"
+    if [[ "$mode" == realtime-suite || "$mode" == stability ]]; then
+        qemu_pmu_args=(-icount "$QEMU_ICOUNT")
+        qemu_tcg_thread=single
+    fi
     local qemu_args=(
         -display none
         -monitor none
         -snapshot
         -name "tgoskits,debug-threads=on"
-        -cpu cortex-a72
-        -accel "tcg,thread=${QEMU_TCG_THREAD:-multi}"
+        -cpu cortex-a72,pmu=on
+        "${qemu_pmu_args[@]}"
+        -accel "tcg,thread=$qemu_tcg_thread"
         -machine virt,virtualization=on,gic-version=3
         -global virtio-mmio.force-legacy=false
         -smp 4
@@ -1155,6 +1194,19 @@ publish_manifest() {
     phase manifest
     printf 'raw_qemu_exit=%s\ntermination_reason=%s\nqemu_exit=%s\nresult_gate=%s\n' \
         "$raw_qemu_exit" "$termination_reason" "$normalized_qemu_exit" "$RESULT_GATE_STATUS" >> "$MANIFEST_TMP"
+    if [[ "$mode" == realtime-suite || "$mode" == stability ]]; then
+        local pmu_status
+        local counter_frequency
+        pmu_status="$(grep -aoE 'RTBENCH_PMU status=(ready|unavailable)' "$CONSOLE_LOG" |
+            sed -n 's/.*status=//p' | head -n 1)"
+        [[ "$pmu_status" == ready ]] || fail "manifest PMU status is not ready: ${pmu_status:-missing}"
+        counter_frequency="$(grep -aoE 'RTBENCH_(BEGIN|STABILITY_BEGIN)[^[:cntrl:]]*frequency=[1-9][0-9]*' "$CONSOLE_LOG" |
+            grep -aoE 'frequency=[1-9][0-9]*' | head -n 1 | cut -d= -f2)"
+        [[ "$counter_frequency" =~ ^[1-9][0-9]*$ ]] ||
+            fail "manifest counter frequency is missing"
+        printf 'rtbench_pmu_status=%s\nrtbench_counter_frequency=%s\n' \
+            "$pmu_status" "$counter_frequency" >> "$MANIFEST_TMP"
+    fi
     mv -- "$MANIFEST_TMP" "$MANIFEST"
 }
 

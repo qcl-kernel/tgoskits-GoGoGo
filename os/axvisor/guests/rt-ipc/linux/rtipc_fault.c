@@ -45,6 +45,16 @@ const char *rtipc_fault_profile_name(rtipc_fault_profile_t profile)
                : "none";
 }
 
+bool rtipc_fault_should_force_disconnect(rtipc_fault_profile_t profile,
+                                         int payload_size,
+                                         int request_index,
+                                         int request_count)
+{
+    return profile == RTIPC_FAULT_PROFILE_RELIABILITY &&
+           payload_size == 64 && request_count > 0 &&
+           request_index == request_count / 2;
+}
+
 void rtipc_fault_init(rtipc_fault_context_t *context,
                       rtipc_fault_profile_t profile)
 {

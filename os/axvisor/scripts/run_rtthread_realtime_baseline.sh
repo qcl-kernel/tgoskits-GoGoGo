@@ -146,6 +146,7 @@ run_suite() {
         --suite-samples "$suite_samples" \
         --json-output "$output/realtime-suite.json" \
         --csv-output "$output/realtime-suite.csv" \
+        --joint-csv-output "$output/realtime-suite-joint.csv" \
         --markdown-output "$output/realtime-suite.md" | tee "$output/realtime-suite.summary.log"
 }
 
@@ -205,6 +206,7 @@ run_stability() {
         --axvisor-linux "$output/axvisor-linux-stability/console.log" \
         --json-output "$output/realtime-stability.json" \
         --csv-output "$output/realtime-stability.csv" \
+        --joint-csv-output "$output/realtime-stability-joint.csv" \
         --markdown-output "$output/realtime-stability.md" | tee "$output/realtime-stability.summary.log"
 }
 

@@ -85,6 +85,16 @@ from pathlib import Path
 
 source, destination = map(Path, sys.argv[1:])
 data = source.read_bytes()
+# A marker watcher can terminate QEMU before its stderr writer appends a
+# newline. Remove only the known QEMU termination suffix after a complete
+# RTBENCH end marker before normalizing serial line endings.
+data = re.sub(
+    rb"(RTBENCH(?:_STABILITY)?_END status=(?:PASS|FAIL)"
+    rb"(?: expected=[0-9]+ collected=[0-9]+ missing=0)?)(?:\r?\n|\r)?"
+    rb"qemu-system-aarch64: terminating[^\r\n]*",
+    rb"\1\n",
+    data,
+)
 # QEMU serial capture can insert CSI color sequences between a VM prefix and
 # an authenticated marker. Normalize only presentation bytes; keep payloads
 # and marker text unchanged for the strict checks below.
@@ -103,7 +113,12 @@ guest_log = re.compile(
 )
 data = guest_log.sub(b"", data)
 data = re.sub(rb"\x1b\[[0-?]*[ -/]*[@-~]", b"", data)
-data = data.replace(b"\r", b"")
+# RT-Thread writes carriage-return terminated records. The marker watcher can
+# stop QEMU immediately after a marker, so QEMU's own exit text may follow a
+# lone CR on the same byte stream. Preserve that CR as a record boundary;
+# deleting it would turn `RTBENCH_END status=PASS` into a longer line and make
+# the strict marker check reject an otherwise successful run.
+data = data.replace(b"\r\n", b"\n").replace(b"\r", b"\n")
 # The observed RT-Thread logger split the `p99_9_ns` field exactly between
 # `n` and `s`; join that field only and keep other line boundaries intact.
 data = re.sub(rb"(?<=p99_9_n)\n(?=s=)", b"", data)
@@ -116,7 +131,10 @@ metric_boundary = re.compile(rb"RTBENCH(?:_END|_STABILITY_|_ERROR)")
 field_names = (
     b"expected", b"collected", b"missing", b"p50_ns", b"p95_ns",
     b"p99_ns", b"p99_9_ns", b"max_ns", b"miss_100us", b"miss_500us",
-    b"miss_1ms", b"mean_ns",
+    b"miss_1ms", b"mean_ns", b"p50_cycles", b"p95_cycles",
+    b"p99_cycles", b"p99_9_cycles", b"max_cycles", b"mean_cycles",
+    b"p50_instructions", b"p95_instructions", b"p99_instructions",
+    b"p99_9_instructions", b"max_instructions", b"mean_instructions",
 )
 lines = data.splitlines()
 normalized = []

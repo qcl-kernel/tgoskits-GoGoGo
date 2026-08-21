@@ -134,6 +134,22 @@ static void test_none_profile_is_transparent(void)
           "none profile must not reorder responses");
 }
 
+static void test_disconnect_is_reliability_only(void)
+{
+    CHECK(!rtipc_fault_should_force_disconnect(
+              RTIPC_FAULT_PROFILE_NONE, 64, 1, 2),
+          "none profile must not force a disconnect");
+    CHECK(rtipc_fault_should_force_disconnect(
+              RTIPC_FAULT_PROFILE_RELIABILITY, 64, 1, 2),
+          "reliability profile must force the midpoint disconnect");
+    CHECK(!rtipc_fault_should_force_disconnect(
+              RTIPC_FAULT_PROFILE_RELIABILITY, 256, 1, 2),
+          "disconnect fault must only affect the 64-byte section");
+    CHECK(!rtipc_fault_should_force_disconnect(
+              RTIPC_FAULT_PROFILE_RELIABILITY, 64, 0, 2),
+          "disconnect fault must not run before the midpoint");
+}
+
 int main(void)
 {
     test_profile_parser();
@@ -141,6 +157,7 @@ int main(void)
     test_duplicate_first_256_byte_response();
     test_reverse_first_two_1024_byte_responses();
     test_none_profile_is_transparent();
+    test_disconnect_is_reliability_only();
 
     if (failures != 0) {
         fprintf(stderr, "fault profile tests failed: %d\n", failures);

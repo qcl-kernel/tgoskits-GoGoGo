@@ -44,11 +44,32 @@ if [ ! -f "$log" ]; then
     exit 1
 fi
 
+# See verify_rtbench_suite.sh: the marker watcher can stop QEMU immediately
+# after a CR-terminated RT-Thread record, leaving QEMU text on that record.
+normalized_log=$(mktemp)
+trap 'rm -f -- "$normalized_log"' EXIT
+python3 - "$log" "$normalized_log" <<'PY'
+import re
+import sys
+from pathlib import Path
+
+source, destination = map(Path, sys.argv[1:])
+data = source.read_bytes()
+data = re.sub(
+    rb"(RTBENCH(?:_STABILITY)?_END status=(?:PASS|FAIL)"
+    rb"(?: expected=[0-9]+ collected=[0-9]+ missing=0)?)(?:\r?\n|\r)?"
+    rb"qemu-system-aarch64: terminating[^\r\n]*",
+    rb"\1\n",
+    data,
+)
+destination.write_bytes(data.replace(b"\r", b"\n"))
+PY
+log=$normalized_log
+
 if [ "$qemu_rc" -ne 0 ]; then
     echo "QEMU failed with exit code $qemu_rc" >&2
     exit 1
 fi
-
 failure_log="$log"
 if [ "$allow_qemu_timer_limit" = allow-qemu-timer-limit ]; then
     failure_log="$(mktemp)"
@@ -56,21 +77,21 @@ if [ "$allow_qemu_timer_limit" = allow-qemu-timer-limit ]; then
     sed '/RTBENCH_STABILITY_END status=FAIL/d' "$log" > "$failure_log"
 fi
 if grep -aEiq \
-    'RTBENCH_ERROR|RTBENCH[^[:cntrl:]]*status=FAIL|panicked at|kernel panic|assertion failed|RT-Thread.*assert' \
+    'RTBENCH_ERROR|RTBENCH[^[:cntrl:]]*status=FAIL|RTBENCH_PMU status=unavailable|panicked at|kernel panic|assertion failed|RT-Thread.*assert' \
     "$failure_log"; then
     echo "benchmark error, panic, or assertion found in stability log" >&2
     exit 1
 fi
 
 expected=$((seconds * 1000 - 1))
-begin_pattern="RTBENCH_STABILITY_BEGIN seconds=${seconds} expected=${expected}[[:space:]]*$"
+begin_pattern="RTBENCH_STABILITY_BEGIN seconds=${seconds} expected=${expected} frequency=[1-9][0-9]* pmu_event=0x8[[:space:]]*$"
 if [ "$allow_qemu_timer_limit" = allow-qemu-timer-limit ]; then
     end_pattern="RTBENCH_STABILITY_END status=(PASS|FAIL) expected=${expected} collected=${expected} missing=0[[:space:]]*$"
 else
     end_pattern="RTBENCH_STABILITY_END status=PASS expected=${expected} collected=${expected} missing=0[[:space:]]*$"
 fi
 done_pattern="RTBENCH_STABILITY_DONE[[:space:]]*$"
-metric_suffix="run=1 expected=${expected} collected=${expected} missing=0 p50_ns=[0-9]+ p95_ns=[0-9]+ p99_ns=[0-9]+ p99_9_ns=[0-9]+ max_ns=[0-9]+ miss_100us=[0-9]+ miss_500us=[0-9]+ miss_1ms=[0-9]+ mean_ns=[0-9]+[[:space:]]*$"
+metric_suffix="run=1 expected=${expected} collected=${expected} missing=0 p50_ns=[0-9]+ p95_ns=[0-9]+ p99_ns=[0-9]+ p99_9_ns=[0-9]+ max_ns=[0-9]+ miss_100us=[0-9]+ miss_500us=[0-9]+ miss_1ms=[0-9]+ mean_ns=[0-9]+ p50_cycles=[0-9]+ p95_cycles=[0-9]+ p99_cycles=[0-9]+ p99_9_cycles=[0-9]+ max_cycles=[0-9]+ mean_cycles=[0-9]+ p50_instructions=[0-9]+ p95_instructions=[0-9]+ p99_instructions=[0-9]+ p99_9_instructions=[0-9]+ max_instructions=[0-9]+ mean_instructions=[0-9]+[[:space:]]*$"
 
 if [ "$(grep -aEc "$begin_pattern" "$log")" -ne 1 ]; then
     echo "missing or duplicate ${seconds}-second stability begin marker" >&2
@@ -82,12 +103,12 @@ if [ "$(grep -aEc "RTBENCH metric=stability_jitter ${metric_suffix}" "$log")" -n
 fi
 if [ "$allow_qemu_timer_limit" = allow-qemu-timer-limit ]; then
     if [ "$(grep -aEc "RTBENCH_STABILITY_END status=FAIL expected=${expected} collected=${expected} missing=0[[:space:]]*$" "$log")" -eq 1 ]; then
-        if [ "$(grep -aEc "RTBENCH metric=stability_jitter .*miss_1ms=[1-9][0-9]* mean_ns=[0-9]+[[:space:]]*$" "$log")" -ne 1 ]; then
+        if [ "$(grep -aEc "RTBENCH metric=stability_jitter .*miss_1ms=[1-9][0-9]* mean_ns=[0-9]+ p50_cycles=" "$log")" -ne 1 ]; then
             echo "diagnostic stability failure was not caused by a one-millisecond timer miss" >&2
             exit 1
         fi
     fi
-elif [ "$(grep -aEc "RTBENCH metric=stability_jitter .*miss_1ms=0 mean_ns=[0-9]+[[:space:]]*$" "$log")" -ne 1 ]; then
+elif [ "$(grep -aEc "RTBENCH metric=stability_jitter .*miss_1ms=0 mean_ns=[0-9]+ p50_cycles=" "$log")" -ne 1 ]; then
     echo "stability benchmark exceeded the one-millisecond deadline" >&2
     exit 1
 fi

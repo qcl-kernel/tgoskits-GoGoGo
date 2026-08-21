@@ -43,20 +43,43 @@ if [ ! -f "$log" ]; then
     echo "RT benchmark log does not exist: $log" >&2
     exit 1
 fi
+
+# QEMU may be terminated as soon as RTBENCH_END is observed. RT-Thread emits
+# that marker with a carriage return, so QEMU's termination diagnostic can be
+# appended after the CR on the same byte stream. Normalize CR boundaries
+# before applying the strict record checks.
+normalized_log=$(mktemp)
+trap 'rm -f -- "$normalized_log"' EXIT
+python3 - "$log" "$normalized_log" <<'PY'
+import re
+import sys
+from pathlib import Path
+
+source, destination = map(Path, sys.argv[1:])
+data = source.read_bytes()
+data = re.sub(
+    rb"(RTBENCH(?:_STABILITY)?_END status=(?:PASS|FAIL)"
+    rb"(?: expected=[0-9]+ collected=[0-9]+ missing=0)?)(?:\r?\n|\r)?"
+    rb"qemu-system-aarch64: terminating[^\r\n]*",
+    rb"\1\n",
+    data,
+)
+destination.write_bytes(data.replace(b"\r", b"\n"))
+PY
+log=$normalized_log
 if [ "$qemu_rc" -ne 0 ]; then
     echo "QEMU failed with exit code $qemu_rc" >&2
     exit 1
 fi
-
 if grep -aEiq \
-    'RTBENCH_ERROR|RTBENCH[^[:cntrl:]]*status=FAIL|panicked at|kernel panic|assertion failed|RT-Thread.*assert' \
+    'RTBENCH_ERROR|RTBENCH[^[:cntrl:]]*status=FAIL|RTBENCH_PMU status=unavailable|panicked at|kernel panic|assertion failed|RT-Thread.*assert' \
     "$log"; then
     echo "benchmark error, panic, or assertion found in suite log" >&2
     exit 1
 fi
 
-begin_pattern="RTBENCH_BEGIN samples=${samples} frequency=[1-9][0-9]*[[:space:]]*$"
-metric_suffix="expected=${samples} collected=${samples} missing=0 p50_ns=[0-9]+ p95_ns=[0-9]+ p99_ns=[0-9]+ p99_9_ns=[0-9]+ max_ns=[0-9]+ miss_100us=[0-9]+ miss_500us=[0-9]+ miss_1ms=[0-9]+ mean_ns=[0-9]+[[:space:]]*$"
+begin_pattern="RTBENCH_BEGIN samples=${samples} frequency=[1-9][0-9]* pmu_event=0x8[[:space:]]*$"
+metric_suffix="expected=${samples} collected=${samples} missing=0 p50_ns=[0-9]+ p95_ns=[0-9]+ p99_ns=[0-9]+ p99_9_ns=[0-9]+ max_ns=[0-9]+ miss_100us=[0-9]+ miss_500us=[0-9]+ miss_1ms=[0-9]+ mean_ns=[0-9]+ p50_cycles=[0-9]+ p95_cycles=[0-9]+ p99_cycles=[0-9]+ p99_9_cycles=[0-9]+ max_cycles=[0-9]+ mean_cycles=[0-9]+ p50_instructions=[0-9]+ p95_instructions=[0-9]+ p99_instructions=[0-9]+ p99_9_instructions=[0-9]+ max_instructions=[0-9]+ mean_instructions=[0-9]+[[:space:]]*$"
 
 if [ "$(grep -aEc "$begin_pattern" "$log")" -ne 1 ]; then
     echo "missing or duplicate benchmark suite begin marker" >&2
@@ -74,7 +97,9 @@ for run in 1 2 3; do
     fi
 done
 
-for metric in preemption irq irq_to_task irq_disabled_duration mutex_inversion wake_under_load; do
+for metric in preemption irq irq_to_task irq_disabled_duration mutex_inversion wake_under_load \
+    context_switch scheduler_decision sync_sem sync_mutex sync_mailbox \
+    irq_handler_exec deadline_miss_under_load; do
     if [ "$(grep -aEc "RTBENCH metric=${metric} run=1 ${metric_suffix}" "$log")" -ne 1 ]; then
         echo "${metric} benchmark is missing or incomplete" >&2
         exit 1

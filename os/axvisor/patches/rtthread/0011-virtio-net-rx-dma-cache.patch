@@ -1,0 +1,109 @@
+diff --git a/components/drivers/virtio/virtio_net.c b/components/drivers/virtio/virtio_net.c
+index 7178e890..4c1f07ab 100644
+--- a/components/drivers/virtio/virtio_net.c
++++ b/components/drivers/virtio/virtio_net.c
+@@ -20,10 +20,18 @@
+ __attribute__((weak)) void rt_virtio_net_rx_irq_hook(rt_uint16_t used_idx,
+                                                     const void *payload,
+                                                     rt_uint32_t len)
+ {
+     (void)used_idx;
+     (void)payload;
+     (void)len;
+ }
+ 
++static void virtio_net_invalidate_used(struct virtq *queue_rx)
++{
++    rt_hw_cpu_dcache_ops(RT_HW_CACHE_INVALIDATE,
++                         &queue_rx->used->idx,
++                         sizeof(queue_rx->used->idx));
++    rt_hw_dsb();
++}
++
+ static rt_err_t virtio_net_tx(rt_device_t dev, struct pbuf *p)
+@@ -35,5 +35,6 @@
+     struct virtio_device *virtio_dev = &virtio_net_dev->virtio_dev;
+     struct virtq *queue_tx = &virtio_dev->queues[VIRTIO_NET_QUEUE_TX];
+ 
++    virtio_net_invalidate_used(queue_tx);
+     /* Reclaim completed TX chains before allocating new descriptors. The
+      * device owns a chain until it publishes its head in the used ring. */
+@@ -70,14 +70,31 @@
+     virtio_net_dev->info[id].hdr.num_buffers = 0;
+ 
+     pbuf_copy_partial(p, virtio_net_dev->info[id].tx_buffer, p->tot_len, 0);
++    rt_hw_cpu_dcache_ops(RT_HW_CACHE_FLUSH, &virtio_net_dev->info[id].hdr,
++                         sizeof(virtio_net_dev->info[id].hdr));
++    rt_hw_cpu_dcache_ops(RT_HW_CACHE_FLUSH, virtio_net_dev->info[id].tx_buffer,
++                         p->tot_len);
++    rt_hw_dsb();
+ 
+     virtio_fill_desc(virtio_dev, VIRTIO_NET_QUEUE_TX, id,
+             VIRTIO_VA2PA(&virtio_net_dev->info[id].hdr), VIRTIO_NET_HDR_SIZE, VIRTQ_DESC_F_NEXT, id + 1);
+ 
+     virtio_fill_desc(virtio_dev, VIRTIO_NET_QUEUE_TX, id + 1,
+             VIRTIO_VA2PA(virtio_net_dev->info[id].tx_buffer), p->tot_len, 0, 0);
++    rt_hw_cpu_dcache_ops(RT_HW_CACHE_FLUSH,
++                         &queue_tx->desc[id],
++                         sizeof(struct virtq_desc) * 2);
++    rt_hw_dsb();
+ 
+     virtio_submit_chain(virtio_dev, VIRTIO_NET_QUEUE_TX, id);
+     rt_hw_dsb();
++    rt_hw_cpu_dcache_ops(
++        RT_HW_CACHE_FLUSH,
++        &queue_tx->avail->ring[queue_tx->avail->idx - 1U],
++        sizeof(queue_tx->avail->ring[queue_tx->avail->idx - 1U]));
++    rt_hw_cpu_dcache_ops(RT_HW_CACHE_FLUSH,
++                         &queue_tx->avail->idx,
++                         sizeof(queue_tx->avail->idx));
++    rt_hw_dsb();
+ 
+     virtio_queue_notify(virtio_dev, VIRTIO_NET_QUEUE_TX);
+@@ -90,10 +90,16 @@
+     struct virtio_device *virtio_dev = &virtio_net_dev->virtio_dev;
+     struct virtq *queue_rx = &virtio_dev->queues[VIRTIO_NET_QUEUE_RX];
+ 
++    virtio_net_invalidate_used(queue_rx);
+     if (queue_rx->used_idx != queue_rx->used->idx)
+     {
++        rt_hw_cpu_dcache_ops(
++            RT_HW_CACHE_INVALIDATE,
++            &queue_rx->used->ring[queue_rx->used_idx % queue_rx->num],
++            sizeof(queue_rx->used->ring[queue_rx->used_idx % queue_rx->num]));
++        rt_hw_dsb();
+         rt_uint16_t used_id = queue_rx->used->ring[queue_rx->used_idx % queue_rx->num].id;
+         id = used_id;
+         len = queue_rx->used->ring[queue_rx->used_idx % queue_rx->num].len - VIRTIO_NET_HDR_SIZE;
+ 
+         if (len > VIRTIO_NET_PAYLOAD_MAX_SIZE)
+@@ -104,5 +123,9 @@
+         if (p != RT_NULL)
+         {
++            rt_hw_cpu_dcache_ops(RT_HW_CACHE_INVALIDATE,
++                                 virtio_net_dev->info[id / 2].rx_buffer,
++                                 len);
++            rt_hw_dsb();
+             rt_memcpy(p->payload, virtio_net_dev->info[id / 2].rx_buffer, len);
+ 
+             queue_rx->used_idx++;
+@@ -217,12 +240,18 @@
+     virtio_interrupt_ack(virtio_dev);
+     rt_hw_dsb();
+ 
++    virtio_net_invalidate_used(queue_rx);
+     if (queue_rx->used_idx != queue_rx->used->idx)
+     {
+         rt_uint16_t scan_idx = virtio_net_dev->rx_irq_used_idx;
+         rt_uint16_t used_idx = queue_rx->used->idx;
+ 
+         rt_hw_dsb();
+         while (scan_idx != used_idx)
+         {
++            rt_hw_cpu_dcache_ops(
++                RT_HW_CACHE_INVALIDATE,
++                &queue_rx->used->ring[scan_idx % queue_rx->num],
++                sizeof(queue_rx->used->ring[scan_idx % queue_rx->num]));
++            rt_hw_dsb();
+             rt_uint16_t used_id =
+                 queue_rx->used->ring[scan_idx % queue_rx->num].id;

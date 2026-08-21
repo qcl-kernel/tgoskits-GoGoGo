@@ -82,13 +82,18 @@ for payload in (64, 256, 1024):
         "transport: retrans=0 timeouts=0 dup=0 reorder=0 errors=0",
     ])
 (root / f"{guest}.log").write_text("\n".join(sections) + "\n", encoding="ascii")
+counter_fields = (
+    "p50_cycles=1 p95_cycles=2 p99_cycles=3 p99_9_cycles=4 max_cycles=5 mean_cycles=2 "
+    "p50_instructions=1 p95_instructions=2 p99_instructions=3 p99_9_instructions=4 "
+    "max_instructions=5 mean_instructions=2"
+)
 (root / "rtthread.log").write_text(
     "RTBENCH metric=stability_jitter expected=10 collected=10 missing=0 "
     "p50_ns=1 p95_ns=2 p99_ns=3 p99_9_ns=4 max_ns=5 "
-    "miss_100us=0 miss_500us=0 miss_1ms=0 mean_ns=2\n"
+    f"miss_100us=0 miss_500us=0 miss_1ms=0 mean_ns=2 {counter_fields}\n"
     "RTBENCH metric=callback_exec expected=10 collected=10 missing=0 "
     "p50_ns=1 p95_ns=2 p99_ns=3 p99_9_ns=4 max_ns=5 "
-    "miss_100us=0 miss_500us=0 miss_1ms=0 mean_ns=2\n",
+    f"miss_100us=0 miss_500us=0 miss_1ms=0 mean_ns=2 {counter_fields}\n",
     encoding="ascii",
 )
 (root / "summary.json").write_text(json.dumps({

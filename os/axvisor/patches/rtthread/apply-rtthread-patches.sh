@@ -34,7 +34,8 @@ PATCH_SET_DIGEST="$({
     "$PATCHDIR/0006-gicv3-use-redistributor-pending-registers.patch" \
     "$PATCHDIR/0007-gicv3-query-interrupt-enable-state.patch" \
     "$PATCHDIR/0008-aarch64-gtimer-use-absolute-deadlines.patch" \
-    "$PATCHDIR/0010-virtio-net-benchmark-packet-hook.patch"
+    "$PATCHDIR/0010-virtio-net-benchmark-packet-hook.patch" \
+    "$PATCHDIR/0011-virtio-net-rx-dma-cache.patch"
 } | sha256sum | awk '{print $1}')"
 if [[ -f "$PATCH_STATE" ]]; then
     if [[ "$(<"$PATCH_STATE")" != "$PATCH_SET_DIGEST" ]]; then
@@ -149,6 +150,13 @@ apply_patch_exactly "$RTDIR" "$GTIMER_DEADLINE_PATCH" \
 NET_BENCH_HOOK_PATCH="$PATCHDIR/0010-virtio-net-benchmark-packet-hook.patch"
 apply_patch_exactly "$RTDIR" "$NET_BENCH_HOOK_PATCH" \
     "the virtio-net benchmark packet hook"
+
+# AxVisor writes the RX used ring and packet buffers from outside the guest.
+# In the non-coherent guest mapping, invalidate those cache lines before the
+# ISR gates on used->idx and before the RX worker consumes the completion.
+RX_DMA_CACHE_PATCH="$PATCHDIR/0011-virtio-net-rx-dma-cache.patch"
+apply_patch_exactly "$RTDIR" "$RX_DMA_CACHE_PATCH" \
+    "the virtio-net RX DMA cache-coherency fix"
 
 if [[ "$TGOSKITS_SKIP_PATCH_APPLICATION" == 0 ]]; then
     printf '%s\n' "$PATCH_SET_DIGEST" >"$PATCH_STATE"
