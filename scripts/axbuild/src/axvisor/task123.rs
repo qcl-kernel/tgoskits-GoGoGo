@@ -339,6 +339,13 @@ fn write_matrix_report(output: &Path, args: &Task123Args) -> anyhow::Result<()> 
                         "rtos_processing_us": summary.get("rtos_processing_us"),
                         "transport_retries": summary.get("transport_retries"),
                         "timeouts": summary.get("timeouts"),
+                        "duplicates": summary.get("duplicates"),
+                        "reconnects": summary.get("reconnects"),
+                        "recoveries": summary.get("recoveries"),
+                        "injected_drops": summary.get("injected_drops"),
+                        "effective_payload_bytes_per_second":
+                            summary.get("effective_payload_bytes_per_second"),
+                        "classification": summary.get("classification"),
                     })
                 })
                 .unwrap_or_else(|| json!({"error": "missing success_rate"}));
@@ -452,9 +459,9 @@ fn parse_rtbench_log(path: &Path) -> Value {
 fn render_matrix_report(report: &Value) -> String {
     let mut output = String::from(concat!(
         "# Task123 cargo xtask RTOS 矩阵报告\n\n",
-        "| RTOS | 应用客户机 | Task 2 | Task 3 | Task 123 | 成功率 | RTT p50 (us) | RTBench \
-         stability jitter p99 (ns) | p99 cycles | p99 instructions |\n",
-        "|---|---|---|---|---|---:|---:|---:|---:|---:|\n",
+        "| RTOS | 应用客户机 | Task 2 | Task 3 | Task 123 | 成功率 | Task 3 超时 | Task 3 重传 | \
+         RTT p50 (us) | RTBench stability jitter p99 (ns) | p99 cycles | p99 instructions |\n",
+        "|---|---|---|---|---|---:|---:|---:|---:|---:|---:|---:|\n",
     ));
     for combination in report
         .get("combinations")
@@ -476,13 +483,15 @@ fn render_matrix_report(report: &Value) -> String {
                 .unwrap_or_else(|| "-".to_string())
         };
         output.push_str(&format!(
-            "| {} | {} | {} | {} | {} | {} | {} | {} | {} | {} |\n",
+            "| {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} |\n",
             text(&["rtos"]),
             text(&["app_guest"]),
             text(&["task2"]),
             text(&["task3"]),
             text(&["task123"]),
             number(&["task3_summary", "success_rate"]),
+            number(&["task3_summary", "timeouts"]),
+            number(&["task3_summary", "transport_retries"]),
             number(&["task3_summary", "round_trip_us", "p50"]),
             number(&["rtbench", "stability_jitter", "p99_ns"]),
             number(&["rtbench", "stability_jitter", "p99_cycles"]),
@@ -664,6 +673,8 @@ mod tests {
                 "task123": "PASS",
                 "task3_summary": {
                     "success_rate": 1.0,
+                    "timeouts": 7,
+                    "transport_retries": 104,
                     "round_trip_us": {"p50": 42}
                 },
                 "rtbench": {
@@ -679,6 +690,7 @@ mod tests {
         let rendered = render_matrix_report(&report);
 
         assert!(rendered.contains("| 123 | 456 | 789 |"));
+        assert!(rendered.contains("| 7 | 104 |"));
     }
 
     #[test]
