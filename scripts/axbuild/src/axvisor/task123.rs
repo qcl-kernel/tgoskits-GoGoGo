@@ -460,7 +460,7 @@ fn render_matrix_report(report: &Value) -> String {
     let mut output = String::from(concat!(
         "# Task123 cargo xtask RTOS 矩阵报告\n\n",
         "| RTOS | 应用客户机 | Task 2 | Task 3 | Task 123 | 成功率 | Task 3 超时 | Task 3 重传 | \
-         RTT p50 (us) | RTBench stability jitter p99 (ns) | p99 cycles | p99 instructions |\n",
+         RTT p50 (us) | RTBench timer jitter p99 (ns) | p99 cycles | p99 instructions |\n",
         "|---|---|---|---|---|---:|---:|---:|---:|---:|---:|---:|\n",
     ));
     for combination in report

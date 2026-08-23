@@ -77,8 +77,9 @@ precise icount 和单线程 TCG，可能比墙钟时间慢很多；普通主机�
 
 RTBench 日志中应重点检查以下指标：
 
-- `stability_jitter`：周期任务抖动，包含 `p50/p95/p99/p99_9/max` 的纳秒、cycles
-  和 instructions 数据；
+- `timer_jitter`：周期任务抖动，包含 `p50/p95/p99/p99_9/max` 的纳秒、cycles
+  和 instructions 数据。旧版 RTBench 日志可能使用 `stability_jitter`，矩阵汇总会
+  兼容读取这两个字段；
 - `callback_exec`：周期回调执行开销；
 - `preemption`、`irq`、`irq_to_task`：抢占、硬件中断和中断到任务唤醒延迟；
 - `irq_disabled_duration`、`mutex_inversion`、`wake_under_load`：关中断、锁反转和
