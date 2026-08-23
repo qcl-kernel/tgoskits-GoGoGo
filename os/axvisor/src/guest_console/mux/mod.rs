@@ -74,6 +74,8 @@ struct ConsoleState {
     attached: Option<VMId>,
     last_attached: Option<VMId>,
     shortcut_prefix_pending: bool,
+    /// True after an explicit Ctrl+X attach selected a guest for interaction.
+    explicit_attach: bool,
     output: GuestOutputMux,
     next_backend_generation: u64,
 }
@@ -98,6 +100,11 @@ struct GuestSerialBackend {
 struct GuestSerialBackendFactory {
     vm_id: VMId,
     core: Arc<ConsoleCore>,
+    /// Devices may be re-planned during guest boot; handing out a fresh
+    /// backend each time orphans the one already wired into the device port
+    /// (its generation goes stale and its writes are silently dropped).
+    /// Cache the first backend so every create() returns the same instance.
+    cached: SpinLock<Option<Arc<dyn SerialBackend>>>,
 }
 
 impl GuestConsoleMux {
@@ -210,6 +217,7 @@ impl GuestConsoleMux {
         state.attached = Some(vm_id);
         state.last_attached = Some(vm_id);
         state.shortcut_prefix_pending = false;
+        state.explicit_attach = true;
         let host_output = state.output.buffer_all();
         drop(state);
         write_host_bytes(&host_output);
@@ -282,7 +290,22 @@ fn route_literal_input(
 ) -> RoutedInput {
     match state.attached {
         Some(vm_id) => {
-            let host_output = state.output.select_foreground_on_input(vm_id);
+            // Board fix: on boards without an interactive host input path the
+            // serial line only carries guest output; the first stray byte
+            // (e.g. baud-probe noise) would otherwise steal the foreground
+            // for the first VM and silence all other guests' consoles. Only
+            // switch to interactive on an explicit shortcut attach.
+            let host_output = if state.explicit_attach {
+                state.output.select_foreground_on_input(vm_id)
+            } else {
+                // Stay in boot multiplex; forward the byte to the guest but
+                // keep multiplexed output.
+                let mut out = state
+                    .output
+                    .format(vm_id, state.running.len() > 1, guest_bytes);
+                out.clear(); // multiplex formatter already emitted what's due
+                out
+            };
             enqueue_guest_input(state, vm_id, guest_bytes);
             RoutedInput {
                 event: ConsoleInputEvent::Consumed,
@@ -406,10 +429,20 @@ impl ConsoleCore {
     ) -> Option<Vec<u8>> {
         let mut state = self.lock_state();
         let multiple_running = state.running.len() > 1;
-        state
-            .guests
-            .get(&vm_id)
-            .filter(|guest| guest.backend_generation == Some(generation))?;
+        // Board fix: device re-plans during guest boot create new backend
+        // generations, orphaning the backend still wired into the serial
+        // device port; its writes were silently dropped. Accept writes from
+        // any generation of this VM — each VM has exactly one console.
+        if state.guests.get(&vm_id).is_none() {
+            return None;
+        }
+        if state.guests.get(&vm_id).and_then(|g| g.backend_generation) != Some(generation) {
+            // Register the writing backend's generation as current so
+            // subsequent writes from this device flow without re-checking.
+            if let Some(guest) = state.guests.get_mut(&vm_id) {
+                guest.backend_generation = Some(generation);
+            }
+        }
         Some(state.output.format(vm_id, multiple_running, bytes))
     }
 
@@ -439,7 +472,13 @@ impl SerialBackend for GuestSerialBackend {
 
 impl SerialBackendFactory for GuestSerialBackendFactory {
     fn create(&self) -> Arc<dyn SerialBackend> {
-        self.core.create_serial_backend(self.vm_id)
+        let mut cached = self.cached.lock();
+        if let Some(existing) = cached.as_ref() {
+            return existing.clone();
+        }
+        let backend = self.core.create_serial_backend(self.vm_id);
+        *cached = Some(backend.clone());
+        backend
     }
 }
 
@@ -454,6 +493,7 @@ pub fn serial_backend_factory(vm_id: VMId) -> Arc<dyn SerialBackendFactory> {
     Arc::new(GuestSerialBackendFactory {
         vm_id,
         core: GUEST_CONSOLE_MUX.core.clone(),
+        cached: SpinLock::new(None),
     })
 }
 

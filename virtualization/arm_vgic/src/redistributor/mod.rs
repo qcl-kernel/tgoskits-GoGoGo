@@ -552,6 +552,9 @@ impl RedistributorState {
             .iter()
             .filter(|delivery| delivery.is_pending_non_active())
         {
+            if !self.interrupt_enabled(delivery.intid(), &mut spi_priority) {
+                continue;
+            }
             let priority = self.delivery_priority(delivery.intid(), &mut spi_priority)?;
             select_pending(&mut selected, delivery.intid(), priority, priority_mask);
         }
@@ -562,6 +565,9 @@ impl RedistributorState {
             .flatten()
             .filter(|entry| entry.state() == InterruptState::Pending)
         {
+            if !self.interrupt_enabled(entry.intid(), &mut spi_priority) {
+                continue;
+            }
             select_pending(
                 &mut selected,
                 entry.intid(),
@@ -615,6 +621,22 @@ impl RedistributorState {
         }
         self.queued_deliveries
             .retain(|delivery| delivery.state() != InterruptState::Inactive);
+    }
+
+    fn interrupt_enabled(
+        &self,
+        intid: IntId,
+        spi_priority: &mut impl FnMut(SpiId) -> VgicResult<Priority>,
+    ) -> bool {
+        let _ = spi_priority; // reserved for SPI lookups if needed later
+        match intid {
+            IntId::Sgi(_) | IntId::Ppi(_) => {
+                self.private_interrupts[intid.raw() as usize].enabled()
+            }
+            // SPI/LPI enablement is tracked by the distributor; queued
+            // software deliveries for them only exist after an enable path.
+            IntId::Spi(_) | IntId::Lpi(_) => true,
+        }
     }
 
     fn delivery_priority(

@@ -24,7 +24,6 @@ const IRQ_SLOT: &str = "irq";
 const MMIO_SIZE: u64 = 0x200;
 const GUEST_MMIO_BASE: u64 = 0x0a00_0000;
 const GUEST_IRQ_INPUT: usize = 48;
-const QEMU_VIRTIO_MMIO_VENDOR_ID: u32 = 0x554d_4551;
 const INGRESS_CAPACITY: usize = 64;
 
 static NEXT_PORT_ID: AtomicUsize = AtomicUsize::new(0);
@@ -166,7 +165,9 @@ impl DeviceModel for VirtioNetModel {
                 backend,
                 VirtioNetConfig::new(self.guest_mac),
                 NoGuestMemoryAccessor,
-                QEMU_VIRTIO_MMIO_VENDOR_ID,
+                // RT-Thread's BSP virtio probe (drv_virtio.c) requires the
+                // spec-standard 0x1AF4 vendor ID; Linux guests ignore it.
+                0x1AF4,
             )
             .map_err(|error| DeviceManagerError::InvalidConfig {
                 operation: "construct virtio-net device",
