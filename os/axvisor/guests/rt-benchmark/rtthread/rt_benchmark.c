@@ -1665,9 +1665,9 @@ static int rtbench_run_stability(uint64_t seconds)
     }
 
     expected = seconds * (1000U / RTBENCH_PERIOD_MS) - 1U;
-    rt_kprintf("RTBENCH_STABILITY_BEGIN seconds=%llu expected=%llu\n",
-               (unsigned long long)seconds,
-               (unsigned long long)expected);
+    /* The BEGIN marker is printed synchronously by rtbench_start_job in the
+     * shell context (see the msh prompt race note there); the worker only
+     * reports the metrics and the END marker. */
     status = rtbench_run_periodic(expected,
                                   RT_FALSE,
                                   seconds * 1000U,
@@ -1754,6 +1754,18 @@ static int rtbench_start_job(enum rtbench_job_kind kind, uint64_t argument)
     rtbench_job.argument = argument;
     rtbench_job.running = RT_TRUE;
     rt_hw_local_irq_enable(irq_level);
+
+    if (kind == RTBENCH_JOB_STABILITY)
+    {
+        /* Print the BEGIN marker from the shell context before the worker
+         * thread exists: rt_kprintf output is not atomic across threads, so
+         * a marker printed by the worker races with the msh prompt echo and
+         * the result gate can see the marker line corrupted mid-string. */
+        rt_uint64_t expected = argument * (1000U / RTBENCH_PERIOD_MS) - 1U;
+        rt_kprintf("RTBENCH_STABILITY_BEGIN seconds=%llu expected=%llu\n",
+                   (unsigned long long)argument,
+                   (unsigned long long)expected);
+    }
 
     worker = rt_thread_create("rtbench",
                               rtbench_worker,

@@ -13,11 +13,13 @@ from typing import Any
 
 NUMBER = r"[0-9]+(?:\.[0-9]+)?"
 RTT_KEYS = ("min", "avg", "p50", "p95", "p99", "p99.9", "max")
+# Artifacts that both guest legs must have consumed with identical content.
+# The stability comparison runs a single RT-Thread image ("rtthread"); the
+# fault variants (rtthread-normal/drop-status/delayed-server) only exist in
+# the fault-suite flow and are never recorded by run_task123.sh here.
 SHARED_ARTIFACTS = (
     "qemu",
-    "rtthread-normal",
-    "rtthread-drop-status",
-    "rtthread-delayed-server",
+    "rtthread",
     "rootfs",
     "model",
     "protocol-source",

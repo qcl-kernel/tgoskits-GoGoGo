@@ -1,0 +1,32 @@
+# ROCK 4D board VM config: RT-Thread guest for the on-board real-time
+# comparison (auto-runs rtbench_stability 300 after boot; see the patched
+# applications/main.c). Pinned to one big Cortex-A72 core (mpidr 0x102).
+[base]
+id = 3
+name = "rtthread-net"
+guest_type = "virtualized"
+cpu_num = 1
+host_timer_policy = "periodic"
+host_vcpu_idle_policy = "busy"
+phys_cpu_ids = [0x102]
+
+[kernel]
+entry_point = 0x4020_0000
+image_location = "memory"
+kernel_path = "/home/yfblock/Code/tgoskits-GoGoGo/tmp/rt-thread-5.2.2-native-current/bsp/qemu-virt64-aarch64/rtthread.bin"
+kernel_load_addr = 0x4020_0000
+load_policy = "keep_configured"
+dtb_load_addr = 0x7f00_0000
+cmdline = "task3.fault=normal"
+memory_regions = [
+  [0x4000_0000, 0x4000_0000, 0x7, 0],
+]
+
+[devices]
+passthrough = []
+disabled = []
+
+[[devices.virtual]]
+id = "net0"
+model = "virtio-net"
+guest_mac = [0x52, 0x54, 0x00, 0x77, 0x00, 0x03]
