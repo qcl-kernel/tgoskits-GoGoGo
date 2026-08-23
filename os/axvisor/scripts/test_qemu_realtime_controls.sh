@@ -98,7 +98,7 @@ rg -qF 'QEMU_TCG_THREAD' "$RUNNER" || {
     echo "RT benchmark runner does not expose the TCG thread mode" >&2
     exit 1
 }
-rg -qF 'QEMU_ICOUNT="${QEMU_ICOUNT:-shift=3}"' "$TASK123_RUNNER" || {
+rg -qF 'QEMU_ICOUNT="${QEMU_ICOUNT:-shift=0}"' "$TASK123_RUNNER" || {
     echo "Task123 runner must default to precise QEMU icount timing for RTBENCH" >&2
     exit 1
 }

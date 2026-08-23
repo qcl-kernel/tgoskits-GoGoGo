@@ -482,6 +482,20 @@ fn render_matrix_report(report: &Value) -> String {
                 .map(format_value)
                 .unwrap_or_else(|| "-".to_string())
         };
+        let jitter = |field: &str| {
+            combination
+                .get("rtbench")
+                .and_then(|value| value.get("stability_jitter"))
+                .and_then(|value| value.get(field))
+                .or_else(|| {
+                    combination
+                        .get("rtbench")
+                        .and_then(|value| value.get("timer_jitter"))
+                        .and_then(|value| value.get(field))
+                })
+                .map(format_value)
+                .unwrap_or_else(|| "-".to_string())
+        };
         output.push_str(&format!(
             "| {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} |\n",
             text(&["rtos"]),
@@ -493,9 +507,9 @@ fn render_matrix_report(report: &Value) -> String {
             number(&["task3_summary", "timeouts"]),
             number(&["task3_summary", "transport_retries"]),
             number(&["task3_summary", "round_trip_us", "p50"]),
-            number(&["rtbench", "stability_jitter", "p99_ns"]),
-            number(&["rtbench", "stability_jitter", "p99_cycles"]),
-            number(&["rtbench", "stability_jitter", "p99_instructions"]),
+            jitter("p99_ns"),
+            jitter("p99_cycles"),
+            jitter("p99_instructions"),
         ));
     }
     output.push_str(
@@ -691,6 +705,34 @@ mod tests {
 
         assert!(rendered.contains("| 123 | 456 | 789 |"));
         assert!(rendered.contains("| 7 | 104 |"));
+    }
+
+    #[test]
+    fn matrix_report_renders_timer_jitter_counters() {
+        let report = json!({
+            "combinations": [{
+                "rtos": "rtthread",
+                "app_guest": "starryos",
+                "task2": "PASS",
+                "task3": "PASS",
+                "task123": "PASS",
+                "task3_summary": {
+                    "success_rate": 1.0,
+                    "round_trip_us": {"p50": 42}
+                },
+                "rtbench": {
+                    "timer_jitter": {
+                        "p99_ns": 123,
+                        "p99_cycles": 456,
+                        "p99_instructions": 789
+                    }
+                }
+            }]
+        });
+
+        let rendered = render_matrix_report(&report);
+
+        assert!(rendered.contains("| 123 | 456 | 789 |"));
     }
 
     #[test]

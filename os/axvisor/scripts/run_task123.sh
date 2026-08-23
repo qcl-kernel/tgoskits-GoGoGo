@@ -12,8 +12,10 @@ RUN_UNTIL="${RUN_UNTIL:-$SCRIPT_DIR/run_until_log_marker.sh}"
 QEMU_REALTIME_CONTROL="${QEMU_REALTIME_CONTROL:-$SCRIPT_DIR/apply_qemu_realtime_controls.sh}"
 QEMU_RESOURCE_SAMPLER="${QEMU_RESOURCE_SAMPLER:-$SCRIPT_DIR/sample_qemu_resources.sh}"
 # RTBENCH requires QEMU's precise icount mode so INST_RETIRED (0x08) is
-# available alongside the virtual timer and cycle counters.
-QEMU_ICOUNT="${QEMU_ICOUNT:-shift=3}"
+# available alongside the virtual timer and cycle counters.  A zero shift
+# keeps the TCG clock precise without stretching the Task 2/3 network path
+# enough to trigger protocol timeouts; callers can override it for studies.
+QEMU_ICOUNT="${QEMU_ICOUNT:-shift=0}"
 LINUX_VMCONFIG_GENERATOR="${LINUX_VMCONFIG_GENERATOR:-$SCRIPT_DIR/generate_linux_vmconfig.sh}"
 STARRYOS_VMCONFIG_GENERATOR="${STARRYOS_VMCONFIG_GENERATOR:-$SCRIPT_DIR/generate_starryos_vmconfig.sh}"
 RTTHREAD_VMCONFIG_GENERATOR="${RTTHREAD_VMCONFIG_GENERATOR:-$SCRIPT_DIR/generate_rtthread_vmconfig.sh}"
@@ -1015,6 +1017,9 @@ generate_vmconfigs() {
         APP_GUEST_VMCONFIG="$LINUX_VMCONFIG"
     else
         guest_cmdline="task2.count=$task2_count task2.fault=none task3.frames=$task3_frames task3.fault=$guest_fault"
+        if [[ "$mode" == realtime-suite ]]; then
+            guest_cmdline+=" rtbench.net.count=$rtbench_samples"
+        fi
         phase starryos-vmconfig
         STARRYOS_VMCONFIG="$(
             timeout --foreground --signal TERM --kill-after 5s \

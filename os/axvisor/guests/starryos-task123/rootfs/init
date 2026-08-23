@@ -31,6 +31,7 @@ parse_command_line() {
     task2_fault=none
     task3_frames=600
     task3_fault=normal
+    rtbench_net_count=0
 
     for argument in $(/bin/busybox cat /proc/cmdline 2>/dev/null); do
         case "$argument" in
@@ -64,6 +65,13 @@ parse_command_line() {
                     *) invalid_control 'task3.fault' ;;
                 esac
                 ;;
+            rtbench.net.count=*)
+                value=${argument#*=}
+                is_decimal "$value" || invalid_control 'rtbench.net.count'
+                [ "$value" -gt 0 ] 2>/dev/null || invalid_control 'rtbench.net.count'
+                [ "$value" -le 100000 ] 2>/dev/null || invalid_control 'rtbench.net.count'
+                rtbench_net_count=$value
+                ;;
             task2.*|task3.*)
                 invalid_control "${argument%%=*}"
                 ;;
@@ -93,6 +101,18 @@ main() {
         finish 1
     fi
     console 'STARRY_NET_READY ip=192.168.77.11 peer=192.168.77.30'
+
+    net_probe_pid=
+    if [ "$rtbench_net_count" -gt 0 ]; then
+        /usr/bin/rtbench-net-probe \
+            --listen 9879 \
+            --target 192.168.77.30 \
+            --port 9878 \
+            --count "$rtbench_net_count" \
+            --interval-us 2000 > /dev/console 2>&1 &
+        net_probe_pid=$!
+        console "TASK3_STARRY_NET_PROBE_READY count=$rtbench_net_count"
+    fi
 
     console 'TASK2_STARRY_BEGIN port=9876'
     /bin/rtipic-client \
@@ -133,6 +153,9 @@ main() {
 
     if [ "$task2_status" -eq 0 ] && [ "$task3_status" -eq 0 ]; then
         console 'TASK123_STARRY_END status=PASS'
+        if [ -n "$net_probe_pid" ]; then
+            wait "$net_probe_pid" || true
+        fi
         finish 0
     fi
     console 'TASK123_STARRY_END status=FAIL'
