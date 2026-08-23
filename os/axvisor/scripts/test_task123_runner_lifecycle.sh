@@ -352,6 +352,7 @@ chmod +x "$tools"/*
 
 common_env=(
     PATH="$tools:$PATH"
+    TGOS_SOURCE_CACHE="$tmp/source-cache"
     QEMU="$tools/qemu-system-aarch64"
     CARGO="$tools/cargo"
     AARCH64_STRIP="$tools/aarch64-linux-gnu-strip"
@@ -524,8 +525,24 @@ for realtime_case in 'realtime-suite:benchmark 2' 'stability:rtbench_stability 1
     assert_mode_contract "$realtime_mode" \
         "$expected_guest_cmdline" \
         "$fixtures/rtthread-normal.bin"
+    if grep -Fq -- '-icount ' "$records/qemu.log"; then
+        fail "$realtime_mode enabled QEMU icount without an explicit request"
+    fi
     assert_reaped "$(cat "$records/qemu.pid")"
 done
+
+: > "$records/qemu.log"
+: > "$records/qemu-stdin.log"
+explicit_icount_output="$tmp/explicit-icount-output"
+if ! env "${common_env[@]}" QEMU_ICOUNT=shift=0 \
+    FAKE_QEMU_EXPECT_COMMAND='rtbench_stability 1' TASK123_TIMEOUT_S=2 \
+    "$RUNNER" --mode stability --seconds 1 --task2-count 2 \
+    --output "$explicit_icount_output" >/dev/null; then
+    fail "explicit QEMU icount run failed"
+fi
+grep -Fq -- '-icount shift=0 ' "$records/qemu.log" ||
+    fail "explicit QEMU icount request was not forwarded"
+assert_reaped "$(cat "$records/qemu.pid")"
 
 : > "$records/qemu.log"
 : > "$records/qemu-stdin.log"
@@ -560,8 +577,10 @@ for rootfs_behavior in zero multiple; do
     : > "$records/cargo.log"
     : > "$records/qemu.log"
     bad_rootfs_output="$tmp/rootfs-$rootfs_behavior-output"
+    bad_rootfs_cache="$tmp/source-cache-$rootfs_behavior"
     expect_failure "rootfs pull with $rootfs_behavior candidates returned success" \
         env "${common_env[@]}" ROOTFS_IMAGE= \
+        TGOS_SOURCE_CACHE="$bad_rootfs_cache" \
         FAKE_ROOTFS_BEHAVIOR="$rootfs_behavior" \
         "$RUNNER" --mode smoke --task2-count 2 --task3-frames 3 \
         --output "$bad_rootfs_output"
@@ -956,6 +975,7 @@ done
 cache_second_output="$tmp/cache-second"
 cache_env=(
     PATH="$tools:$PATH"
+    TGOS_SOURCE_CACHE="$tmp/source-cache"
     QEMU="$tools/qemu-system-aarch64"
     CARGO="$tools/cargo"
     AARCH64_STRIP="$tools/aarch64-linux-gnu-strip"

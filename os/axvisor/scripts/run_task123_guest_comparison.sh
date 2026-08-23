@@ -6,7 +6,7 @@ SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(CDPATH= cd -- "$SCRIPT_DIR/../../.." && pwd)"
 RUNNER="${TASK123_COMPARISON_RUNNER:-$SCRIPT_DIR/run_task123.sh}"
 ANALYZER="${TASK123_COMPARISON_ANALYZER:-$SCRIPT_DIR/compare_task123_guests.py}"
-ROOTFS_IMAGE="${ROOTFS_IMAGE:-$ROOT/tmp/source-cache/rootfs/qemu-aarch64/rootfs.img}"
+ROOTFS_IMAGE="${ROOTFS_IMAGE:-$ROOT/tmp/source-cache/task123-rootfs-current/rootfs.img}"
 
 mode=quick
 mode_set=0
@@ -218,9 +218,13 @@ main() {
     if [[ "$mode" == full ]]; then
         # StarryOS needs additional time to drain the larger Task2 workload
         # after the shared RTBench stability window has completed.
-        RUN_TIMEOUT=$((STABILITY_SECONDS + 1800))
+        RUN_TIMEOUT=$((STABILITY_SECONDS + 3600))
     else
-        RUN_TIMEOUT=$((STABILITY_SECONDS + 600))
+        # The quick matrix still runs 30000 requests for each of three
+        # payloads. StarryOS's userspace network path is slower than Linux,
+        # so retain a bounded but larger allowance for the complete guest
+        # workload instead of terminating it during the final payload.
+        RUN_TIMEOUT=$((STABILITY_SECONDS + 1800))
     fi
     RUNNER="$(canonical_executable runner "$RUNNER")"
     ANALYZER="$(canonical_executable analyzer "$ANALYZER")"

@@ -43,6 +43,13 @@ write_complete_log "$complete"
 expect_pass complete "$VERIFY" "$complete" 300 0
 expect_fail qemu_timeout "$VERIFY" "$complete" 300 124
 
+extended_begin="$TMP_DIR/extended-begin.log"
+write_complete_log "$extended_begin"
+sed -i \
+    's/RTBENCH_STABILITY_BEGIN seconds=300 expected=299999$/RTBENCH_STABILITY_BEGIN seconds=300 expected=299999 frequency=62500000 tick_hz=1000 start_tick=2067 start_counter=143931000/' \
+    "$extended_begin"
+expect_pass extended_begin "$VERIFY" "$extended_begin" 300 0
+
 crlf="$TMP_DIR/crlf.log"
 sed 's/$/\r/' "$complete" > "$crlf"
 expect_pass crlf "$VERIFY" "$crlf" 300 0

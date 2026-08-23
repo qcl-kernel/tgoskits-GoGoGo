@@ -34,9 +34,9 @@ if [[ ! -f "$DRIVER" ]]; then
 fi
 
 failures=0
-if ! grep -Eq '^#define[[:space:]]+VIRTIO_VENDOR_ID[[:space:]]+\(?0x1AF4\)?' \
+if ! grep -Eq '^#define[[:space:]]+VIRTIO_VENDOR_ID[[:space:]]+\(?0x554d4551\)?' \
     "$VIRTIO_BSP_HEADER"; then
-    echo "FAIL: RT-Thread virtio vendor ID must match AxVisor's standard 0x1AF4" >&2
+    echo "FAIL: RT-Thread virtio vendor ID must match QEMU's 0x554d4551" >&2
     failures=$((failures + 1))
 fi
 if ! grep -Eq '^#define[[:space:]]+VIRTIO_IRQ_BASE[[:space:]]+\(?48\)?' \
@@ -437,6 +437,10 @@ else
     require_pattern \
         "stability checks the sample conservation invariant" \
         'collected \+ missing != expected' \
+        "$BENCHMARK"
+    require_pattern \
+        "stability reports tick and architectural-counter drift" \
+        'RTBENCH_STABILITY_CLOCK ticks=' \
         "$BENCHMARK"
     require_function_pattern \
         "stability waits for exact samples within the bounded timeout" \

@@ -947,7 +947,7 @@ index 801e889b..b8f134a9 100644
 -#define VIRTIO_VENDOR_ID    0x554d4551  /* "QEMU" */
 +#define VIRTIO_MAX_NR       1
 +#define VIRTIO_IRQ_BASE     (48)
-+#define VIRTIO_VENDOR_ID    0x1AF4      /* Red Hat (standard virtio PCI vendor) */
++#define VIRTIO_VENDOR_ID    0x554d4551  /* QEMU virtio-mmio */
 
  /* GIC */
 -#define MAX_HANDLERS        96

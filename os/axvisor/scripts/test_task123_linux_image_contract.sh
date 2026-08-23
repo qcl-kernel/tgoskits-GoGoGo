@@ -10,10 +10,11 @@ PACKAGE="$TASK3_ROOT/buildroot/package/task3-linux/task3-linux.mk"
 BUILD="$TASK3_ROOT/scripts/build_linux.sh"
 RUNNER="$ROOT/os/axvisor/scripts/run_task123.sh"
 TASK2_MAKE="$ROOT/os/axvisor/guests/rt-ipc/linux/Makefile"
-MODEL_DIR="$TASK3_ROOT/build/model"
-INITRAMFS=${TASK123_INITRAMFS:-"$TASK3_ROOT/build/images/linux/rootfs.cpio.gz"}
-EXPECTED_TASK2_BIN=${TASK123_EXPECTED_TASK2_BIN:-"$TASK3_ROOT/build/alpine-root/bin/rtipic-client"}
-EXPECTED_TASK3_BIN=${TASK123_EXPECTED_TASK3_BIN:-"$TASK3_ROOT/build/alpine-root/usr/bin/task3-linux"}
+LINUX_IMAGE_CACHE=${TASK123_LINUX_IMAGE_CACHE:-"$ROOT/tmp/source-cache/task3-alpine-linux/6.12.21-alpine-3.23.0"}
+MODEL_DIR=${TASK123_MODEL_DIR:-"$ROOT/tmp/source-cache/task3-model"}
+INITRAMFS=${TASK123_INITRAMFS:-"$LINUX_IMAGE_CACHE/images/linux/rootfs.cpio.gz"}
+EXPECTED_TASK2_BIN=${TASK123_EXPECTED_TASK2_BIN:-"$LINUX_IMAGE_CACHE/linux-app/task2/linux/target/rtipic-client"}
+EXPECTED_TASK3_BIN=${TASK123_EXPECTED_TASK3_BIN:-"$LINUX_IMAGE_CACHE/linux-app/task3-linux"}
 
 fail() {
     printf 'test_task123_linux_image_contract: %s\n' "$*" >&2

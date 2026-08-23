@@ -50,9 +50,7 @@ run, guest, mode, count, frames, seconds = sys.argv[1:]
 root = Path(run)
 common = [
     ("qemu", "a"),
-    ("rtthread-normal", "b"),
-    ("rtthread-drop-status", "c"),
-    ("rtthread-delayed-server", "d"),
+    ("rtthread", "b"),
     ("rootfs", "e"),
     ("model", "f"),
     ("protocol-source", "1"),
@@ -122,7 +120,7 @@ fi
 [[ -s "$output/comparison/comparison.json" ]] || fail "comparison JSON is missing"
 [[ -s "$output/comparison/comparison-report.md" ]] || fail "comparison report is missing"
 [[ "$(wc -l < "$trace")" -eq 2 ]] || fail "orchestrator did not run both guests exactly once"
-awk '$1 == "linux" && $2 == "stability" && $3 == 30000 && $4 == 3 && $5 == 300 && $7 == 900 {next} $1 == "starryos" && $2 == "stability" && $3 == 30000 && $4 == 3 && $5 == 300 && $7 == 900 {next} {exit 1}' "$trace" ||
+awk '$1 == "linux" && $2 == "stability" && $3 == 30000 && $4 == 3 && $5 == 300 && $7 == 2100 {next} $1 == "starryos" && $2 == "stability" && $3 == 30000 && $4 == 3 && $5 == 300 && $7 == 2100 {next} {exit 1}' "$trace" ||
     fail "quick comparison did not use the specified workload"
 cache_one="$(awk 'NR == 1 {print $6}' "$trace")"
 cache_two="$(awk 'NR == 2 {print $6}' "$trace")"
@@ -143,7 +141,7 @@ if ! TASK123_COMPARISON_RUNNER="$runner" \
     fail "full guest comparison failed"
 fi
 [[ "$(wc -l < "$full_trace")" -eq 2 ]] || fail "full comparison did not run both guests exactly once"
-awk '$1 == "linux" && $2 == "stability" && $3 == 240000 && $4 == 3 && $5 == 3600 && $7 == 5400 {next} $1 == "starryos" && $2 == "stability" && $3 == 240000 && $4 == 3 && $5 == 3600 && $7 == 5400 {next} {exit 1}' "$full_trace" ||
+awk '$1 == "linux" && $2 == "stability" && $3 == 240000 && $4 == 3 && $5 == 3600 && $7 == 7200 {next} $1 == "starryos" && $2 == "stability" && $3 == 240000 && $4 == 3 && $5 == 3600 && $7 == 7200 {next} {exit 1}' "$full_trace" ||
     fail "full comparison did not use the formal workload"
 [[ -s "$full_output/comparison/comparison-report.md" ]] ||
     fail "full comparison report is missing"

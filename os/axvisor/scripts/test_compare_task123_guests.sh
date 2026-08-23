@@ -74,9 +74,9 @@ def write_guest(name: str, avg: int, app_guest: str) -> None:
         (run / "manifest.txt").read_text(encoding="ascii")
         + "result_gate=PASS\n"
         + "ARTIFACT name=qemu path=/tmp/qemu sha256=" + "a" * 64 + "\n"
-        + "ARTIFACT name=rtthread-normal path=/tmp/rt-normal sha256=" + "b" * 64 + "\n"
-        + "ARTIFACT name=rtthread-drop-status path=/tmp/rt-drop sha256=" + "c" * 64 + "\n"
-        + "ARTIFACT name=rtthread-delayed-server path=/tmp/rt-delay sha256=" + "d" * 64 + "\n"
+        # Stability comparison uses one RT-Thread image and runtime fault
+        # configuration; legacy per-fault images are not part of its manifest.
+        + "ARTIFACT name=rtthread path=/tmp/rtthread sha256=" + "b" * 64 + "\n"
         + "ARTIFACT name=rootfs path=/tmp/rootfs sha256=" + "e" * 64 + "\n"
         + "ARTIFACT name=model path=/tmp/model sha256=" + "f" * 64 + "\n"
         + "ARTIFACT name=protocol-source path=/tmp/protocol.c sha256=" + "1" * 64 + "\n"

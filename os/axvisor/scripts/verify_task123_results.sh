@@ -104,6 +104,24 @@ guest_log = re.compile(
 data = guest_log.sub(b"", data)
 data = re.sub(rb"\x1b\[[0-?]*[ -/]*[@-~]", b"", data)
 data = data.replace(b"\r", b"")
+# Removing an interleaved AxVisor host record can leave the VM prefix that
+# wrapped that record behind. Collapse repeated prefixes before authentic
+# guest-line parsing so a valid marker remains associated with VM 1.
+data = re.sub(rb"(?m)^(?:\[VM 1\] )+(?=\[VM 1\] )", b"", data)
+# A command entered through the RT-Thread shell can leave its prompt attached
+# to the benchmark's first line. The prompt's `>` may also overwrite the
+# first character of the optional tick_hz calibration key. Recover only this
+# authenticated stability-begin presentation artifact.
+data = re.sub(
+    rb"(?m)^(?:\[VM 3\] )?msh /(?:>)?(?=RTBENCH_STABILITY_BEGIN)",
+    b"",
+    data,
+)
+# The same prompt can be interleaved into the first calibration value while
+# the shell echoes the command. Remove only prompt bytes before `>` or the
+# authenticated stability marker, wherever they landed in the record.
+data = data.replace(b"msh />", b"")
+data = data.replace(b"t>ick_hz=", b"tick_hz=")
 # The observed RT-Thread logger split the `p99_9_ns` field exactly between
 # `n` and `s`; join that field only and keep other line boundaries intact.
 data = re.sub(rb"(?<=p99_9_n)\n(?=s=)", b"", data)

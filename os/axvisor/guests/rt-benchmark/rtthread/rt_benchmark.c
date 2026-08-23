@@ -1652,9 +1652,14 @@ static int rtbench_run_core_suite(uint64_t samples)
 static int rtbench_run_stability(uint64_t seconds)
 {
     uint64_t expected;
+    rt_tick_t start_tick;
+    uint64_t start_counter;
+    rt_tick_t end_tick;
+    uint64_t end_counter;
     struct rtbench_result conservation;
     uint64_t collected;
     uint64_t missing;
+    const rt_bool_t stop_timer_after_expected_samples = RT_FALSE;
     int status;
 
     rtbench_frequency = rtbench_read_frequency();
@@ -1665,13 +1670,20 @@ static int rtbench_run_stability(uint64_t seconds)
     }
 
     expected = seconds * (1000U / RTBENCH_PERIOD_MS) - 1U;
-    rt_kprintf("RTBENCH_STABILITY_BEGIN seconds=%llu expected=%llu\n",
+    start_tick = rt_tick_get();
+    start_counter = rtbench_read_counter();
+    rt_kprintf("RTBENCH_STABILITY_BEGIN seconds=%llu expected=%llu frequency=%llu "
+               "tick_hz=%u start_tick=%llu start_counter=%llu\n",
                (unsigned long long)seconds,
-               (unsigned long long)expected);
+               (unsigned long long)expected,
+               (unsigned long long)rtbench_frequency,
+               (unsigned)RT_TICK_PER_SECOND,
+               (unsigned long long)start_tick,
+               (unsigned long long)start_counter);
     status = rtbench_run_periodic(expected,
                                   RT_FALSE,
                                   seconds * 1000U,
-                                  RT_TRUE,
+                                  stop_timer_after_expected_samples,
                                   1,
                                   "stability_jitter");
 
@@ -1688,12 +1700,20 @@ static int rtbench_run_stability(uint64_t seconds)
     conservation.expected = expected;
     conservation.collected = collected;
     conservation.missing = missing;
+    end_tick = rt_tick_get();
+    end_counter = rtbench_read_counter();
     rt_kprintf("RTBENCH_STABILITY_END status=%s expected=%llu collected=%llu "
                "missing=%llu\n",
                status == RT_EOK ? "PASS" : "FAIL",
                (unsigned long long)conservation.expected,
                (unsigned long long)conservation.collected,
                (unsigned long long)conservation.missing);
+    rt_kprintf("RTBENCH_STABILITY_CLOCK ticks=%llu counter_ticks=%llu "
+               "counter_elapsed_ns=%llu\n",
+               (unsigned long long)(end_tick - start_tick),
+               (unsigned long long)(end_counter - start_counter),
+               (unsigned long long)rtbench_ticks_to_ns(end_counter - start_counter,
+                                                      rtbench_frequency));
     rt_kprintf("RTBENCH_STABILITY_DONE\n");
     return status;
 }

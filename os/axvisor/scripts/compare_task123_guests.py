@@ -15,9 +15,10 @@ NUMBER = r"[0-9]+(?:\.[0-9]+)?"
 RTT_KEYS = ("min", "avg", "p50", "p95", "p99", "p99.9", "max")
 SHARED_ARTIFACTS = (
     "qemu",
-    "rtthread-normal",
-    "rtthread-drop-status",
-    "rtthread-delayed-server",
+    # The integrated runner builds one RT-Thread image. Task 3 fault cases
+    # are selected at runtime, so they must not require separate binaries in
+    # the stability comparison manifest.
+    "rtthread",
     "rootfs",
     "model",
     "protocol-source",

@@ -196,6 +196,26 @@ rm -f -- "$tmp/ansi-console/linux.log" "$tmp/ansi-console/summary.json" \
 run_gate "$tmp/ansi-console" smoke >/dev/null ||
     fail "ANSI-wrapped console markers were rejected"
 
+cp -a "$tmp/smoke" "$tmp/repeated-vm-prefix"
+python3 - "$tmp/repeated-vm-prefix/console.log" <<'PY'
+import sys
+from pathlib import Path
+
+path = Path(sys.argv[1])
+text = path.read_text(encoding="utf-8")
+needle = "[VM 1] TASK3_FRAME_CSV=FIXED,0"
+replacement = "[VM 1] [VM 1] [VM 1] TASK3_FRAME_CSV=FIXED,0"
+if text.count(needle) != 1:
+    raise SystemExit("repeated VM-prefix fixture marker not found")
+path.write_text(text.replace(needle, replacement, 1), encoding="utf-8")
+PY
+rm -f -- "$tmp/repeated-vm-prefix/linux.log" \
+    "$tmp/repeated-vm-prefix/summary.json" \
+    "$tmp/repeated-vm-prefix/frames.csv" \
+    "$tmp/repeated-vm-prefix/summary.raw.json"
+run_gate "$tmp/repeated-vm-prefix" smoke >/dev/null ||
+    fail "repeated VM prefixes were not normalized"
+
 make_fixture "$tmp/attached-linux-replay"
 awk '
     !attached && /^\[VM 1\] TASK3_FRAME_CSV=/ {
@@ -296,6 +316,30 @@ make_fixture "$tmp/stability"
 emit_stability 1 >> "$tmp/stability/console.log"
 run_gate "$tmp/stability" stability --seconds 1 >/dev/null ||
     fail "stability fixture was rejected"
+
+cp -a "$tmp/stability" "$tmp/stability-shell-prompt"
+python3 - "$tmp/stability-shell-prompt/console.log" <<'PY'
+import sys
+from pathlib import Path
+
+path = Path(sys.argv[1])
+data = path.read_bytes()
+needle = b"[VM 3] RTBENCH_STABILITY_BEGIN"
+replacement = (
+    b"[VM 3] RTBENCH_STABILITY_BEGIN "
+    b"seconds=1 expected=999 frequency=62msh />500000 t>ick_hz=1000"
+)
+if data.count(needle) != 1:
+    raise SystemExit("stability marker fixture not found")
+data = data.replace(needle, replacement, 1)
+path.write_bytes(data)
+PY
+rm -f -- "$tmp/stability-shell-prompt/linux.log" \
+    "$tmp/stability-shell-prompt/summary.json" \
+    "$tmp/stability-shell-prompt/frames.csv" \
+    "$tmp/stability-shell-prompt/summary.raw.json"
+run_gate "$tmp/stability-shell-prompt" stability --seconds 1 >/dev/null ||
+    fail "stability marker preceded by a shell prompt was rejected"
 
 make_fixture "$tmp/stability-qemu-timer-limit"
 emit_stability 1 >> "$tmp/stability-qemu-timer-limit/console.log"

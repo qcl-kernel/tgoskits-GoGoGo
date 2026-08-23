@@ -63,7 +63,10 @@ if grep -aEiq \
 fi
 
 expected=$((seconds * 1000 - 1))
-begin_pattern="RTBENCH_STABILITY_BEGIN seconds=${seconds} expected=${expected}[[:space:]]*$"
+# RT-Thread includes calibration metadata after the required fields. Accept
+# additional key=value fields while keeping the duration and sample count
+# authenticated.
+begin_pattern="RTBENCH_STABILITY_BEGIN seconds=${seconds} expected=${expected}([[:space:]]+[A-Za-z0-9_]+=[^[:space:]]+)*[[:space:]]*$"
 if [ "$allow_qemu_timer_limit" = allow-qemu-timer-limit ]; then
     end_pattern="RTBENCH_STABILITY_END status=(PASS|FAIL) expected=${expected} collected=${expected} missing=0[[:space:]]*$"
 else

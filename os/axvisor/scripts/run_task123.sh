@@ -10,9 +10,10 @@ TASK3_ROOT="$ROOT/os/axvisor/guests/task3"
 RUN_UNTIL="${RUN_UNTIL:-$SCRIPT_DIR/run_until_log_marker.sh}"
 QEMU_REALTIME_CONTROL="${QEMU_REALTIME_CONTROL:-$SCRIPT_DIR/apply_qemu_realtime_controls.sh}"
 QEMU_RESOURCE_SAMPLER="${QEMU_RESOURCE_SAMPLER:-$SCRIPT_DIR/sample_qemu_resources.sh}"
-# RTBench's virtual PMU requires QEMU PMU support and precise icount so
-# INST_RETIRED advances deterministically alongside the virtual timer.
-QEMU_ICOUNT="${QEMU_ICOUNT:-shift=3}"
+# Use QEMU's wall clock by default. Fixed icount is still available for
+# explicitly requested PMU/RTBench experiments, but it serializes the TCG
+# event loop and makes the integrated network workload unnecessarily slow.
+QEMU_ICOUNT="${QEMU_ICOUNT:-}"
 LINUX_VMCONFIG_GENERATOR="${LINUX_VMCONFIG_GENERATOR:-$SCRIPT_DIR/generate_linux_vmconfig.sh}"
 STARRYOS_VMCONFIG_GENERATOR="${STARRYOS_VMCONFIG_GENERATOR:-$SCRIPT_DIR/generate_starryos_vmconfig.sh}"
 RTTHREAD_VMCONFIG_GENERATOR="${RTTHREAD_VMCONFIG_GENERATOR:-$SCRIPT_DIR/generate_rtthread_vmconfig.sh}"
@@ -59,7 +60,7 @@ validate_precise_icount() {
     local value=${QEMU_ICOUNT:-}
     local shift
     [[ "$value" =~ ^shift=[0-9]+(,.*)?$ ]] || {
-        fail "QEMU_ICOUNT must use precise fixed-shift mode for RTBENCH (for example shift=3), got: $value"
+        fail "QEMU_ICOUNT must use precise fixed-shift mode for RTBENCH (for example shift=0), got: $value"
         return 2
     }
     shift=${value#shift=}
@@ -216,7 +217,8 @@ validate_mode_options() {
     elif [[ "$mode" == stability ]]; then
         require_integer "$stability_seconds" 1 3600 seconds
     fi
-    if [[ "$mode" == realtime-suite || "$mode" == stability ]]; then
+    if [[ "$mode" == realtime-suite || "$mode" == stability ]] &&
+       [[ -n "$QEMU_ICOUNT" ]]; then
         validate_precise_icount || return 2
     fi
 
@@ -612,6 +614,12 @@ resolve_rootfs_image() {
         return
     fi
 
+    local persistent_rootfs="$TGOS_SOURCE_CACHE/task123-rootfs-current/rootfs.img"
+    if [[ -s "$persistent_rootfs" ]]; then
+        ROOTFS_IMAGE="$(canonical_existing_file rootfs "$persistent_rootfs")"
+        return
+    fi
+
     local rootfs_dir="$RUNTIME_DIR/rootfs"
     local rootfs_candidates=()
     run_timed "$TASK123_BUILD_TIMEOUT_S" image-pull \
@@ -622,6 +630,21 @@ resolve_rootfs_image() {
         return 1
     }
     ROOTFS_IMAGE="$(canonical_existing_file rootfs "${rootfs_candidates[0]}")"
+    publish_rootfs_artifact "$ROOTFS_IMAGE"
+}
+
+publish_rootfs_artifact() {
+    local image=$1
+    local destination="$TGOS_SOURCE_CACHE/task123-rootfs-current"
+    local temporary="$destination/rootfs.img.tmp.$$"
+
+    mkdir -p -- "$destination" || return 0
+    if cp -- "$image" "$temporary" && mv -- "$temporary" "$destination/rootfs.img"; then
+        progress "Published reusable Linux rootfs to $destination"
+    else
+        progress "Warning: failed to publish reusable Linux rootfs to $destination"
+        rm -f -- "$temporary"
+    fi
 }
 
 linux_image_has_task123_probe() {
@@ -690,6 +713,29 @@ build_rtthread_variant() {
             --image "$output" \
             --source "$source_tree" \
             --output "$metadata_output"
+    publish_rtthread_artifact "$output" "$metadata_output"
+}
+
+publish_rtthread_artifact() {
+    local image=$1
+    local metadata=$2
+    local destination="$TGOS_SOURCE_CACHE/task123-rtthread-current"
+    local image_tmp="$destination/rtthread.bin.tmp.$$"
+    local metadata_tmp="$destination/rtthread.bin.meta.json.tmp.$$"
+
+    mkdir -p -- "$destination" || return 0
+    if cp -- "$image" "$image_tmp" &&
+        cp -- "$metadata" "$metadata_tmp" &&
+        python3 "$IMAGE_METADATA" check \
+            --image "$image_tmp" \
+            --metadata "$metadata_tmp" &&
+        mv -- "$image_tmp" "$destination/rtthread.bin" &&
+        mv -- "$metadata_tmp" "$destination/rtthread.bin.meta.json"; then
+        progress "Published reusable RT-Thread image to $destination"
+    else
+        progress "Warning: failed to publish reusable RT-Thread image to $destination"
+        rm -f -- "$image_tmp" "$metadata_tmp"
+    fi
 }
 
 build_rtthread_images_if_needed() {
@@ -1055,7 +1101,7 @@ launch_one_qemu() {
 
     local qemu_pmu_args=()
     local qemu_tcg_thread="${QEMU_TCG_THREAD:-multi}"
-    if [[ "$mode" == realtime-suite || "$mode" == stability ]]; then
+    if [[ -n "$QEMU_ICOUNT" ]]; then
         qemu_pmu_args=(-icount "$QEMU_ICOUNT")
         qemu_tcg_thread=single
     fi
@@ -1063,14 +1109,14 @@ launch_one_qemu() {
         -display none
         -monitor none
         -snapshot
-        -name "tgoskits,debug-threads=on"
+        -name tgoskits
         -cpu cortex-a72,pmu=on
         "${qemu_pmu_args[@]}"
         -accel "tcg,thread=$qemu_tcg_thread"
         -machine virt,virtualization=on,gic-version=3
         -global virtio-mmio.force-legacy=false
         -smp 4
-        -device nvme,drive=disk0,serial=tgoskits,max_ioqpairs=64,msix_qsize=65
+        -device nvme,drive=disk0,serial=tgoskits,max_ioqpairs=4,msix_qsize=65
         -drive "id=disk0,if=none,format=raw,file=$ROOTFS_IMAGE"
         # This is the AxVisor host cmdline; Linux workload controls live only in its VM config.
         -append 'root=/dev/nvme0n1 rw init=/bin/sh'

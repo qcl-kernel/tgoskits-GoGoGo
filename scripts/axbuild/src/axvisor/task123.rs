@@ -37,6 +37,25 @@ struct Task123Environment {
     native_source: Option<PathBuf>,
 }
 
+#[derive(serde::Deserialize)]
+struct Task123ImageMetadata {
+    schema: u32,
+    patch_set_sha256: String,
+}
+
+const RTTHREAD_PATCHES: [&str; 10] = [
+    "0000-axvisor-aarch64-port.patch",
+    "0009-native-qemu-memory-layout.patch",
+    "0002-lwip-rx-mailbox-recover-notice.patch",
+    "0003-virtio-net-reclaim-tx-used-ring.patch",
+    "0004-virtio-net-use-rx-used-ring-head.patch",
+    "0005-lwip-configurable-udp-recv-mailbox.patch",
+    "0006-gicv3-use-redistributor-pending-registers.patch",
+    "0007-gicv3-query-interrupt-enable-state.patch",
+    "0008-aarch64-gtimer-use-absolute-deadlines.patch",
+    "0010-virtio-net-benchmark-packet-hook.patch",
+];
+
 impl Task123Environment {
     fn from_process() -> Self {
         Self {
@@ -62,15 +81,23 @@ struct Task123Plan {
 }
 
 impl Task123Plan {
-    fn resolve(workspace_root: &Path, environment: &Task123Environment) -> anyhow::Result<Self> {
+    fn resolve(workspace_root: &Path, environment: &Task123Environment) -> Self {
         let rtthread_image = environment.image.clone().or_else(|| {
-            let native_source = environment
-                .native_source
-                .clone()
-                .unwrap_or_else(|| workspace_root.join("tmp/rt-thread-5.2.2-native-current"));
+            let native_source = environment.native_source.clone().unwrap_or_else(|| {
+                workspace_root.join("tmp/source-cache/task123-rtthread-current")
+            });
             let candidate = native_source.join("bsp/qemu-virt64-aarch64/rtthread.bin");
+            if candidate.is_file() {
+                let metadata = default_metadata_path(&candidate);
+                if metadata_is_current(&metadata, workspace_root) {
+                    return Some(candidate);
+                }
+            }
+
+            let candidate = native_source.join("rtthread.bin");
             let metadata = default_metadata_path(&candidate);
-            (candidate.is_file() && metadata.is_file()).then_some(candidate)
+            (candidate.is_file() && metadata_is_current(&metadata, workspace_root))
+                .then_some(candidate)
         });
         let rtthread_image_meta = rtthread_image.as_ref().map(|image| {
             environment
@@ -79,12 +106,12 @@ impl Task123Plan {
                 .unwrap_or_else(|| default_metadata_path(image))
         });
 
-        Ok(Self {
+        Self {
             runner: workspace_root.join("os/axvisor/scripts/run_task123_guest_comparison.sh"),
             rtthread_image,
             rtthread_image_meta,
             require_image_metadata: true,
-        })
+        }
     }
 }
 
@@ -92,6 +119,39 @@ fn default_metadata_path(image: &Path) -> PathBuf {
     let mut metadata = image.as_os_str().to_os_string();
     metadata.push(".meta.json");
     PathBuf::from(metadata)
+}
+
+fn metadata_is_current(path: &Path, workspace_root: &Path) -> bool {
+    std::fs::File::open(path)
+        .and_then(|file| {
+            let metadata: Task123ImageMetadata = serde_json::from_reader(file)?;
+            Ok(metadata.schema == 1
+                && metadata.patch_set_sha256 == patch_set_digest(workspace_root))
+        })
+        .unwrap_or(false)
+}
+
+fn patch_set_digest(workspace_root: &Path) -> String {
+    use std::fmt::Write as _;
+
+    use sha2::{Digest, Sha256};
+
+    let mut manifest = String::new();
+    for name in RTTHREAD_PATCHES {
+        let path = workspace_root
+            .join("os/axvisor/patches/rtthread")
+            .join(name);
+        let Some(contents) = std::fs::read(path).ok() else {
+            return String::new();
+        };
+        let mut patch_digest = Sha256::new();
+        patch_digest.update(contents);
+        writeln!(&mut manifest, "{:x}  {name}", patch_digest.finalize())
+            .expect("writing an in-memory patch manifest cannot fail");
+    }
+    let mut digest = Sha256::new();
+    digest.update(manifest.as_bytes());
+    format!("{:x}", digest.finalize())
 }
 
 impl Task123Args {
@@ -120,8 +180,26 @@ impl Task123Args {
 pub(super) async fn run(axvisor: &mut Axvisor, args: Task123Args) -> anyhow::Result<()> {
     let workspace_root = axvisor.app.workspace_root().to_path_buf();
     let environment = Task123Environment::from_process();
-    let plan = Task123Plan::resolve(&workspace_root, &environment)?;
+    let plan = Task123Plan::resolve(&workspace_root, &environment);
+    if let Some(output) = &args.output {
+        prepare_output_parent(&workspace_root, output)?;
+    }
     plan.execute(&args.runner_arguments())
+}
+
+fn prepare_output_parent(workspace_root: &Path, output: &Path) -> anyhow::Result<()> {
+    let parent = output.parent().unwrap_or_else(|| Path::new("."));
+    let parent = if output.is_absolute() {
+        parent.to_path_buf()
+    } else {
+        workspace_root.join(parent)
+    };
+    std::fs::create_dir_all(&parent).map_err(|error| {
+        anyhow::anyhow!(
+            "failed to create Task123 output parent {}: {error}",
+            parent.display()
+        )
+    })
 }
 
 impl Task123Plan {
@@ -220,6 +298,18 @@ mod tests {
     }
 
     #[test]
+    fn prepares_missing_output_parent_for_relative_and_absolute_paths() {
+        let workspace = tempdir().unwrap();
+        let relative_output = PathBuf::from("tmp/results/run");
+        prepare_output_parent(workspace.path(), &relative_output).unwrap();
+        assert!(workspace.path().join("tmp/results").is_dir());
+
+        let absolute_output = workspace.path().join("absolute/results/run");
+        prepare_output_parent(workspace.path(), &absolute_output).unwrap();
+        assert!(workspace.path().join("absolute/results").is_dir());
+    }
+
+    #[test]
     fn plan_uses_explicit_image_without_requiring_persistent_build() {
         let plan = Task123Plan::resolve(
             Path::new("/workspace"),
@@ -228,8 +318,7 @@ mod tests {
                 image_meta: Some(PathBuf::from("/explicit/rtthread.meta.json")),
                 native_source: None,
             },
-        )
-        .unwrap();
+        );
 
         assert_eq!(
             plan.rtthread_image,
@@ -245,18 +334,19 @@ mod tests {
     #[test]
     fn plan_selects_persistent_image_only_when_image_and_metadata_exist() {
         let workspace = tempdir().unwrap();
+        let digest = write_patch_set(workspace.path());
         let image = workspace
             .path()
-            .join("tmp/rt-thread-5.2.2-native-current/bsp/qemu-virt64-aarch64/rtthread.bin");
+            .join("tmp/source-cache/task123-rtthread-current/rtthread.bin");
         std::fs::create_dir_all(image.parent().unwrap()).unwrap();
         std::fs::write(&image, b"image").unwrap();
         std::fs::write(
             PathBuf::from(format!("{}.meta.json", image.display())),
-            b"metadata",
+            &format!(r#"{{"schema":1,"patch_set_sha256":"{digest}"}}"#),
         )
         .unwrap();
 
-        let plan = Task123Plan::resolve(workspace.path(), &Task123Environment::default()).unwrap();
+        let plan = Task123Plan::resolve(workspace.path(), &Task123Environment::default());
 
         assert_eq!(plan.rtthread_image, Some(image.clone()));
         assert_eq!(
@@ -266,12 +356,54 @@ mod tests {
     }
 
     #[test]
+    fn plan_rejects_persistent_image_with_unsupported_metadata_schema() {
+        let workspace = tempdir().unwrap();
+        let image = workspace
+            .path()
+            .join("tmp/source-cache/task123-rtthread-current/rtthread.bin");
+        let metadata = PathBuf::from(format!("{}.meta.json", image.display()));
+        std::fs::create_dir_all(image.parent().unwrap()).unwrap();
+        std::fs::write(&image, b"image").unwrap();
+        std::fs::write(&metadata, br#"{"schema": 0}"#).unwrap();
+
+        let plan = Task123Plan::resolve(workspace.path(), &Task123Environment::default());
+
+        assert_eq!(plan.rtthread_image, None);
+        assert_eq!(plan.rtthread_image_meta, None);
+    }
+
+    #[test]
+    fn plan_rejects_persistent_image_with_stale_patch_set() {
+        let workspace = tempdir().unwrap();
+        let patch_dir = workspace.path().join("os/axvisor/patches/rtthread");
+        std::fs::create_dir_all(&patch_dir).unwrap();
+        for name in RTTHREAD_PATCHES {
+            std::fs::write(patch_dir.join(name), name.as_bytes()).unwrap();
+        }
+        let image = workspace
+            .path()
+            .join("tmp/source-cache/task123-rtthread-current/rtthread.bin");
+        let metadata = PathBuf::from(format!("{}.meta.json", image.display()));
+        std::fs::create_dir_all(image.parent().unwrap()).unwrap();
+        std::fs::write(&image, b"image").unwrap();
+        std::fs::write(
+            &metadata,
+            br#"{"schema":1,"patch_set_sha256":"0000000000000000000000000000000000000000000000000000000000000000"}"#,
+        )
+        .unwrap();
+
+        let plan = Task123Plan::resolve(workspace.path(), &Task123Environment::default());
+
+        assert_eq!(plan.rtthread_image, None);
+        assert_eq!(plan.rtthread_image_meta, None);
+    }
+
+    #[test]
     fn plan_builds_on_demand_without_persistent_image() {
         let plan = Task123Plan::resolve(
             Path::new("/definitely-missing-workspace"),
             &Task123Environment::default(),
-        )
-        .unwrap();
+        );
 
         assert_eq!(plan.rtthread_image, None);
         assert_eq!(plan.rtthread_image_meta, None);
@@ -281,13 +413,14 @@ mod tests {
     #[test]
     fn plan_honors_native_source_for_persistent_image_discovery() {
         let workspace = tempdir().unwrap();
+        let digest = write_patch_set(workspace.path());
         let native_source = workspace.path().join("custom-native-source");
         let image = native_source.join("bsp/qemu-virt64-aarch64/rtthread.bin");
         std::fs::create_dir_all(image.parent().unwrap()).unwrap();
         std::fs::write(&image, b"image").unwrap();
         std::fs::write(
             PathBuf::from(format!("{}.meta.json", image.display())),
-            b"metadata",
+            &format!(r#"{{"schema":1,"patch_set_sha256":"{digest}"}}"#),
         )
         .unwrap();
 
@@ -297,8 +430,7 @@ mod tests {
                 native_source: Some(native_source),
                 ..Task123Environment::default()
             },
-        )
-        .unwrap();
+        );
 
         assert_eq!(plan.rtthread_image, Some(image.clone()));
         assert_eq!(
@@ -315,10 +447,39 @@ mod tests {
                 image_meta: Some(PathBuf::from("/explicit/rtthread.meta.json")),
                 ..Task123Environment::default()
             },
-        )
-        .unwrap();
+        );
 
         assert_eq!(plan.rtthread_image, None);
         assert_eq!(plan.rtthread_image_meta, None);
+    }
+
+    #[test]
+    fn patch_set_digest_matches_relative_sha256sum_manifest() {
+        let workspace = tempdir().unwrap();
+        write_patch_set(workspace.path());
+
+        let patch_dir = workspace.path().join("os/axvisor/patches/rtthread");
+        let manifest = std::process::Command::new("sha256sum")
+            .args(RTTHREAD_PATCHES)
+            .current_dir(&patch_dir)
+            .output()
+            .unwrap();
+        assert!(manifest.status.success());
+
+        let mut expected = sha2::Sha256::new();
+        use sha2::Digest as _;
+        expected.update(manifest.stdout);
+        let expected = format!("{:x}", expected.finalize());
+
+        assert_eq!(patch_set_digest(workspace.path()), expected);
+    }
+
+    fn write_patch_set(workspace_root: &Path) -> String {
+        let patch_dir = workspace_root.join("os/axvisor/patches/rtthread");
+        std::fs::create_dir_all(&patch_dir).unwrap();
+        for name in RTTHREAD_PATCHES {
+            std::fs::write(patch_dir.join(name), name.as_bytes()).unwrap();
+        }
+        patch_set_digest(workspace_root)
     }
 }

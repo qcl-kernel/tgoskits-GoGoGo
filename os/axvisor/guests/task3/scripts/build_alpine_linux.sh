@@ -24,6 +24,16 @@ JOBS=${JOBS:-$(getconf _NPROCESSORS_ONLN)}
 
 mkdir -p "$LINUX_CACHE" "$ALPINE_CACHE" "$BUILD_DIR" "$OUTPUT_DIR"
 
+ensure_model_cache() {
+    model=$CACHE_ROOT/task3-model
+    if [ -s "$model/model_weights.h" ] &&
+        [ -s "$model/line-follow.y4m" ] &&
+        [ -s "$model/truth.csv" ]; then
+        return
+    fi
+    TASK3_MODEL_DIR=$model "$TASK3_ROOT/scripts/build_model.sh"
+}
+
 download_verified() {
     url=$1
     archive=$2
@@ -102,6 +112,7 @@ build_initramfs() {
 }
 
 build_linux
+ensure_model_cache
 build_initramfs
 printf 'linux_image=%s\nlinux_initrd=%s\n' \
     "$OUTPUT_DIR/Image" "$OUTPUT_DIR/rootfs.cpio"

@@ -23,19 +23,21 @@ source "$PATCHDIR/patch_helpers.sh"
 echo "Applying RT-Thread patches for axvisor..."
 
 PATCH_STATE="$RTDIR/.axvisor-rtthread-patch-state"
-PATCH_SET_DIGEST="$({
+PATCH_SET_DIGEST="$(
+    cd -- "$PATCHDIR"
     sha256sum \
-    "$PATCHDIR/0000-axvisor-aarch64-port.patch" \
-    "$PATCHDIR/0009-native-qemu-memory-layout.patch" \
-    "$PATCHDIR/0002-lwip-rx-mailbox-recover-notice.patch" \
-    "$PATCHDIR/0003-virtio-net-reclaim-tx-used-ring.patch" \
-    "$PATCHDIR/0004-virtio-net-use-rx-used-ring-head.patch" \
-    "$PATCHDIR/0005-lwip-configurable-udp-recv-mailbox.patch" \
-    "$PATCHDIR/0006-gicv3-use-redistributor-pending-registers.patch" \
-    "$PATCHDIR/0007-gicv3-query-interrupt-enable-state.patch" \
-    "$PATCHDIR/0008-aarch64-gtimer-use-absolute-deadlines.patch" \
-    "$PATCHDIR/0010-virtio-net-benchmark-packet-hook.patch"
-} | sha256sum | awk '{print $1}')"
+        0000-axvisor-aarch64-port.patch \
+        0009-native-qemu-memory-layout.patch \
+        0002-lwip-rx-mailbox-recover-notice.patch \
+        0003-virtio-net-reclaim-tx-used-ring.patch \
+        0004-virtio-net-use-rx-used-ring-head.patch \
+        0005-lwip-configurable-udp-recv-mailbox.patch \
+        0006-gicv3-use-redistributor-pending-registers.patch \
+        0007-gicv3-query-interrupt-enable-state.patch \
+        0008-aarch64-gtimer-use-absolute-deadlines.patch \
+        0010-virtio-net-benchmark-packet-hook.patch \
+        | sha256sum | awk '{print $1}'
+)"
 if [[ -f "$PATCH_STATE" ]]; then
     if [[ "$(<"$PATCH_STATE")" != "$PATCH_SET_DIGEST" ]]; then
         echo "RT-Thread source patch state is stale; prepare a fresh source tree" >&2
