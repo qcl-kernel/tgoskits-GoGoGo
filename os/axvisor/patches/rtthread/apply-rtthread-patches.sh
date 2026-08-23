@@ -34,7 +34,8 @@ PATCH_SET_DIGEST="$({
     "$PATCHDIR/0006-gicv3-use-redistributor-pending-registers.patch" \
     "$PATCHDIR/0007-gicv3-query-interrupt-enable-state.patch" \
     "$PATCHDIR/0008-aarch64-gtimer-use-absolute-deadlines.patch" \
-    "$PATCHDIR/0010-virtio-net-benchmark-packet-hook.patch"
+    "$PATCHDIR/0010-virtio-net-benchmark-packet-hook.patch" \
+    "$PATCHDIR/0011-rock4d-board-port.patch"
 } | sha256sum | awk '{print $1}')"
 if [[ -f "$PATCH_STATE" ]]; then
     if [[ "$(<"$PATCH_STATE")" != "$PATCH_SET_DIGEST" ]]; then
@@ -149,6 +150,16 @@ apply_patch_exactly "$RTDIR" "$GTIMER_DEADLINE_PATCH" \
 NET_BENCH_HOOK_PATCH="$PATCHDIR/0010-virtio-net-benchmark-packet-hook.patch"
 apply_patch_exactly "$RTDIR" "$NET_BENCH_HOOK_PATCH" \
     "the virtio-net benchmark packet hook"
+
+# ROCK 4D (RK3576) board port. The QEMU-virt BSP assumes PL011@0x09000000,
+# GICv3@0x08000000, and virtio@0x0a000000; the physical board instead uses
+# GIC-400 (GICv2)@0x2a701000/0x2a702000 and an NS16550@0x2ad40000 (reg-shift
+# 2) console. Remap the device region, select GICv2, switch rt_kprintf to the
+# polled 16550, auto-run the stability benchmark (no interactive console), and
+# gate the RT-IPC/task3 servers behind RT_USING_TASK123_SERVER.
+BOARD_PORT_PATCH="$PATCHDIR/0011-rock4d-board-port.patch"
+apply_patch_exactly "$RTDIR" "$BOARD_PORT_PATCH" \
+    "the ROCK 4D board port"
 
 if [[ "$TGOSKITS_SKIP_PATCH_APPLICATION" == 0 ]]; then
     printf '%s\n' "$PATCH_SET_DIGEST" >"$PATCH_STATE"

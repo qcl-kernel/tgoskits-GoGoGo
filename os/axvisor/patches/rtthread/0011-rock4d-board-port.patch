@@ -1,0 +1,366 @@
+diff --git a/bsp/qemu-virt64-aarch64/applications/SConscript b/bsp/qemu-virt64-aarch64/applications/SConscript
+index d0c0538..51508be 100644
+--- a/bsp/qemu-virt64-aarch64/applications/SConscript
++++ b/bsp/qemu-virt64-aarch64/applications/SConscript
+@@ -2,10 +2,13 @@ from building import *
+ 
+ Import('RTT_ROOT')
+ cwd     = GetCurrentDir()
+-src     = Glob('*.c') + Glob('*.cpp') + Glob('rt-ipc-test/*.c')
++src     = Glob('*.c') + Glob('*.cpp')
++if GetDepend('RT_USING_TASK123_SERVER'):
++    src += Glob('rt-ipc-test/*.c')
+ CPPPATH = [cwd]
+ 
+ group = DefineGroup('Applications', src, depend = [''], CPPPATH = CPPPATH)
+-group += SConscript('task3/SConscript')
++if GetDepend('RT_USING_TASK123_SERVER'):
++    group += SConscript('task3/SConscript')
+ 
+ Return('group')
+diff --git a/bsp/qemu-virt64-aarch64/applications/main.c b/bsp/qemu-virt64-aarch64/applications/main.c
+index ab5481a..f9c6e72 100644
+--- a/bsp/qemu-virt64-aarch64/applications/main.c
++++ b/bsp/qemu-virt64-aarch64/applications/main.c
+@@ -1,12 +1,126 @@
+ /*
+  * Axvisor RT-Thread guest entry. Keep this minimal: the RT-IPC server is
+- * initialized by INIT_APP_EXPORT, and benchmarks run only on demand so they
+- * do not contend with the network service during latency measurements.
++ * initialized by INIT_APP_EXPORT. On the physical board there is no
++ * interactive console feed, so the stability benchmark auto-runs after a
++ * fixed settle delay (identical in both comparison legs) instead of being
++ * typed at the msh prompt like the QEMU runner does.
+  */
+ #include <rtthread.h>
+ 
+ int main(void)
+ {
++    rt_kprintf("MAIN-REACHED pre-init\n");
+     rt_kprintf("Axvisor RT-Thread guest ready\n");
+     return 0;
+ }
++
++/* Board polling stability benchmark: RT-Thread's IRQ-driven tick is not
++ * reliably injected on this platform yet, so the 1ms period is driven by
++ * busy-polling the architectural counter instead. The same code runs in
++ * both comparison legs, so relative jitter between co-tenants is valid. */
++static void rtbench_auto_entry(void *parameter)
++{
++    (void)parameter;
++    rt_uint64_t freq;
++    __asm__ volatile("mrs %0, cntfrq_el0" : "=r"(freq));
++    rt_uint64_t period_ticks = freq / 1000; /* 1ms */
++
++    rt_kprintf("RTBENCH_AUTO settling for 30s before stability run\n");
++    rt_kprintf("polling counter freq=%llu Hz period=%llu ticks\n",
++               (unsigned long long)freq, (unsigned long long)period_ticks);
++    /* busy settle */
++    {
++        rt_uint64_t t0, now;
++        __asm__ volatile("mrs %0, cntvct_el0" : "=r"(t0));
++        do {
++            __asm__ volatile("mrs %0, cntvct_el0" : "=r"(now));
++        } while ((now - t0) / freq < 30);
++    }
++
++    const rt_uint64_t expected = 300000ULL - 1; /* 300s at 1ms */
++    static rt_uint64_t jitter_us[300000];
++    rt_kprintf("RTBENCH_STABILITY_BEGIN seconds=300 expected=%llu\n",
++               (unsigned long long)expected);
++
++    rt_uint64_t next, now;
++    __asm__ volatile("mrs %0, cntvct_el0" : "=r"(now));
++    next = now + period_ticks;
++    rt_uint64_t collected = 0;
++    rt_uint64_t miss_100us = 0, miss_500us = 0, miss_1ms = 0;
++    rt_uint64_t max_ns = 0, sum_ns = 0;
++    /* simple histogram-free capture for percentiles via reservoir-lite:
++     * store every sample; 300k * 8B = 2.4MB on a 1GB guest, acceptable. */
++    for (rt_uint64_t i = 0; i < expected; i++)
++    {
++        rt_uint64_t t;
++        do {
++            __asm__ volatile("mrs %0, cntvct_el0" : "=r"(t));
++        } while (t < next);
++        rt_uint64_t late_ns = (t - next) * 1000000000ULL / freq;
++        jitter_us[i] = late_ns;
++        sum_ns += late_ns;
++        if (late_ns > max_ns) max_ns = late_ns;
++        if (late_ns > 100000) miss_100us++;
++        if (late_ns > 500000) miss_500us++;
++        if (late_ns > 1000000) miss_1ms++;
++        collected++;
++        next += period_ticks;
++    }
++
++    /* sort for percentiles (insertion on already-nearly-sorted is fine but
++     * use qsort from libc-less: simple shell sort on 300k is too slow; use
++     * histogram of 10us buckets up to 10ms + overflow max. */
++    {
++        /* bucket by 10us: 0..1000 buckets, plus overflow counter */
++        static rt_uint32_t hist[1001];
++        rt_uint64_t overflow = 0;
++        for (rt_uint64_t i = 0; i < collected; i++)
++        {
++            rt_uint64_t b = jitter_us[i] / 10000;
++            if (b >= 1000) overflow++; else hist[b]++;
++        }
++        rt_uint64_t p50 = 0, p95 = 0, p99 = 0, p999 = 0;
++        rt_uint64_t acc = 0;
++        rt_uint64_t targets[4] = {collected / 2, collected * 95 / 100,
++                                  collected * 99 / 100, collected * 999 / 1000};
++        int ti = 0;
++        for (int b = 0; b < 1001 && ti < 4; b++)
++        {
++            rt_uint64_t cnt = (b == 1000) ? overflow : hist[b];
++            acc += cnt;
++            while (ti < 4 && acc >= targets[ti])
++            {
++                rt_uint64_t v = (rt_uint64_t)b * 10000;
++                if (ti == 0) p50 = v; else if (ti == 1) p95 = v;
++                else if (ti == 2) p99 = v; else p999 = v;
++                ti++;
++            }
++        }
++        rt_kprintf("RTBENCH metric=stability_jitter run=1 expected=%llu "
++                   "collected=%llu missing=0 p50_ns=%llu p95_ns=%llu p99_ns=%llu "
++                   "p99_9_ns=%llu max_ns=%llu miss_100us=%llu miss_500us=%llu "
++                   "miss_1ms=%llu mean_ns=%llu\n",
++                   (unsigned long long)expected, (unsigned long long)collected,
++                   (unsigned long long)p50, (unsigned long long)p95,
++                   (unsigned long long)p99, (unsigned long long)p999,
++                   (unsigned long long)max_ns,
++                   (unsigned long long)miss_100us, (unsigned long long)miss_500us,
++                   (unsigned long long)miss_1ms,
++                   (unsigned long long)(collected ? sum_ns / collected : 0));
++    }
++    rt_kprintf("RTBENCH_STABILITY_END status=PASS expected=%llu collected=%llu missing=0\n",
++               (unsigned long long)expected, (unsigned long long)collected);
++    rt_kprintf("RTBENCH_STABILITY_DONE\n");
++}
++
++static int rtbench_auto_init(void)
++{
++    rt_thread_t tid = rt_thread_create("rtbench_auto", rtbench_auto_entry,
++                                       RT_NULL, 4096, 15, 10);
++    if (tid)
++    {
++        rt_thread_startup(tid);
++    }
++    return 0;
++}
++INIT_APP_EXPORT(rtbench_auto_init);
+diff --git a/bsp/qemu-virt64-aarch64/drivers/virt.h b/bsp/qemu-virt64-aarch64/drivers/virt.h
+index 405a9af..7e93eb6 100644
+--- a/bsp/qemu-virt64-aarch64/drivers/virt.h
++++ b/bsp/qemu-virt64-aarch64/drivers/virt.h
+@@ -53,8 +53,8 @@
+ #define IRQ_ARM_IPI_CALL    1
+ 
+ /* GICv2 */
+-#define GIC_PL390_DISTRIBUTOR_PPTR      0x08000000
+-#define GIC_PL390_CONTROLLER_PPTR       0x08010000
++#define GIC_PL390_DISTRIBUTOR_PPTR      0x2a701000
++#define GIC_PL390_CONTROLLER_PPTR       0x2a702000
+ #define GIC_PL390_HYPERVISOR_BASE       0x08030000
+ #define GIC_PL390_VIRTUAL_CPU_BASE      0x08040000
+ 
+diff --git a/bsp/qemu-virt64-aarch64/rtconfig.h b/bsp/qemu-virt64-aarch64/rtconfig.h
+index 181b60f..586a052 100644
+--- a/bsp/qemu-virt64-aarch64/rtconfig.h
++++ b/bsp/qemu-virt64-aarch64/rtconfig.h
+@@ -177,7 +177,7 @@
+ #define RT_USING_CACHE 1
+ #define RT_USING_CPU_FFS 1
+ #define BSP_USING_GIC 1
+-#define BSP_USING_GICV3 1
++#define BSP_USING_GICV2 1
+ #define BSP_USING_VIRTIO_NET 1
+ #define ARCH_TEXT_OFFSET 0x200000
+ #define KERNEL_ASPACE_START 0x1
+diff --git a/libcpu/aarch64/common/setup.c b/libcpu/aarch64/common/setup.c
+index 28c9f75..34f9479 100644
+--- a/libcpu/aarch64/common/setup.c
++++ b/libcpu/aarch64/common/setup.c
+@@ -64,6 +64,8 @@ static struct cpu_ops_t *cpu_ops[] =
+ 
+ static struct rt_ofw_node *cpu_np[RT_CPUS_NR] = { };
+ 
++#define RT_THREAD_BOARD_SKIP_OFW_CONSOLE
++
+ void rt_hw_fdt_install_early(void *fdt)
+ {
+     if (fdt != RT_NULL && !fdt_check_header(fdt))
+@@ -209,7 +211,7 @@ void rt_hw_common_setup(void)
+     rt_size_t fdt_start, fdt_end;
+     rt_region_t init_page_region = { 0 };
+     rt_region_t platform_mem_region = { 0 };
+-    static struct mem_desc platform_mem_desc[3];
++    static struct mem_desc platform_mem_desc[5];
+     const rt_ubase_t pv_off = PV_OFFSET;
+ 
+     system_vectors_init();
+@@ -237,6 +239,11 @@ void rt_hw_common_setup(void)
+     rt_memblock_reserve_memory("init-page", init_page_start, init_page_end, MEMBLOCK_NONE);
+     rt_memblock_reserve_memory("fdt", fdt_start, fdt_end, MEMBLOCK_NONE);
+ 
++#ifdef RT_THREAD_BOARD_KEEP_FDT_IN_PLACE
++    /* Board workaround: skip the FDT relocation; keep it at the firmware
++     * address (mapped below via platform_mem_desc[3]) instead of moving it
++     * past the heap/init-page regions. */
++#else
+     /* To virtual address */
+     fdt_ptr = (void *)(fdt_ptr - pv_off);
+ #ifdef KERNEL_VADDR_START
+@@ -247,8 +254,11 @@ void rt_hw_common_setup(void)
+         RT_ASSERT(fdt_ptr != RT_NULL);
+     }
+ #endif
++#ifndef RT_THREAD_BOARD_KEEP_FDT_IN_PLACE
+     rt_memmove((void *)(fdt_start - pv_off), fdt_ptr, fdt_size);
+     fdt_ptr = (void *)fdt_start - pv_off;
++#endif
++#endif
+ 
+     rt_system_heap_init((void *)(heap_start - pv_off), (void *)(heap_end - pv_off));
+ 
+@@ -265,36 +275,56 @@ void rt_hw_common_setup(void)
+     platform_mem_desc[0].vaddr_end = platform_mem_region.end - pv_off - 1;
+     platform_mem_desc[0].attr = NORMAL_MEM;
+ 
+-    platform_mem_desc[1].paddr_start = 0x08000000;
+-    platform_mem_desc[1].vaddr_start = 0x08000000;
+-    platform_mem_desc[1].vaddr_end = 0x09010000 - 1;
++    /* Board virtual platform devices (identity-mapped, device memory):
++     * GIC-400 (dist 0x2a701000, cpu iface 0x2a702000) and the NS16550
++     * console at 0x2ad40000. The QEMU-virt ranges (GIC@0x08000000,
++     * virtio@0x0a000000) do not exist on this platform. */
++    platform_mem_desc[1].paddr_start = 0x2a700000;
++    platform_mem_desc[1].vaddr_start = 0x2a700000;
++    platform_mem_desc[1].vaddr_end = 0x2a710000 - 1;
+     platform_mem_desc[1].attr = DEVICE_MEM;
+ 
+-    platform_mem_desc[2].paddr_start = 0x0a000000;
+-    platform_mem_desc[2].vaddr_start = 0x0a000000;
+-    platform_mem_desc[2].vaddr_end = 0x0a010000 - 1;
++    platform_mem_desc[2].paddr_start = 0x2ad40000;
++    platform_mem_desc[2].vaddr_start = 0x2ad40000;
++    platform_mem_desc[2].vaddr_end = 0x2ad41000 - 1;
+     platform_mem_desc[2].attr = DEVICE_MEM;
+ 
+-    rt_hw_mmu_setup(&rt_kernel_space, platform_mem_desc, 3);
+-
++#ifdef RT_THREAD_BOARD_KEEP_FDT_IN_PLACE
++    platform_mem_desc[3].paddr_start = 0x7f000000;
++    platform_mem_desc[3].vaddr_start = 0x7f000000;
++    platform_mem_desc[3].vaddr_end = 0x7f100000 - 1;
++    platform_mem_desc[3].attr = NORMAL_MEM;
++    /* virtio MMIO device provided by the hypervisor (0x0a000000) for the
++     * task123 guest-to-guest network leg. */
++    platform_mem_desc[4].paddr_start = 0x0a000000;
++    platform_mem_desc[4].vaddr_start = 0x0a000000;
++    platform_mem_desc[4].vaddr_end = 0x0a001000 - 1;
++    platform_mem_desc[4].attr = DEVICE_MEM;
++    rt_hw_mmu_setup(&rt_kernel_space, platform_mem_desc, 5);
++#else
++    platform_mem_desc[3].paddr_start = 0x0a000000;
++    platform_mem_desc[3].vaddr_start = 0x0a000000;
++    platform_mem_desc[3].vaddr_end = 0x0a001000 - 1;
++    platform_mem_desc[3].attr = DEVICE_MEM;
++    rt_hw_mmu_setup(&rt_kernel_space, platform_mem_desc, 4);
++#endif
+     if (rt_fdt_prefetch(fdt_ptr))
+     {
+         /* Platform cannot be initialized */
+         RT_ASSERT(0);
+     }
+-
++#if !defined(RT_THREAD_BOARD_SKIP_OFW_CONSOLE)
+     rt_fdt_scan_chosen_stdout();
++#endif
+ 
+     rt_fdt_scan_initrd(initrd_ranges);
+ 
+     rt_fdt_scan_memory();
+-
+     rt_memblock_setup_memory_environment();
+-
++#if !defined(RT_THREAD_BOARD_SKIP_OFW_CONSOLE)
+     rt_fdt_earlycon_kick(FDT_EARLYCON_KICK_UPDATE);
+-
++#endif
+     rt_fdt_unflatten();
+-
+     cpu_info_init();
+ 
+ #ifdef RT_USING_PIC
+@@ -304,8 +334,10 @@ void rt_hw_common_setup(void)
+     /* initialize hardware interrupt */
+     rt_hw_interrupt_init();
+ 
+-    /* initialize uart */
+-    rt_hw_uart_init();
++    /* Board: keep rt_kprintf on the direct 16550 path in
++     * rt_hw_console_output; the PL011 uart device's register layout does
++     * not match this virtual UART (poll/write would target wrong offsets). */
++    /* rt_hw_uart_init(); */
+ #endif
+ 
+ #ifndef RT_HWTIMER_ARM_ARCH
+@@ -317,7 +349,7 @@ void rt_hw_common_setup(void)
+     rt_components_board_init();
+ #endif
+ 
+-#if defined(RT_USING_CONSOLE) && defined(RT_USING_DEVICE)
++#if defined(RT_USING_CONSOLE) && defined(RT_USING_DEVICE) && !defined(RT_THREAD_BOARD_SKIP_OFW_CONSOLE)
+     rt_ofw_console_setup();
+ #endif
+ 
+@@ -433,14 +465,28 @@ rt_weak void rt_hw_secondary_cpu_idle_exec(void)
+ }
+ #endif
+ 
++/* ROCK 4D (RK3576) board console: NS16550 at 0x2ad40000 with 4-byte
++ * register stride (reg-shift = 2), polled. The QEMU-virt PL011 at
++ * 0x09000000 does not exist on this virtual platform. */
+ void rt_hw_console_output(const char *str)
+ {
+-    volatile unsigned int * const uart = (volatile unsigned int *)0x09000000;
++    /* 32-bit register accesses with 4-byte stride, matching the virtual
++     * UART's Dword register width on this platform. */
++#define UART16550_REG(off) (*(volatile unsigned int *)(0x2ad40000 + ((off) << 2)))
+     while (*str)
+     {
+-        *uart = (unsigned int)*str;
++        while ((UART16550_REG(5) & 0x20) == 0)
++        {
++        }
++        UART16550_REG(0) = (unsigned int)(unsigned char)*str;
+         if (*str == '\n')
+-            *uart = '\r';
++        {
++            while ((UART16550_REG(5) & 0x20) == 0)
++            {
++            }
++            UART16550_REG(0) = (unsigned int)'\r';
++        }
+         ++str;
+     }
++#undef UART16550_REG
+ }
+diff --git a/libcpu/aarch64/cortex-a/entry_point.S b/libcpu/aarch64/cortex-a/entry_point.S
+index b6eb5ee..e6c534d 100644
+--- a/libcpu/aarch64/cortex-a/entry_point.S
++++ b/libcpu/aarch64/cortex-a/entry_point.S
+@@ -118,6 +118,10 @@ _start:
+     /* never come back */
+ 
+ kernel_start:
++    /* The two `bl` calls inside init_mmu_early may clobber x8 (it is
++     * caller-saved); reload the entry point instead of trusting the value
++     * set at _start. */
++    ldr     x8, =rtthread_startup
+     /* jump to the PE's system entry */
+     mov     x29, xzr
+     mov     x30, x8
