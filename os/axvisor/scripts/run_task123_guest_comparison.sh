@@ -16,16 +16,20 @@ matrix=0
 output_candidate=""
 cache_candidate=""
 allow_qemu_timer_limit=0
+rtbench_samples_candidate=""
+task2_count_candidate=""
 comparison_status=NOT_STARTED
 
 usage() {
     cat >&2 <<EOF
 usage:
-  $0 [--quick|--full] [--rtos rtthread|zephyr]
-       [--matrix all] [--cache DIR] [--output DIR] [--allow-qemu-timer-limit]
+  $0 [--quick|--full|--realtime-suite] [--rtos rtthread|zephyr]
+       [--matrix all] [--cache DIR] [--output DIR] [--task2-count N]
+       [--allow-qemu-timer-limit]
 
 quick:  300-second stability run, 30000 Task2 requests per payload
 full:   3600-second stability run, 240000 Task2 requests per payload
+realtime-suite: RTBench latency suite with 1000 samples by default
 default: Linux/StarryOS comparison with RT-Thread
 matrix:  run all four RTOS/app-guest combinations sequentially; --quick uses
          a short functional profile (1 second, 10 requests per payload)
@@ -47,7 +51,7 @@ path_is_within() {
 parse_arguments() {
     while [[ $# -gt 0 ]]; do
         case "$1" in
-            --quick|--full)
+            --quick|--full|--realtime-suite)
                 [[ "$mode_set" -eq 0 ]] || usage
                 mode=${1#--}
                 mode_set=1
@@ -86,6 +90,16 @@ parse_arguments() {
                 [[ "$allow_qemu_timer_limit" -eq 0 ]] || usage
                 allow_qemu_timer_limit=1
                 shift
+                ;;
+            --rtbench-samples)
+                [[ $# -ge 2 && -z "$rtbench_samples_candidate" ]] || usage
+                rtbench_samples_candidate=$2
+                shift 2
+                ;;
+            --task2-count)
+                [[ $# -ge 2 && -z "$task2_count_candidate" ]] || usage
+                task2_count_candidate=$2
+                shift 2
                 ;;
             -h|--help)
                 usage
@@ -204,8 +218,8 @@ publish_comparison_manifest() {
 
     temporary="$(mktemp "$OUTPUT/.comparison-manifest.XXXXXX")" || return 1
     if ! {
-        printf 'schema=1\nmode=%s\nstability_seconds=%s\ntask2_count=%s\ntask3_frames=3\n' \
-            "$mode" "$STABILITY_SECONDS" "$TASK2_COUNT"
+        printf 'schema=1\nmode=%s\nstability_seconds=%s\ntask2_count=%s\ntask3_frames=3\nrtbench_samples=%s\n' \
+            "$mode" "$STABILITY_SECONDS" "$TASK2_COUNT" "${RTBENCH_SAMPLES:-0}"
         printf 'guest_order=linux,starryos\nshared_artifact_cache=%s\nrunner=%s\nanalyzer=%s\n' \
             "$CACHE" "$RUNNER" "$ANALYZER"
         if [[ "$matrix" -eq 1 ]]; then
@@ -266,18 +280,22 @@ run_guest() {
     local -a runner_arguments
     if [[ "$matrix" -eq 1 && "$mode" == quick ]]; then
         guest_mode=smoke
+    elif [[ "$mode" == realtime-suite ]]; then
+        guest_mode=realtime-suite
     fi
     printf 'PHASE guest-%s\n' "$guest"
     printf 'STEP run-%s mode=%s task2_count=%s\n' \
         "$guest" "$guest_mode" "$TASK2_COUNT"
     if [[ "$guest_mode" == stability ]]; then
         printf 'STABILITY_SECONDS %s\n' "$STABILITY_SECONDS"
+    elif [[ "$guest_mode" == realtime-suite ]]; then
+        printf 'RTBENCH_SAMPLES %s\n' "$RTBENCH_SAMPLES"
     fi
     local runner_environment=(
         "TASK123_SHARED_ARTIFACT_DIR=$CACHE"
         "TASK123_TIMEOUT_S=$RUN_TIMEOUT"
     )
-    if [[ "$matrix" -eq 1 ]]; then
+    if [[ "$matrix" -eq 1 && "$mode" == quick ]]; then
         # Matrix quick is a functional coverage run. Multi-threaded TCG keeps
         # one guest vCPU from monopolizing the emulator while another guest
         # is still booting; formal realtime runs retain single-thread TCG.
@@ -298,6 +316,8 @@ run_guest() {
     )
     if [[ "$guest_mode" == stability ]]; then
         runner_arguments+=(--seconds "$STABILITY_SECONDS")
+    elif [[ "$guest_mode" == realtime-suite ]]; then
+        runner_arguments+=(--rtbench-samples "$RTBENCH_SAMPLES")
     else
         runner_arguments+=(--task3-frames 3)
     fi
@@ -315,10 +335,23 @@ main() {
             STABILITY_SECONDS=3600
             TASK2_COUNT=240000
             ;;
+        realtime-suite)
+            STABILITY_SECONDS=0
+            TASK2_COUNT=1000
+            RTBENCH_SAMPLES=${rtbench_samples_candidate:-1000}
+            [[ "$RTBENCH_SAMPLES" =~ ^[0-9]+$ && "$RTBENCH_SAMPLES" -ge 1 && "$RTBENCH_SAMPLES" -le 100000 ]] ||
+                fail "--rtbench-samples must be an integer from 1 to 100000"
+            ;;
         *)
             usage
             ;;
     esac
+    if [[ -n "$task2_count_candidate" ]]; then
+        [[ "$task2_count_candidate" =~ ^[0-9]+$ && "$task2_count_candidate" -ge 1 &&
+           "$task2_count_candidate" -le 2147483647 ]] ||
+            fail "--task2-count must be an integer from 1 to 2147483647"
+        TASK2_COUNT=$task2_count_candidate
+    fi
     if [[ "$matrix" -eq 1 && "$mode" == quick ]]; then
         # A four-run matrix is an entrypoint/function check, not a replacement
         # for the formal realtime measurement.  Single-thread TCG can dilate a
@@ -326,9 +359,11 @@ main() {
         # so quick matrix uses a short complete profile.  Single-pair --quick
         # and --full intentionally retain their formal workloads.
         STABILITY_SECONDS=1
-        TASK2_COUNT=10
+        TASK2_COUNT=${task2_count_candidate:-10}
     fi
-    if [[ "$mode" == full ]]; then
+    if [[ "$mode" == realtime-suite ]]; then
+        RUN_TIMEOUT=$((RTBENCH_SAMPLES / 100 + 900))
+    elif [[ "$mode" == full ]]; then
         # The host budget covers both the Task2 workload and the virtual-clock
         # dilation caused by single-thread TCG with precise icount.  A guest
         # stability window can take several times its nominal virtual duration.

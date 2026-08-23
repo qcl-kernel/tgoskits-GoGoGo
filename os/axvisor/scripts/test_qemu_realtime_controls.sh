@@ -98,12 +98,28 @@ rg -qF 'QEMU_TCG_THREAD' "$RUNNER" || {
     echo "RT benchmark runner does not expose the TCG thread mode" >&2
     exit 1
 }
+rg -qF 'QEMU_ICOUNT="${QEMU_ICOUNT:-shift=3}"' "$TASK123_RUNNER" || {
+    echo "Task123 runner must default to precise QEMU icount timing for RTBENCH" >&2
+    exit 1
+}
+rg -qF 'qemu_pmu_args=(-icount "$QEMU_ICOUNT")' "$TASK123_RUNNER" || {
+    echo "Task123 runner must pass precise icount to realtime QEMU runs" >&2
+    exit 1
+}
+rg -qF 'qemu_tcg_thread="${QEMU_TCG_THREAD:-multi}"' "$TASK123_RUNNER" || {
+    echo "Task123 runner must preserve multi-threaded TCG by default" >&2
+    exit 1
+}
 rg -qF 'qemu_cpu_affinity=' "$TASK123_RUNNER" || {
     echo "Task123 manifest does not record QEMU CPU affinity" >&2
     exit 1
 }
 rg -qF 'qemu_vcpu_affinity=' "$TASK123_RUNNER" || {
     echo "Task123 manifest does not record QEMU vCPU affinity" >&2
+    exit 1
+}
+! rg -qF 'debug-threads=on' "$TASK123_RUNNER" || {
+    echo "Task123 runner still enables QEMU debug thread naming" >&2
     exit 1
 }
 

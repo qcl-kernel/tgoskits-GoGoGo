@@ -284,3 +284,23 @@ grep -Fxq 'status=COMPLETE' "$matrix_output/comparison-manifest.txt" ||
     fail "matrix manifest is not complete"
 
 echo "PASS: RTOS/app-guest matrix orchestrator contract"
+
+realtime_matrix_output="$tmp/realtime-matrix-output"
+realtime_matrix_trace="$tmp/realtime-matrix.trace"
+if ! TASK123_COMPARISON_RUNNER="$runner" \
+    TASK123_COMPARISON_TRACE="$realtime_matrix_trace" \
+    "$ORCHESTRATOR" --realtime-suite --matrix all --rtbench-samples 2 \
+        --task2-count 10 \
+        --output "$realtime_matrix_output" >/dev/null; then
+    fail "realtime four-combination matrix failed"
+fi
+[[ "$(wc -l < "$realtime_matrix_trace")" -eq 4 ]] ||
+    fail "realtime matrix must run four combinations exactly once"
+awk '
+    $2 == "realtime-suite" && $3 == 10 && $5 == "-" && $9 == "unset" {count++; next}
+    {exit 1}
+    END {if (count != 4) exit 1}
+' "$realtime_matrix_trace" ||
+    fail "realtime matrix must leave TCG mode unset so the runner selects single-threaded TCG"
+
+echo "PASS: realtime RTOS/app-guest matrix uses compatible QEMU timing"

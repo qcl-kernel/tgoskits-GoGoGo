@@ -5,36 +5,24 @@ set -euo pipefail
 ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/../../.." && pwd)"
 ENTRYPOINT="$ROOT/run-task123.sh"
 
-grep -Fq 'RTTHREAD_REQUIRE_IMAGE_METADATA' "$ENTRYPOINT" || {
-    echo "FAIL: direct task123 entrypoint does not enforce RT-Thread image metadata" >&2
+grep -Fq 'cargo xtask axvisor task123' "$ENTRYPOINT" || {
+    echo "FAIL: direct task123 entrypoint does not delegate to cargo xtask" >&2
     exit 1
 }
-grep -Fq 'RTTHREAD_IMAGE_META' "$ENTRYPOINT" || {
-    echo "FAIL: direct task123 entrypoint does not propagate RT-Thread metadata" >&2
+grep -Fq 'exec "$@"' "$ENTRYPOINT" || {
+    echo "FAIL: direct task123 entrypoint does not preserve foreground signals" >&2
     exit 1
 }
-grep -Fq 'rt-thread-5.2.2-native-current' "$ENTRYPOINT" || {
-    echo "FAIL: direct task123 entrypoint does not prefer the persistent RT-Thread image" >&2
+grep -Fq -- '--quick --allow-qemu-timer-limit' "$ENTRYPOINT" || {
+    echo "FAIL: direct task123 entrypoint does not define the default xtask mode" >&2
     exit 1
 }
-grep -Fq 'input-digest --root "$SCRIPT_DIR"' "$ENTRYPOINT" || {
-    echo "FAIL: direct task123 entrypoint does not fingerprint current RT-Thread build inputs" >&2
+grep -Fq -- '--matrix all' "$ROOT/scripts/axbuild/src/axvisor/task123.rs" || {
+    echo "FAIL: cargo task123 planner does not expose the four-combination matrix" >&2
     exit 1
 }
-grep -Fq -- '--input-digest "$rtthread_input_digest"' "$ENTRYPOINT" || {
-    echo "FAIL: direct task123 entrypoint accepts a stale persistent RT-Thread image" >&2
-    exit 1
-}
-grep -Fq 'env "${runner_environment[@]}"' "$ENTRYPOINT" || {
-    echo "FAIL: direct task123 entrypoint does not pass resolved inputs to the runner" >&2
-    exit 1
-}
-grep -Fq -- '--rtos' "$ENTRYPOINT" || {
-    echo "FAIL: direct task123 entrypoint does not expose the RTOS selector" >&2
-    exit 1
-}
-grep -Fq -- '--matrix all' "$ENTRYPOINT" || {
-    echo "FAIL: direct task123 entrypoint does not expose the four-combination matrix" >&2
+grep -Fq -- 'realtime-suite' "$ROOT/scripts/axbuild/src/axvisor/task123.rs" || {
+    echo "FAIL: cargo task123 planner does not expose realtime-suite" >&2
     exit 1
 }
 

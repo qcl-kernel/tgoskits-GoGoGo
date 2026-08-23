@@ -259,6 +259,11 @@ validate_mode_options() {
         single|multi) ;;
         *) fail "QEMU_TCG_THREAD must be single or multi"; return 2 ;;
     esac
+    if [[ "$mode" == realtime-suite || "$mode" == stability ]] &&
+        [[ -n "$QEMU_ICOUNT" && "${QEMU_TCG_THREAD:-}" == multi ]]; then
+        fail "QEMU_TCG_THREAD=multi is incompatible with precise QEMU_ICOUNT; use single"
+        return 2
+    fi
     require_integer "${QEMU_RESOURCE_SAMPLE_INTERVAL_MS:-100}" 1 60000 QEMU_RESOURCE_SAMPLE_INTERVAL_MS
     require_integer "${TASK123_ALLOW_QEMU_TIMER_LIMIT:-0}" 0 1 TASK123_ALLOW_QEMU_TIMER_LIMIT
     require_integer "${RTTHREAD_REQUIRE_IMAGE_METADATA:-0}" 0 1 RTTHREAD_REQUIRE_IMAGE_METADATA
@@ -1721,7 +1726,11 @@ main() {
     TASK123_PHASE_TIMEOUT_S=${TASK123_PHASE_TIMEOUT_S:-600}
     QEMU_UCLAMP_MIN=${QEMU_UCLAMP_MIN:-1024}
     QEMU_TIMER_SLACK_NS=${QEMU_TIMER_SLACK_NS:-1}
-    QEMU_TCG_THREAD=${QEMU_TCG_THREAD:-multi}
+    if [[ "$mode" == realtime-suite || "$mode" == stability ]]; then
+        QEMU_TCG_THREAD=${QEMU_TCG_THREAD:-single}
+    else
+        QEMU_TCG_THREAD=${QEMU_TCG_THREAD:-multi}
+    fi
     configure_app_guest_markers
     mkdir -p -- "$ROOT/tmp"
     RUNTIME_DIR="$(mktemp -d "$ROOT/tmp/task123-runtime.XXXXXX")"

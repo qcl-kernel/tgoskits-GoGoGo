@@ -14,6 +14,7 @@ pub mod board;
 pub mod build;
 pub mod config;
 pub mod rootfs;
+pub mod task123;
 pub mod test;
 
 /// Axvisor host-side commands
@@ -27,6 +28,8 @@ pub enum Command {
     Board(ArgsBoard),
     /// Run Axvisor test suites
     Test(ArgsTest),
+    /// Run the integrated Task123 Linux/StarryOS guest comparison
+    Task123(task123::Task123Args),
     /// Build and run Axvisor with U-Boot
     Uboot(ArgsUboot),
     /// Generate a default board config
@@ -251,6 +254,7 @@ impl Axvisor {
             Command::Defconfig(args) => self.defconfig(args),
             Command::Config(args) => self.config(args).await,
             Command::Test(args) => self.test(args).await,
+            Command::Task123(args) => task123::run(self, args).await,
         }
     }
 
@@ -454,6 +458,47 @@ mod tests {
                 assert_eq!(args.build.vmconfigs, vec![PathBuf::from("tmp/vm1.toml")]);
             }
             _ => panic!("expected uboot command"),
+        }
+    }
+
+    #[test]
+    fn command_parses_task123() {
+        #[derive(Parser)]
+        struct Cli {
+            #[command(subcommand)]
+            command: Command,
+        }
+
+        let cli = Cli::try_parse_from([
+            "axvisor",
+            "task123",
+            "--realtime-suite",
+            "--matrix",
+            "all",
+            "--rtbench-samples",
+            "1000",
+            "--task2-count",
+            "10",
+            "--output",
+            "/tmp/task123-results",
+            "--cache",
+            "/tmp/task123-cache",
+        ])
+        .unwrap();
+
+        match cli.command {
+            Command::Task123(args) => {
+                assert!(!args.quick);
+                assert!(!args.full);
+                assert!(args.realtime_suite);
+                assert_eq!(args.matrix.as_deref(), Some("all"));
+                assert_eq!(args.rtbench_samples, Some(1000));
+                assert_eq!(args.task2_count, Some(10));
+                assert!(!args.allow_qemu_timer_limit);
+                assert_eq!(args.output, Some(PathBuf::from("/tmp/task123-results")));
+                assert_eq!(args.cache, Some(PathBuf::from("/tmp/task123-cache")));
+            }
+            _ => panic!("expected task123 command"),
         }
     }
 
