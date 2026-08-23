@@ -13,6 +13,7 @@ VERIFY_SUITE="$SCRIPT_DIR/verify_rtbench_suite.sh"
 QEMU_REALTIME_CONTROL="$SCRIPT_DIR/apply_qemu_realtime_controls.sh"
 NET_PROBE="$SCRIPT_DIR/send_rtbench_net_probe.py"
 IMAGE_METADATA="$SCRIPT_DIR/rtthread_image_metadata.py"
+RTTHREAD_INPUT_DIGEST="$(python3 "$IMAGE_METADATA" input-digest --root "$ROOT")"
 
 QEMU="${QEMU:-$(command -v qemu-system-aarch64 || true)}"
 RTTHREAD_NATIVE_SRC="${RTTHREAD_NATIVE_SRC:-$ROOT/tmp/rt-thread-5.2.2-native-current}"
@@ -195,6 +196,7 @@ RTTHREAD_IMAGE_METADATA="${RTTHREAD_IMAGE_METADATA:-$BSP_DIR/rtthread.bin.meta.j
 python3 "$IMAGE_METADATA" write \
     --image "$BSP_DIR/rtthread.bin" \
     --source "$RTTHREAD_NATIVE_SRC" \
+    --input-digest "$RTTHREAD_INPUT_DIGEST" \
     --output "$RTTHREAD_IMAGE_METADATA"
 
 mkdir -p -- "$(dirname -- "$NATIVE_GUEST_LOG")" "$(dirname -- "$NATIVE_QEMU_LOG")"
@@ -268,7 +270,6 @@ RUN_UNTIL_CHILD_PID_FILE="$qemu_pid_file" \
     "$QEMU" \
         -display none \
         -monitor none \
-        -name 'tgoskits,debug-threads=on' \
         -accel "tcg,thread=$QEMU_TCG_THREAD" \
         -machine virt,gic-version=3 \
         -global virtio-mmio.force-legacy=false \

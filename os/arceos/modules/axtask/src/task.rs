@@ -44,6 +44,9 @@ const STACK_END_MAGIC: usize = 0x57AC_CE11usize;
 /// on the ABI-mandated 16-byte stack alignment at task entry.
 pub(crate) const TASK_STACK_ALIGN: usize = 16;
 
+#[cfg(feature = "smp")]
+const NO_INITIAL_CPU: u32 = u32::MAX;
+
 /// A unique identifier for a thread.
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub struct TaskId(u64);
@@ -88,6 +91,10 @@ pub struct TaskInner {
 
     /// CPU affinity mask.
     cpumask: SpinLock<AxCpuMask>,
+
+    /// One-shot CPU preference consumed when the task is first queued.
+    #[cfg(feature = "smp")]
+    initial_cpu: AtomicU32,
 
     /// Scheduling policy of the task.
     sched_policy: AtomicI32,
@@ -294,6 +301,26 @@ impl TaskInner {
         *self.cpumask.lock_irqsave() = cpumask
     }
 
+    /// Sets a one-shot CPU preference for the task's first run-queue placement.
+    ///
+    /// The scheduler validates the preference against the task's CPU affinity
+    /// and consumes it without changing that affinity. On single-core builds,
+    /// this method has no effect.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `cpu_id` cannot be represented by the scheduler's CPU ID type.
+    pub fn set_initial_cpu(&mut self, cpu_id: usize) {
+        #[cfg(feature = "smp")]
+        {
+            let cpu_id = u32::try_from(cpu_id).expect("initial CPU ID exceeds u32");
+            assert_ne!(cpu_id, NO_INITIAL_CPU, "initial CPU ID uses reserved value");
+            self.initial_cpu.store(cpu_id, Ordering::Release);
+        }
+        #[cfg(not(feature = "smp"))]
+        let _ = cpu_id;
+    }
+
     #[inline]
     pub fn sched_policy(&self) -> i32 {
         self.sched_policy.load(Ordering::Acquire)
@@ -389,6 +416,8 @@ impl TaskInner {
             state: AtomicU8::new(TaskState::Ready as u8),
             // By default, the task is allowed to run on all CPUs.
             cpumask: SpinLock::new(crate::api::cpu_mask_full()),
+            #[cfg(feature = "smp")]
+            initial_cpu: AtomicU32::new(NO_INITIAL_CPU),
             sched_policy: AtomicI32::new(0),
             sched_priority: AtomicI32::new(0),
             in_wait_queue: AtomicBool::new(false),
@@ -682,6 +711,13 @@ impl TaskInner {
     #[inline]
     pub(crate) fn set_cpu_id(&self, cpu_id: u32) {
         self.cpu_id.store(cpu_id, Ordering::Release);
+    }
+
+    #[cfg(feature = "smp")]
+    #[inline]
+    pub(crate) fn take_initial_cpu(&self) -> Option<usize> {
+        let cpu_id = self.initial_cpu.swap(NO_INITIAL_CPU, Ordering::AcqRel);
+        (cpu_id != NO_INITIAL_CPU).then_some(cpu_id as usize)
     }
 
     /// Returns whether the task is running on a CPU.
@@ -1033,6 +1069,28 @@ mod stack_tests {
     fn borrowed_task_stack_top_stays_16_byte_aligned_with_guard_feature() {
         let stack = TaskStack::borrowed(0x1000.into(), 0x1000, TASK_STACK_ALIGN);
         assert_eq!(stack.top().as_usize() % TASK_STACK_ALIGN, 0);
+    }
+}
+
+#[cfg(all(test, feature = "smp"))]
+mod placement_tests {
+    use super::TaskInner;
+
+    #[test]
+    fn initial_cpu_hint_is_consumed_once_without_narrowing_affinity() {
+        let mut task = TaskInner::new(
+            || {},
+            "placement-test".into(),
+            crate::default_task_stack_size(),
+        );
+        let affinity = crate::AxCpuMask::from_raw_bits(0b1011);
+        task.set_cpumask(affinity);
+
+        task.set_initial_cpu(1);
+
+        assert_eq!(task.take_initial_cpu(), Some(1));
+        assert_eq!(task.take_initial_cpu(), None);
+        assert_eq!(task.cpumask(), affinity);
     }
 }
 

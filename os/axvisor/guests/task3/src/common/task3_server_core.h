@@ -17,6 +17,7 @@ typedef struct {
     void *reply_context;
     task3_status_t cached_status;
     uint64_t requests;
+    uint64_t applied_steps;
     uint64_t errors;
     uint64_t duplicate_requests;
     int cached_status_valid;

@@ -593,7 +593,6 @@ qemu_args=(
   -display none
   -monitor none
   -snapshot
-  -name 'tgoskits,debug-threads=on'
   -accel "tcg,thread=$QEMU_TCG_THREAD"
   -cpu cortex-a72,pmu=on
   -machine virt,virtualization=on,gic-version=3

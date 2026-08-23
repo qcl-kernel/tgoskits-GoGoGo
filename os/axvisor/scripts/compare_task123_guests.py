@@ -15,11 +15,9 @@ from summarize_rtthread_realtime import compare_joint, joint_record
 
 NUMBER = r"[0-9]+(?:\.[0-9]+)?"
 RTT_KEYS = ("min", "avg", "p50", "p95", "p99", "p99.9", "max")
+RTT_PERCENTILE_KEYS = ("min", "p50", "p95", "p99", "p99.9", "max")
 SHARED_ARTIFACTS = (
     "qemu",
-    "rtthread-normal",
-    "rtthread-drop-status",
-    "rtthread-delayed-server",
     "rootfs",
     "model",
     "protocol-source",
@@ -117,7 +115,14 @@ def parse_task2(path: Path) -> dict[str, Any]:
                 if match is None:
                     fail(f"missing RTT field {key} in {path}: {line}")
                 values[key] = duration_to_ms(match.group(1), match.group(2))
-            require_non_decreasing(values, RTT_KEYS, f"Task2 {current}B RTT in {path}")
+            require_non_decreasing(
+                values, RTT_PERCENTILE_KEYS, f"Task2 {current}B RTT in {path}"
+            )
+            if not values["min"] <= values["avg"] <= values["max"]:
+                fail(
+                    f"Task2 {current}B RTT mean is outside the sample range in "
+                    f"{path}: min={values['min']} avg={values['avg']} max={values['max']}"
+                )
             section["rtt_ms"] = values
             continue
         match = re.search(rf"throughput=({NUMBER})(B/s|KiB/s|MiB/s|GiB/s)", line)
@@ -250,15 +255,19 @@ def guest_log(run_dir: Path, guest: str) -> Path:
 def load_guest(
     run_dir: Path, guest: str, allow_qemu_timer_limit: bool
 ) -> dict[str, Any]:
+    manifest = parse_manifest(
+        run_dir / "manifest.txt", guest, allow_qemu_timer_limit
+    )
+    rtos = manifest.get("rtos")
+    if rtos not in {"rtthread", "zephyr"}:
+        fail(f"unsupported or missing RTOS in manifest: {run_dir / 'manifest.txt'}")
     return {
         "app_guest": guest,
         "run_dir": str(run_dir.resolve()),
-        "manifest": parse_manifest(
-            run_dir / "manifest.txt", guest, allow_qemu_timer_limit
-        ),
+        "manifest": manifest,
         "task2": parse_task2(guest_log(run_dir, guest)),
         "task3": parse_summary(run_dir / "summary.json"),
-        "rtbench": parse_rtbench(run_dir / "rtthread.log"),
+        "rtbench": parse_rtbench(run_dir / f"{rtos}.log"),
         "host": parse_host_metrics(run_dir / "host-metrics.txt"),
     }
 
@@ -278,7 +287,14 @@ def compare_values(baseline: int | float, candidate: int | float) -> dict[str, A
 
 
 def compare_guests(linux: dict[str, Any], starryos: dict[str, Any]) -> dict[str, Any]:
-    for field in ("mode", "task2_count", "task3_frames", "task3_fault", "qemu_timer_slack_ns"):
+    for field in (
+        "rtos",
+        "mode",
+        "task2_count",
+        "task3_frames",
+        "task3_fault",
+        "qemu_timer_slack_ns",
+    ):
         if linux["manifest"].get(field) != starryos["manifest"].get(field):
             fail(
                 f"guest manifests disagree on {field}: "
@@ -291,6 +307,15 @@ def compare_guests(linux: dict[str, Any], starryos: dict[str, Any]) -> dict[str,
             fail(f"shared artifact {artifact} is missing from a manifest")
         if left != right:
             fail(f"shared artifact {artifact} differs between guest runs")
+    selected_rtos = linux["manifest"].get("rtos")
+    if selected_rtos not in {"rtthread", "zephyr"}:
+        fail(f"unsupported or missing RTOS in guest manifests: {selected_rtos!r}")
+    left = linux["manifest"].get(f"artifact:{selected_rtos}")
+    right = starryos["manifest"].get(f"artifact:{selected_rtos}")
+    if left is None or right is None:
+        fail(f"shared artifact {selected_rtos} is missing from a manifest")
+    if left != right:
+        fail(f"shared artifact {selected_rtos} differs between guest runs")
 
     task2: dict[str, Any] = {"payloads": {}}
     for payload in ("64", "256", "1024"):

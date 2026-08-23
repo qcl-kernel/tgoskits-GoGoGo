@@ -12,14 +12,19 @@ fail() {
     exit 1
 }
 
-wait_for_file() {
+wait_for_file_record() {
     local path=$1
     local attempts=0
-    while [[ ! -s "$path" && "$attempts" -lt 500 ]]; do
+    local lines=0
+    while [[ "$attempts" -lt 500 ]]; do
+        if [[ -r "$path" ]]; then
+            lines=$(wc -l < "$path")
+            [[ "$lines" -ge 1 ]] && return 0
+        fi
         sleep 0.01
         attempts=$((attempts + 1))
     done
-    [[ -s "$path" ]]
+    return 1
 }
 
 assert_reaped() {
@@ -38,28 +43,40 @@ assert_reaped() {
 fixtures="$tmp/fixtures"
 tools="$tmp/tools"
 records="$tmp/records"
-mkdir -p "$fixtures/source-input" "$tools" "$records"
+mkdir -p "$fixtures/source-input" "$fixtures/rtthread-source" "$tools" "$records"
 for artifact in linux-kernel initramfs.cpio rtthread-normal.bin \
     rtthread-drop-status.bin rtthread-delayed-server.bin starryos-task123.bin \
-    rootfs.img model.bin; do
+    zephyr.bin rootfs.img model.bin; do
     printf '%s\n' "$artifact" > "$fixtures/$artifact"
 done
+printf '%s\n' '{"schema":1,"rtos":"zephyr","image_sha256":"'"$(sha256sum -- "$fixtures/zephyr.bin" | cut -d' ' -f1)"'","image_size":'"$(stat -c %s -- "$fixtures/zephyr.bin")"',"entry_point":1073746180,"zephyr_version":"fixture","zephyr_commit":"fixture","zephyr_sdk_version":"fixture","board":"fixture","virtio_net":true,"real_spi_interrupt":true}' \
+    > "$fixtures/zephyr.bin.meta.json"
+printf '%s\n' 'ddf52e2cdd977f14fc04035c88672ac204aec713' \
+    > "$fixtures/rtthread-source/.axvisor-rtthread-source-commit"
+rtthread_input_digest="$(
+    python3 "$ROOT/os/axvisor/scripts/rtthread_image_metadata.py" \
+        input-digest --root "$ROOT"
+)"
+python3 "$ROOT/os/axvisor/scripts/rtthread_image_metadata.py" write \
+    --image "$fixtures/rtthread-normal.bin" \
+    --source "$fixtures/rtthread-source" \
+    --patch-digest fixture-patch-set \
+    --input-digest "$rtthread_input_digest" \
+    --output "$fixtures/rtthread-normal.bin.meta.json"
 
 cat > "$tools/cargo" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
 printf '%q ' "$@" >> "$FAKE_CARGO_LOG"
 printf '\n' >> "$FAKE_CARGO_LOG"
-if [[ "$*" == "xtask image pull qemu-aarch64 -o "* ]]; then
-    output_dir=${@: -1}
-    mkdir -p "$output_dir/pulled"
+if [[ "$1" == xtask && "$2" == image && "$3" == pull && "$4" == --arch && "$5" == aarch64 ]]; then
+    output_dir="${TGOS_IMAGE_LOCAL_STORAGE:?}"
+    mkdir -p "$output_dir/rootfs-aarch64-alpine.img"
     case "${FAKE_ROOTFS_BEHAVIOR:-one}" in
         zero) ;;
-        one) printf 'pulled rootfs\n' > "$output_dir/pulled/rootfs.img" ;;
+        one) printf 'pulled rootfs\n' > "$output_dir/rootfs-aarch64-alpine.img/rootfs-aarch64-alpine.img" ;;
         multiple)
-            printf 'rootfs one\n' > "$output_dir/pulled/rootfs.img"
-            mkdir -p "$output_dir/second"
-            printf 'rootfs two\n' > "$output_dir/second/rootfs.img"
+            exit 93
             ;;
         *) exit 93 ;;
     esac
@@ -158,11 +175,19 @@ if [[ "$app_guest" == starryos ]]; then
 fi
 printf '[VM 1] %s\n' "$app_smp_marker"
 printf '[VM 1] %s\n' "$app_net_marker"
-cat <<'LOG'
-[VM 3] RTIPC_SERVER_READY ip=192.168.77.30 port=9876
-[VM 3] TASK3_RTOS_READY ip=192.168.77.30 port=9877
-[VM 3] msh />
-LOG
+rtos_shell_marker='msh />'
+if grep -Fq 'kernel_path = "zephyr.bin"' "$FAKE_CARGO_VMCONFIG_DIR/2.toml"; then
+    rtos_shell_marker=''
+fi
+if [[ -n "$rtos_shell_marker" ]]; then
+    printf '[VM 3] [32m[I/rtipic.srv] server starting on 192.168.77.30:9876[0m\n'
+else
+    printf '[VM 3] RTIPC_SERVER_READY ip=192.168.77.30 port=9876\n'
+fi
+printf '[VM 3] TASK3_RTOS_READY ip=192.168.77.30 port=9877\n'
+if [[ -n "$rtos_shell_marker" ]]; then
+    printf '[VM 3] %s\n' "$rtos_shell_marker"
+fi
 for payload in 64 256 1024; do
     printf '[VM 1] --- Payload %sB ---\n' "$payload"
     printf '[VM 1] sent=%s recv=%s\n' "$task2_count" "$task2_count"
@@ -193,9 +218,10 @@ done
 records=$((task3_frames * 2))
 printf '[VM 1] TASK3_SUMMARY_JSON={"schema":1,"frames_per_mode":%s,"records":%s,"requests":%s,"successes":%s,"success_rate":1.0,"application_errors":0,"application_timeouts":0,"reconnects":0,"injected_drops":%s,"elapsed_us":1000,"settling":{"fixed":{},"ai":{}}}\n' \
     "$task3_frames" "$records" "$records" "$records" "$injected_drops"
-if [[ -z "${FAKE_QEMU_EXPECT_COMMAND:-}" ]]; then
-    printf '[VM 3] TASK3_RTOS_FINAL requests=%s errors=%s duplicates=%s applied_steps=%s retries=%s\n' \
-        "$records" "$rtos_errors" "$rtos_duplicates" "$records" "$rtos_retries"
+if [[ -z "${FAKE_QEMU_EXPECT_COMMAND:-}" &&
+      "${FAKE_QEMU_DROP_FIRST_CONSOLE_SWITCH:-0}" != 1 &&
+      "${FAKE_QEMU_BEHAVIOR:-pass}" != split-final ]]; then
+    emit_rtos_final
 fi
 case "$task3_fault" in
     drop-status) echo '[VM 3] TASK3_FAULT_DROP_STATUS dropped=1' ;;
@@ -203,10 +229,13 @@ case "$task3_fault" in
     delayed-server) echo '[VM 3] TASK3_FAULT_DELAYED_SERVER delay_ms=3000' ;;
     malformed) echo '[VM 1] TASK3_FAULT_MALFORMED schema2=rejected short=rejected crc=rejected rejected=3 actuator_before=0 actuator_after=0 applied_delta=0' ;;
 esac
-if [[ -n "${FAKE_QEMU_EXPECT_COMMAND:-}" &&
-      "${FAKE_QEMU_BENCHMARK_AFTER_LINUX:-0}" != 1 ]]; then
+if [[ -n "${FAKE_QEMU_EXPECT_COMMAND:-}" ]]; then
     emit_linux_finals
     linux_finals_emitted=1
+fi
+if [[ -z "${FAKE_QEMU_EXPECT_COMMAND:-}" &&
+      "${FAKE_QEMU_DROP_FIRST_CONSOLE_SWITCH:-0}" == 1 ]]; then
+    emit_linux_finals
 fi
 }
 
@@ -267,8 +296,20 @@ emit_benchmark() {
     else
         local expected=$((value * 1000 - 1))
         local counters='p50_cycles=1 p95_cycles=2 p99_cycles=3 p99_9_cycles=4 max_cycles=5 mean_cycles=2 p50_instructions=1 p95_instructions=2 p99_instructions=3 p99_9_instructions=4 max_instructions=5 mean_instructions=2'
-        printf 'RTBENCH_STABILITY_BEGIN seconds=%s expected=%s frequency=1000000 pmu_event=0x8\n' "$value" "$expected"
-        echo 'RTBENCH_PMU status=ready event=0x8 cycles_delta=100 instructions_delta=100'
+        if [[ "${FAKE_QEMU_BEHAVIOR:-pass}" == interleaved-begin-marker ]]; then
+            printf 'RTBENCH_STABILITY_BEGIN seconds=%s exp' "$value"
+            printf '\033[37m[ 40.877348 0:25 axvm::runtime::hvc:272] \033[32mVM[1] PSCI_CPU_ON\033[m\r\n\033[m'
+            printf 'ected=%s frequency=1000000 pmu_event=0x8\n' "$expected"
+        else
+            printf 'RTBENCH_STABILITY_BEGIN seconds=%s expected=%s frequency=1000000 pmu_event=0x8\n' "$value" "$expected"
+        fi
+        if [[ "${FAKE_QEMU_PMU_UNAVAILABLE:-0}" == 1 ]]; then
+            echo 'RTBENCH_PMU status=unavailable event=0x8 cycles_delta=0 instructions_delta=0 units=ns'
+        elif [[ "${FAKE_QEMU_BEHAVIOR:-pass}" == interleaved-pmu-marker ]]; then
+            printf 'RTmBTBENECNCH_PMU status=ready event=0x8 cycles_delta=100 instructions_delta=100\n'
+        else
+            echo 'RTBENCH_PMU status=ready event=0x8 cycles_delta=100 instructions_delta=100'
+        fi
         for metric in stability_jitter callback_exec; do
             local miss_1ms=0
             if [[ "$metric" == stability_jitter &&
@@ -284,7 +325,12 @@ emit_benchmark() {
         else
             printf 'RTBENCH_STABILITY_END status=PASS expected=%s collected=%s missing=0\n' "$expected" "$expected"
         fi
-        echo 'RTBENCH_STABILITY_DONE'
+        if [[ "${FAKE_QEMU_BEHAVIOR:-pass}" == interleaved-stability-done ]]; then
+            printf 'RTBENCH_STABILITY'
+            printf '_ONE\n'
+        else
+            echo 'RTBENCH_STABILITY_DONE'
+        fi
     fi
 }
 
@@ -300,53 +346,95 @@ wait_for_control() {
     return 1
 }
 
+emit_rtos_final() {
+    if [[ "${FAKE_QEMU_BEHAVIOR:-pass}" == split-final ]]; then
+        printf '[VM 3] TASK3_RTOS_FINAL requests=%s errors=%s duplicates=%s applied_st' \
+            "$records" "$rtos_errors" "$rtos_duplicates"
+        sleep 1
+        printf 'eps=%s retries=%s\n' "$records" "$rtos_retries"
+    else
+        printf '[VM 3] TASK3_RTOS_FINAL requests=%s errors=%s duplicates=%s applied_steps=%s retries=%s\n' \
+            "$records" "$rtos_errors" "$rtos_duplicates" "$records" "$rtos_retries"
+    fi
+    if [[ "${FAKE_QEMU_DROP_FINAL_DONE:-0}" == 1 ]]; then
+        return
+    elif [[ "${FAKE_QEMU_BEHAVIOR:-pass}" == split-final-done ]]; then
+        printf '[VM 3] TASK3_RTOS_FINAL_DON'
+        printf '\033[37m[ 52.430151 0:30 axvm::runtime::vcpus:667] \033[32mVM[1] VCpu[1] exiting...\033[m\r\n'
+        printf 'E\n'
+    else
+        printf '[VM 3] TASK3_RTOS_FINAL_DONE\n'
+    fi
+}
+
+rtos_final_emitted=0
+
 if [[ "${FAKE_QEMU_BEHAVIOR:-pass}" == complete-nonzero ]]; then
     sleep 0.2
 fi
 emit_initial
 if [[ -n "${FAKE_QEMU_EXPECT_COMMAND:-}" ]]; then
+    # AxVisor prints an earlier VM3 attachment during startup, followed by
+    # VM1 becoming the active console. A later switch must wait for a new
+    # confirmation rather than treating this stale line as the result.
+    printf '[Axvisor] attached VM[3] console; use Ctrl+X, then h to return to the shell\n'
+    printf '[Axvisor] attached VM[1] console; use Ctrl+X, then h to return to the shell\n'
     wait_for_control ']'
     echo 'select-vm3' >> "$FAKE_QEMU_STDIN_LOG"
+    printf '[Axvisor] attached VM[3] console; use Ctrl+X, then h to return to the shell\n'
+    if [[ "${FAKE_QEMU_FINAL_WITHOUT_BENCHMARK:-0}" == 1 ]]; then
+        printf '%s
+' '[Axvisor] attached VM[3] console; use Ctrl+X, then h to return to the shell'
+        emit_rtos_final
+        rtos_final_emitted=1
+        trap 'exit 143' TERM
+        while :; do sleep 1; done
+    fi
+    emit_rtos_final
+    rtos_final_emitted=1
     benchmark_command=
     while IFS= read -r -n 1 command_byte; do
         [[ "$command_byte" == $'\r' ]] && break
         benchmark_command+=$command_byte
     done
+    if [[ -z "$benchmark_command" ]]; then
+        while IFS= read -r -n 1 command_byte; do
+            [[ "$command_byte" == $'\r' ]] && break
+            benchmark_command+=$command_byte
+        done
+    fi
     [[ "$benchmark_command" == "$FAKE_QEMU_EXPECT_COMMAND" ]]
     printf 'command=%s\n' "$benchmark_command" >> "$FAKE_QEMU_STDIN_LOG"
-    if [[ "${FAKE_QEMU_BENCHMARK_AFTER_LINUX:-0}" == 1 ]]; then
-        wait_for_control '['
-        echo 'select-vm1' >> "$FAKE_QEMU_STDIN_LOG"
-        emit_linux_finals
-        wait_for_control ']'
-        echo 'select-vm3-final' >> "$FAKE_QEMU_STDIN_LOG"
+    if [[ "${FAKE_QEMU_BEHAVIOR:-pass}" != missing-benchmark ]]; then
         emit_benchmark "$benchmark_command"
-        printf 'TASK3_RTOS_FINAL requests=%s errors=%s duplicates=%s applied_steps=%s retries=%s\n' \
-            "$records" "$rtos_errors" "$rtos_duplicates" "$records" "$rtos_retries"
-        linux_finals_emitted=1
-    elif [[ "${FAKE_QEMU_BEHAVIOR:-pass}" != missing-benchmark ]]; then
-        emit_benchmark "$benchmark_command"
-        if [[ "$benchmark_command" == benchmark\ * ]]; then
-            printf 'TASK3_RTOS_FINAL requests=%s errors=%s duplicates=%s applied_steps=%s retries=%s\n' \
-                "$records" "$rtos_errors" "$rtos_duplicates" "$records" "$rtos_retries"
+        if [[ "$rtos_final_emitted" -eq 0 ]]; then
+            emit_rtos_final
+            rtos_final_emitted=1
         fi
     fi
-    if [[ "${FAKE_QEMU_BENCHMARK_AFTER_LINUX:-0}" != 1 &&
-          "${FAKE_QEMU_EXPECT_COMMAND:-}" == rtbench_stability\ * ]]; then
-        wait_for_control '['
-        echo 'select-vm1' >> "$FAKE_QEMU_STDIN_LOG"
-    fi
 fi
-if [[ "${linux_finals_emitted:-0}" != 1 ]]; then
+if [[ "${FAKE_QEMU_DROP_FIRST_CONSOLE_SWITCH:-0}" -eq 1 ]]; then
+    wait_for_control ']'
+    echo 'drop-first-switch' >> "$FAKE_QEMU_STDIN_LOG"
+    wait_for_control ']'
+    echo 'retry-switch' >> "$FAKE_QEMU_STDIN_LOG"
+    printf '[Axvisor] attached VM[3] console; use Ctrl+X, then h to return to the shell\n'
+    if [[ "$rtos_final_emitted" -eq 0 ]]; then
+        emit_rtos_final
+        rtos_final_emitted=1
+    fi
+    trap 'exit 143' TERM
+    while :; do sleep 1; done
+fi
+if [[ "${linux_finals_emitted:-0}" != 1 && \
+      "${FAKE_QEMU_FINAL_WITHOUT_BENCHMARK:-0}" != 1 ]]; then
     emit_linux_finals
 fi
-if [[ -n "${FAKE_QEMU_EXPECT_COMMAND:-}" &&
-      "${FAKE_QEMU_BENCHMARK_AFTER_LINUX:-0}" != 1 &&
-      "${FAKE_QEMU_EXPECT_COMMAND:-}" == rtbench_stability\ * ]]; then
-    wait_for_control ']'
-    echo 'select-vm3-final' >> "$FAKE_QEMU_STDIN_LOG"
-    printf 'TASK3_RTOS_FINAL requests=%s errors=%s duplicates=%s applied_steps=%s retries=%s\n' \
-        "$records" "$rtos_errors" "$rtos_duplicates" "$records" "$rtos_retries"
+if [[ "${FAKE_QEMU_BEHAVIOR:-pass}" == split-final ]]; then
+    if [[ "$rtos_final_emitted" -eq 0 ]]; then
+        emit_rtos_final
+        rtos_final_emitted=1
+    fi
 fi
 if [[ "${FAKE_QEMU_BEHAVIOR:-pass}" == duplicate ]]; then
     echo '[VM 1] TASK2_LINUX_END status=PASS'
@@ -369,9 +457,11 @@ common_env=(
     LINUX_KERNEL_IMAGE="$fixtures/linux-kernel"
     LINUX_INITRAMFS_IMAGE="$fixtures/initramfs.cpio"
     RTTHREAD_IMAGE="$fixtures/rtthread-normal.bin"
+    ZEPHYR_IMAGE="$fixtures/zephyr.bin"
     ROOTFS_IMAGE="$fixtures/rootfs.img"
     TASK123_MODEL_IMAGE="$fixtures/model.bin"
     STARRYOS_IMAGE="$fixtures/starryos-task123.bin"
+    RTTHREAD_IMAGE_META="$fixtures/rtthread-normal.bin.meta.json"
     FAKE_CARGO_LOG="$records/cargo.log"
     FAKE_CARGO_PID_FILE="$records/fake-cargo.pid"
     FAKE_CARGO_CHILD_PID_FILE="$records/fake-cargo-child.pid"
@@ -447,9 +537,29 @@ assert_starryos_contract() {
 
 [[ -x "$RUNNER" ]] || fail "run_task123.sh is missing or not executable"
 
+stale_metadata="$fixtures/rtthread-stale-inputs.bin.meta.json"
+cp -- "$fixtures/rtthread-normal.bin.meta.json" "$stale_metadata"
+python3 - "$stale_metadata" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+path = Path(sys.argv[1])
+metadata = json.loads(path.read_text(encoding="utf-8"))
+metadata["build_inputs_sha256"] = "0" * 64
+path.write_text(json.dumps(metadata) + "\n", encoding="utf-8")
+PY
+expect_failure "stale RT-Thread build inputs passed metadata validation" \
+    env "${common_env[@]}" RTTHREAD_IMAGE_META="$stale_metadata" \
+        RTTHREAD_REQUIRE_IMAGE_METADATA=1 \
+        "$RUNNER" --mode smoke --task2-count 2 --task3-frames 3 \
+        --output "$tmp/stale-rtthread-inputs"
+
 normal_output="$tmp/normal-output"
-if ! run_runner "$normal_output" > "$tmp/normal.stdout"; then
+if ! run_runner "$normal_output" > "$tmp/normal.stdout" 2>"$tmp/normal.stderr"; then
     [[ ! -f "$normal_output/console.log" ]] || cat "$normal_output/console.log" >&2
+    cat "$tmp/normal.stdout" >&2
+    cat "$tmp/normal.stderr" >&2
     fail "normal fake run failed"
 fi
 grep -Fq 'PHASE dependency-check' "$tmp/normal.stdout" ||
@@ -494,6 +604,38 @@ grep -Fq 'AxVisor host cmdline' "$RUNNER" ||
 
 : > "$records/cargo.log"
 : > "$records/qemu.log"
+split_final_output="$tmp/split-final-output"
+if ! env "${common_env[@]}" FAKE_QEMU_BEHAVIOR=split-final \
+    "$RUNNER" --mode smoke --task2-count 2 --task3-frames 3 \
+    --output "$split_final_output" >/dev/null; then
+    [[ ! -f "$split_final_output/console.log" ]] || cat "$split_final_output/console.log" >&2
+    fail "runner terminated before the complete RTOS final marker"
+fi
+grep -Fq 'TASK3_RTOS_FINAL requests=6 errors=0 duplicates=0 applied_steps=6 retries=0' \
+    "$split_final_output/rtthread.log" ||
+    fail "runner did not preserve the complete split RTOS final marker"
+grep -Fq 'TASK3_RTOS_FINAL_DONE' "$split_final_output/console.log" ||
+    fail "runner did not wait for the RTOS final completion marker"
+assert_reaped "$(cat "$records/qemu.pid")"
+
+: > "$records/cargo.log"
+: > "$records/qemu.log"
+split_final_done_output="$tmp/split-final-done-output"
+if ! env "${common_env[@]}" FAKE_QEMU_BEHAVIOR=split-final-done TASK123_TIMEOUT_S=2 \
+    "$RUNNER" --mode smoke --task2-count 2 --task3-frames 3 \
+    --output "$split_final_done_output" >/dev/null; then
+    [[ ! -f "$split_final_done_output/console.log" ]] || cat "$split_final_done_output/console.log" >&2
+    fail "runner rejected a final marker split across shared-console writes"
+fi
+grep -Fq 'TASK3_RTOS_FINAL requests=6 errors=0 duplicates=0 applied_steps=6 retries=0' \
+    "$split_final_done_output/rtthread.log" ||
+    fail "runner did not preserve the final summary when final marker was split"
+grep -Fq 'TASK3_RTOS_FINAL_DONE' "$split_final_done_output/rtthread.log" ||
+    fail "result gate did not reconstruct the split RTOS final completion marker"
+assert_reaped "$(cat "$records/qemu.pid")"
+
+: > "$records/cargo.log"
+: > "$records/qemu.log"
 starry_output="$tmp/starry-output"
 if ! env "${common_env[@]}" "$RUNNER" --app-guest starryos --mode smoke \
     --task2-count 2 --task3-frames 3 --output "$starry_output" >/dev/null; then
@@ -505,6 +647,88 @@ grep -Fq 'kernel_path = "starryos-task123.bin"' "$records/1.toml" ||
 [[ "$(cat "$records/1.image")" == "$(realpath -e "$fixtures/starryos-task123.bin")" ]] ||
     fail "StarryOS run selected the wrong application image"
 assert_starryos_contract "$starry_output"
+assert_reaped "$(cat "$records/qemu.pid")"
+
+: > "$records/cargo.log"
+: > "$records/qemu.log"
+zephyr_output="$tmp/zephyr-output"
+if ! env "${common_env[@]}" TASK123_TIMEOUT_S=2 \
+    FAKE_QEMU_EXPECT_COMMAND='rtbench_stability 300' \
+    TASK123_ZEPHYR_SMOKE_COMMAND='rtbench_stability 300' \
+    "$RUNNER" --rtos zephyr --app-guest linux \
+    --mode smoke --task2-count 2 --task3-frames 3 \
+    --output "$zephyr_output" >/dev/null; then
+    fail "Zephyr/Linux fake run failed"
+fi
+[[ "$(cat "$records/qemu-stdin.log")" == $'select-vm3\ncommand=rtbench_stability 300' ]] ||
+    fail "Zephyr smoke mode did not collect its final marker with a benchmark command"
+grep -Fxq 'rtos=zephyr' "$zephyr_output/manifest.txt" ||
+    fail "Zephyr manifest did not record rtos"
+grep -Fxq 'app_guest=linux' "$zephyr_output/manifest.txt" ||
+    fail "Zephyr run did not retain the Linux app guest"
+[[ "$(cat "$records/2.image")" == "$(realpath -e "$fixtures/zephyr.bin")" ]] ||
+    fail "Zephyr run selected the wrong RTOS image"
+grep -Fq 'kernel_path = "zephyr.bin"' "$records/2.toml" ||
+    fail "Zephyr run selected the wrong VM template"
+assert_reaped "$(cat "$records/qemu.pid")"
+
+: > "$records/cargo.log"
+: > "$records/qemu.log"
+: > "$records/qemu-stdin.log"
+zephyr_smoke_output="$tmp/zephyr-smoke-output"
+if ! env "${common_env[@]}" FAKE_QEMU_EXPECT_COMMAND='collect-final-only' \
+    FAKE_QEMU_FINAL_WITHOUT_BENCHMARK=1 \
+    "$RUNNER" --rtos zephyr --app-guest linux \
+    --mode smoke --task2-count 2 --task3-frames 3 \
+    --output "$zephyr_smoke_output" >"$tmp/zephyr-smoke.stdout" 2>"$tmp/zephyr-smoke.stderr"; then
+    [[ ! -f "$zephyr_smoke_output/console.log" ]] ||
+        cat "$zephyr_smoke_output/console.log" >&2
+    cat "$tmp/zephyr-smoke.stdout" >&2
+    cat "$tmp/zephyr-smoke.stderr" >&2
+    fail "Zephyr/Linux smoke fake run failed without a benchmark command"
+fi
+grep -Fxq 'select-vm3' "$records/qemu-stdin.log" ||
+    fail "Zephyr smoke mode did not switch to VM3 to collect its final marker"
+grep -Fq 'TASK3_RTOS_FINAL requests=' "$zephyr_smoke_output/console.log" ||
+    fail "Zephyr smoke run did not collect the RTOS final marker"
+assert_reaped "$(cat "$records/qemu.pid")"
+
+: > "$records/qemu.log"
+: > "$records/qemu-stdin.log"
+zephyr_switch_retry_output="$tmp/zephyr-switch-retry-output"
+if ! env "${common_env[@]}" FAKE_QEMU_DROP_FIRST_CONSOLE_SWITCH=1 \
+    "$RUNNER" --rtos zephyr --app-guest linux \
+    --mode smoke --task2-count 2 --task3-frames 3 \
+    --output "$zephyr_switch_retry_output" >/dev/null; then
+    [[ ! -f "$zephyr_switch_retry_output/console.log" ]] ||
+        cat "$zephyr_switch_retry_output/console.log" >&2
+    fail "Zephyr/Linux smoke did not retry a dropped console switch"
+fi
+[[ "$(cat "$records/qemu-stdin.log")" == $'drop-first-switch\nretry-switch' ]] ||
+    fail "Zephyr smoke did not resend the complete console-switch prefix"
+grep -Fq '[Axvisor] attached VM[3] console' \
+    "$zephyr_switch_retry_output/console.log" ||
+    fail "Zephyr smoke retried without requiring console-switch confirmation"
+assert_reaped "$(cat "$records/qemu.pid")"
+
+: > "$records/cargo.log"
+: > "$records/qemu.log"
+: > "$records/qemu-stdin.log"
+zephyr_unavailable_pmu_output="$tmp/zephyr-unavailable-pmu-output"
+if ! env "${common_env[@]}" TASK123_TIMEOUT_S=3 \
+    TASK123_ALLOW_QEMU_TIMER_LIMIT=1 \
+    FAKE_QEMU_EXPECT_COMMAND='rtbench_stability 1' \
+    FAKE_QEMU_PMU_UNAVAILABLE=1 \
+    "$RUNNER" --rtos zephyr --app-guest linux --mode stability \
+    --seconds 1 --task2-count 2 --output "$zephyr_unavailable_pmu_output" \
+    >/dev/null; then
+    [[ ! -f "$zephyr_unavailable_pmu_output/console.log" ]] ||
+        cat "$zephyr_unavailable_pmu_output/console.log" >&2
+    fail "Zephyr stability rejected PMU-unavailable evidence"
+fi
+grep -Fxq 'rtbench_pmu_status=unavailable' \
+    "$zephyr_unavailable_pmu_output/manifest.txt" ||
+    fail "Zephyr manifest did not record unavailable PMU status"
 assert_reaped "$(cat "$records/qemu.pid")"
 
 for realtime_case in 'realtime-suite:benchmark 2' 'stability:rtbench_stability 1'; do
@@ -528,60 +752,160 @@ for realtime_case in 'realtime-suite:benchmark 2' 'stability:rtbench_stability 1
             cat "$realtime_output/console.log" >&2
         fail "$realtime_mode feeder run failed"
     fi
-    if [[ "$realtime_mode" == realtime-suite ]]; then
-        [[ "$(cat "$records/qemu-stdin.log")" == $'select-vm3\ncommand='"$realtime_command" ]] ||
-            fail "$realtime_mode did not preserve the VM3 benchmark stream"
-    else
-        [[ "$(cat "$records/qemu-stdin.log")" == $'select-vm3\ncommand='"$realtime_command"$'\nselect-vm1\nselect-vm3-final' ]] ||
-            fail "$realtime_mode did not drain the VM1 and VM3 replay buffers"
-    fi
+    [[ "$(cat "$records/qemu-stdin.log")" == $'select-vm3\ncommand='"$realtime_command" ]] ||
+        fail "$realtime_mode did not start the benchmark after Linux final evidence"
     assert_mode_contract "$realtime_mode" \
         "$expected_guest_cmdline" \
         "$fixtures/rtthread-normal.bin"
     assert_reaped "$(cat "$records/qemu.pid")"
 done
 
+: > "$records/cargo.log"
+: > "$records/qemu.log"
+: > "$records/qemu-stdin.log"
+missing_final_done_output="$tmp/stability-missing-final-done"
+if ! env "${common_env[@]}" FAKE_QEMU_DROP_FINAL_DONE=1 \
+    FAKE_QEMU_EXPECT_COMMAND='rtbench_stability 1' TASK123_TIMEOUT_S=2 \
+    TASK123_ALLOW_QEMU_TIMER_LIMIT=1 \
+    "$RUNNER" --mode stability --rtos rtthread --app-guest starryos \
+    --seconds 1 --task2-count 2 --output "$missing_final_done_output" >/dev/null; then
+    [[ ! -f "$missing_final_done_output/console.log" ]] ||
+        cat "$missing_final_done_output/console.log" >&2
+    fail "runner required the lossy RTOS final DONE write after a complete final record"
+fi
+grep -Fq 'TASK3_RTOS_FINAL requests=6 errors=0 duplicates=0 applied_steps=6 retries=0' \
+    "$missing_final_done_output/console.log" ||
+    fail "missing-DONE run lost the complete RTOS final record"
+if grep -Fq 'TASK3_RTOS_FINAL_DONE' "$missing_final_done_output/console.log"; then
+    fail "missing-DONE fixture unexpectedly emitted the optional completion marker"
+fi
+[[ "$(cat "$records/qemu-stdin.log")" == \
+   $'select-vm3\ncommand=rtbench_stability 1' ]] ||
+    fail "runner did not start the benchmark after the complete RTOS final record"
+assert_reaped "$(cat "$records/qemu.pid")"
+
+feed_function="$tmp/feed_benchmark_command.txt"
+sed -n '/^feed_benchmark_command()/,/^collect_rtos_final_command()/p' "$RUNNER" > "$feed_function"
+app_done_line="$(grep -nF 'if ! wait_for_console_marker "$APP_GUEST_TASK123_END_MARKER"' "$feed_function" | head -n 1 | cut -d: -f1 || true)"
+switch_to_rtos_line="$(grep -nF 'switch_console_to_next_guest || return 1' "$feed_function" | head -n 1 | cut -d: -f1 || true)"
+benchmark_started_line="$(grep -nF 'if ! wait_for_console_marker "$started"' "$feed_function" | cut -d: -f1 || true)"
+benchmark_ready_line="$(grep -nF 'if ! wait_for_console_marker "$ready"' "$feed_function" | tail -n 1 | cut -d: -f1 || true)"
+[[ "$app_done_line" =~ ^[0-9]+$ && "$switch_to_rtos_line" =~ ^[0-9]+$ &&
+   "$benchmark_started_line" =~ ^[0-9]+$ && "$benchmark_ready_line" =~ ^[0-9]+$ ]] ||
+    fail "benchmark feeder ordering markers are missing"
+grep -Fq "started='pmu_event=0x8'" "$feed_function" ||
+    fail "benchmark start boundary can split the begin evidence line"
+(( app_done_line < switch_to_rtos_line && switch_to_rtos_line < benchmark_started_line &&
+   benchmark_started_line < benchmark_ready_line )) ||
+    fail "benchmark feeder did not preserve app-final, RTOS-final, benchmark ordering"
+if grep -Fq "printf '\\030['" "$feed_function"; then
+    fail "benchmark feeder switches back to an application guest that may already be stopped"
+fi
+
+interleaved_pmu_output="$tmp/stability-interleaved-pmu"
+if ! env "${common_env[@]}" FAKE_QEMU_BEHAVIOR=interleaved-pmu-marker \
+    FAKE_QEMU_EXPECT_COMMAND='rtbench_stability 1' TASK123_TIMEOUT_S=3 \
+    "$RUNNER" --mode stability --rtos rtthread --app-guest linux \
+    --seconds 1 --task2-count 2 \
+    --output "$interleaved_pmu_output" >/dev/null; then
+    cat "$interleaved_pmu_output/console.log" >&2 || true
+    fail "runner rejected an RT-Thread PMU marker interleaved with shell echo"
+fi
+grep -Fxq 'rtbench_pmu_status=ready' \
+    "$interleaved_pmu_output/manifest.txt" ||
+    fail "interleaved PMU marker was not recorded in the manifest"
+
+interleaved_begin_output="$tmp/stability-interleaved-begin"
+if ! env "${common_env[@]}" FAKE_QEMU_BEHAVIOR=interleaved-begin-marker \
+    FAKE_QEMU_EXPECT_COMMAND='rtbench_stability 1' TASK123_TIMEOUT_S=3 \
+    "$RUNNER" --mode stability --rtos rtthread --app-guest linux \
+    --seconds 1 --task2-count 2 \
+    --output "$interleaved_begin_output" >/dev/null; then
+    cat "$interleaved_begin_output/console.log" >&2 || true
+    fail "runner rejected a benchmark begin marker interleaved with host output"
+fi
+grep -Fxq 'rtbench_counter_frequency=1000000' \
+    "$interleaved_begin_output/manifest.txt" ||
+    fail "interleaved benchmark frequency was not recorded in the manifest"
+
+interleaved_done_output="$tmp/stability-interleaved-done"
+if ! env "${common_env[@]}" FAKE_QEMU_BEHAVIOR=interleaved-stability-done \
+    FAKE_QEMU_EXPECT_COMMAND='rtbench_stability 1' TASK123_TIMEOUT_S=2 \
+    TASK123_ALLOW_QEMU_TIMER_LIMIT=1 \
+    "$RUNNER" --mode stability --rtos rtthread --app-guest starryos \
+    --seconds 1 --task2-count 2 \
+    --output "$interleaved_done_output" >/dev/null; then
+    [[ ! -f "$interleaved_done_output/console.log" ]] ||
+        cat "$interleaved_done_output/console.log" >&2
+    fail "runner waited for a stability DONE marker corrupted by shared-console output"
+fi
+grep -Fq 'TASK3_RTOS_FINAL requests=6 errors=0 duplicates=0 applied_steps=6 retries=0' \
+    "$interleaved_done_output/console.log" ||
+    fail "stability feeder did not wait for the RTOS final record"
+awk '
+    /TASK3_RTOS_FINAL requests=/ { final = NR }
+    /RTBENCH_STABILITY_BEGIN / { begin = NR }
+    END { exit !(final > 0 && begin > final) }
+' "$interleaved_done_output/console.log" ||
+    fail "stability benchmark started before the RTOS final record"
+grep -Fxq 'result_gate=PASS_WITH_QEMU_TIMER_LIMIT' \
+    "$interleaved_done_output/manifest.txt" ||
+    fail "interleaved QEMU timer-limit run was not accepted by the result gate"
+assert_reaped "$(cat "$records/qemu.pid")"
+
 : > "$records/qemu.log"
 : > "$records/qemu-stdin.log"
 linux_first_output="$tmp/linux-first-output"
-if ! env "${common_env[@]}" FAKE_QEMU_BENCHMARK_AFTER_LINUX=1 \
+if ! env "${common_env[@]}" \
     FAKE_QEMU_EXPECT_COMMAND='rtbench_stability 1' TASK123_TIMEOUT_S=2 \
     "$RUNNER" --mode stability --seconds 1 --task2-count 2 \
     --output "$linux_first_output" >/dev/null; then
     fail "runner did not drain Linux before waiting for benchmark completion"
 fi
 [[ "$(cat "$records/qemu-stdin.log")" == \
-   $'select-vm3\ncommand=rtbench_stability 1\nselect-vm1\nselect-vm3-final' ]] ||
+   $'select-vm3\ncommand=rtbench_stability 1' ]] ||
     fail "Linux-first run used the wrong console drain order"
 assert_reaped "$(cat "$records/qemu.pid")"
 
 : > "$records/cargo.log"
 : > "$records/qemu.log"
 default_rootfs_output="$tmp/default-rootfs-output"
-env "${common_env[@]}" ROOTFS_IMAGE= "$RUNNER" --mode smoke \
+default_rootfs_cache="$tmp/default-rootfs-cache"
+env "${common_env[@]}" ROOTFS_IMAGE= TGOS_SOURCE_CACHE="$default_rootfs_cache" \
+    "$RUNNER" --mode smoke \
     --task2-count 2 --task3-frames 3 --output "$default_rootfs_output" >/dev/null ||
     fail "default rootfs pull run failed"
-grep -Eq '^xtask image pull qemu-aarch64 -o /.*task123-runtime\.[^/]+/rootfs[[:space:]]*$' \
-    "$records/cargo.log" || fail "runner did not pull qemu-aarch64 into its runtime directory"
-grep -Eq '^ARTIFACT name=rootfs path=/.*task123-runtime\.[^/]+/rootfs/pulled/rootfs\.img sha256=[0-9a-f]{64}$' \
+grep -Eq '^xtask image pull --arch aarch64[[:space:]]*$' \
+    "$records/cargo.log" || fail "runner did not pull the managed aarch64 rootfs"
+grep -Eq '^ARTIFACT name=rootfs path=/.*rootfs/rootfs-aarch64-alpine\.img/rootfs-aarch64-alpine\.img sha256=[0-9a-f]{64}$' \
     "$default_rootfs_output/manifest.txt" ||
     fail "manifest did not record the uniquely pulled rootfs"
 [[ "$(wc -l < "$records/qemu.log")" -eq 1 ]] ||
     fail "default rootfs run did not reach exactly one QEMU"
 assert_reaped "$(cat "$records/qemu.pid")"
 
-for rootfs_behavior in zero multiple; do
+: > "$records/cargo.log"
+: > "$records/qemu.log"
+reused_rootfs_output="$tmp/reused-rootfs-output"
+env "${common_env[@]}" ROOTFS_IMAGE= TGOS_SOURCE_CACHE="$default_rootfs_cache" \
+    "$RUNNER" --mode smoke --task2-count 2 --task3-frames 3 \
+    --output "$reused_rootfs_output" >/dev/null ||
+    fail "cached rootfs reuse run failed"
+[[ "$(grep -Ec 'xtask image pull --arch aarch64' "$records/cargo.log")" -eq 0 ]] ||
+    fail "cached rootfs was pulled again"
+[[ "$(wc -l < "$records/qemu.log")" -eq 1 ]] ||
+    fail "cached rootfs run did not reach exactly one QEMU"
+
+for rootfs_behavior in zero failure; do
     : > "$records/cargo.log"
     : > "$records/qemu.log"
     bad_rootfs_output="$tmp/rootfs-$rootfs_behavior-output"
+    bad_rootfs_cache="$tmp/rootfs-$rootfs_behavior-cache"
     expect_failure "rootfs pull with $rootfs_behavior candidates returned success" \
-        env "${common_env[@]}" ROOTFS_IMAGE= \
+        env "${common_env[@]}" ROOTFS_IMAGE= TGOS_SOURCE_CACHE="$bad_rootfs_cache" \
         FAKE_ROOTFS_BEHAVIOR="$rootfs_behavior" \
-        "$RUNNER" --mode smoke --task2-count 2 --task3-frames 3 \
-        --output "$bad_rootfs_output"
-    grep -Fq 'image pull must produce exactly one rootfs.img' \
-        "$tmp/failure.out" ||
-        fail "rootfs $rootfs_behavior candidate failure was not diagnosed"
+            "$RUNNER" --mode smoke --task2-count 2 --task3-frames 3 \
+            --output "$bad_rootfs_output"
     [[ ! -s "$records/qemu.log" ]] ||
         fail "QEMU started after rootfs $rootfs_behavior candidate failure"
 done
@@ -626,6 +950,14 @@ for label in qemu axvisor linux-kernel linux-initramfs rtthread \
     linux-vmconfig rtthread-vmconfig model protocol-source protocol-header; do
     grep -Eq "^ARTIFACT name=$label path=/.* sha256=[0-9a-f]{64}$" \
         "$normal_output/manifest.txt" || fail "manifest is missing $label hash"
+done
+for vmconfig in linux rtthread; do
+    persisted="$normal_output/vmconfig-$vmconfig.toml"
+    [[ -s "$persisted" ]] ||
+        fail "successful run did not preserve the $vmconfig VM config"
+    grep -Eq "^ARTIFACT name=$vmconfig-vmconfig path=$persisted sha256=[0-9a-f]{64}$" \
+        "$normal_output/manifest.txt" ||
+        fail "manifest does not reference the persisted $vmconfig VM config"
 done
 grep -Fxq 'raw_qemu_exit=143' "$normal_output/manifest.txt" ||
     fail "manifest did not preserve the raw marker-complete QEMU status"
@@ -717,7 +1049,9 @@ assert_reaped "$gate_pid"
 : > "$records/qemu.log"
 marker_output="$tmp/marker-failure"
 expect_failure "marker failure returned success" \
-    run_runner "$marker_output" FAKE_QEMU_BEHAVIOR=missing
+    env "${common_env[@]}" FAKE_QEMU_BEHAVIOR=missing TASK123_TIMEOUT_S=2 \
+    "$RUNNER" --mode smoke --task2-count 2 --task3-frames 3 \
+    --output "$marker_output"
 [[ -e "$marker_output/console.log" ]] || fail "marker failure discarded console log"
 marker_pid="$(cat "$records/qemu.pid")"
 assert_reaped "$marker_pid"
@@ -939,7 +1273,7 @@ env "${common_env[@]}" FAKE_QEMU_BEHAVIOR=hang TASK123_TIMEOUT_S=30 \
     "$RUNNER" --mode smoke --task2-count 2 --task3-frames 3 \
     --output "$term_output" >"$tmp/term.out" 2>&1 &
 runner_pid=$!
-wait_for_file "$records/qemu.pid" || fail "TERM test did not start QEMU"
+wait_for_file_record "$records/qemu.pid" || fail "TERM test did not start QEMU"
 term_qemu_pid="$(cat "$records/qemu.pid")"
 kill -TERM "$runner_pid"
 set +e
@@ -963,7 +1297,7 @@ env "${common_env[@]}" TASK123_SHARED_ARTIFACT_DIR="$cache" \
 }
 for cached_name in \
     linux-kernel linux-initramfs.cpio model_weights.h rootfs.img \
-    rtthread.bin starryos-task123.bin; do
+    rtthread.bin rtthread.bin.meta.json starryos-task123.bin; do
     [[ -s "$cache/$cached_name" ]] || fail "cache did not populate $cached_name"
 done
 
@@ -989,6 +1323,7 @@ cache_env=(
 : > "$records/cargo.log"
 : > "$records/qemu.log"
 env "${cache_env[@]}" TASK123_SHARED_ARTIFACT_DIR="$cache" \
+    RTTHREAD_REQUIRE_IMAGE_METADATA=1 \
     "$RUNNER" --app-guest starryos --mode smoke --task2-count 2 \
     --task3-frames 3 --output "$cache_second_output" >"$tmp/cache-second.stdout" || {
     [[ ! -f "$cache_second_output/console.log" ]] || cat "$cache_second_output/console.log" >&2

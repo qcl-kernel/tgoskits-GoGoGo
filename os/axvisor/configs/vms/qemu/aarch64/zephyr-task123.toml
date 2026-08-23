@@ -4,7 +4,9 @@ name = "zephyr-task123"
 guest_type = "virtualized"
 cpu_num = 1
 host_timer_policy = "tickless"
-host_vcpu_idle_policy = "busy"
+# Zephyr spends most idle time in WFI.  Halt the AxVisor vCPU task on WFI so
+# single-threaded QEMU TCG can continue scheduling the two-vCPU Linux guest.
+host_vcpu_idle_policy = "halt"
 phys_cpu_ids = [2]
 phys_cpu_sets = [4]
 

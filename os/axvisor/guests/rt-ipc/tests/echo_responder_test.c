@@ -2,7 +2,7 @@
 #include <string.h>
 
 #include "../common/rt_ipc.h"
-#include "../rtthread/rtipc_echo_responder.h"
+#include "../common/rtipc_echo_responder.h"
 #include "../rtthread/rtipc_server_status.h"
 
 #define CAPTURE_CAPACITY (RTIPC_SEND_WINDOW + 1)

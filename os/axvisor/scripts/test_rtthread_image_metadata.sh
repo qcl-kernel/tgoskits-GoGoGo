@@ -16,17 +16,55 @@ printf '%s\n' 'patch-set-test-digest' \
 image="$TMP_ROOT/rtthread.bin"
 printf '%s\n' 'current RT-Thread image' >"$image"
 metadata="$image.meta.json"
+input_digest_a=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+input_digest_b=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+
+digest_root="$TMP_ROOT/digest-root"
+for relative in \
+    os/axvisor/patches/rtthread \
+    os/axvisor/guests/rt-ipc/common \
+    os/axvisor/guests/rt-ipc/rtthread \
+    os/axvisor/guests/task3/src/common \
+    os/axvisor/guests/task3/src/rtthread \
+    os/axvisor/guests/rt-benchmark/rtthread; do
+    mkdir -p -- "$digest_root/$relative"
+    printf 'fixture for %s\n' "$relative" > "$digest_root/$relative/input.c"
+done
+computed_before="$(python3 "$META_TOOL" input-digest --root "$digest_root")"
+printf '%s\n' 'changed Task 3 server input' \
+    >> "$digest_root/os/axvisor/guests/task3/src/common/input.c"
+computed_after="$(python3 "$META_TOOL" input-digest --root "$digest_root")"
+[[ "$computed_before" =~ ^[0-9a-f]{64}$ && "$computed_after" =~ ^[0-9a-f]{64}$ ]] || {
+    echo 'FAIL: computed RT-Thread build input digest is not SHA-256' >&2
+    exit 1
+}
+[[ "$computed_before" != "$computed_after" ]] || {
+    echo 'FAIL: Task 3 source change did not invalidate RT-Thread build inputs' >&2
+    exit 1
+}
 
 python3 "$META_TOOL" write \
     --image "$image" \
     --source "$source_dir" \
     --patch-digest patch-set-test-digest \
+    --input-digest "$input_digest_a" \
     --output "$metadata"
 python3 "$META_TOOL" check \
     --image "$image" \
     --metadata "$metadata" \
     --source "$source_dir" \
-    --patch-digest patch-set-test-digest
+    --patch-digest patch-set-test-digest \
+    --input-digest "$input_digest_a"
+
+if python3 "$META_TOOL" check \
+    --image "$image" \
+    --metadata "$metadata" \
+    --source "$source_dir" \
+    --patch-digest patch-set-test-digest \
+    --input-digest "$input_digest_b" >/dev/null 2>&1; then
+    echo 'FAIL: changed RT-Thread build inputs passed metadata validation' >&2
+    exit 1
+fi
 
 printf '%s\n' 'stale image contents' >"$image"
 if python3 "$META_TOOL" check \

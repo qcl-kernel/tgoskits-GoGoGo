@@ -19,8 +19,8 @@
 #include "../linux/rtipc_client_report.h"
 #include "../linux/rtipc_shutdown.h"
 
-#define CLIENT_PATH "../linux/target/rtipic-client-host"
-#define CLOCK_FAIL_CLIENT_PATH "../linux/target/rtipic-client-clock-fail"
+#define CLIENT_PATH "/proc/self/cwd/../linux/target/rtipic-client-host"
+#define CLOCK_FAIL_CLIENT_PATH "/proc/self/cwd/../linux/target/rtipic-client-clock-fail"
 #define CASE_DEADLINE_MS 10000U
 #define OUTPUT_CAPACITY 65536U
 

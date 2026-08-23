@@ -17,9 +17,25 @@ grep -Fq 'rt-thread-5.2.2-native-current' "$ENTRYPOINT" || {
     echo "FAIL: direct task123 entrypoint does not prefer the persistent RT-Thread image" >&2
     exit 1
 }
+grep -Fq 'input-digest --root "$SCRIPT_DIR"' "$ENTRYPOINT" || {
+    echo "FAIL: direct task123 entrypoint does not fingerprint current RT-Thread build inputs" >&2
+    exit 1
+}
+grep -Fq -- '--input-digest "$rtthread_input_digest"' "$ENTRYPOINT" || {
+    echo "FAIL: direct task123 entrypoint accepts a stale persistent RT-Thread image" >&2
+    exit 1
+}
 grep -Fq 'env "${runner_environment[@]}"' "$ENTRYPOINT" || {
     echo "FAIL: direct task123 entrypoint does not pass resolved inputs to the runner" >&2
     exit 1
 }
+grep -Fq -- '--rtos' "$ENTRYPOINT" || {
+    echo "FAIL: direct task123 entrypoint does not expose the RTOS selector" >&2
+    exit 1
+}
+grep -Fq -- '--matrix all' "$ENTRYPOINT" || {
+    echo "FAIL: direct task123 entrypoint does not expose the four-combination matrix" >&2
+    exit 1
+}
 
-echo "PASS: direct task123 entrypoint selects and validates RT-Thread image"
+echo "PASS: direct task123 entrypoint selects RTOS inputs and validates RT-Thread image"

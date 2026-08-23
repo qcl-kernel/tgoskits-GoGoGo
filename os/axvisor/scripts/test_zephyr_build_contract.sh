@@ -6,6 +6,7 @@ ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/../../.." && pwd -P)"
 SCRIPT_DIR="$ROOT/os/axvisor/scripts"
 PREPARE="$ROOT/os/axvisor/scripts/prepare_zephyr_source.sh"
 BUILD="$ROOT/os/axvisor/scripts/build_zephyr_task123.sh"
+RUNNER="$ROOT/os/axvisor/scripts/run_task123.sh"
 ZEPHYR_METADATA="$ROOT/os/axvisor/scripts/zephyr_image_metadata.py"
 NETWORK_ENV="$ROOT/os/axvisor/scripts/network_env.sh"
 APP="$ROOT/os/axvisor/guests/zephyr-task123"
@@ -71,6 +72,20 @@ grep -Fq 'TGOS_SOURCE_CACHE:-$ROOT/tmp/source-cache' "$PREPARE" ||
     { echo "FAIL: Zephyr source cache is not persistent" >&2; exit 1; }
 grep -Fq 'zephyr.bin.meta.json' "$BUILD" ||
     { echo "FAIL: Zephyr builder does not publish image metadata" >&2; exit 1; }
+grep -Fq -- '--input-digest' "$BUILD" ||
+    { echo "FAIL: Zephyr builder does not expose input digest mode" >&2; exit 1; }
+grep -Fq 'zephyr.bin.inputs.sha256' "$BUILD" ||
+    { echo "FAIL: Zephyr builder does not publish input digest metadata" >&2; exit 1; }
+grep -Fq 'flock' "$BUILD" ||
+    { echo "FAIL: Zephyr image cache publication is not serialized" >&2; exit 1; }
+grep -Fq 'zephyr_image_metadata.py" check' "$BUILD" ||
+    { echo "FAIL: Zephyr builder does not authenticate a generation before publication" >&2; exit 1; }
+grep -Fq -- '--input-digest' "$RUNNER" ||
+    { echo "FAIL: Task123 runner does not calculate the Zephyr input digest" >&2; exit 1; }
+grep -Fq 'zephyr.bin.inputs.sha256' "$RUNNER" ||
+    { echo "FAIL: Task123 runner does not validate the Zephyr input digest" >&2; exit 1; }
+grep -Fq 'ZEPHYR_IMAGE_METADATA_TOOL" check' "$RUNNER" ||
+    { echo "FAIL: Task123 runner does not authenticate cached Zephyr image bytes" >&2; exit 1; }
 grep -Fq 'network_env.sh' "$BUILD" ||
     { echo "FAIL: Zephyr builder does not load the shared proxy environment" >&2; exit 1; }
 grep -Fq 'http://172.16.0.254:7897' "$NETWORK_ENV" ||
@@ -102,5 +117,105 @@ if "$SCRIPT_DIR/generate_zephyr_vmconfig.sh" \
     echo "FAIL: out-of-RAM Zephyr DTB was accepted" >&2
     exit 1
 fi
+
+digest_fixture="$vmconfig_fixture/zephyr-app"
+cp -a -- "$APP" "$digest_fixture"
+digest_before="$(ZEPHYR_TASK123_APP="$digest_fixture" "$BUILD" --input-digest)"
+printf '\n/* cache invalidation contract */\n' >> "$digest_fixture/src/main.c"
+digest_after="$(ZEPHYR_TASK123_APP="$digest_fixture" "$BUILD" --input-digest)"
+[[ "$digest_before" =~ ^[0-9a-f]{64}$ && "$digest_after" =~ ^[0-9a-f]{64}$ ]] ||
+    { echo "FAIL: Zephyr input digest is not a SHA-256 value" >&2; exit 1; }
+[[ "$digest_before" != "$digest_after" ]] ||
+    { echo "FAIL: Zephyr application changes do not invalidate the image digest" >&2; exit 1; }
+
+publication_root="$vmconfig_fixture/publication-cache"
+publication_output="$publication_root/current-image"
+mkdir -p -- "$publication_root"
+
+make_generation_fixture() {
+    local name=$1
+    local payload=$2
+    local fixture="$vmconfig_fixture/$name"
+    mkdir -p -- "$fixture"
+    printf '%s\n' "$payload" > "$fixture/zephyr.bin"
+    printf '%s\n' \
+        '{"entry_point":1073746180,"zephyr_version":"fixture","zephyr_commit":"fixture","zephyr_sdk_version":"fixture","board":"qemu_cortex_a53"}' \
+        > "$fixture/build-meta.json"
+    "$ZEPHYR_METADATA" write \
+        --image "$fixture/zephyr.bin" \
+        --source "$fixture/build-meta.json" \
+        --output "$fixture/zephyr.bin.meta.json" >/dev/null
+}
+
+publish_fixture() {
+    local fixture=$1
+    local digest=$2
+    ZEPHYR_TASK123_BUILD_LIB_ONLY=1 bash -c '
+        set -euo pipefail
+        source "$1"
+        publish_zephyr_generation "$2" "$3" "$4" "$5"
+    ' bash "$BUILD" "$fixture/zephyr.bin" "$fixture/zephyr.bin.meta.json" \
+        "$digest" "$publication_output"
+}
+
+cache_is_current() {
+    local digest=$1
+    ZEPHYR_TASK123_BUILD_LIB_ONLY=1 bash -c '
+        set -euo pipefail
+        source "$1"
+        zephyr_generation_is_current "$2" "$3"
+    ' bash "$BUILD" "$publication_output" "$digest"
+}
+
+make_generation_fixture generation-a 'generation A'
+make_generation_fixture generation-b 'generation B'
+make_generation_fixture generation-c 'generation C'
+digest_a=$(printf 'a%.0s' {1..64})
+digest_b=$(printf 'b%.0s' {1..64})
+digest_c=$(printf 'c%.0s' {1..64})
+
+publish_fixture "$vmconfig_fixture/generation-a" "$digest_a"
+cache_is_current "$digest_a" ||
+    { echo "FAIL: published Zephyr generation is not reusable" >&2; exit 1; }
+"$ZEPHYR_METADATA" check \
+    --image "$publication_output/current/zephyr.bin" \
+    --metadata "$publication_output/current/zephyr.bin.meta.json" >/dev/null
+current_before_failure=$(readlink -- "$publication_output/current")
+
+if publish_zephyr_generation_error=$(
+    ZEPHYR_TASK123_BUILD_LIB_ONLY=1 bash -c '
+        set -euo pipefail
+        source "$1"
+        publish_zephyr_generation "$2" "$3" "$4" "$5"
+    ' bash "$BUILD" "$vmconfig_fixture/generation-b/zephyr.bin" \
+        "$vmconfig_fixture/generation-a/zephyr.bin.meta.json" "$digest_b" \
+        "$publication_output" 2>&1
+); then
+    echo "FAIL: mismatched Zephyr image metadata was published" >&2
+    exit 1
+fi
+[[ -n "$publish_zephyr_generation_error" ]] ||
+    { echo "FAIL: rejected Zephyr publication did not explain the failure" >&2; exit 1; }
+[[ "$(readlink -- "$publication_output/current")" == "$current_before_failure" ]] ||
+    { echo "FAIL: failed Zephyr publication changed the current generation" >&2; exit 1; }
+cache_is_current "$digest_a" ||
+    { echo "FAIL: failed publication corrupted the reusable Zephyr cache" >&2; exit 1; }
+
+publish_fixture "$vmconfig_fixture/generation-b" "$digest_b" &
+publish_b_pid=$!
+publish_fixture "$vmconfig_fixture/generation-c" "$digest_c" &
+publish_c_pid=$!
+wait "$publish_b_pid"
+wait "$publish_c_pid"
+current_digest=$(sed -n '1p' "$publication_output/current/zephyr.bin.inputs.sha256")
+case "$current_digest" in
+    "$digest_b"|"$digest_c") ;;
+    *) echo "FAIL: concurrent Zephyr publication exposed an unknown digest" >&2; exit 1 ;;
+esac
+cache_is_current "$current_digest" ||
+    { echo "FAIL: concurrent Zephyr publication exposed a mixed generation" >&2; exit 1; }
+"$ZEPHYR_METADATA" check \
+    --image "$publication_output/current/zephyr.bin" \
+    --metadata "$publication_output/current/zephyr.bin.meta.json" >/dev/null
 
 echo "PASS: Zephyr pinned source and real-interrupt build contract"

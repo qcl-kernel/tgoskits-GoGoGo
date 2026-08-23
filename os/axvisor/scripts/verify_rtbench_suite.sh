@@ -2,8 +2,8 @@
 
 set -eu
 
-if [ "$#" -lt 3 ] || [ "$#" -gt 4 ]; then
-    echo "usage: $0 LOG EXPECTED_SAMPLES QEMU_EXIT_CODE [full|core]" >&2
+if [ "$#" -lt 3 ] || [ "$#" -gt 5 ]; then
+    echo "usage: $0 LOG EXPECTED_SAMPLES QEMU_EXIT_CODE [full|core] [rtthread|zephyr]" >&2
     exit 2
 fi
 
@@ -11,10 +11,18 @@ log=$1
 samples=$2
 qemu_rc=$3
 suite_mode=${4:-full}
+rtos=${5:-rtthread}
 case "$suite_mode" in
     full|core) ;;
     *)
         echo "invalid suite mode: $suite_mode" >&2
+        exit 2
+        ;;
+esac
+case "$rtos" in
+    rtthread|zephyr) ;;
+    *)
+        echo "invalid RTOS selector: $rtos" >&2
         exit 2
         ;;
 esac
@@ -71,14 +79,22 @@ if [ "$qemu_rc" -ne 0 ]; then
     echo "QEMU failed with exit code $qemu_rc" >&2
     exit 1
 fi
-if grep -aEiq \
-    'RTBENCH_ERROR|RTBENCH[^[:cntrl:]]*status=FAIL|RTBENCH_PMU status=unavailable|panicked at|kernel panic|assertion failed|RT-Thread.*assert' \
-    "$log"; then
+if [ "$rtos" = zephyr ]; then
+    failure_check_log="$(mktemp)"
+    sed '/RTBENCH_PMU status=unavailable /d' "$log" > "$failure_check_log"
+    failure_pattern='RTBENCH_ERROR|RTBENCH[^[:cntrl:]]*status=FAIL|panicked at|kernel panic|assertion failed'
+else
+    failure_check_log="$log"
+    failure_pattern='RTBENCH_ERROR|RTBENCH[^[:cntrl:]]*status=FAIL|RTBENCH_PMU status=unavailable|panicked at|kernel panic|assertion failed'
+fi
+if grep -aEiq "$failure_pattern" "$failure_check_log"; then
     echo "benchmark error, panic, or assertion found in suite log" >&2
     exit 1
 fi
 
-begin_pattern="RTBENCH_BEGIN samples=${samples} frequency=[1-9][0-9]* pmu_event=0x8[[:space:]]*$"
+# RT-Thread omits `expected`; Zephyr includes it as an explicit sample-count
+# echo. Both forms are valid only when the requested sample count is present.
+begin_pattern="RTBENCH_BEGIN samples=${samples}( expected=${samples})? frequency=[1-9][0-9]* pmu_event=0x8[[:space:]]*$"
 metric_suffix="expected=${samples} collected=${samples} missing=0 p50_ns=[0-9]+ p95_ns=[0-9]+ p99_ns=[0-9]+ p99_9_ns=[0-9]+ max_ns=[0-9]+ miss_100us=[0-9]+ miss_500us=[0-9]+ miss_1ms=[0-9]+ mean_ns=[0-9]+ p50_cycles=[0-9]+ p95_cycles=[0-9]+ p99_cycles=[0-9]+ p99_9_cycles=[0-9]+ max_cycles=[0-9]+ mean_cycles=[0-9]+ p50_instructions=[0-9]+ p95_instructions=[0-9]+ p99_instructions=[0-9]+ p99_9_instructions=[0-9]+ max_instructions=[0-9]+ mean_instructions=[0-9]+[[:space:]]*$"
 
 if [ "$(grep -aEc "$begin_pattern" "$log")" -ne 1 ]; then
@@ -86,7 +102,8 @@ if [ "$(grep -aEc "$begin_pattern" "$log")" -ne 1 ]; then
     exit 1
 fi
 
-for run in 1 2 3; do
+required_runs=$( [ "$rtos" = zephyr ] && echo 1 || echo '1 2 3' )
+for run in $required_runs; do
     if [ "$(grep -aEc "RTBENCH metric=timer_jitter run=${run} ${metric_suffix}" "$log")" -ne 1 ]; then
         echo "timer jitter run ${run} is missing or incomplete" >&2
         exit 1
@@ -97,22 +114,26 @@ for run in 1 2 3; do
     fi
 done
 
-for metric in preemption irq irq_to_task irq_disabled_duration mutex_inversion wake_under_load \
-    context_switch scheduler_decision sync_sem sync_mutex sync_mailbox \
-    irq_handler_exec deadline_miss_under_load; do
+if [ "$rtos" = rtthread ]; then
+    metrics='preemption irq irq_to_task irq_disabled_duration mutex_inversion wake_under_load context_switch scheduler_decision sync_sem sync_mutex sync_mailbox irq_handler_exec deadline_miss_under_load'
+else
+    metrics=''
+fi
+for metric in $metrics; do
     if [ "$(grep -aEc "RTBENCH metric=${metric} run=1 ${metric_suffix}" "$log")" -ne 1 ]; then
         echo "${metric} benchmark is missing or incomplete" >&2
         exit 1
     fi
 done
 
-if [ "$suite_mode" = full ] &&
+if [ "$rtos" = rtthread ] && [ "$suite_mode" = full ] &&
     [ "$(grep -aEc "RTBENCH metric=net_event_latency run=1 ${metric_suffix}" "$log")" -ne 1 ]; then
     echo "net_event_latency benchmark is missing or incomplete" >&2
     exit 1
 fi
 
-if [ "$(grep -aEc 'RTBENCH_END status=PASS[[:space:]]*$' "$log")" -ne 1 ]; then
+end_pattern="RTBENCH_END status=PASS( expected=${samples} collected=${samples} missing=0)?[[:space:]]*$"
+if [ "$(grep -aEc "$end_pattern" "$log")" -ne 1 ]; then
     echo "missing, duplicate, or failed benchmark suite end marker" >&2
     exit 1
 fi

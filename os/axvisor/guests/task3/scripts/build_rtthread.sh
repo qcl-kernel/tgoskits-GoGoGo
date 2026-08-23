@@ -49,6 +49,8 @@ mkdir -p "$packages_stub"
 : >"$packages_stub/Kconfig"
 cp "$TASK3_ROOT/src/rtthread/task3_server.c" \
     "$TASK3_ROOT/src/rtthread/SConscript" \
+    "$TASK3_ROOT/src/common/task3_server_core.c" \
+    "$TASK3_ROOT/src/common/task3_server_core.h" \
     "$TASK3_ROOT/src/common/controller.c" \
     "$TASK3_ROOT/src/common/controller.h" \
     "$TASK3_ROOT/src/common/task3_protocol.c" \

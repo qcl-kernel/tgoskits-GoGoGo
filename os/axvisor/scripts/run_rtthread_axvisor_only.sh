@@ -10,6 +10,7 @@ VERIFY_SUITE="$SCRIPT_DIR/verify_rtbench_suite.sh"
 VERIFY_STABILITY="$SCRIPT_DIR/verify_rtbench_stability.sh"
 NET_PROBE="$SCRIPT_DIR/send_rtbench_net_probe.py"
 IMAGE_METADATA="$SCRIPT_DIR/rtthread_image_metadata.py"
+RTTHREAD_INPUT_DIGEST="$(python3 "$IMAGE_METADATA" input-digest --root "$ROOT")"
 QEMU="${QEMU:-qemu-system-aarch64}"
 ROOTFS="${ROOTFS_IMAGE:-$ROOT/tmp/source-cache/rootfs/qemu-aarch64/rootfs.img}"
 RTBENCH_NET_HOST_PORT="${RTBENCH_NET_HOST_PORT:-19879}"
@@ -90,7 +91,8 @@ if [[ "$RTTHREAD_REQUIRE_IMAGE_METADATA" -eq 1 ]]; then
     metadata="${RTTHREAD_IMAGE_META:-$image.meta.json}"
     python3 "$IMAGE_METADATA" check \
         --image "$image" \
-        --metadata "$metadata"
+        --metadata "$metadata" \
+        --input-digest "$RTTHREAD_INPUT_DIGEST"
 fi
 mkdir -p -- "$output"
 output="$(cd -- "$output" && pwd)"
@@ -148,7 +150,7 @@ if [[ "$mode" == suite || "$mode" == stability ]]; then
     qemu_icount_args=(-icount "$QEMU_ICOUNT")
     qemu_tcg_thread=single
 fi
-"$QEMU" -display none -monitor none -snapshot -name 'tgoskits,debug-threads=on' \
+"$QEMU" -display none -monitor none -snapshot \
     -accel "tcg,thread=$qemu_tcg_thread" -cpu cortex-a72,pmu=on \
     "${qemu_icount_args[@]}" \
     -machine virt,virtualization=on,gic-version=3 -global virtio-mmio.force-legacy=false \

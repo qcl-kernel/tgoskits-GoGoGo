@@ -26,7 +26,7 @@ def write_guest(name: str, avg: int, app_guest: str) -> None:
     run = root / name
     run.mkdir()
     (run / "manifest.txt").write_text(
-        f"schema=1\napp_guest={app_guest}\nmode=stability\nseconds=1\n",
+        f"schema=1\nrtos=rtthread\napp_guest={app_guest}\nmode=stability\nseconds=1\n",
         encoding="ascii",
     )
     sections = []
@@ -81,9 +81,7 @@ def write_guest(name: str, avg: int, app_guest: str) -> None:
         (run / "manifest.txt").read_text(encoding="ascii")
         + "result_gate=PASS\n"
         + "ARTIFACT name=qemu path=/tmp/qemu sha256=" + "a" * 64 + "\n"
-        + "ARTIFACT name=rtthread-normal path=/tmp/rt-normal sha256=" + "b" * 64 + "\n"
-        + "ARTIFACT name=rtthread-drop-status path=/tmp/rt-drop sha256=" + "c" * 64 + "\n"
-        + "ARTIFACT name=rtthread-delayed-server path=/tmp/rt-delay sha256=" + "d" * 64 + "\n"
+        + "ARTIFACT name=rtthread path=/tmp/rtthread sha256=" + "b" * 64 + "\n"
         + "ARTIFACT name=rootfs path=/tmp/rootfs sha256=" + "e" * 64 + "\n"
         + "ARTIFACT name=model path=/tmp/model sha256=" + "f" * 64 + "\n"
         + "ARTIFACT name=protocol-source path=/tmp/protocol.c sha256=" + "1" * 64 + "\n"
@@ -130,6 +128,20 @@ if (
     raise SystemExit("comparison report is missing required sections")
 PY
 
+cp -a "$tmp/linux" "$tmp/zephyr-linux"
+cp -a "$tmp/starryos" "$tmp/zephyr-starryos"
+for guest in zephyr-linux zephyr-starryos; do
+    sed -i \
+        -e 's/^rtos=rtthread$/rtos=zephyr/' \
+        -e 's/ARTIFACT name=rtthread /ARTIFACT name=zephyr /' \
+        "$tmp/$guest/manifest.txt"
+    mv "$tmp/$guest/rtthread.log" "$tmp/$guest/zephyr.log"
+done
+"$ANALYZER" --linux-run "$tmp/zephyr-linux" \
+    --starryos-run "$tmp/zephyr-starryos" \
+    --output "$tmp/zephyr-comparison" >/dev/null ||
+    fail "analyzer rejected current Zephyr artifacts"
+
 for guest in linux starryos; do
     sed -i 's/^result_gate=PASS$/result_gate=PASS_WITH_QEMU_TIMER_LIMIT/' \
         "$tmp/$guest/manifest.txt"
@@ -141,6 +153,13 @@ fi
 "$ANALYZER" --linux-run "$tmp/linux" --starryos-run "$tmp/starryos" \
     --allow-qemu-timer-limit --output "$tmp/diagnostic-accepted" >/dev/null ||
     fail "analyzer rejected explicit diagnostic gate"
+
+for guest in linux starryos; do
+    sed -i -E 's/avg=([0-9]+)ms/avg=3ms/g' "$tmp/$guest/$guest.log"
+done
+"$ANALYZER" --linux-run "$tmp/linux" --starryos-run "$tmp/starryos" \
+    --allow-qemu-timer-limit --output "$tmp/skewed-rtt" >/dev/null ||
+    fail "analyzer rejected a legal skewed RTT distribution with avg above p50"
 
 python3 - "$tmp/linux/linux.log" <<'PY'
 import sys

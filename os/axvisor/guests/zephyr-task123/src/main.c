@@ -674,8 +674,9 @@ task3_poll:
 			       (unsigned long long)task3_app.requests,
 			       (unsigned long long)task3_app.errors,
 			       (unsigned long long)task3_app.duplicate_requests,
-			       (unsigned long long)task3_app.controller.applied_steps,
+			       (unsigned long long)task3_app.applied_steps,
 			       (unsigned long long)task3_session.counters.transport_retries);
+			printk("TASK3_RTOS_FINAL_DONE\n");
 			break;
 		}
 		k_yield();

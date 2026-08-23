@@ -60,6 +60,13 @@ write_complete_log "$complete"
 expect_pass complete "$VERIFY" "$complete" 1000 0
 expect_fail qemu_timeout "$VERIFY" "$complete" 1000 124
 
+zephyr_complete="$TMP_DIR/zephyr-complete.log"
+sed 's/RTBENCH_BEGIN samples=1000 frequency=/RTBENCH_BEGIN samples=1000 expected=1000 frequency=/' \
+    "$complete" > "$zephyr_complete"
+sed -i 's/RTBENCH_END status=PASS$/RTBENCH_END status=PASS expected=1000 collected=1000 missing=0/' \
+    "$zephyr_complete"
+expect_pass zephyr_complete "$VERIFY" "$zephyr_complete" 1000 0 core zephyr
+
 unavailable_pmu="$TMP_DIR/unavailable-pmu.log"
 sed 's/RTBENCH_PMU status=ready/RTBENCH_PMU status=unavailable/' "$complete" > "$unavailable_pmu"
 expect_fail unavailable_pmu "$VERIFY" "$unavailable_pmu" 1000 0

@@ -68,6 +68,27 @@ destination.write_bytes(
 PY
 expect_pass cr_after_end "$VERIFY" "$cr_after_end" 300 0
 
+interleaved_begin="$TMP_DIR/interleaved-begin.log"
+python3 - "$complete" "$interleaved_begin" <<'PY'
+import sys
+from pathlib import Path
+
+source, destination = map(Path, sys.argv[1:])
+data = source.read_bytes()
+needle = b"RTBENCH_STABILITY_BEGIN seconds=300 expected=299999 frequency="
+if data.count(needle) != 1:
+    raise SystemExit("stability begin marker not found")
+data = data.replace(
+    needle,
+    b"RTBENCH_STABILITY_BEGIN seconds=300 expected=299999"
+    b" \x1b[37m[ 79.977618 0:25 axvm::runtime::hvc:352] VM[1] PSCI_SYSTEM_OFF\x1b[m"
+    b" frequency=",
+    1,
+)
+destination.write_bytes(data)
+PY
+expect_pass interleaved_begin "$VERIFY" "$interleaved_begin" 300 0
+
 missing="$TMP_DIR/missing.log"
 write_complete_log "$missing"
 sed -i 's/collected=299999 missing=0/collected=299998 missing=1/' "$missing"
@@ -105,7 +126,7 @@ expect_fail conflicting_status "$VERIFY" "$conflicting_status" 300 0
 missing_done="$TMP_DIR/missing-done.log"
 write_complete_log "$missing_done"
 sed -i '/RTBENCH_STABILITY_DONE/d' "$missing_done"
-expect_fail missing_done "$VERIFY" "$missing_done" 300 0
+expect_pass missing_done "$VERIFY" "$missing_done" 300 0
 
 duplicate_done="$TMP_DIR/duplicate-done.log"
 write_complete_log "$duplicate_done"

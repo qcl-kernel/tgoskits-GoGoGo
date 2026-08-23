@@ -89,7 +89,6 @@ int task3_server_handle_message(task3_server_app_t *app, uint8_t message_type,
         (payload == NULL && length != 0)) {
         return -1;
     }
-    app->requests++;
     if (message_type != RTIPC_MSG_CTRL_CMD) {
         return send_error(app, payload, length, TASK3_CODEC_INVALID_FIELD,
                           now_ms);
@@ -122,6 +121,11 @@ int task3_server_handle_message(task3_server_app_t *app, uint8_t message_type,
         } else if (control.command == TASK3_CMD_RESET) {
             app->cached_status_valid = 0;
         }
+    }
+    if (control.command == TASK3_CMD_STEP &&
+        (status.flags & TASK3_STATUS_FLAG_DUPLICATE) == 0) {
+        app->requests++;
+        app->applied_steps++;
     }
     if (control.command == TASK3_CMD_STOP) {
         app->stop_requested = 1;

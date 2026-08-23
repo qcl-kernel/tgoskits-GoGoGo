@@ -21,6 +21,7 @@ ALPINE_CACHE=$CACHE_ROOT/alpine/$ALPINE_VERSION
 BUILD_DIR=${BUILD_DIR:-$TASK3_ROOT/build/alpine-linux}
 OUTPUT_DIR=${OUTPUT_DIR:-$BUILD_DIR/images/linux}
 JOBS=${JOBS:-$(getconf _NPROCESSORS_ONLN)}
+INITRAMFS_INPUT_STAMP=$OUTPUT_DIR/rootfs.cpio.gz.inputs
 
 mkdir -p "$LINUX_CACHE" "$ALPINE_CACHE" "$BUILD_DIR" "$OUTPUT_DIR"
 
@@ -74,8 +75,40 @@ build_apps() {
         -o "$app/rtbench-net-probe" "$app/rtbench_net_probe.c"
 }
 
+initramfs_inputs_are_current() {
+    [ -s "$OUTPUT_DIR/rootfs.cpio.gz" ] && [ -s "$INITRAMFS_INPUT_STAMP" ] ||
+        return 1
+    write_initramfs_input_stamp
+    cmp -s "$OUTPUT_DIR/rootfs.cpio.inputs.new" "$INITRAMFS_INPUT_STAMP"
+}
+
+write_initramfs_input_stamp() {
+    {
+        printf '%s  %s\n' "$(sha256sum "$TASK3_ROOT/scripts/build_alpine_linux.sh" | cut -d' ' -f1)" \
+            "$TASK3_ROOT/scripts/build_alpine_linux.sh"
+        find "$TASK3_ROOT/src/linux" "$TASK3_ROOT/src/common" \
+             "$REPO_ROOT/os/axvisor/guests/rt-ipc/common" \
+             "$REPO_ROOT/os/axvisor/guests/rt-ipc/linux" \
+             "$REPO_ROOT/os/axvisor/guests/linux-net/init-task123" \
+             "$TASK3_ROOT/configs/linux.config" \
+             "$CACHE_ROOT/task3-model/model_weights.h" \
+             "$CACHE_ROOT/task3-model/line-follow.y4m" \
+             "$CACHE_ROOT/task3-model/truth.csv" \
+             -type f -print0 | sort -z | xargs -0 sha256sum
+    } > "$OUTPUT_DIR/rootfs.cpio.inputs.new"
+}
+
+publish_initramfs_inputs() {
+    if [ -s "$OUTPUT_DIR/rootfs.cpio.inputs.new" ]; then
+        mv "$OUTPUT_DIR/rootfs.cpio.inputs.new" "$INITRAMFS_INPUT_STAMP"
+    else
+        write_initramfs_input_stamp
+    fi
+}
+
 build_initramfs() {
-    if [ -s "$OUTPUT_DIR/rootfs.cpio.gz" ]; then return; fi
+    write_initramfs_input_stamp
+    if initramfs_inputs_are_current; then return; fi
     archive=$ALPINE_CACHE/alpine-minirootfs-$ALPINE_VERSION-aarch64.tar.gz
     download_verified "$ALPINE_ARCHIVE_URL" "$archive" "$ALPINE_SHA256"
     root=$BUILD_DIR/alpine-root
@@ -99,6 +132,7 @@ build_initramfs() {
     mv "$OUTPUT_DIR/rootfs.cpio.gz.part" "$OUTPUT_DIR/rootfs.cpio.gz"
     rm -f "$OUTPUT_DIR/rootfs.cpio"
     ln -s rootfs.cpio.gz "$OUTPUT_DIR/rootfs.cpio"
+    publish_initramfs_inputs
 }
 
 build_linux
