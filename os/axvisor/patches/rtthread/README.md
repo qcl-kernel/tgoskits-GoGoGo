@@ -33,8 +33,9 @@ RT-Thread 上游源码不在此仓库内，这里以「patch 文件集 + apply �
 | `0008-aarch64-gtimer-use-absolute-deadlines.patch` | AArch64 定时器用绝对 CNTV_CVAL 截止 + 累加补偿，消除相对 TVAL 的相位误差累积 | 3 | +45 / −13 |
 | `0009-native-qemu-memory-layout.patch` | guest 镜像链接到 2 MiB 偏移，与 VM 配置地址一致 | 2 | +3 / −3 |
 | `0010-virtio-net-benchmark-packet-hook.patch` | benchmark 专用 RX packet hook，暴露报文字节供 UDP 探针包选择 | 2 | +29 / −2 |
+| `0011-rock4d-board-port.patch` | ROCK 4D（RK3576）板级移植：重映射 GIC-400/GICv2 与 NS16550 设备区、改用轮询 16550 串口、用 cntvct_el0 自动跑稳定性基准、`RT_USING_TASK123_SERVER` 门控 RT-IPC/task3 server | 6 | +194 / −27 |
 
-合计约 **+947 / −1479 行**，覆盖 RT-Thread 的 BSP、libcpu/aarch64、virtio-net、lwIP、GICv3 等子系统。
+合计约 **+1141 / −1506 行**，覆盖 RT-Thread 的 BSP、libcpu/aarch64、virtio-net、lwIP、GICv3 等子系统。
 
 ## 配套的 guest 源码（在 tgoskits 仓库内，非 patch）
 
