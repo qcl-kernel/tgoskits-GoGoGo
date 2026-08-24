@@ -58,6 +58,7 @@ p95=2900, p99=2900, max=2900`。这组 3 帧数据用于闭环和协议门禁，
 
 ## 4. 数据与复现入口
 
+- 独立复现指南：[task123-reproduction-cn.md](../../../../../task123-reproduction-cn.md)
 - 图表入口：[图标数据/index.html](../../../../../图标数据/index.html)
 - 生成脚本：[图标数据/plot_task123.py](../../../../../图标数据/plot_task123.py)
 - 纳秒明细：[图标数据/rtbench-metrics.csv](../../../../../图标数据/rtbench-metrics.csv)

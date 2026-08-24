@@ -1,5 +1,7 @@
 # Task123 Test Logs
 
+完整复现命令见 [`../task123-reproduction-cn.md`](../task123-reproduction-cn.md)。
+
 ## ROCK 4D
 
 The `rock4d/` directory contains the final physical-board captures:

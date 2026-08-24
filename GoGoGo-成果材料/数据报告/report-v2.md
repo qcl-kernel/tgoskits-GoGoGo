@@ -10,6 +10,7 @@
 > 的 Task 2、Task 3、Task123 门禁均为 `PASS`；16 项 RTBench 纳秒指标均满足
 > `expected=10 collected=10 missing=0`。详细数据见
 > [Task123 最终 QEMU 与 ROCK 4D 验证报告](task123/report/2026-08-25/tgoskits/task123-final-qemu-rock4d-report.md)。
+> 完整复现命令见[独立复现指南](../task123-reproduction-cn.md)。
 > 本段结论优先于本文后续较早的阶段性 QEMU/单 Linux 上板描述。
 
 ## 1. 版本结论
