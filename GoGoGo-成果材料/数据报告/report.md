@@ -6,6 +6,12 @@
 >
 > 证据优先级：最终 AxVisor 集成报告 > 专项性能报告 > 原始运行日志和故障证据
 
+> **2026-08-25 结果附录：**本文正文保留 2026-08-19 的历史 QEMU 基线。后续复测已将
+> Task123 扩展到 QEMU 四组合和 ROCK 4D 真机四组合；八个组合均通过 Task 2、Task 3、
+> Task123 门禁，并取得完整的 16 项纳秒 RTBench 指标（`expected=10 collected=10
+> missing=0`）。请以[最终 QEMU 与 ROCK 4D 验证报告](task123/report/2026-08-25/tgoskits/task123-final-qemu-rock4d-report.md)
+> 及[更新版汇总](report-v2.md)作为当前结果，本文其余章节仍用于追溯此前实现和排障过程。
+
 ## 1. 总体结论
 
 当前最终方案是一个 AxVisor 实例启动一个 2-vCPU Linux 客户机和一个 1-vCPU
@@ -214,8 +220,8 @@ patch/验证脚本。
 
 - [RT-IPC 集成设计](task12/design/2026-08-11/tgoskits/docs/superpowers/specs/2026-08-11-rt-ipc-integration-design.md)
 - [RT-IPC 与任务一/二实施计划](task12/plan/2026-08-15/tgoskits/docs/superpowers/plans/2026-08-15-task1-task2-implementation.md)
-- [可靠性证据日志](task12/evidence/2026-08-15/tgoskits/docs/docs/build/axvisor/task2-2026-08-15-rtipc-reliability-faults-pass.log)
-- [长时网络证据日志](task12/evidence/2026-08-16/tgoskits-untracked-logs/docs/docs/build/axvisor/task2-2026-08-16-fin-multipeer-1000.log)
+- [可靠性证据日志](task12/evidence/2026-08-15/tgoskits-untracked-logs/docs/docs/build/axvisor/task2-2026-08-15-rtipc-reliability-faults-pass.log)
+- [长时网络证据日志](task12/evidence/2026-08-16/tgoskits/docs/docs/build/axvisor/task2-2026-08-16-fin-multipeer-1000.log)
 
 ## 5. 任务三：AI 模型与控制联动
 

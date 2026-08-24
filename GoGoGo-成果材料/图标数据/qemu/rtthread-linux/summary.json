@@ -23,8 +23,8 @@
     "total": 3
   },
   "duplicates": 0,
-  "effective_payload_bytes_per_second": 223,
-  "elapsed_us": 645057,
+  "effective_payload_bytes_per_second": 218,
+  "elapsed_us": 658373,
   "frames_per_mode": 3,
   "gates": {
     "ai_tracking_mae_improves_at_least_30_percent": false,
@@ -33,32 +33,32 @@
   },
   "gates_enforced": false,
   "inference_us": {
-    "max": 11173,
-    "mean": 9102,
-    "min": 7542,
-    "p50": 8275,
-    "p95": 11173,
-    "p99": 11173
+    "max": 19599,
+    "mean": 8806,
+    "min": 4178,
+    "p50": 6051,
+    "p95": 19599,
+    "p99": 19599
   },
   "injected_drops": 0,
   "reconnects": 0,
   "recoveries": 0,
   "requests": 6,
   "round_trip_us": {
-    "max": 27772,
-    "mean": 23719,
-    "min": 20182,
-    "p50": 22820,
-    "p95": 27772,
-    "p99": 27772
+    "max": 39873,
+    "mean": 23711,
+    "min": 10368,
+    "p50": 17704,
+    "p95": 39873,
+    "p99": 39873
   },
   "rtos_processing_us": {
-    "max": 5565,
-    "mean": 1234,
-    "min": 27,
-    "p50": 164,
-    "p95": 5565,
-    "p99": 5565
+    "max": 10075,
+    "mean": 4212,
+    "min": 26,
+    "p50": 3767,
+    "p95": 10075,
+    "p99": 10075
   },
   "schema": 1,
   "settling": {
@@ -77,10 +77,10 @@
   },
   "sources": {
     "app_guest": "linux",
-    "app_log": "/home/yfblock/Code/tgoskits-GoGoGo/tmp/task123-qemu-ns-all-2/rtthread-linux/linux.log",
-    "frames_csv": "/home/yfblock/Code/tgoskits-GoGoGo/tmp/task123-qemu-ns-all-2/rtthread-linux/frames.csv",
+    "app_log": "/home/yfblock/Code/tgoskits-GoGoGo/@logs/task123/qemu-final-r2/rtthread-linux/linux.log",
+    "frames_csv": "/home/yfblock/Code/tgoskits-GoGoGo/@logs/task123/qemu-final-r2/rtthread-linux/frames.csv",
     "rtos": "rtthread",
-    "rtos_log": "/home/yfblock/Code/tgoskits-GoGoGo/tmp/task123-qemu-ns-all-2/rtthread-linux/rtthread.log"
+    "rtos_log": "/home/yfblock/Code/tgoskits-GoGoGo/@logs/task123/qemu-final-r2/rtthread-linux/rtthread.log"
   },
   "success_rate": 1.0,
   "successes": 6,

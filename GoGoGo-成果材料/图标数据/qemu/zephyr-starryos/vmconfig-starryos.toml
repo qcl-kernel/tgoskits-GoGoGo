@@ -13,7 +13,7 @@ image_location = "memory"
 kernel_path = "starryos-task123.bin"
 kernel_load_addr = 0x8020_0000
 dtb_load_addr = 0x9f00_0000
-cmdline = "task2.count=2 task2.fault=none task3.frames=3 task3.fault=normal rtbench.net.count=2"
+cmdline = "task2.count=10 task2.fault=none task3.frames=3 task3.fault=normal rtbench.net.count=10"
 memory_regions = [
   [0x8000_0000, 0x2000_0000, 0x7, 2],
 ]

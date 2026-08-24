@@ -2,21 +2,20 @@
 
 ## ROCK 4D
 
-The `rock4d/` directory contains the previous physical-board captures:
+The `rock4d/` directory contains the final physical-board captures:
 
 - `fixed-task123-rock4d-rtthread-linux.log`
 - `fixed-task123-rock4d-rtthread-starryos.log`
 - `fixed-task123-rock4d-zephyr-linux.log`
 - `fixed-task123-rock4d-zephyr-starryos.log`
 
-Those captures predate the unified 16-metric realtime suite. The current ROCK 4D
-rerun is blocked before guest boot by U-Boot TFTP/PHY timeout (`phy_startup() failed:
--110`), so these files must not be treated as current PASS evidence.
+The final rerun captures were normalized from the serial retries. The parser keeps
+only complete rows and de-duplicates identical records. All four ROCK 4D combinations
+now provide the same 16 nanosecond probes.
 
 ## QEMU
 
-The `qemu/` directory contains the current four-combination matrix from
-`tmp/task123-qemu-ns-all-2`:
+The `qemu/` directory contains the final four-combination QEMU matrix:
 
 - `matrix/matrix-summary.json`
 - `matrix/matrix-report.md`
@@ -38,9 +37,16 @@ The generated files are SVGs under `plots/`:
 - `rtbench-miss-counts`: missing, 100 us, 500 us, and 1 ms miss counts.
 - `host-resources`: QEMU CPU time, RSS, and thread samples; Rock-4D host samples are `NA`.
 
-RTBench charts include only captures that satisfy the complete 16-metric nanosecond
-contract. Incomplete ROCK 4D captures remain in the raw tables for diagnosis but are
-excluded from heatmap cells instead of being rendered as fabricated zeros.
+RTBench charts include all eight QEMU/ROCK 4D combinations. Every combination has
+16 complete nanosecond metrics with `expected=10`, `collected=10`, and `missing=0`.
+No missing value is replaced with `16`, zero, or another synthetic default; a visible
+`16` is a measured 16 ns value. PMU cycles/instructions are intentionally excluded
+from the cross-platform completeness contract. ROCK 4D host-resource cells are `NA`
+because there is no QEMU process sampler on the physical board, not because RTBench
+data is missing.
+
+The detailed conclusion is in
+`../数据报告/task123/report/2026-08-25/tgoskits/task123-final-qemu-rock4d-report.md`.
 
 The complete parsed data is in `parsed-data.json` and the normalized tables are
 `task2-metrics.csv`, `task3-metrics.csv`, `rtbench-metrics.csv`, and

@@ -7,24 +7,24 @@
 <line class="grid" x1="78.0" y1="653.0" x2="513.0" y2="653.0"/>
 <text x="72.0" y="657.0" font-size="10px" text-anchor="end" font-weight="normal" fill="#111827">0</text>
 <line class="grid" x1="78.0" y1="512.0" x2="513.0" y2="512.0"/>
-<text x="72.0" y="516.0" font-size="10px" text-anchor="end" font-weight="normal" fill="#111827">3.12e+04</text>
+<text x="72.0" y="516.0" font-size="10px" text-anchor="end" font-weight="normal" fill="#111827">17,018.4</text>
 <line class="grid" x1="78.0" y1="371.0" x2="513.0" y2="371.0"/>
-<text x="72.0" y="375.0" font-size="10px" text-anchor="end" font-weight="normal" fill="#111827">6.24e+04</text>
+<text x="72.0" y="375.0" font-size="10px" text-anchor="end" font-weight="normal" fill="#111827">34,036.8</text>
 <line class="grid" x1="78.0" y1="230.0" x2="513.0" y2="230.0"/>
-<text x="72.0" y="234.0" font-size="10px" text-anchor="end" font-weight="normal" fill="#111827">9.36e+04</text>
+<text x="72.0" y="234.0" font-size="10px" text-anchor="end" font-weight="normal" fill="#111827">51,055.2</text>
 <line class="grid" x1="78.0" y1="89.0" x2="513.0" y2="89.0"/>
-<text x="72.0" y="93.0" font-size="10px" text-anchor="end" font-weight="normal" fill="#111827">1.25e+05</text>
-<rect x="88.9" y="149.4" width="32.6" height="503.6" fill="#2563eb"/>
-<text x="105.2" y="145.4" font-size="10px" text-anchor="middle" font-weight="normal" fill="#111827">1.11e+05</text>
+<text x="72.0" y="93.0" font-size="10px" text-anchor="end" font-weight="normal" fill="#111827">68,073.6</text>
+<rect x="88.9" y="245.0" width="32.6" height="408.0" fill="#2563eb"/>
+<text x="105.2" y="241.0" font-size="10px" text-anchor="middle" font-weight="normal" fill="#111827">49,240</text>
 <text x="105.2" y="669.0" font-size="9px" text-anchor="middle" font-weight="normal" fill="#111827">Q-RT/L</text>
-<rect x="143.2" y="354.8" width="32.6" height="298.2" fill="#0891b2"/>
-<text x="159.6" y="350.8" font-size="10px" text-anchor="middle" font-weight="normal" fill="#111827">6.6e+04</text>
+<rect x="143.2" y="309.7" width="32.6" height="343.3" fill="#0891b2"/>
+<text x="159.6" y="305.7" font-size="10px" text-anchor="middle" font-weight="normal" fill="#111827">41,440</text>
 <text x="159.6" y="669.0" font-size="9px" text-anchor="middle" font-weight="normal" fill="#111827">Q-RT/S</text>
-<rect x="197.6" y="345.4" width="32.6" height="307.6" fill="#16a34a"/>
-<text x="213.9" y="341.4" font-size="10px" text-anchor="middle" font-weight="normal" fill="#111827">6.81e+04</text>
+<rect x="197.6" y="149.4" width="32.6" height="503.6" fill="#16a34a"/>
+<text x="213.9" y="145.4" font-size="10px" text-anchor="middle" font-weight="normal" fill="#111827">60,780</text>
 <text x="213.9" y="669.0" font-size="9px" text-anchor="middle" font-weight="normal" fill="#111827">Q-Z/L</text>
-<rect x="252.0" y="442.2" width="32.6" height="210.8" fill="#65a30d"/>
-<text x="268.3" y="438.2" font-size="10px" text-anchor="middle" font-weight="normal" fill="#111827">4.67e+04</text>
+<rect x="252.0" y="272.0" width="32.6" height="381.0" fill="#65a30d"/>
+<text x="268.3" y="268.0" font-size="10px" text-anchor="middle" font-weight="normal" fill="#111827">45,990</text>
 <text x="268.3" y="669.0" font-size="9px" text-anchor="middle" font-weight="normal" fill="#111827">Q-Z/S</text>
 <rect class="na" x="306.4" y="645.0" width="32.6" height="8"/>
 <text x="322.7" y="641.0" font-size="9px" text-anchor="middle" font-weight="normal" fill="#111827">NA</text>
@@ -44,24 +44,24 @@
 <line class="grid" x1="603.0" y1="653.0" x2="1038.0" y2="653.0"/>
 <text x="597.0" y="657.0" font-size="10px" text-anchor="end" font-weight="normal" fill="#111827">0</text>
 <line class="grid" x1="603.0" y1="512.0" x2="1038.0" y2="512.0"/>
-<text x="597.0" y="516.0" font-size="10px" text-anchor="end" font-weight="normal" fill="#111827">3.86e+05</text>
+<text x="597.0" y="516.0" font-size="10px" text-anchor="end" font-weight="normal" fill="#111827">384,905.92</text>
 <line class="grid" x1="603.0" y1="371.0" x2="1038.0" y2="371.0"/>
-<text x="597.0" y="375.0" font-size="10px" text-anchor="end" font-weight="normal" fill="#111827">7.72e+05</text>
+<text x="597.0" y="375.0" font-size="10px" text-anchor="end" font-weight="normal" fill="#111827">769,811.84</text>
 <line class="grid" x1="603.0" y1="230.0" x2="1038.0" y2="230.0"/>
-<text x="597.0" y="234.0" font-size="10px" text-anchor="end" font-weight="normal" fill="#111827">1.16e+06</text>
+<text x="597.0" y="234.0" font-size="10px" text-anchor="end" font-weight="normal" fill="#111827">1,154,717.76</text>
 <line class="grid" x1="603.0" y1="89.0" x2="1038.0" y2="89.0"/>
-<text x="597.0" y="93.0" font-size="10px" text-anchor="end" font-weight="normal" fill="#111827">1.54e+06</text>
-<rect x="613.9" y="169.7" width="32.6" height="483.3" fill="#2563eb"/>
-<text x="630.2" y="165.7" font-size="10px" text-anchor="middle" font-weight="normal" fill="#111827">1.32e+06</text>
+<text x="597.0" y="93.0" font-size="10px" text-anchor="end" font-weight="normal" fill="#111827">1,539,623.68</text>
+<rect x="613.9" y="168.9" width="32.6" height="484.1" fill="#2563eb"/>
+<text x="630.2" y="164.9" font-size="10px" text-anchor="middle" font-weight="normal" fill="#111827">1,321,428</text>
 <text x="630.2" y="669.0" font-size="9px" text-anchor="middle" font-weight="normal" fill="#111827">Q-RT/L</text>
 <rect x="668.2" y="149.4" width="32.6" height="503.6" fill="#0891b2"/>
-<text x="684.6" y="145.4" font-size="10px" text-anchor="middle" font-weight="normal" fill="#111827">1.38e+06</text>
+<text x="684.6" y="145.4" font-size="10px" text-anchor="middle" font-weight="normal" fill="#111827">1,374,664</text>
 <text x="684.6" y="669.0" font-size="9px" text-anchor="middle" font-weight="normal" fill="#111827">Q-RT/S</text>
-<rect x="722.6" y="502.6" width="32.6" height="150.4" fill="#16a34a"/>
-<text x="738.9" y="498.6" font-size="10px" text-anchor="middle" font-weight="normal" fill="#111827">4.12e+05</text>
+<rect x="722.6" y="502.1" width="32.6" height="150.9" fill="#16a34a"/>
+<text x="738.9" y="498.1" font-size="10px" text-anchor="middle" font-weight="normal" fill="#111827">412,024</text>
 <text x="738.9" y="669.0" font-size="9px" text-anchor="middle" font-weight="normal" fill="#111827">Q-Z/L</text>
-<rect x="777.0" y="486.3" width="32.6" height="166.7" fill="#65a30d"/>
-<text x="793.3" y="482.3" font-size="10px" text-anchor="middle" font-weight="normal" fill="#111827">4.56e+05</text>
+<rect x="777.0" y="485.0" width="32.6" height="168.0" fill="#65a30d"/>
+<text x="793.3" y="481.0" font-size="10px" text-anchor="middle" font-weight="normal" fill="#111827">458,640</text>
 <text x="793.3" y="669.0" font-size="9px" text-anchor="middle" font-weight="normal" fill="#111827">Q-Z/S</text>
 <rect class="na" x="831.4" y="645.0" width="32.6" height="8"/>
 <text x="847.7" y="641.0" font-size="9px" text-anchor="middle" font-weight="normal" fill="#111827">NA</text>

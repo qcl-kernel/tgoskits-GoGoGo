@@ -1,5 +1,9 @@
 # RTOS 矩阵清理与真实 QEMU 验证报告
 
+> **历史说明（2026-08-25）：**本文记录 2026-08-24 的阶段性 QEMU 清理结果，其中
+> ROCK 4D 的 TFTP/PHY 阻塞结论已被后续四组合真机复测取代。最新结果见
+> [Task123 最终 QEMU 与 ROCK 4D 验证报告](../../2026-08-25/tgoskits/task123-final-qemu-rock4d-report.md)。
+
 ## 1. 报告信息
 
 | 项目 | 内容 |

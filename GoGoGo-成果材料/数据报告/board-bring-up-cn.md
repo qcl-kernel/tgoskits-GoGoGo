@@ -2,7 +2,8 @@
 
 本文说明如何把 Axvisor 编译产物刷到物理开发板并运行 board 测试，覆盖板卡资源
 申请、guest 资产准备、构建、刷写、运行判定与常见问题。目标读者是需要在真实
-ARM/x86 板上跑 Axvisor guest（当前仓库已验证的形态是**单 Linux guest**）的
+ARM/x86 板上跑 Axvisor guest（当前仓库已验证的形态包含 ROCK 4D 上的
+**RT-Thread/Zephyr + Linux/StarryOS 四种组合**）的
 开发者。
 
 本文依据仓库现有资产编写：
@@ -26,7 +27,7 @@ ARM/x86 板上跑 Axvisor guest（当前仓库已验证的形态是**单 Linux g
 | ROC-RK3568-PC | RK3568（Firefly） | aarch64 | 无（外部提供） | linux smp1/smp2、arceos smp1/smp2 | ✅ roc-rk3568-pc-linux |
 | PhytiumPi | 飞腾 PE2204 | aarch64 | 无（外部提供） | linux/arceos smp1+smp2、freertos、zephyr、rtthread | ✅ phytiumpi-linux |
 | ASUS NUC15CRH | x86_64（ACPI） | x86_64 | 无（ACPI） | linux smp1 | ✅ asus-nuc15crh-linux |
-| Rock 4D | RK3576（Radxa） | aarch64 | 有（`rock-4d.dtb`） | linux smp1 | ❌ 非 CI 常态（文档 + 手工验证） |
+| Rock 4D | RK3576（Radxa） | aarch64 | 有（`rock-4d.dtb`） | RT-Thread/Zephyr + Linux/StarryOS 四组合 | ✅ 手工完成四组合 |
 | TAC-E400 | 飞腾系（复用 pe2204 DTS） | aarch64 | 无 | linux、arceos、freertos、zephyr | ❌ |
 | RDK-S100 | D-Robotics S100P | aarch64 | 无 | linux smp1、arceos smp1 | ❌ |
 
@@ -35,9 +36,13 @@ TOML）属于实验性/占位：RK3588 generic（`vms/rk3588/linux-smp8.toml`，
 Firefly ITX-3588J，镜像路径为占位符）、BST A1000B（`vms/a1000/linux-smp8-*.toml`）、
 EVM3588（仅 README 提及，无任何配置/DTB/测试）。这些不能直接上板。
 
-> **关键限制**：仓库在物理板上只验证过**单 Linux guest** 启动链路。三 guest
-> 网络拓扑、RTOS guest 联网等仅在 QEMU 跑通。物理板 RTOS guest 是占位镜像，
-> 没有 virtio-net 配置。详见 `real-arm-board-run.md`。
+> **当前状态（2026-08-25）**：ROCK 4D 已完成 RT-Thread/Zephyr 与 Linux/StarryOS
+> 的四种组合真机验证。每个组合均通过 Task 2、Task 3 和 Task123 门禁，并采集完整
+> 的 16 项纳秒 RTBench 指标。早期“单 Linux/RTOS 占位镜像”的描述仅适用于历史
+> 阶段，不适用于当前 Task123 配置。
+
+最终数据见 `GoGoGo-成果材料/数据报告/task123/report/2026-08-25/tgoskits/`
+和 `GoGoGo-成果材料/图标数据/`。
 
 ---
 
@@ -140,6 +145,40 @@ dtb_path    = "/guest/linux/rock-4d-linux-smp1.dtb"
 
 ## 4. 上板测试命令与流程
 
+### 4.0 Task123 真机四组合入口（2026-08-25）
+
+以下四条命令分别完成构建、guest 资产准备、AxVisor/U-Boot 启动和结果门禁。命令中的
+`rock-4d-uboot-local.toml` 只保留在本机，需按实际串口和电源控制方式配置：
+
+```bash
+# RT-Thread + Linux
+cargo xtask axvisor task123 uboot --rtos rtthread --app-guest linux \
+  --realtime-suite --rtbench-samples 10 \
+  --config os/axvisor/configs/board/rock-4d-task123-linuxleg.toml \
+  --uboot-config os/StarryOS/configs/board/rock-4d-uboot-local.toml
+
+# RT-Thread + StarryOS
+cargo xtask axvisor task123 uboot --rtos rtthread --app-guest starryos \
+  --realtime-suite --rtbench-samples 10 \
+  --config os/axvisor/configs/board/rock-4d-task123-twoguest.toml \
+  --uboot-config os/StarryOS/configs/board/rock-4d-uboot-local.toml
+
+# Zephyr + Linux
+cargo xtask axvisor task123 uboot --rtos zephyr --app-guest linux \
+  --realtime-suite --rtbench-samples 10 \
+  --config os/axvisor/configs/board/rock-4d-task123-zephyr-linux.toml \
+  --uboot-config os/StarryOS/configs/board/rock-4d-uboot-local.toml
+
+# Zephyr + StarryOS
+cargo xtask axvisor task123 uboot --rtos zephyr --app-guest starryos \
+  --realtime-suite --rtbench-samples 10 \
+  --config os/axvisor/configs/board/rock-4d-task123-zephyr-starryos.toml \
+  --uboot-config os/StarryOS/configs/board/rock-4d-uboot-local.toml
+```
+
+四条命令均要求对应客户机输出 `TASK123_*_END status=PASS`，并要求 RTBench 每项
+满足 `expected=10 collected=10 missing=0`。Task 2 请求数由板级 VM 配置固定为 10。
+
 ### 4.1 标准 board smoke 测试
 
 一条命令完成「编译 → 打包 FIT → 经 ostool 刷写 → U-Boot `tftp image.fit && bootm`
@@ -224,8 +263,8 @@ Rock 4D 用 `ax-driver/rockchip-dwmmc`，Orange Pi 5 Plus 用 `ax-driver/rockchi
 
 ## 7. 常见问题
 
-- **QEMU 能跑、板卡不能跑**：三 guest 网络/RTOS 联网只在 QEMU 验证过；板卡上先只
-  验证单 Linux。物理板 RTOS guest 是占位镜像、无 virtio-net。
+- **QEMU 与板卡数据不可混用**：当前四种 ROCK 4D 组合均已通过功能门禁；QEMU
+  TCG 的 host 资源和 timer 长尾仍只能作为仿真数据，不能替代真机实时性上界。
 - **`--board evm3588 ...` 报找不到**：EVM3588 没有 board case，也不要用
   `vms/rk3588/linux-smp8.toml` 冒充（其 DTS 是 Firefly ITX-3588J、路径是占位符）。
 - **串口无输出 / 停在 rdrive**：确认 `BOARD_DTB` 与板卡固件/内存映射一致；Orange Pi

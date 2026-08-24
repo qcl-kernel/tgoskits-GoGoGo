@@ -23,8 +23,8 @@
     "total": 3
   },
   "duplicates": 0,
-  "effective_payload_bytes_per_second": 247,
-  "elapsed_us": 582466,
+  "effective_payload_bytes_per_second": 246,
+  "elapsed_us": 585252,
   "frames_per_mode": 3,
   "gates": {
     "ai_tracking_mae_improves_at_least_30_percent": false,
@@ -33,32 +33,32 @@
   },
   "gates_enforced": false,
   "inference_us": {
-    "max": 13461,
-    "mean": 6682,
-    "min": 3279,
-    "p50": 5598,
-    "p95": 13461,
-    "p99": 13461
+    "max": 11577,
+    "mean": 6224,
+    "min": 3654,
+    "p50": 5472,
+    "p95": 11577,
+    "p99": 11577
   },
   "injected_drops": 0,
   "reconnects": 0,
   "recoveries": 0,
   "requests": 6,
   "round_trip_us": {
-    "max": 19593,
-    "mean": 13783,
-    "min": 9392,
-    "p50": 12822,
-    "p95": 19593,
-    "p99": 19593
+    "max": 22892,
+    "mean": 10628,
+    "min": 5028,
+    "p50": 9401,
+    "p95": 22892,
+    "p99": 22892
   },
   "rtos_processing_us": {
-    "max": 995,
-    "mean": 266,
+    "max": 27,
+    "mean": 27,
     "min": 27,
     "p50": 27,
-    "p95": 995,
-    "p99": 995
+    "p95": 27,
+    "p99": 27
   },
   "schema": 1,
   "settling": {
@@ -77,10 +77,10 @@
   },
   "sources": {
     "app_guest": "linux",
-    "app_log": "/home/yfblock/Code/tgoskits-GoGoGo/tmp/task123-qemu-ns-all-2/zephyr-linux/linux.log",
-    "frames_csv": "/home/yfblock/Code/tgoskits-GoGoGo/tmp/task123-qemu-ns-all-2/zephyr-linux/frames.csv",
+    "app_log": "/home/yfblock/Code/tgoskits-GoGoGo/@logs/task123/qemu-final-r2/zephyr-linux/linux.log",
+    "frames_csv": "/home/yfblock/Code/tgoskits-GoGoGo/@logs/task123/qemu-final-r2/zephyr-linux/frames.csv",
     "rtos": "zephyr",
-    "rtos_log": "/home/yfblock/Code/tgoskits-GoGoGo/tmp/task123-qemu-ns-all-2/zephyr-linux/zephyr.log"
+    "rtos_log": "/home/yfblock/Code/tgoskits-GoGoGo/@logs/task123/qemu-final-r2/zephyr-linux/zephyr.log"
   },
   "success_rate": 1.0,
   "successes": 6,

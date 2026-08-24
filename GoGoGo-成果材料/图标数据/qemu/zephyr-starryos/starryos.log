@@ -1,4 +1,4 @@
-task2.count=2 task2.fault=none task3.frames=3 task3.fault=normal rtbench.net.count=2
+task2.count=10 task2.fault=none task3.frames=3 task3.fault=normal rtbench.net.count=10
 VM Load @PA:0x80000000
 VM Load Offset: 0x100000000
 Memory Map:
@@ -47,40 +47,40 @@ log_level = info
 backtrace = false
 smp = 2
 
-Boot at 1970-01-01 00:00:00.905273728 UTC
+Boot at 1970-01-01 00:00:00.905447216 UTC
 
 Initialized 6 tracepoints
 kmod subsystem initialized
 STARRY_SMP_READY configured=2 online=0-1 nproc=2
 STARRY_NET_READY ip=192.168.77.11 peer=192.168.77.30
-TASK3_STARRY_NET_PROBE_READY count=2
+TASK3_STARRY_NET_PROBE_READY count=10
 TASK2_STARRY_BEGIN port=9876
-RTBENCH_NET_PROBE_READY listen=9879 count=2
+RTBENCH_NET_PROBE_READY listen=9879 count=10
 === RT-IPC Benchmark Client ===
-Target: 192.168.77.30:9876, count=2 per size
+Target: 192.168.77.30:9876, count=10 per size
 
 [client] fault profile: none
 [client] connecting...
 [client] connected!
 
 --- Payload 64B ---
-  sent=2  recv=2  loss=0%
-  RTT: min=5ms avg=6ms max=7ms P50=5ms P95=5ms P99=5ms P99.9=5ms
-  throughput=10.42KiB/s
+  sent=10  recv=10  loss=0%
+  RTT: min=4ms avg=5ms max=7ms P50=5ms P95=6ms P99=6ms P99.9=6ms
+  throughput=11.57KiB/s
   request_timeouts=0 protocol_errors=0 reconnects=0
   transport: retrans=0 timeouts=0 dup=0 reorder=0 errors=0
 
 --- Payload 256B ---
-  sent=2  recv=2  loss=0%
-  RTT: min=7ms avg=17ms max=28ms P50=7ms P95=7ms P99=7ms P99.9=7ms
-  throughput=14.29KiB/s
+  sent=10  recv=10  loss=0%
+  RTT: min=4ms avg=6ms max=23ms P50=5ms P95=7ms P99=7ms P99.9=7ms
+  throughput=36.23KiB/s
   request_timeouts=0 protocol_errors=0 reconnects=0
   transport: retrans=0 timeouts=0 dup=0 reorder=0 errors=0
 
 --- Payload 1024B ---
-  sent=2  recv=2  loss=0%
-  RTT: min=9ms avg=14ms max=19ms P50=9ms P95=9ms P99=9ms P99.9=9ms
-  throughput=68.97KiB/s
+  sent=10  recv=10  loss=0%
+  RTT: min=5ms avg=7ms max=24ms P50=5ms P95=6ms P99=6ms P99.9=6ms
+  throughput=138.89KiB/s
   request_timeouts=0 protocol_errors=0 reconnects=0
   transport: retrans=0 timeouts=0 dup=0 reorder=0 errors=0
 
@@ -90,12 +90,12 @@ ALL TESTS COMPLETE
 RT-IPC client exited with rc=0
 TASK2_STARRY_END status=PASS
 TASK3_STARRY_READY ip=192.168.77.11 peer=192.168.77.30:9877
-TASK3_FRAME_CSV=FIXED,0,0,2,2,21649,1950,0,0,0,0,44,6390,0,0,0
-TASK3_FRAME_CSV=FIXED,1,1461,2,2,16624,1571,0,0,0,0,27,3539,0,0,0
-TASK3_FRAME_CSV=FIXED,2,2900,2,2,32767,1571,0,0,0,0,27,3253,0,0,0
-TASK3_FRAME_CSV=AI,0,0,2,2,21649,1571,0,0,0,0,27,5257,0,0,0
-TASK3_FRAME_CSV=AI,1,1461,2,2,16624,1783,0,0,0,0,27,3340,0,0,0
-TASK3_FRAME_CSV=AI,2,2900,2,2,32767,1702,0,0,0,0,27,5044,0,0,0
-TASK3_SUMMARY_JSON={"schema":1,"frames_per_mode":3,"records":6,"elapsed_us":438736,"requests":6,"successes":6,"success_rate":1.000000,"application_errors":0,"application_timeouts":0,"transport_retries":0,"duplicates":0,"recovered":0,"reconnects":0,"injected_drops":0,"classification":{"correct":3,"total":3,"accuracy":1.000000,"confusion_matrix":[[0,0,0],[0,3,0],[0,0,0]]},"inference_us":{"min":1571,"mean":1691,"p50":1571,"p95":1950,"p99":1950,"max":1950},"round_trip_us":{"min":3253,"mean":4470,"p50":3539,"p95":6390,"p99":6390,"max":6390},"tracking_error_q15":{"fixed":{"min":0,"mean":1453,"p50":1461,"p95":2900,"p99":2900,"max":2900},"ai":{"min":0,"mean":1453,"p50":1461,"p95":2900,"p99":2900,"max":2900}},"settling":{"fixed":{"direction_changes":0,"successes":0,"mean_frames":0,"max_frames":0},"ai":{"direction_changes":0,"successes":0,"mean_frames":0,"max_frames":0}},"effective_payload_bytes_per_second":328}
+TASK3_FRAME_CSV=FIXED,0,0,2,2,21649,1938,0,0,0,0,65,5357,0,0,0
+TASK3_FRAME_CSV=FIXED,1,1461,2,2,16624,1571,0,0,0,0,27,4140,0,0,0
+TASK3_FRAME_CSV=FIXED,2,2900,2,2,32767,1571,0,0,0,0,83,4386,0,0,0
+TASK3_FRAME_CSV=AI,0,0,2,2,21649,1647,0,0,0,0,27,7054,0,0,0
+TASK3_FRAME_CSV=AI,1,1461,2,2,16624,1618,0,0,0,0,27,3923,0,0,0
+TASK3_FRAME_CSV=AI,2,2900,2,2,32767,1831,0,0,0,0,27,4527,0,0,0
+TASK3_SUMMARY_JSON={"schema":1,"frames_per_mode":3,"records":6,"elapsed_us":436564,"requests":6,"successes":6,"success_rate":1.000000,"application_errors":0,"application_timeouts":0,"transport_retries":0,"duplicates":0,"recovered":0,"reconnects":0,"injected_drops":0,"classification":{"correct":3,"total":3,"accuracy":1.000000,"confusion_matrix":[[0,0,0],[0,3,0],[0,0,0]]},"inference_us":{"min":1571,"mean":1696,"p50":1618,"p95":1938,"p99":1938,"max":1938},"round_trip_us":{"min":3923,"mean":4897,"p50":4386,"p95":7054,"p99":7054,"max":7054},"tracking_error_q15":{"fixed":{"min":0,"mean":1453,"p50":1461,"p95":2900,"p99":2900,"max":2900},"ai":{"min":0,"mean":1453,"p50":1461,"p95":2900,"p99":2900,"max":2900}},"settling":{"fixed":{"direction_changes":0,"successes":0,"mean_frames":0,"max_frames":0},"ai":{"direction_changes":0,"successes":0,"mean_frames":0,"max_frames":0}},"effective_payload_bytes_per_second":329}
 TASK3_STARRY_END status=PASS
 TASK123_STARRY_END status=PASS

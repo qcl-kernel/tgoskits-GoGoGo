@@ -23,8 +23,8 @@
     "total": 3
   },
   "duplicates": 0,
-  "effective_payload_bytes_per_second": 328,
-  "elapsed_us": 438736,
+  "effective_payload_bytes_per_second": 329,
+  "elapsed_us": 436564,
   "frames_per_mode": 3,
   "gates": {
     "ai_tracking_mae_improves_at_least_30_percent": false,
@@ -33,32 +33,32 @@
   },
   "gates_enforced": false,
   "inference_us": {
-    "max": 1950,
-    "mean": 1691,
+    "max": 1938,
+    "mean": 1696,
     "min": 1571,
-    "p50": 1571,
-    "p95": 1950,
-    "p99": 1950
+    "p50": 1618,
+    "p95": 1938,
+    "p99": 1938
   },
   "injected_drops": 0,
   "reconnects": 0,
   "recoveries": 0,
   "requests": 6,
   "round_trip_us": {
-    "max": 6390,
-    "mean": 4470,
-    "min": 3253,
-    "p50": 3539,
-    "p95": 6390,
-    "p99": 6390
+    "max": 7054,
+    "mean": 4897,
+    "min": 3923,
+    "p50": 4386,
+    "p95": 7054,
+    "p99": 7054
   },
   "rtos_processing_us": {
-    "max": 44,
-    "mean": 29,
+    "max": 83,
+    "mean": 42,
     "min": 27,
     "p50": 27,
-    "p95": 44,
-    "p99": 44
+    "p95": 83,
+    "p99": 83
   },
   "schema": 1,
   "settling": {
@@ -77,10 +77,10 @@
   },
   "sources": {
     "app_guest": "starryos",
-    "app_log": "/home/yfblock/Code/tgoskits-GoGoGo/tmp/task123-qemu-ns-all-2/zephyr-starryos/starryos.log",
-    "frames_csv": "/home/yfblock/Code/tgoskits-GoGoGo/tmp/task123-qemu-ns-all-2/zephyr-starryos/frames.csv",
+    "app_log": "/home/yfblock/Code/tgoskits-GoGoGo/@logs/task123/qemu-final-r2/zephyr-starryos/starryos.log",
+    "frames_csv": "/home/yfblock/Code/tgoskits-GoGoGo/@logs/task123/qemu-final-r2/zephyr-starryos/frames.csv",
     "rtos": "zephyr",
-    "rtos_log": "/home/yfblock/Code/tgoskits-GoGoGo/tmp/task123-qemu-ns-all-2/zephyr-starryos/zephyr.log"
+    "rtos_log": "/home/yfblock/Code/tgoskits-GoGoGo/@logs/task123/qemu-final-r2/zephyr-starryos/zephyr.log"
   },
   "success_rate": 1.0,
   "successes": 6,

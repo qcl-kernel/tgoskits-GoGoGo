@@ -6,6 +6,12 @@
 >
 > 本版重点：记录 StarryOS 替代 Linux 后，与 RT-Thread 共同运行并完成长期压力测试的结果。
 
+> **2026-08-25 更新：**最终验证已扩展为 QEMU 四组合与 ROCK 4D 真机四组合。八个组合
+> 的 Task 2、Task 3、Task123 门禁均为 `PASS`；16 项 RTBench 纳秒指标均满足
+> `expected=10 collected=10 missing=0`。详细数据见
+> [Task123 最终 QEMU 与 ROCK 4D 验证报告](task123/report/2026-08-25/tgoskits/task123-final-qemu-rock4d-report.md)。
+> 本段结论优先于本文后续较早的阶段性 QEMU/单 Linux 上板描述。
+
 ## 1. 版本结论
 
 在原有 Linux 版本基础上，项目进一步完成了 StarryOS 2-vCPU 客户机接入 AxVisor，并

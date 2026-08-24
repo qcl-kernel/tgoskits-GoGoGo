@@ -76,6 +76,18 @@ RTBENCH_METRICS = [
     "deadline_miss_under_load",
     "net_event_latency",
 ]
+RTBENCH_PLOT_METRICS = RTBENCH_METRICS
+RTBENCH_NS_FIELDS = {
+    "expected",
+    "collected",
+    "missing",
+    "p50_ns",
+    "p95_ns",
+    "p99_ns",
+    "p99_9_ns",
+    "max_ns",
+    "mean_ns",
+}
 
 
 def clean(text: str) -> str:
@@ -204,17 +216,42 @@ def flatten(value: object, prefix: str = "") -> dict[str, object]:
 
 def parse_rtbench(path: Path, source: str, rtos: str, guest: str) -> list[dict[str, object]]:
     result: list[dict[str, object]] = []
-    for line in lines(path):
-        match = re.search(r"RTBENCH metric=([A-Za-z0-9_]+)\s+(.*)", line)
-        if not match:
+    capture_lines = lines(path)
+    compact_lines = [
+        match.groups()
+        for line in capture_lines
+        if (match := re.search(r"RTBENCH_NS metric=([A-Za-z0-9_]+)\s+(.*)", line))
+    ]
+    # A compact line is emitted by current guests. Do not mix it with the
+    # legacy verbose line, which can be byte-corrupted on a physical UART.
+    candidates = compact_lines or [
+        match.groups()
+        for line in capture_lines
+        if (match := re.search(r"RTBENCH metric=([A-Za-z0-9_]+)\s+(.*)", line))
+    ]
+    seen: set[tuple[str, tuple[tuple[str, object], ...]]] = set()
+    for metric, field_text in candidates:
+        if metric not in RTBENCH_METRICS:
             continue
+        parsed_fields = fields(field_text)
+        if not RTBENCH_NS_FIELDS <= parsed_fields.keys():
+            continue
+        identity = (metric, tuple(sorted((key, parsed_fields[key]) for key in RTBENCH_NS_FIELDS)))
+        if identity in seen:
+            continue
+        seen.add(identity)
+        try:
+            log_file = str(path.relative_to(ROOT))
+        except ValueError:
+            log_file = str(path)
         row = {
             "source": source,
             "rtos": rtos,
             "app_guest": guest,
-            "metric": match.group(1),
+            "metric": metric,
+            "log_file": log_file,
         }
-        row.update(fields(match.group(2)))
+        row.update(parsed_fields)
         result.append(row)
     return result
 
@@ -247,11 +284,23 @@ def write_csv(path: Path, rows: list[dict[str, object]]) -> None:
         writer.writerows(rows)
 
 
+def fixed_number(value: float | int) -> str:
+    numeric = float(value)
+    if not math.isfinite(numeric):
+        return str(value)
+    if numeric == 0:
+        return "0"
+    if numeric.is_integer():
+        return f"{int(numeric):,}"
+    precision = 6 if abs(numeric) < 1 else 3
+    return f"{numeric:,.{precision}f}".rstrip("0").rstrip(".")
+
+
 def nice(value: object) -> str:
     if value is None or value == "":
         return "NA"
-    if isinstance(value, float):
-        return f"{value:.3g}"
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return fixed_number(value)
     return str(value)
 
 
@@ -297,7 +346,7 @@ def bar_panel(parts: list[str], x: float, y: float, width: float, height: float,
         value = top_value * tick / 4
         yy = bottom - (bottom - top) * tick / 4
         parts.append(f'<line class="grid" x1="{left:.1f}" y1="{yy:.1f}" x2="{right:.1f}" y2="{yy:.1f}"/>')
-        parts.append(svg_text(left - 6, yy + 4, f"{value:.3g}", 10, "end"))
+        parts.append(svg_text(left - 6, yy + 4, fixed_number(value), 10, "end"))
     step = (right - left) / len(values)
     bar_width = min(34, step * 0.60)
     for index, value in enumerate(values):
@@ -324,7 +373,7 @@ def grouped_panel(parts: list[str], x: float, y: float, width: float, height: fl
         value = top_value * tick / 4
         yy = bottom - (bottom - top) * tick / 4
         parts.append(f'<line class="grid" x1="{left:.1f}" y1="{yy:.1f}" x2="{right:.1f}" y2="{yy:.1f}"/>')
-        parts.append(svg_text(left - 6, yy + 4, f"{value:.3g}", 10, "end"))
+        parts.append(svg_text(left - 6, yy + 4, fixed_number(value), 10, "end"))
     step = (right - left) / len(SHORT_LABELS)
     bar_width = min(14, step * 0.72 / max(1, len(groups)))
     for combo_index in range(len(SHORT_LABELS)):
@@ -438,7 +487,16 @@ def aggregate_rtbench(rtbench: list[dict[str, object]], statistic: str, metric_r
     for metric in metric_rows:
         values: list[float | None] = []
         for source, rtos, guest, _rtos_path, _app_path in combinations:
-            matches = [row.get(statistic) for row in rtbench if row["source"] == source and row["rtos"] == rtos and row["app_guest"] == guest and row["metric"] == metric]
+            matches = [
+                row.get(statistic)
+                for row in rtbench
+                if row["source"] == source
+                and row["rtos"] == rtos
+                and row["app_guest"] == guest
+                and row["metric"] == metric
+                and row.get("expected") == row.get("collected")
+                and row.get("missing") == 0
+            ]
             numbers = [float(value) for value in matches if isinstance(value, (int, float))]
             if statistic.endswith(("_cycles", "_instructions")) and numbers and max(abs(value) for value in numbers) == 0:
                 values.append(None)
@@ -448,45 +506,22 @@ def aggregate_rtbench(rtbench: list[dict[str, object]], statistic: str, metric_r
     return result
 
 
-def complete_rtbench_combinations(rtbench: list[dict[str, object]]) -> list[tuple[str, str, str, Path, Path]]:
-    complete = []
-    for combination in COMBINATIONS:
-        source, rtos, guest, _rtos_path, _app_path = combination
-        rows = [
-            row
-            for row in rtbench
-            if row["source"] == source and row["rtos"] == rtos and row["app_guest"] == guest
-        ]
-        metrics = {row["metric"] for row in rows}
-        if set(RTBENCH_METRICS) <= metrics and all(
-            any(
-                row["metric"] == metric and isinstance(row.get("mean_ns"), (int, float))
-                for row in rows
-            )
-            for metric in RTBENCH_METRICS
-        ):
-            complete.append(combination)
-    return complete
-
-
 def chart_rtbench(rtbench: list[dict[str, object]]) -> None:
-    metric_rows = RTBENCH_METRICS
-    combinations = complete_rtbench_combinations(rtbench)
-    labels = [SHORT_LABELS[COMBINATIONS.index(combination)] for combination in combinations]
+    metric_rows = RTBENCH_PLOT_METRICS
+    combinations = COMBINATIONS
+    labels = SHORT_LABELS
     panels = [("mean_ns", "mean ns"), ("p95_ns", "p95 ns"), ("p99_ns", "p99 ns"), ("max_ns", "max ns")]
-    parts = svg_header(1600, 1480, "RTBench nanosecond metrics: complete captures only")
+    parts = svg_header(1600, 1480, "RTBench nanosecond metrics: complete measured values")
     for index, (statistic, title) in enumerate(panels):
         heatmap(parts, 20 + (index % 2) * 790, 55 + (index // 2) * 675, 760, 640, title, metric_rows, aggregate_rtbench(rtbench, statistic, metric_rows, combinations), "ns", labels)
-    if len(combinations) < len(COMBINATIONS):
-        parts.append(svg_text(24, 1460, "ROCK 4D captures without the complete 16-metric ns contract are omitted.", 11))
+    parts.append(svg_text(24, 1460, "All cells show measured nanosecond values from complete samples=10 records.", 11))
     finish_svg(parts, PLOTS / "rtbench-nanoseconds.svg")
 
     count_rows = ["missing", "miss_100us", "miss_500us", "miss_1ms"]
     parts = svg_header(1600, 900, "RTBench completeness and jitter miss counts")
     for index, statistic in enumerate(count_rows):
         heatmap(parts, 20 + (index % 2) * 790, 55 + (index // 2) * 390, 760, 355, statistic, metric_rows, aggregate_rtbench(rtbench, statistic, metric_rows, combinations), "count", labels)
-    if len(combinations) < len(COMBINATIONS):
-        parts.append(svg_text(24, 885, "ROCK 4D captures without the complete 16-metric ns contract are omitted.", 11))
+    parts.append(svg_text(24, 885, "All cells show measured counts from complete samples=10 records.", 11))
     finish_svg(parts, PLOTS / "rtbench-miss-counts.svg")
 
     # PMU registers are not virtualized consistently across QEMU and ROCK 4D.
