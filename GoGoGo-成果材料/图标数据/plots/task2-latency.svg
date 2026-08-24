@@ -1,0 +1,378 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1660" viewBox="0 0 1600 1660" role="img" aria-label="Task 2 network latency: all payloads and combinations">
+<rect width="1600" height="1660" fill="#ffffff"/>
+<style>text{font-family:Arial,sans-serif} .grid{stroke:#d1d5db;stroke-width:1} .frame{fill:none;stroke:#374151;stroke-width:1} .na{fill:#e5e7eb;stroke:#9ca3af;stroke-width:1}</style>
+<text x="24.0" y="30.0" font-size="20px" text-anchor="start" font-weight="bold" fill="#111827">Task 2 network latency: all payloads and combinations</text>
+<text x="28.0" y="70.0" font-size="14px" text-anchor="start" font-weight="bold" fill="#111827">RTT min</text>
+<rect class="frame" x="78.0" y="84.0" width="690.0" height="164.0"/>
+<line class="grid" x1="78.0" y1="248.0" x2="768.0" y2="248.0"/>
+<text x="72.0" y="252.0" font-size="10px" text-anchor="end" font-weight="normal" fill="#111827">0</text>
+<line class="grid" x1="78.0" y1="207.0" x2="768.0" y2="207.0"/>
+<text x="72.0" y="211.0" font-size="10px" text-anchor="end" font-weight="normal" fill="#111827">5.88</text>
+<line class="grid" x1="78.0" y1="166.0" x2="768.0" y2="166.0"/>
+<text x="72.0" y="170.0" font-size="10px" text-anchor="end" font-weight="normal" fill="#111827">11.8</text>
+<line class="grid" x1="78.0" y1="125.0" x2="768.0" y2="125.0"/>
+<text x="72.0" y="129.0" font-size="10px" text-anchor="end" font-weight="normal" fill="#111827">17.6</text>
+<line class="grid" x1="78.0" y1="84.0" x2="768.0" y2="84.0"/>
+<text x="72.0" y="88.0" font-size="10px" text-anchor="end" font-weight="normal" fill="#111827">23.5</text>
+<rect x="107.1" y="220.1" width="13.0" height="27.9" fill="#2563eb"/>
+<rect x="121.1" y="164.3" width="13.0" height="83.7" fill="#f59e0b"/>
+<rect x="135.1" y="101.6" width="13.0" height="146.4" fill="#16a34a"/>
+<text x="121.1" y="264.0" font-size="9px" text-anchor="middle" font-weight="normal" fill="#111827">Q-RT/L</text>
+<rect x="193.4" y="185.2" width="13.0" height="62.8" fill="#2563eb"/>
+<rect x="207.4" y="199.2" width="13.0" height="48.8" fill="#f59e0b"/>
+<rect x="221.4" y="178.3" width="13.0" height="69.7" fill="#16a34a"/>
+<text x="207.4" y="264.0" font-size="9px" text-anchor="middle" font-weight="normal" fill="#111827">Q-RT/S</text>
+<rect x="279.6" y="213.1" width="13.0" height="34.9" fill="#2563eb"/>
+<rect x="293.6" y="178.3" width="13.0" height="69.7" fill="#f59e0b"/>
+<rect x="307.6" y="136.4" width="13.0" height="111.6" fill="#16a34a"/>
+<text x="293.6" y="264.0" font-size="9px" text-anchor="middle" font-weight="normal" fill="#111827">Q-Z/L</text>
+<rect x="365.9" y="213.1" width="13.0" height="34.9" fill="#2563eb"/>
+<rect x="379.9" y="199.2" width="13.0" height="48.8" fill="#f59e0b"/>
+<rect x="393.9" y="185.2" width="13.0" height="62.8" fill="#16a34a"/>
+<text x="379.9" y="264.0" font-size="9px" text-anchor="middle" font-weight="normal" fill="#111827">Q-Z/S</text>
+<rect x="452.1" y="234.1" width="13.0" height="13.9" fill="#2563eb"/>
+<rect x="466.1" y="234.1" width="13.0" height="13.9" fill="#f59e0b"/>
+<rect x="480.1" y="227.1" width="13.0" height="20.9" fill="#16a34a"/>
+<text x="466.1" y="264.0" font-size="9px" text-anchor="middle" font-weight="normal" fill="#111827">R-RT/L</text>
+<rect x="538.4" y="213.1" width="13.0" height="34.9" fill="#2563eb"/>
+<rect x="552.4" y="206.2" width="13.0" height="41.8" fill="#f59e0b"/>
+<rect x="566.4" y="206.2" width="13.0" height="41.8" fill="#16a34a"/>
+<text x="552.4" y="264.0" font-size="9px" text-anchor="middle" font-weight="normal" fill="#111827">R-RT/S</text>
+<rect x="624.6" y="206.2" width="13.0" height="41.8" fill="#2563eb"/>
+<rect x="638.6" y="206.2" width="13.0" height="41.8" fill="#f59e0b"/>
+<rect x="652.6" y="206.2" width="13.0" height="41.8" fill="#16a34a"/>
+<text x="638.6" y="264.0" font-size="9px" text-anchor="middle" font-weight="normal" fill="#111827">R-Z/L</text>
+<rect x="710.9" y="199.2" width="13.0" height="48.8" fill="#2563eb"/>
+<rect x="724.9" y="192.2" width="13.0" height="55.8" fill="#f59e0b"/>
+<rect x="738.9" y="199.2" width="13.0" height="48.8" fill="#16a34a"/>
+<text x="724.9" y="264.0" font-size="9px" text-anchor="middle" font-weight="normal" fill="#111827">R-Z/S</text>
+<rect x="78.0" y="274.0" width="10" height="10" fill="#2563eb"/>
+<text x="92.0" y="284.0" font-size="10px" text-anchor="start" font-weight="normal" fill="#111827">64B</text>
+<rect x="178.0" y="274.0" width="10" height="10" fill="#f59e0b"/>
+<text x="192.0" y="284.0" font-size="10px" text-anchor="start" font-weight="normal" fill="#111827">256B</text>
+<rect x="278.0" y="274.0" width="10" height="10" fill="#16a34a"/>
+<text x="292.0" y="284.0" font-size="10px" text-anchor="start" font-weight="normal" fill="#111827">1024B</text>
+<text x="36.0" y="166.0" font-size="10px" text-anchor="middle" font-weight="normal" fill="#111827">ms</text>
+<text x="818.0" y="70.0" font-size="14px" text-anchor="start" font-weight="bold" fill="#111827">RTT avg</text>
+<rect class="frame" x="868.0" y="84.0" width="690.0" height="164.0"/>
+<line class="grid" x1="868.0" y1="248.0" x2="1558.0" y2="248.0"/>
+<text x="862.0" y="252.0" font-size="10px" text-anchor="end" font-weight="normal" fill="#111827">0</text>
+<line class="grid" x1="868.0" y1="207.0" x2="1558.0" y2="207.0"/>
+<text x="862.0" y="211.0" font-size="10px" text-anchor="end" font-weight="normal" fill="#111827">17.1</text>
+<line class="grid" x1="868.0" y1="166.0" x2="1558.0" y2="166.0"/>
+<text x="862.0" y="170.0" font-size="10px" text-anchor="end" font-weight="normal" fill="#111827">34.2</text>
+<line class="grid" x1="868.0" y1="125.0" x2="1558.0" y2="125.0"/>
+<text x="862.0" y="129.0" font-size="10px" text-anchor="end" font-weight="normal" fill="#111827">51.2</text>
+<line class="grid" x1="868.0" y1="84.0" x2="1558.0" y2="84.0"/>
+<text x="862.0" y="88.0" font-size="10px" text-anchor="end" font-weight="normal" fill="#111827">68.3</text>
+<rect x="897.1" y="101.6" width="13.0" height="146.4" fill="#2563eb"/>
+<rect x="911.1" y="212.0" width="13.0" height="36.0" fill="#f59e0b"/>
+<rect x="925.1" y="195.2" width="13.0" height="52.8" fill="#16a34a"/>
+<text x="911.1" y="264.0" font-size="9px" text-anchor="middle" font-weight="normal" fill="#111827">Q-RT/L</text>
+<rect x="983.4" y="221.6" width="13.0" height="26.4" fill="#2563eb"/>
+<rect x="997.4" y="202.4" width="13.0" height="45.6" fill="#f59e0b"/>
+<rect x="1011.4" y="197.6" width="13.0" height="50.4" fill="#16a34a"/>
+<text x="997.4" y="264.0" font-size="9px" text-anchor="middle" font-weight="normal" fill="#111827">Q-RT/S</text>
+<rect x="1069.6" y="226.4" width="13.0" height="21.6" fill="#2563eb"/>
+<rect x="1083.6" y="207.2" width="13.0" height="40.8" fill="#f59e0b"/>
+<rect x="1097.6" y="207.2" width="13.0" height="40.8" fill="#16a34a"/>
+<text x="1083.6" y="264.0" font-size="9px" text-anchor="middle" font-weight="normal" fill="#111827">Q-Z/L</text>
+<rect x="1155.9" y="233.6" width="13.0" height="14.4" fill="#2563eb"/>
+<rect x="1169.9" y="207.2" width="13.0" height="40.8" fill="#f59e0b"/>
+<rect x="1183.9" y="214.4" width="13.0" height="33.6" fill="#16a34a"/>
+<text x="1169.9" y="264.0" font-size="9px" text-anchor="middle" font-weight="normal" fill="#111827">Q-Z/S</text>
+<rect x="1242.1" y="243.2" width="13.0" height="4.8" fill="#2563eb"/>
+<rect x="1256.1" y="243.2" width="13.0" height="4.8" fill="#f59e0b"/>
+<rect x="1270.1" y="240.8" width="13.0" height="7.2" fill="#16a34a"/>
+<text x="1256.1" y="264.0" font-size="9px" text-anchor="middle" font-weight="normal" fill="#111827">R-RT/L</text>
+<rect x="1328.4" y="233.6" width="13.0" height="14.4" fill="#2563eb"/>
+<rect x="1342.4" y="221.6" width="13.0" height="26.4" fill="#f59e0b"/>
+<rect x="1356.4" y="221.6" width="13.0" height="26.4" fill="#16a34a"/>
+<text x="1342.4" y="264.0" font-size="9px" text-anchor="middle" font-weight="normal" fill="#111827">R-RT/S</text>
+<rect x="1414.6" y="231.2" width="13.0" height="16.8" fill="#2563eb"/>
+<rect x="1428.6" y="226.4" width="13.0" height="21.6" fill="#f59e0b"/>
+<rect x="1442.6" y="226.4" width="13.0" height="21.6" fill="#16a34a"/>
+<text x="1428.6" y="264.0" font-size="9px" text-anchor="middle" font-weight="normal" fill="#111827">R-Z/L</text>
+<rect x="1500.9" y="228.8" width="13.0" height="19.2" fill="#2563eb"/>
+<rect x="1514.9" y="216.8" width="13.0" height="31.2" fill="#f59e0b"/>
+<rect x="1528.9" y="219.2" width="13.0" height="28.8" fill="#16a34a"/>
+<text x="1514.9" y="264.0" font-size="9px" text-anchor="middle" font-weight="normal" fill="#111827">R-Z/S</text>
+<rect x="868.0" y="274.0" width="10" height="10" fill="#2563eb"/>
+<text x="882.0" y="284.0" font-size="10px" text-anchor="start" font-weight="normal" fill="#111827">64B</text>
+<rect x="968.0" y="274.0" width="10" height="10" fill="#f59e0b"/>
+<text x="982.0" y="284.0" font-size="10px" text-anchor="start" font-weight="normal" fill="#111827">256B</text>
+<rect x="1068.0" y="274.0" width="10" height="10" fill="#16a34a"/>
+<text x="1082.0" y="284.0" font-size="10px" text-anchor="start" font-weight="normal" fill="#111827">1024B</text>
+<text x="826.0" y="166.0" font-size="10px" text-anchor="middle" font-weight="normal" fill="#111827">ms</text>
+<text x="28.0" y="340.0" font-size="14px" text-anchor="start" font-weight="bold" fill="#111827">RTT max</text>
+<rect class="frame" x="78.0" y="354.0" width="690.0" height="164.0"/>
+<line class="grid" x1="78.0" y1="518.0" x2="768.0" y2="518.0"/>
+<text x="72.0" y="522.0" font-size="10px" text-anchor="end" font-weight="normal" fill="#111827">0</text>
+<line class="grid" x1="78.0" y1="477.0" x2="768.0" y2="477.0"/>
+<text x="72.0" y="481.0" font-size="10px" text-anchor="end" font-weight="normal" fill="#111827">33</text>
+<line class="grid" x1="78.0" y1="436.0" x2="768.0" y2="436.0"/>
+<text x="72.0" y="440.0" font-size="10px" text-anchor="end" font-weight="normal" fill="#111827">66.1</text>
+<line class="grid" x1="78.0" y1="395.0" x2="768.0" y2="395.0"/>
+<text x="72.0" y="399.0" font-size="10px" text-anchor="end" font-weight="normal" fill="#111827">99.1</text>
+<line class="grid" x1="78.0" y1="354.0" x2="768.0" y2="354.0"/>
+<text x="72.0" y="358.0" font-size="10px" text-anchor="end" font-weight="normal" fill="#111827">132</text>
+<rect x="107.1" y="371.6" width="13.0" height="146.4" fill="#2563eb"/>
+<rect x="121.1" y="495.7" width="13.0" height="22.3" fill="#f59e0b"/>
+<rect x="135.1" y="488.2" width="13.0" height="29.8" fill="#16a34a"/>
+<text x="121.1" y="534.0" font-size="9px" text-anchor="middle" font-weight="normal" fill="#111827">Q-RT/L</text>
+<rect x="193.4" y="501.9" width="13.0" height="16.1" fill="#2563eb"/>
+<rect x="207.4" y="479.5" width="13.0" height="38.5" fill="#f59e0b"/>
+<rect x="221.4" y="478.3" width="13.0" height="39.7" fill="#16a34a"/>
+<text x="207.4" y="534.0" font-size="9px" text-anchor="middle" font-weight="normal" fill="#111827">Q-RT/S</text>
+<rect x="279.6" y="501.9" width="13.0" height="16.1" fill="#2563eb"/>
+<rect x="293.6" y="488.2" width="13.0" height="29.8" fill="#f59e0b"/>
+<rect x="307.6" y="494.4" width="13.0" height="23.6" fill="#16a34a"/>
+<text x="293.6" y="534.0" font-size="9px" text-anchor="middle" font-weight="normal" fill="#111827">Q-Z/L</text>
+<rect x="365.9" y="509.3" width="13.0" height="8.7" fill="#2563eb"/>
+<rect x="379.9" y="483.3" width="13.0" height="34.7" fill="#f59e0b"/>
+<rect x="393.9" y="494.4" width="13.0" height="23.6" fill="#16a34a"/>
+<text x="379.9" y="534.0" font-size="9px" text-anchor="middle" font-weight="normal" fill="#111827">Q-Z/S</text>
+<rect x="452.1" y="513.0" width="13.0" height="5.0" fill="#2563eb"/>
+<rect x="466.1" y="513.0" width="13.0" height="5.0" fill="#f59e0b"/>
+<rect x="480.1" y="513.0" width="13.0" height="5.0" fill="#16a34a"/>
+<text x="466.1" y="534.0" font-size="9px" text-anchor="middle" font-weight="normal" fill="#111827">R-RT/L</text>
+<rect x="538.4" y="504.3" width="13.0" height="13.7" fill="#2563eb"/>
+<rect x="552.4" y="459.7" width="13.0" height="58.3" fill="#f59e0b"/>
+<rect x="566.4" y="457.2" width="13.0" height="60.8" fill="#16a34a"/>
+<text x="552.4" y="534.0" font-size="9px" text-anchor="middle" font-weight="normal" fill="#111827">R-RT/S</text>
+<rect x="624.6" y="508.1" width="13.0" height="9.9" fill="#2563eb"/>
+<rect x="638.6" y="478.3" width="13.0" height="39.7" fill="#f59e0b"/>
+<rect x="652.6" y="475.8" width="13.0" height="42.2" fill="#16a34a"/>
+<text x="638.6" y="534.0" font-size="9px" text-anchor="middle" font-weight="normal" fill="#111827">R-Z/L</text>
+<rect x="710.9" y="503.1" width="13.0" height="14.9" fill="#2563eb"/>
+<rect x="724.9" y="456.0" width="13.0" height="62.0" fill="#f59e0b"/>
+<rect x="738.9" y="456.0" width="13.0" height="62.0" fill="#16a34a"/>
+<text x="724.9" y="534.0" font-size="9px" text-anchor="middle" font-weight="normal" fill="#111827">R-Z/S</text>
+<rect x="78.0" y="544.0" width="10" height="10" fill="#2563eb"/>
+<text x="92.0" y="554.0" font-size="10px" text-anchor="start" font-weight="normal" fill="#111827">64B</text>
+<rect x="178.0" y="544.0" width="10" height="10" fill="#f59e0b"/>
+<text x="192.0" y="554.0" font-size="10px" text-anchor="start" font-weight="normal" fill="#111827">256B</text>
+<rect x="278.0" y="544.0" width="10" height="10" fill="#16a34a"/>
+<text x="292.0" y="554.0" font-size="10px" text-anchor="start" font-weight="normal" fill="#111827">1024B</text>
+<text x="36.0" y="436.0" font-size="10px" text-anchor="middle" font-weight="normal" fill="#111827">ms</text>
+<text x="818.0" y="340.0" font-size="14px" text-anchor="start" font-weight="bold" fill="#111827">RTT P50</text>
+<rect class="frame" x="868.0" y="354.0" width="690.0" height="164.0"/>
+<line class="grid" x1="868.0" y1="518.0" x2="1558.0" y2="518.0"/>
+<text x="862.0" y="522.0" font-size="10px" text-anchor="end" font-weight="normal" fill="#111827">0</text>
+<line class="grid" x1="868.0" y1="477.0" x2="1558.0" y2="477.0"/>
+<text x="862.0" y="481.0" font-size="10px" text-anchor="end" font-weight="normal" fill="#111827">5.88</text>
+<line class="grid" x1="868.0" y1="436.0" x2="1558.0" y2="436.0"/>
+<text x="862.0" y="440.0" font-size="10px" text-anchor="end" font-weight="normal" fill="#111827">11.8</text>
+<line class="grid" x1="868.0" y1="395.0" x2="1558.0" y2="395.0"/>
+<text x="862.0" y="399.0" font-size="10px" text-anchor="end" font-weight="normal" fill="#111827">17.6</text>
+<line class="grid" x1="868.0" y1="354.0" x2="1558.0" y2="354.0"/>
+<text x="862.0" y="358.0" font-size="10px" text-anchor="end" font-weight="normal" fill="#111827">23.5</text>
+<rect x="897.1" y="490.1" width="13.0" height="27.9" fill="#2563eb"/>
+<rect x="911.1" y="434.3" width="13.0" height="83.7" fill="#f59e0b"/>
+<rect x="925.1" y="371.6" width="13.0" height="146.4" fill="#16a34a"/>
+<text x="911.1" y="534.0" font-size="9px" text-anchor="middle" font-weight="normal" fill="#111827">Q-RT/L</text>
+<rect x="983.4" y="455.2" width="13.0" height="62.8" fill="#2563eb"/>
+<rect x="997.4" y="469.2" width="13.0" height="48.8" fill="#f59e0b"/>
+<rect x="1011.4" y="448.3" width="13.0" height="69.7" fill="#16a34a"/>
+<text x="997.4" y="534.0" font-size="9px" text-anchor="middle" font-weight="normal" fill="#111827">Q-RT/S</text>
+<rect x="1069.6" y="483.1" width="13.0" height="34.9" fill="#2563eb"/>
+<rect x="1083.6" y="448.3" width="13.0" height="69.7" fill="#f59e0b"/>
+<rect x="1097.6" y="406.4" width="13.0" height="111.6" fill="#16a34a"/>
+<text x="1083.6" y="534.0" font-size="9px" text-anchor="middle" font-weight="normal" fill="#111827">Q-Z/L</text>
+<rect x="1155.9" y="483.1" width="13.0" height="34.9" fill="#2563eb"/>
+<rect x="1169.9" y="469.2" width="13.0" height="48.8" fill="#f59e0b"/>
+<rect x="1183.9" y="455.2" width="13.0" height="62.8" fill="#16a34a"/>
+<text x="1169.9" y="534.0" font-size="9px" text-anchor="middle" font-weight="normal" fill="#111827">Q-Z/S</text>
+<rect x="1242.1" y="497.1" width="13.0" height="20.9" fill="#2563eb"/>
+<rect x="1256.1" y="497.1" width="13.0" height="20.9" fill="#f59e0b"/>
+<rect x="1270.1" y="497.1" width="13.0" height="20.9" fill="#16a34a"/>
+<text x="1256.1" y="534.0" font-size="9px" text-anchor="middle" font-weight="normal" fill="#111827">R-RT/L</text>
+<rect x="1328.4" y="476.2" width="13.0" height="41.8" fill="#2563eb"/>
+<rect x="1342.4" y="469.2" width="13.0" height="48.8" fill="#f59e0b"/>
+<rect x="1356.4" y="469.2" width="13.0" height="48.8" fill="#16a34a"/>
+<text x="1342.4" y="534.0" font-size="9px" text-anchor="middle" font-weight="normal" fill="#111827">R-RT/S</text>
+<rect x="1414.6" y="469.2" width="13.0" height="48.8" fill="#2563eb"/>
+<rect x="1428.6" y="469.2" width="13.0" height="48.8" fill="#f59e0b"/>
+<rect x="1442.6" y="469.2" width="13.0" height="48.8" fill="#16a34a"/>
+<text x="1428.6" y="534.0" font-size="9px" text-anchor="middle" font-weight="normal" fill="#111827">R-Z/L</text>
+<rect x="1500.9" y="462.2" width="13.0" height="55.8" fill="#2563eb"/>
+<rect x="1514.9" y="455.2" width="13.0" height="62.8" fill="#f59e0b"/>
+<rect x="1528.9" y="462.2" width="13.0" height="55.8" fill="#16a34a"/>
+<text x="1514.9" y="534.0" font-size="9px" text-anchor="middle" font-weight="normal" fill="#111827">R-Z/S</text>
+<rect x="868.0" y="544.0" width="10" height="10" fill="#2563eb"/>
+<text x="882.0" y="554.0" font-size="10px" text-anchor="start" font-weight="normal" fill="#111827">64B</text>
+<rect x="968.0" y="544.0" width="10" height="10" fill="#f59e0b"/>
+<text x="982.0" y="554.0" font-size="10px" text-anchor="start" font-weight="normal" fill="#111827">256B</text>
+<rect x="1068.0" y="544.0" width="10" height="10" fill="#16a34a"/>
+<text x="1082.0" y="554.0" font-size="10px" text-anchor="start" font-weight="normal" fill="#111827">1024B</text>
+<text x="826.0" y="436.0" font-size="10px" text-anchor="middle" font-weight="normal" fill="#111827">ms</text>
+<text x="28.0" y="610.0" font-size="14px" text-anchor="start" font-weight="bold" fill="#111827">RTT P95</text>
+<rect class="frame" x="78.0" y="624.0" width="690.0" height="164.0"/>
+<line class="grid" x1="78.0" y1="788.0" x2="768.0" y2="788.0"/>
+<text x="72.0" y="792.0" font-size="10px" text-anchor="end" font-weight="normal" fill="#111827">0</text>
+<line class="grid" x1="78.0" y1="747.0" x2="768.0" y2="747.0"/>
+<text x="72.0" y="751.0" font-size="10px" text-anchor="end" font-weight="normal" fill="#111827">5.88</text>
+<line class="grid" x1="78.0" y1="706.0" x2="768.0" y2="706.0"/>
+<text x="72.0" y="710.0" font-size="10px" text-anchor="end" font-weight="normal" fill="#111827">11.8</text>
+<line class="grid" x1="78.0" y1="665.0" x2="768.0" y2="665.0"/>
+<text x="72.0" y="669.0" font-size="10px" text-anchor="end" font-weight="normal" fill="#111827">17.6</text>
+<line class="grid" x1="78.0" y1="624.0" x2="768.0" y2="624.0"/>
+<text x="72.0" y="628.0" font-size="10px" text-anchor="end" font-weight="normal" fill="#111827">23.5</text>
+<rect x="107.1" y="760.1" width="13.0" height="27.9" fill="#2563eb"/>
+<rect x="121.1" y="704.3" width="13.0" height="83.7" fill="#f59e0b"/>
+<rect x="135.1" y="641.6" width="13.0" height="146.4" fill="#16a34a"/>
+<text x="121.1" y="804.0" font-size="9px" text-anchor="middle" font-weight="normal" fill="#111827">Q-RT/L</text>
+<rect x="193.4" y="725.2" width="13.0" height="62.8" fill="#2563eb"/>
+<rect x="207.4" y="739.2" width="13.0" height="48.8" fill="#f59e0b"/>
+<rect x="221.4" y="718.3" width="13.0" height="69.7" fill="#16a34a"/>
+<text x="207.4" y="804.0" font-size="9px" text-anchor="middle" font-weight="normal" fill="#111827">Q-RT/S</text>
+<rect x="279.6" y="753.1" width="13.0" height="34.9" fill="#2563eb"/>
+<rect x="293.6" y="718.3" width="13.0" height="69.7" fill="#f59e0b"/>
+<rect x="307.6" y="676.4" width="13.0" height="111.6" fill="#16a34a"/>
+<text x="293.6" y="804.0" font-size="9px" text-anchor="middle" font-weight="normal" fill="#111827">Q-Z/L</text>
+<rect x="365.9" y="753.1" width="13.0" height="34.9" fill="#2563eb"/>
+<rect x="379.9" y="739.2" width="13.0" height="48.8" fill="#f59e0b"/>
+<rect x="393.9" y="725.2" width="13.0" height="62.8" fill="#16a34a"/>
+<text x="379.9" y="804.0" font-size="9px" text-anchor="middle" font-weight="normal" fill="#111827">Q-Z/S</text>
+<rect x="452.1" y="767.1" width="13.0" height="20.9" fill="#2563eb"/>
+<rect x="466.1" y="767.1" width="13.0" height="20.9" fill="#f59e0b"/>
+<rect x="480.1" y="760.1" width="13.0" height="27.9" fill="#16a34a"/>
+<text x="466.1" y="804.0" font-size="9px" text-anchor="middle" font-weight="normal" fill="#111827">R-RT/L</text>
+<rect x="538.4" y="739.2" width="13.0" height="48.8" fill="#2563eb"/>
+<rect x="552.4" y="732.2" width="13.0" height="55.8" fill="#f59e0b"/>
+<rect x="566.4" y="732.2" width="13.0" height="55.8" fill="#16a34a"/>
+<text x="552.4" y="804.0" font-size="9px" text-anchor="middle" font-weight="normal" fill="#111827">R-RT/S</text>
+<rect x="624.6" y="732.2" width="13.0" height="55.8" fill="#2563eb"/>
+<rect x="638.6" y="732.2" width="13.0" height="55.8" fill="#f59e0b"/>
+<rect x="652.6" y="732.2" width="13.0" height="55.8" fill="#16a34a"/>
+<text x="638.6" y="804.0" font-size="9px" text-anchor="middle" font-weight="normal" fill="#111827">R-Z/L</text>
+<rect x="710.9" y="718.3" width="13.0" height="69.7" fill="#2563eb"/>
+<rect x="724.9" y="711.3" width="13.0" height="76.7" fill="#f59e0b"/>
+<rect x="738.9" y="718.3" width="13.0" height="69.7" fill="#16a34a"/>
+<text x="724.9" y="804.0" font-size="9px" text-anchor="middle" font-weight="normal" fill="#111827">R-Z/S</text>
+<rect x="78.0" y="814.0" width="10" height="10" fill="#2563eb"/>
+<text x="92.0" y="824.0" font-size="10px" text-anchor="start" font-weight="normal" fill="#111827">64B</text>
+<rect x="178.0" y="814.0" width="10" height="10" fill="#f59e0b"/>
+<text x="192.0" y="824.0" font-size="10px" text-anchor="start" font-weight="normal" fill="#111827">256B</text>
+<rect x="278.0" y="814.0" width="10" height="10" fill="#16a34a"/>
+<text x="292.0" y="824.0" font-size="10px" text-anchor="start" font-weight="normal" fill="#111827">1024B</text>
+<text x="36.0" y="706.0" font-size="10px" text-anchor="middle" font-weight="normal" fill="#111827">ms</text>
+<text x="818.0" y="610.0" font-size="14px" text-anchor="start" font-weight="bold" fill="#111827">RTT P99</text>
+<rect class="frame" x="868.0" y="624.0" width="690.0" height="164.0"/>
+<line class="grid" x1="868.0" y1="788.0" x2="1558.0" y2="788.0"/>
+<text x="862.0" y="792.0" font-size="10px" text-anchor="end" font-weight="normal" fill="#111827">0</text>
+<line class="grid" x1="868.0" y1="747.0" x2="1558.0" y2="747.0"/>
+<text x="862.0" y="751.0" font-size="10px" text-anchor="end" font-weight="normal" fill="#111827">5.88</text>
+<line class="grid" x1="868.0" y1="706.0" x2="1558.0" y2="706.0"/>
+<text x="862.0" y="710.0" font-size="10px" text-anchor="end" font-weight="normal" fill="#111827">11.8</text>
+<line class="grid" x1="868.0" y1="665.0" x2="1558.0" y2="665.0"/>
+<text x="862.0" y="669.0" font-size="10px" text-anchor="end" font-weight="normal" fill="#111827">17.6</text>
+<line class="grid" x1="868.0" y1="624.0" x2="1558.0" y2="624.0"/>
+<text x="862.0" y="628.0" font-size="10px" text-anchor="end" font-weight="normal" fill="#111827">23.5</text>
+<rect x="897.1" y="760.1" width="13.0" height="27.9" fill="#2563eb"/>
+<rect x="911.1" y="704.3" width="13.0" height="83.7" fill="#f59e0b"/>
+<rect x="925.1" y="641.6" width="13.0" height="146.4" fill="#16a34a"/>
+<text x="911.1" y="804.0" font-size="9px" text-anchor="middle" font-weight="normal" fill="#111827">Q-RT/L</text>
+<rect x="983.4" y="725.2" width="13.0" height="62.8" fill="#2563eb"/>
+<rect x="997.4" y="739.2" width="13.0" height="48.8" fill="#f59e0b"/>
+<rect x="1011.4" y="718.3" width="13.0" height="69.7" fill="#16a34a"/>
+<text x="997.4" y="804.0" font-size="9px" text-anchor="middle" font-weight="normal" fill="#111827">Q-RT/S</text>
+<rect x="1069.6" y="753.1" width="13.0" height="34.9" fill="#2563eb"/>
+<rect x="1083.6" y="718.3" width="13.0" height="69.7" fill="#f59e0b"/>
+<rect x="1097.6" y="676.4" width="13.0" height="111.6" fill="#16a34a"/>
+<text x="1083.6" y="804.0" font-size="9px" text-anchor="middle" font-weight="normal" fill="#111827">Q-Z/L</text>
+<rect x="1155.9" y="753.1" width="13.0" height="34.9" fill="#2563eb"/>
+<rect x="1169.9" y="739.2" width="13.0" height="48.8" fill="#f59e0b"/>
+<rect x="1183.9" y="725.2" width="13.0" height="62.8" fill="#16a34a"/>
+<text x="1169.9" y="804.0" font-size="9px" text-anchor="middle" font-weight="normal" fill="#111827">Q-Z/S</text>
+<rect x="1242.1" y="767.1" width="13.0" height="20.9" fill="#2563eb"/>
+<rect x="1256.1" y="767.1" width="13.0" height="20.9" fill="#f59e0b"/>
+<rect x="1270.1" y="760.1" width="13.0" height="27.9" fill="#16a34a"/>
+<text x="1256.1" y="804.0" font-size="9px" text-anchor="middle" font-weight="normal" fill="#111827">R-RT/L</text>
+<rect x="1328.4" y="739.2" width="13.0" height="48.8" fill="#2563eb"/>
+<rect x="1342.4" y="732.2" width="13.0" height="55.8" fill="#f59e0b"/>
+<rect x="1356.4" y="732.2" width="13.0" height="55.8" fill="#16a34a"/>
+<text x="1342.4" y="804.0" font-size="9px" text-anchor="middle" font-weight="normal" fill="#111827">R-RT/S</text>
+<rect x="1414.6" y="732.2" width="13.0" height="55.8" fill="#2563eb"/>
+<rect x="1428.6" y="732.2" width="13.0" height="55.8" fill="#f59e0b"/>
+<rect x="1442.6" y="732.2" width="13.0" height="55.8" fill="#16a34a"/>
+<text x="1428.6" y="804.0" font-size="9px" text-anchor="middle" font-weight="normal" fill="#111827">R-Z/L</text>
+<rect x="1500.9" y="718.3" width="13.0" height="69.7" fill="#2563eb"/>
+<rect x="1514.9" y="711.3" width="13.0" height="76.7" fill="#f59e0b"/>
+<rect x="1528.9" y="718.3" width="13.0" height="69.7" fill="#16a34a"/>
+<text x="1514.9" y="804.0" font-size="9px" text-anchor="middle" font-weight="normal" fill="#111827">R-Z/S</text>
+<rect x="868.0" y="814.0" width="10" height="10" fill="#2563eb"/>
+<text x="882.0" y="824.0" font-size="10px" text-anchor="start" font-weight="normal" fill="#111827">64B</text>
+<rect x="968.0" y="814.0" width="10" height="10" fill="#f59e0b"/>
+<text x="982.0" y="824.0" font-size="10px" text-anchor="start" font-weight="normal" fill="#111827">256B</text>
+<rect x="1068.0" y="814.0" width="10" height="10" fill="#16a34a"/>
+<text x="1082.0" y="824.0" font-size="10px" text-anchor="start" font-weight="normal" fill="#111827">1024B</text>
+<text x="826.0" y="706.0" font-size="10px" text-anchor="middle" font-weight="normal" fill="#111827">ms</text>
+<text x="28.0" y="880.0" font-size="14px" text-anchor="start" font-weight="bold" fill="#111827">RTT P99.9</text>
+<rect class="frame" x="78.0" y="894.0" width="690.0" height="164.0"/>
+<line class="grid" x1="78.0" y1="1058.0" x2="768.0" y2="1058.0"/>
+<text x="72.0" y="1062.0" font-size="10px" text-anchor="end" font-weight="normal" fill="#111827">0</text>
+<line class="grid" x1="78.0" y1="1017.0" x2="768.0" y2="1017.0"/>
+<text x="72.0" y="1021.0" font-size="10px" text-anchor="end" font-weight="normal" fill="#111827">5.88</text>
+<line class="grid" x1="78.0" y1="976.0" x2="768.0" y2="976.0"/>
+<text x="72.0" y="980.0" font-size="10px" text-anchor="end" font-weight="normal" fill="#111827">11.8</text>
+<line class="grid" x1="78.0" y1="935.0" x2="768.0" y2="935.0"/>
+<text x="72.0" y="939.0" font-size="10px" text-anchor="end" font-weight="normal" fill="#111827">17.6</text>
+<line class="grid" x1="78.0" y1="894.0" x2="768.0" y2="894.0"/>
+<text x="72.0" y="898.0" font-size="10px" text-anchor="end" font-weight="normal" fill="#111827">23.5</text>
+<rect x="107.1" y="1030.1" width="13.0" height="27.9" fill="#2563eb"/>
+<rect x="121.1" y="974.3" width="13.0" height="83.7" fill="#f59e0b"/>
+<rect x="135.1" y="911.6" width="13.0" height="146.4" fill="#16a34a"/>
+<text x="121.1" y="1074.0" font-size="9px" text-anchor="middle" font-weight="normal" fill="#111827">Q-RT/L</text>
+<rect x="193.4" y="995.2" width="13.0" height="62.8" fill="#2563eb"/>
+<rect x="207.4" y="1009.2" width="13.0" height="48.8" fill="#f59e0b"/>
+<rect x="221.4" y="988.3" width="13.0" height="69.7" fill="#16a34a"/>
+<text x="207.4" y="1074.0" font-size="9px" text-anchor="middle" font-weight="normal" fill="#111827">Q-RT/S</text>
+<rect x="279.6" y="1023.1" width="13.0" height="34.9" fill="#2563eb"/>
+<rect x="293.6" y="988.3" width="13.0" height="69.7" fill="#f59e0b"/>
+<rect x="307.6" y="946.4" width="13.0" height="111.6" fill="#16a34a"/>
+<text x="293.6" y="1074.0" font-size="9px" text-anchor="middle" font-weight="normal" fill="#111827">Q-Z/L</text>
+<rect x="365.9" y="1023.1" width="13.0" height="34.9" fill="#2563eb"/>
+<rect x="379.9" y="1009.2" width="13.0" height="48.8" fill="#f59e0b"/>
+<rect x="393.9" y="995.2" width="13.0" height="62.8" fill="#16a34a"/>
+<text x="379.9" y="1074.0" font-size="9px" text-anchor="middle" font-weight="normal" fill="#111827">Q-Z/S</text>
+<rect x="452.1" y="1037.1" width="13.0" height="20.9" fill="#2563eb"/>
+<rect x="466.1" y="1037.1" width="13.0" height="20.9" fill="#f59e0b"/>
+<rect x="480.1" y="1030.1" width="13.0" height="27.9" fill="#16a34a"/>
+<text x="466.1" y="1074.0" font-size="9px" text-anchor="middle" font-weight="normal" fill="#111827">R-RT/L</text>
+<rect x="538.4" y="1009.2" width="13.0" height="48.8" fill="#2563eb"/>
+<rect x="552.4" y="1002.2" width="13.0" height="55.8" fill="#f59e0b"/>
+<rect x="566.4" y="1002.2" width="13.0" height="55.8" fill="#16a34a"/>
+<text x="552.4" y="1074.0" font-size="9px" text-anchor="middle" font-weight="normal" fill="#111827">R-RT/S</text>
+<rect x="624.6" y="1002.2" width="13.0" height="55.8" fill="#2563eb"/>
+<rect x="638.6" y="1002.2" width="13.0" height="55.8" fill="#f59e0b"/>
+<rect x="652.6" y="1002.2" width="13.0" height="55.8" fill="#16a34a"/>
+<text x="638.6" y="1074.0" font-size="9px" text-anchor="middle" font-weight="normal" fill="#111827">R-Z/L</text>
+<rect x="710.9" y="988.3" width="13.0" height="69.7" fill="#2563eb"/>
+<rect x="724.9" y="981.3" width="13.0" height="76.7" fill="#f59e0b"/>
+<rect x="738.9" y="988.3" width="13.0" height="69.7" fill="#16a34a"/>
+<text x="724.9" y="1074.0" font-size="9px" text-anchor="middle" font-weight="normal" fill="#111827">R-Z/S</text>
+<rect x="78.0" y="1084.0" width="10" height="10" fill="#2563eb"/>
+<text x="92.0" y="1094.0" font-size="10px" text-anchor="start" font-weight="normal" fill="#111827">64B</text>
+<rect x="178.0" y="1084.0" width="10" height="10" fill="#f59e0b"/>
+<text x="192.0" y="1094.0" font-size="10px" text-anchor="start" font-weight="normal" fill="#111827">256B</text>
+<rect x="278.0" y="1084.0" width="10" height="10" fill="#16a34a"/>
+<text x="292.0" y="1094.0" font-size="10px" text-anchor="start" font-weight="normal" fill="#111827">1024B</text>
+<text x="36.0" y="976.0" font-size="10px" text-anchor="middle" font-weight="normal" fill="#111827">ms</text>
+<rect x="1080.0" y="1120.0" width="12" height="12" fill="#2563eb"/>
+<text x="1097.0" y="1130.0" font-size="11px" text-anchor="start" font-weight="normal" fill="#111827">Q-RT/L</text>
+<rect x="1230.0" y="1120.0" width="12" height="12" fill="#0891b2"/>
+<text x="1247.0" y="1130.0" font-size="11px" text-anchor="start" font-weight="normal" fill="#111827">Q-RT/S</text>
+<rect x="1380.0" y="1120.0" width="12" height="12" fill="#16a34a"/>
+<text x="1397.0" y="1130.0" font-size="11px" text-anchor="start" font-weight="normal" fill="#111827">Q-Z/L</text>
+<rect x="1530.0" y="1120.0" width="12" height="12" fill="#65a30d"/>
+<text x="1547.0" y="1130.0" font-size="11px" text-anchor="start" font-weight="normal" fill="#111827">Q-Z/S</text>
+<rect x="1080.0" y="1140.0" width="12" height="12" fill="#ea580c"/>
+<text x="1097.0" y="1150.0" font-size="11px" text-anchor="start" font-weight="normal" fill="#111827">R-RT/L</text>
+<rect x="1230.0" y="1140.0" width="12" height="12" fill="#c2410c"/>
+<text x="1247.0" y="1150.0" font-size="11px" text-anchor="start" font-weight="normal" fill="#111827">R-RT/S</text>
+<rect x="1380.0" y="1140.0" width="12" height="12" fill="#9333ea"/>
+<text x="1397.0" y="1150.0" font-size="11px" text-anchor="start" font-weight="normal" fill="#111827">R-Z/L</text>
+<rect x="1530.0" y="1140.0" width="12" height="12" fill="#db2777"/>
+<text x="1547.0" y="1150.0" font-size="11px" text-anchor="start" font-weight="normal" fill="#111827">R-Z/S</text>
+</svg>

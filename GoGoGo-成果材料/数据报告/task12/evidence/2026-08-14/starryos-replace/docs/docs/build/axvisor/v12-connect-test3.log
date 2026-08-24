@@ -1,0 +1,141 @@
+qemu-system-aarch64: warning: hub 77 is not connected to host network
+root=/dev/nvme0n1 rw init=/bin/sh
+VM Load @PA:0x40200000
+VM Load Offset: 0xffff0000c0200000
+Memory Map:
+  Free   0x00000040000000 - 0x00000040200000 (2 MiB)
+  KImg   0x00000040200000 - 0x00000043a00000 (56 MiB)
+  Free   0x00000043a00000 - 0x00000240000000 (7.94 GiB)
+Initialize RAM allocator: 0x43a00000..0x240000000
+Reserving CPU-local areas
+CPU-local area stride: 0x44000 bytes
+Total CPU-local allocation: 0x110000 bytes (4 CPUs)
+Flushed RAM used range to memory map: 0x43a00000..0x43b00000, current: 0x43b00000
+Flushed RAM used range to memory map: 0x43b00000..0x43c10000, current: 0x43c10000
+CPU-local areas allocated at 0x43b00000 - 0x43c10000
+EL: 2
+Mapping early memory regions...
+Ram                 : [0x0000000040000000, 0x0000000240000000) -> [0x0000000040000000, 0x0000000240000000) (8 GiB)
+KImage              : [0x0000ffff80000000, 0x0000ffff83800000) -> [0x0000000040200000, 0x0000000043a00000) (56 MiB)
+PerCpu              : [0x0000ff0043b00000, 0x0000ff0043c10000) -> [0x0000000043b00000, 0x0000000043c10000) (1.06 MiB)
+Debug serial        : [0x0000000009000000, 0x0000000009001000) -> [0x0000000009000000, 0x0000000009001000) (4 KiB)
+Boot page table at physical address: PA:0x43c10000
+Setting up table registers...
+MMU Entry point at physical address: 0x40456bf4
+Trap vector at 0xffff8025a800
+Memory Map:
+  MMIO   0x00000009000000 - 0x00000009001000 (4 KiB)
+  Free   0x00000040000000 - 0x00000040200000 (2 MiB)
+  KImg   0x00000040200000 - 0x00000043a00000 (56 MiB)
+  Rsv    0x00000043a00000 - 0x00000043b00000 (1 MiB)
+  PerCPU 0x00000043b00000 - 0x00000043c10000 (1.06 MiB)
+  Rsv    0x00000043c10000 - 0x00000043c1a000 (40 KiB)
+  Free   0x00000043c1a000 - 0x00000240000000 (7.94 GiB)
+Jumping to main entry point at 0xffff8023ea20 with SP 0x0000ff0043b44000
+
+       d8888                            .d88888b.   .d8888b.
+      d88888                           d88P" "Y88b d88P  Y88b
+     d88P888                           888     888 Y88b.
+    d88P 888 888d888  .d8888b  .d88b.  888     888  "Y888b.
+   d88P  888 888P"   d88P"    d8P  Y8b 888     888     "Y88b.
+  d88P   888 888     888      88888888 888     888       "888
+ d8888888888 888     Y88b.    Y8b.     Y88b. .d88P Y88b  d88P
+d88P     888 888      "Y8888P  "Y8888   "Y88888P"   "Y8888P"
+
+arch = aarch64
+platform = linux,dummy-virt
+target = aarch64-unknown-none-softfloat
+build_mode = 
+log_level = info
+backtrace = false
+smp = 3
+
+[37m[  0.063497 ax_runtime:220] [32mLogging is enabled.[m
+[m[37m[  0.063882 ax_runtime:221] [32mPrimary CPU 0 started, arg = 0x43a00000.[m
+[m[37m[  0.064008 ax_runtime:223] [32mFound physcial memory regions:[m
+[m[37m[  0.064928 ax_runtime:225] [32m  [PA:0x9000000, PA:0x9001000) mmio (READ | WRITE | DEVICE | RESERVED)[m
+[m[37m[  0.065179 ax_runtime:225] [32m  [PA:0x40000000, PA:0x40200000) free memory (READ | WRITE | FREE)[m
+[m[37m[  0.065346 ax_runtime:225] [32m  [PA:0x40200000, PA:0x43a00000) reserved (READ | WRITE | EXECUTE | RESERVED)[m
+[m[37m[  0.065503 ax_runtime:225] [32m  [PA:0x43a00000, PA:0x43b00000) reserved (READ | WRITE | EXECUTE | RESERVED)[m
+[m[37m[  0.065656 ax_runtime:225] [32m  [PA:0x43b00000, PA:0x43c10000) reserved (READ | WRITE | EXECUTE | RESERVED)[m
+[m[37m[  0.065810 ax_runtime:225] [32m  [PA:0x43c10000, PA:0x43c1a000) reserved (READ | WRITE | EXECUTE | RESERVED)[m
+[m[37m[  0.065965 ax_runtime:225] [32m  [PA:0x43c1a000, PA:0x240000000) free memory (READ | WRITE | FREE)[m
+[m[37m[  0.066123 ax_runtime:373] [32mInitialize global memory allocator...[m
+[m[37m[  0.066246 ax_runtime:374] [32m  use buddy-slab-allocator allocator.[m
+[m[37m[  0.066451 ax_alloc::buddy_slab:158] [32mInitialize global memory allocator, start_vaddr: 0x43c1a000, size: 0x1fc3e6000[m
+[m[37m[  0.072811 ax_alloc::buddy_slab:424] [32mglobal allocator initialized[m
+[m[37m[  0.073015 ax_alloc::buddy_slab:168] [32mAdd memory region, start_vaddr: 0x40000000, size: 0x200000[m
+[m[37m[  0.073195 buddy_slab_allocator::global:151] [32mGlobalAllocator: skip region 0x40000000+0x200000, no allocator-visible memory after 2097152 alignment[m
+[m[37m[  0.073543 ax_runtime:260] [32mkernel aspace: [VA:0x0, VA:0xffffffffffffffff)[m
+[m[37m[  0.073694 ax_mm:103] [32mInitialize virtual memory management...[m
+[m[37m[  0.591557 ax_runtime:272] [32mInitialize platform devices...[m
+[m[37m[  0.596496 someboot::arch::power:23] [32mPower management method : SMC[m
+[m[37m[  0.596654 somehal::driver:5] [32mInitializing rdrive with FDT at 0x43a00000[m
+[m[37m[  0.606846 somehal::arch::gic::v3:284] [32mGICv3 CPU 0 EOI mode: two_step=true[m
+[m[37m[  0.612437 ax_task::api:137] [32mInitialize scheduling...[m
+[m[37m[  0.613377 ax_task::api:145] [32m  use FIFO scheduler.[m
+[m[37m[  0.613621 ax_runtime:298] [32mInitialize interrupt handlers...[m
+[m[37m[  0.615190 ax_runtime::devices:2] [32mProbe platform devices...[m
+[m[37m[  0.635709 ax_driver::block::nvme:42] [32mNVMe PCI endpoint 0000:00:01.0: BAR0=0x8000000000..0x8000004000, int_pin=1, int_line=0[m
+[m[37m[  0.646223 nvme_driver::nvme:161] [32mNVME @0x8000000000 deferred init, version: 1.4.0[m
+[m[37m[  0.646734 ax_driver::block::nvme:74] [32mNVMe block device registered at 0000:00:01.0 with 65 MSI-X vectors[m
+[m[37m[  0.650856 ax_fs_ng::block::runtime::lifecycle::device:300] [32mblock device nvme IRQ source 0 (IrqId { domain: IrqDomainId(9), hwirq: HwIrq(0) }) fixed to CPU 0 for queue mask 0x0[m
+[m[37m[  0.667246 ax_fs_ng::block::runtime::hctx:177] [32mblock hctx 0 bound to CPU 0 with hardware depth 63[m
+[m[37m[  0.667670 ax_fs_ng::block::runtime::lifecycle::device:300] [32mblock device nvme IRQ source 1 (IrqId { domain: IrqDomainId(9), hwirq: HwIrq(1) }) fixed to CPU 0 for queue mask 0x1[m
+[m[37m[  0.673028 ax_fs_ng::root:341] [32m    raw device fs=Some(Ext4)[m
+[m[37m[  0.673186 ax_fs_ng::root:372] [32m  block device 0 (nvme) has no usable partition table; treating the whole disk as a candidate[m
+[m[37m[  0.673555 ax_fs_ng::root:481] [32m  matched root by raw device path on disk0 raw device[m
+[m[37m[  0.673903 ax_fs_ng:86] [32mInitialize filesystem subsystem...[m
+[m[37m[  0.673990 ax_fs_ng:87] [32m  selected root device: disk0 raw device[m
+[m[37m[  0.676557 rsext4::crc32c::arm64:54] [33mID_AA64ISAR0_EL1[19:16]: 0x1[m
+[m[37m[  0.676666 rsext4::crc32c::arm64:57] [33mHardware CRC32C support detected.[m
+[m[37m[  0.686884 rsext4::ext4::mount:331] [32m/lost+found exists (superblock hint inode=11)[m
+[m[37m[  0.687797 rsext4::ext4::mount:466] [32mExt4 filesystem mounted[m
+[m[37m[  0.687896 rsext4::ext4::mount:467] [32m  - block size: 4096 bytes[m
+[m[37m[  0.687988 rsext4::ext4::mount:468] [32m  - total blocks: 8192[m
+[m[37m[  0.688073 rsext4::ext4::mount:469] [32m  - free blocks: 1393[m
+[m[37m[  0.688156 rsext4::ext4::mount:470] [32m  - total inodes: 8192[m
+[m[37m[  0.688240 rsext4::ext4::mount:471] [32m  - free inodes: 8153[m
+[m[37m[  0.688349 rsext4::ext4::sync:13] [32mSyncing filesystem...[m
+[m[37m[  0.712997 rsext4::ext4::mount:550] [32mExt4 filesystem mounted[m
+[m[37m[  0.713806 ax_fs_ng:99] [32m  filesystem type: "ext4"[m
+[m[37m[  0.720845 somehal::arch::gic::v3:284] [32mGICv3 CPU 1 EOI mode: two_step=true[m
+[m[37m[  0.721464 ax_runtime::mp:79] [32mSecondary CPU 1 started.[m
+[m[37m[  0.722164 ax_runtime::mp:110] [32mSecondary CPU 1 init OK.[m
+[m[37m[  0.727587 somehal::arch::gic::v3:284] [32mGICv3 CPU 2 EOI mode: two_step=true[m
+[m[37m[  0.727827 ax_runtime::mp:79] [32mSecondary CPU 2 started.[m
+[m[37m[  0.727867 ax_runtime:346] [32mPrimary CPU 0 init OK.[m
+[m[37m[  0.728008 ax_runtime::mp:110] [32mSecondary CPU 2 init OK.[m
+[m[37m[  0.733357 0:4 ax_fs_ng::block::runtime::hctx:177] [32mblock hctx 1 bound to CPU 1 with hardware depth 63[m
+[m[37m[  0.733558 0:4 ax_fs_ng::block::runtime::hctx:177] [32mblock hctx 2 bound to CPU 2 with hardware depth 63[m
+[m[37m[  0.733873 0:4 ax_fs_ng::block::runtime::lifecycle::device:300] [32mblock device nvme IRQ source 2 (IrqId { domain: IrqDomainId(9), hwirq: HwIrq(2) }) fixed to CPU 1 for queue mask 0x2[m
+[m[37m[  0.734178 0:4 ax_fs_ng::block::runtime::lifecycle::device:300] [32mblock device nvme IRQ source 3 (IrqId { domain: IrqDomainId(9), hwirq: HwIrq(3) }) fixed to CPU 2 for queue mask 0x4[m
+[m[37m[  0.735436 0:2 ax_fs_ng::block::runtime::lifecycle::device:385] [32mblock device nvme online with 3 hctxs across 3 CPUs[m
+[m
+
+       d8888            888     888  d8b
+      d88888            888     888  Y8P
+     d88P888            888     888
+    d88P 888  888  888  Y88b   d88P  888  .d8888b    .d88b.   888d888
+   d88P  888  `Y8bd8P'   Y88b d88P   888  88K       d88""88b  888P"
+  d88P   888    X88K      Y88o88P    888  "Y8888b.  888  888  888
+ d8888888888  .d8""8b.     Y888P     888       X88  Y88..88P  888
+d88P     888  888  888      Y8P      888   88888P'   "Y88P"   888
+
+
+by AxVisor Team
+
+[37m[  0.737583 0:2 axvisor:73] [32mStarting virtualization...[m
+[m[37m[  0.737712 0:2 axvm::host::arceos:349] [32mEnabling hardware virtualization support on all cores...[m
+[m[37m[  0.737870 0:2 axvm::host::arceos:355] [32mCore 0 is initializing hardware virtualization support...[m
+[m[37m[  0.738034 0:2 axvm::timer:318] [32mInitializing AxVM timer wheel...[m
+[m[37m[  0.741888 0:2 axvm::host::arceos:357] [32mHardware virtualization support enabled on core 0[m
+[m[37m[  0.742205 1:15 axvm::host::arceos:367] [32mCore 1 is initializing hardware virtualization support...[m
+[m[37m[  0.742336 0:2 axvm::host::arceos:383] [32mWaiting for all cores to enable hardware virtualization...[m
+[m[37m[  0.742391 2:16 axvm::host::arceos:367] [32mCore 2 is initializing hardware virtualization support...[m
+[m[37m[  0.742376 1:15 axvm::timer:318] [32mInitializing AxVM timer wheel...[m
+[m[37m[  0.742642 2:16 axvm::timer:318] [32mInitializing AxVM timer wheel...[m
+[m[37m[  0.744277 1:15 axvm::host::arceos:370] [32mHardware virtualization support enabled on core 1[m
+[m[37m[  0.745780 1:6 axvm::arch::aarch64::gic:541] [33mUnhandled acknowledged host IRQ 0[m
+[m[37m[  0.746147 1:6 axvm::arch::aarch64::gic:541] [33mUnhandled acknowledged host IRQ 0[m
+[m

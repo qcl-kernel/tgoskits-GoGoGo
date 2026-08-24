@@ -1,0 +1,1585 @@
+diff --git a/docs/superpowers/plans/2026-08-23-task123-xtask.md b/docs/superpowers/plans/2026-08-23-task123-xtask.md
+new file mode 100644
+index 000000000..5ab96e687
+--- /dev/null
++++ b/docs/superpowers/plans/2026-08-23-task123-xtask.md
+@@ -0,0 +1,52 @@
++# Task123 xtask Integration Implementation Plan
++
++> For agentic workers: use superpowers:subagent-driven-development or
++> superpowers:executing-plans to implement this plan task-by-task. Steps use
++> checkbox syntax for tracking.
++
++Goal: Move the direct Task123 entrypoint policy into cargo xtask axvisor
++task123 without changing runner behavior.
++
++Architecture: Add a small AxVisor command module that builds an explicit
++runner plan and spawns the existing guest-comparison runner with inherited
++streams. Keep image pulling in the existing runner and axbuild image command.
++
++Tech Stack: Rust/clap in scripts/axbuild, Bash compatibility wrapper, existing
++Task123 shell contract tests.
++
++---
++
++### Task 1: Runner planning contract
++
++Files:
++
++- Create: scripts/axbuild/src/axvisor/task123.rs
++- Modify: scripts/axbuild/src/axvisor/mod.rs
++
++- Add a failing CLI test proving quick mode and an output path parse.
++- Add failing unit tests for explicit image selection, persistent image
++  selection, metadata defaulting, and runner arguments.
++- Implement the pure planner and execute it by spawning the existing
++  comparison runner with inherited stdio and environment.
++
++### Task 2: Compatibility entrypoint
++
++Files:
++
++- Modify: run-task123.sh
++- Modify: os/axvisor/scripts/test_run_task123_entrypoint.sh
++
++- Update the shell contract test first so it requires delegation to
++  cargo xtask axvisor task123.
++- Replace duplicate wrapper logic with the thin compatibility shim.
++
++### Task 3: Verification
++
++Files:
++
++- No production changes unless verification finds a defect.
++
++- Run focused axbuild tests for the new planner and CLI.
++- Run the direct entrypoint contract test.
++- Run existing Task123 lifecycle and realtime-control contract tests.
++- Run formatting and workspace package tests as appropriate.
+diff --git a/docs/superpowers/specs/2026-08-23-task123-xtask-design.md b/docs/superpowers/specs/2026-08-23-task123-xtask-design.md
+new file mode 100644
+index 000000000..c30dfd44b
+--- /dev/null
++++ b/docs/superpowers/specs/2026-08-23-task123-xtask-design.md
+@@ -0,0 +1,38 @@
++# Task123 xtask Integration Design
++
++## Goal
++
++Expose the existing Task123 guest-comparison workflow as a first-class
++cargo xtask axvisor task123 command while preserving the behavior of the
++repository direct run-task123.sh entrypoint.
++
++## Design
++
++The Rust command owns the thin entrypoint policy that used to live in the root
++shell wrapper:
++
++- prefer RTTHREAD_IMAGE and RTTHREAD_IMAGE_META when supplied;
++- otherwise select the metadata-validated persistent image under
++  tmp/rt-thread-5.2.2-native-current;
++- always require image metadata;
++- keep the runner in the foreground with inherited terminal streams;
++- default to quick mode and retain allow-qemu-timer-limit for diagnostic
++  QEMU TCG stability runs.
++
++The command then starts os/axvisor/scripts/run_task123_guest_comparison.sh.
++That runner remains the lifecycle owner for QEMU, guest serial input, marker
++watching, resource sampling, and cleanup. It already delegates rootfs download
++and extraction to the standard cargo xtask image pull qemu-aarch64 path, so no
++duplicate download implementation is introduced.
++
++The root run-task123.sh becomes a compatibility shim that invokes
++cargo xtask axvisor task123. This keeps existing documentation and muscle
++memory working while making the xtask command the canonical implementation.
++
++## Testing
++
++Rust unit tests cover CLI parsing, path resolution, persistent RT-Thread image
++selection, environment propagation, and runner argument construction. Shell
++contract tests cover the compatibility wrapper. Existing Task123 lifecycle,
++result-gate, and realtime-control tests remain the end-to-end regression
++surface.
+diff --git a/os/axvisor/guests/rt-benchmark/rtthread/rt_benchmark.c b/os/axvisor/guests/rt-benchmark/rtthread/rt_benchmark.c
+index 959047759..8a346d250 100644
+--- a/os/axvisor/guests/rt-benchmark/rtthread/rt_benchmark.c
++++ b/os/axvisor/guests/rt-benchmark/rtthread/rt_benchmark.c
+@@ -1652,9 +1652,14 @@ static int rtbench_run_core_suite(uint64_t samples)
+ static int rtbench_run_stability(uint64_t seconds)
+ {
+     uint64_t expected;
++    rt_tick_t start_tick;
++    uint64_t start_counter;
++    rt_tick_t end_tick;
++    uint64_t end_counter;
+     struct rtbench_result conservation;
+     uint64_t collected;
+     uint64_t missing;
++    const rt_bool_t stop_timer_after_expected_samples = RT_FALSE;
+     int status;
+ 
+     rtbench_frequency = rtbench_read_frequency();
+@@ -1665,13 +1670,20 @@ static int rtbench_run_stability(uint64_t seconds)
+     }
+ 
+     expected = seconds * (1000U / RTBENCH_PERIOD_MS) - 1U;
+-    rt_kprintf("RTBENCH_STABILITY_BEGIN seconds=%llu expected=%llu\n",
++    start_tick = rt_tick_get();
++    start_counter = rtbench_read_counter();
++    rt_kprintf("RTBENCH_STABILITY_BEGIN seconds=%llu expected=%llu frequency=%llu "
++               "tick_hz=%u start_tick=%llu start_counter=%llu\n",
+                (unsigned long long)seconds,
+-               (unsigned long long)expected);
++               (unsigned long long)expected,
++               (unsigned long long)rtbench_frequency,
++               (unsigned)RT_TICK_PER_SECOND,
++               (unsigned long long)start_tick,
++               (unsigned long long)start_counter);
+     status = rtbench_run_periodic(expected,
+                                   RT_FALSE,
+                                   seconds * 1000U,
+-                                  RT_TRUE,
++                                  stop_timer_after_expected_samples,
+                                   1,
+                                   "stability_jitter");
+ 
+@@ -1688,12 +1700,20 @@ static int rtbench_run_stability(uint64_t seconds)
+     conservation.expected = expected;
+     conservation.collected = collected;
+     conservation.missing = missing;
++    end_tick = rt_tick_get();
++    end_counter = rtbench_read_counter();
+     rt_kprintf("RTBENCH_STABILITY_END status=%s expected=%llu collected=%llu "
+                "missing=%llu\n",
+                status == RT_EOK ? "PASS" : "FAIL",
+                (unsigned long long)conservation.expected,
+                (unsigned long long)conservation.collected,
+                (unsigned long long)conservation.missing);
++    rt_kprintf("RTBENCH_STABILITY_CLOCK ticks=%llu counter_ticks=%llu "
++               "counter_elapsed_ns=%llu\n",
++               (unsigned long long)(end_tick - start_tick),
++               (unsigned long long)(end_counter - start_counter),
++               (unsigned long long)rtbench_ticks_to_ns(end_counter - start_counter,
++                                                      rtbench_frequency));
+     rt_kprintf("RTBENCH_STABILITY_DONE\n");
+     return status;
+ }
+diff --git a/os/axvisor/guests/task3/scripts/build_alpine_linux.sh b/os/axvisor/guests/task3/scripts/build_alpine_linux.sh
+index d8fcace9c..578ae898f 100755
+--- a/os/axvisor/guests/task3/scripts/build_alpine_linux.sh
++++ b/os/axvisor/guests/task3/scripts/build_alpine_linux.sh
+@@ -24,6 +24,16 @@ JOBS=${JOBS:-$(getconf _NPROCESSORS_ONLN)}
+ 
+ mkdir -p "$LINUX_CACHE" "$ALPINE_CACHE" "$BUILD_DIR" "$OUTPUT_DIR"
+ 
++ensure_model_cache() {
++    model=$CACHE_ROOT/task3-model
++    if [ -s "$model/model_weights.h" ] &&
++        [ -s "$model/line-follow.y4m" ] &&
++        [ -s "$model/truth.csv" ]; then
++        return
++    fi
++    TASK3_MODEL_DIR=$model "$TASK3_ROOT/scripts/build_model.sh"
++}
++
+ download_verified() {
+     url=$1
+     archive=$2
+@@ -102,6 +112,7 @@ build_initramfs() {
+ }
+ 
+ build_linux
++ensure_model_cache
+ build_initramfs
+ printf 'linux_image=%s\nlinux_initrd=%s\n' \
+     "$OUTPUT_DIR/Image" "$OUTPUT_DIR/rootfs.cpio"
+diff --git a/os/axvisor/guests/task3/tests/test_build_contracts.sh b/os/axvisor/guests/task3/tests/test_build_contracts.sh
+index 9ca16f0dc..44be28b46 100755
+--- a/os/axvisor/guests/task3/tests/test_build_contracts.sh
++++ b/os/axvisor/guests/task3/tests/test_build_contracts.sh
+@@ -167,10 +167,11 @@ exec 8>&-
+ grep -F 'another Linux image build owns' "$lock_build/output" >/dev/null
+ 
+ checksum_build="$tmp_dir/checksum"
+-mkdir -p "$checksum_build/downloads"
++checksum_cache="$checksum_build/source-cache"
++mkdir -p "$checksum_cache/arm-gnu-toolchain/$ARM_TOOLCHAIN_VERSION"
+ printf '%s\n' corrupt > \
+-    "$checksum_build/downloads/arm-gnu-toolchain-$ARM_TOOLCHAIN_VERSION.tar.xz"
+-if BUILD_DIR="$checksum_build" \
++    "$checksum_cache/arm-gnu-toolchain/$ARM_TOOLCHAIN_VERSION/archive.tar.xz"
++if TGOS_SOURCE_CACHE="$checksum_cache" BUILD_DIR="$checksum_build" \
+     "$TASK3_ROOT/scripts/fetch_sources.sh" --toolchain-only \
+     >"$checksum_build/output" 2>&1; then
+     echo 'fetch_sources accepted a corrupt toolchain archive' >&2
+@@ -187,7 +188,8 @@ git -C "$fixture_repository" -c user.name=Task3 \
+ fixture_commit=$(git -C "$fixture_repository" rev-parse HEAD)
+ fixture_root="$tmp_dir/fetch-root"
+ mkdir -p "$fixture_root/scripts" "$fixture_root/configs"
+-cp "$TASK3_ROOT/scripts/common.sh" "$TASK3_ROOT/scripts/fetch_sources.sh" \
++cp "$TASK3_ROOT/scripts/common.sh" "$TASK3_ROOT/scripts/source_cache.sh" \
++    "$TASK3_ROOT/scripts/fetch_sources.sh" \
+     "$fixture_root/scripts/"
+ sed \
+     -e "s/^RTTHREAD_COMMIT=.*/RTTHREAD_COMMIT=$fixture_commit/" \
+@@ -206,8 +208,10 @@ make_valid_rt_checkout() {
+ 
+ expect_fetch_failure() {
+     build_dir=$1
+-    message=$2
++    cache_root=$2
++    message=$3
+     if TASK3_ROOT="$fixture_root" BUILD_DIR="$build_dir" \
++        TGOS_SOURCE_CACHE="$cache_root" \
+         "$fixture_root/scripts/fetch_sources.sh" --sources-only \
+         >"$build_dir/output" 2>&1; then
+         echo "fetch_sources unexpectedly accepted: $message" >&2
+@@ -217,46 +221,62 @@ expect_fetch_failure() {
+ }
+ 
+ case_dir="$tmp_dir/rt-origin"
+-mkdir -p "$case_dir/sources"
++cache_root="$case_dir/cache"
++mkdir -p "$cache_root/rt-thread/$fixture_commit"
+ git -c advice.detachedHead=false clone --quiet --shared \
+     "$fixture_repository" \
+-    "$case_dir/sources/rt-thread"
+-expect_fetch_failure "$case_dir" 'rt-thread origin mismatch'
++    "$cache_root/rt-thread/$fixture_commit/source"
++expect_fetch_failure "$case_dir" "$cache_root" 'rt-thread cache origin mismatch'
+ 
+ case_dir="$tmp_dir/rt-head"
+-mkdir -p "$case_dir/sources"
++cache_root="$case_dir/cache"
++mkdir -p "$case_dir/sources" "$cache_root/rt-thread/$fixture_commit"
+ make_valid_rt_checkout "$case_dir/sources/rt-thread"
+-git -C "$case_dir/sources/rt-thread" -c user.name=Task3 \
++mv "$case_dir/sources/rt-thread" \
++    "$cache_root/rt-thread/$fixture_commit/source"
++git -C "$cache_root/rt-thread/$fixture_commit/source" -c user.name=Task3 \
+     -c user.email=task3@example.invalid commit --quiet --allow-empty \
+     -m 'mismatched head'
+-expect_fetch_failure "$case_dir" 'rt-thread commit mismatch'
++expect_fetch_failure "$case_dir" "$cache_root" 'rt-thread cache commit mismatch'
+ 
+ case_dir="$tmp_dir/rt-attached"
+-mkdir -p "$case_dir/sources"
++cache_root="$case_dir/cache"
++mkdir -p "$case_dir/sources" "$cache_root/rt-thread/$fixture_commit"
+ make_valid_rt_checkout "$case_dir/sources/rt-thread"
+-git -C "$case_dir/sources/rt-thread" switch --quiet -c attached-test
+-expect_fetch_failure "$case_dir" 'rt-thread checkout is not detached'
++mv "$case_dir/sources/rt-thread" \
++    "$cache_root/rt-thread/$fixture_commit/source"
++git -C "$cache_root/rt-thread/$fixture_commit/source" switch --quiet -c attached-test
++expect_fetch_failure "$case_dir" "$cache_root" \
++    'rt-thread cached checkout is not detached'
+ 
+ case_dir="$tmp_dir/buildroot-origin"
+-mkdir -p "$case_dir/sources"
++cache_root="$case_dir/cache"
++mkdir -p "$case_dir/sources" "$cache_root/rt-thread/$fixture_commit" \
++    "$cache_root/buildroot/$fixture_commit"
+ make_valid_rt_checkout "$case_dir/sources/rt-thread"
++mv "$case_dir/sources/rt-thread" \
++    "$cache_root/rt-thread/$fixture_commit/source"
+ git -c advice.detachedHead=false clone --quiet --shared \
+     "$fixture_repository" \
+-    "$case_dir/sources/buildroot"
+-expect_fetch_failure "$case_dir" 'buildroot origin mismatch'
++    "$cache_root/buildroot/$fixture_commit/source"
++expect_fetch_failure "$case_dir" "$cache_root" 'buildroot cache origin mismatch'
+ 
+ case_dir="$tmp_dir/buildroot-head"
+-mkdir -p "$case_dir/sources"
++cache_root="$case_dir/cache"
++mkdir -p "$case_dir/sources" "$cache_root/rt-thread/$fixture_commit" \
++    "$cache_root/buildroot/$fixture_commit"
+ make_valid_rt_checkout "$case_dir/sources/rt-thread"
++mv "$case_dir/sources/rt-thread" \
++    "$cache_root/rt-thread/$fixture_commit/source"
+ git -c advice.detachedHead=false clone --quiet --shared \
+     "$fixture_repository" \
+-    "$case_dir/sources/buildroot"
+-git -C "$case_dir/sources/buildroot" remote set-url origin \
++    "$cache_root/buildroot/$fixture_commit/source"
++git -C "$cache_root/buildroot/$fixture_commit/source" remote set-url origin \
+     https://gitlab.com/buildroot.org/buildroot.git
+-git -C "$case_dir/sources/buildroot" -c user.name=Task3 \
++git -C "$cache_root/buildroot/$fixture_commit/source" -c user.name=Task3 \
+     -c user.email=task3@example.invalid commit --quiet --allow-empty \
+     -m 'mismatched buildroot head'
+-expect_fetch_failure "$case_dir" 'buildroot commit mismatch'
++expect_fetch_failure "$case_dir" "$cache_root" 'buildroot cache commit mismatch'
+ 
+ printf '%s\n' 'CONFIG_KEEP=y' '# CONFIG_CHANGE is not set' >"$tmp_dir/.config"
+ python3 "$TASK3_ROOT/scripts/set_kconfig.py" "$tmp_dir/.config" \
+diff --git a/os/axvisor/patches/rtthread/0000-axvisor-aarch64-port.patch b/os/axvisor/patches/rtthread/0000-axvisor-aarch64-port.patch
+index 60550a552..e876049d4 100644
+--- a/os/axvisor/patches/rtthread/0000-axvisor-aarch64-port.patch
++++ b/os/axvisor/patches/rtthread/0000-axvisor-aarch64-port.patch
+@@ -947,7 +947,7 @@ index 801e889b..b8f134a9 100644
+ -#define VIRTIO_VENDOR_ID    0x554d4551  /* "QEMU" */
+ +#define VIRTIO_MAX_NR       1
+ +#define VIRTIO_IRQ_BASE     (48)
+-+#define VIRTIO_VENDOR_ID    0x1AF4      /* Red Hat (standard virtio PCI vendor) */
+++#define VIRTIO_VENDOR_ID    0x554d4551  /* QEMU virtio-mmio */
+ 
+  /* GIC */
+ -#define MAX_HANDLERS        96
+diff --git a/os/axvisor/patches/rtthread/apply-rtthread-patches.sh b/os/axvisor/patches/rtthread/apply-rtthread-patches.sh
+index a996053ba..56ab725c7 100755
+--- a/os/axvisor/patches/rtthread/apply-rtthread-patches.sh
++++ b/os/axvisor/patches/rtthread/apply-rtthread-patches.sh
+@@ -23,19 +23,21 @@ source "$PATCHDIR/patch_helpers.sh"
+ echo "Applying RT-Thread patches for axvisor..."
+ 
+ PATCH_STATE="$RTDIR/.axvisor-rtthread-patch-state"
+-PATCH_SET_DIGEST="$({
++PATCH_SET_DIGEST="$(
++    cd -- "$PATCHDIR"
+     sha256sum \
+-    "$PATCHDIR/0000-axvisor-aarch64-port.patch" \
+-    "$PATCHDIR/0009-native-qemu-memory-layout.patch" \
+-    "$PATCHDIR/0002-lwip-rx-mailbox-recover-notice.patch" \
+-    "$PATCHDIR/0003-virtio-net-reclaim-tx-used-ring.patch" \
+-    "$PATCHDIR/0004-virtio-net-use-rx-used-ring-head.patch" \
+-    "$PATCHDIR/0005-lwip-configurable-udp-recv-mailbox.patch" \
+-    "$PATCHDIR/0006-gicv3-use-redistributor-pending-registers.patch" \
+-    "$PATCHDIR/0007-gicv3-query-interrupt-enable-state.patch" \
+-    "$PATCHDIR/0008-aarch64-gtimer-use-absolute-deadlines.patch" \
+-    "$PATCHDIR/0010-virtio-net-benchmark-packet-hook.patch"
+-} | sha256sum | awk '{print $1}')"
++        0000-axvisor-aarch64-port.patch \
++        0009-native-qemu-memory-layout.patch \
++        0002-lwip-rx-mailbox-recover-notice.patch \
++        0003-virtio-net-reclaim-tx-used-ring.patch \
++        0004-virtio-net-use-rx-used-ring-head.patch \
++        0005-lwip-configurable-udp-recv-mailbox.patch \
++        0006-gicv3-use-redistributor-pending-registers.patch \
++        0007-gicv3-query-interrupt-enable-state.patch \
++        0008-aarch64-gtimer-use-absolute-deadlines.patch \
++        0010-virtio-net-benchmark-packet-hook.patch \
++        | sha256sum | awk '{print $1}'
++)"
+ if [[ -f "$PATCH_STATE" ]]; then
+     if [[ "$(<"$PATCH_STATE")" != "$PATCH_SET_DIGEST" ]]; then
+         echo "RT-Thread source patch state is stale; prepare a fresh source tree" >&2
+diff --git a/os/axvisor/patches/rtthread/test-rtthread-patches.sh b/os/axvisor/patches/rtthread/test-rtthread-patches.sh
+index 35a9303d7..8058832cb 100755
+--- a/os/axvisor/patches/rtthread/test-rtthread-patches.sh
++++ b/os/axvisor/patches/rtthread/test-rtthread-patches.sh
+@@ -34,9 +34,9 @@ if [[ ! -f "$DRIVER" ]]; then
+ fi
+ 
+ failures=0
+-if ! grep -Eq '^#define[[:space:]]+VIRTIO_VENDOR_ID[[:space:]]+\(?0x1AF4\)?' \
++if ! grep -Eq '^#define[[:space:]]+VIRTIO_VENDOR_ID[[:space:]]+\(?0x554d4551\)?' \
+     "$VIRTIO_BSP_HEADER"; then
+-    echo "FAIL: RT-Thread virtio vendor ID must match AxVisor's standard 0x1AF4" >&2
++    echo "FAIL: RT-Thread virtio vendor ID must match QEMU's 0x554d4551" >&2
+     failures=$((failures + 1))
+ fi
+ if ! grep -Eq '^#define[[:space:]]+VIRTIO_IRQ_BASE[[:space:]]+\(?48\)?' \
+@@ -438,6 +438,10 @@ else
+         "stability checks the sample conservation invariant" \
+         'collected \+ missing != expected' \
+         "$BENCHMARK"
++    require_pattern \
++        "stability reports tick and architectural-counter drift" \
++        'RTBENCH_STABILITY_CLOCK ticks=' \
++        "$BENCHMARK"
+     require_function_pattern \
+         "stability waits for exact samples within the bounded timeout" \
+         'rtbench_run_stability' \
+diff --git a/os/axvisor/scripts/compare_task123_guests.py b/os/axvisor/scripts/compare_task123_guests.py
+index c88175bfc..bf12b0c55 100755
+--- a/os/axvisor/scripts/compare_task123_guests.py
++++ b/os/axvisor/scripts/compare_task123_guests.py
+@@ -15,9 +15,10 @@ NUMBER = r"[0-9]+(?:\.[0-9]+)?"
+ RTT_KEYS = ("min", "avg", "p50", "p95", "p99", "p99.9", "max")
+ SHARED_ARTIFACTS = (
+     "qemu",
+-    "rtthread-normal",
+-    "rtthread-drop-status",
+-    "rtthread-delayed-server",
++    # The integrated runner builds one RT-Thread image. Task 3 fault cases
++    # are selected at runtime, so they must not require separate binaries in
++    # the stability comparison manifest.
++    "rtthread",
+     "rootfs",
+     "model",
+     "protocol-source",
+diff --git a/os/axvisor/scripts/run_task123.sh b/os/axvisor/scripts/run_task123.sh
+index 5cdb48e58..657872926 100755
+--- a/os/axvisor/scripts/run_task123.sh
++++ b/os/axvisor/scripts/run_task123.sh
+@@ -10,6 +10,10 @@ TASK3_ROOT="$ROOT/os/axvisor/guests/task3"
+ RUN_UNTIL="${RUN_UNTIL:-$SCRIPT_DIR/run_until_log_marker.sh}"
+ QEMU_REALTIME_CONTROL="${QEMU_REALTIME_CONTROL:-$SCRIPT_DIR/apply_qemu_realtime_controls.sh}"
+ QEMU_RESOURCE_SAMPLER="${QEMU_RESOURCE_SAMPLER:-$SCRIPT_DIR/sample_qemu_resources.sh}"
++# Use QEMU's wall clock by default. Fixed icount is still available for
++# explicitly requested PMU/RTBench experiments, but it serializes the TCG
++# event loop and makes the integrated network workload unnecessarily slow.
++QEMU_ICOUNT="${QEMU_ICOUNT:-}"
+ LINUX_VMCONFIG_GENERATOR="${LINUX_VMCONFIG_GENERATOR:-$SCRIPT_DIR/generate_linux_vmconfig.sh}"
+ STARRYOS_VMCONFIG_GENERATOR="${STARRYOS_VMCONFIG_GENERATOR:-$SCRIPT_DIR/generate_starryos_vmconfig.sh}"
+ RTTHREAD_VMCONFIG_GENERATOR="${RTTHREAD_VMCONFIG_GENERATOR:-$SCRIPT_DIR/generate_rtthread_vmconfig.sh}"
+@@ -52,6 +56,21 @@ require_integer() {
+     }
+ }
+ 
++validate_precise_icount() {
++    local value=${QEMU_ICOUNT:-}
++    local shift
++    [[ "$value" =~ ^shift=[0-9]+(,.*)?$ ]] || {
++        fail "QEMU_ICOUNT must use precise fixed-shift mode for RTBENCH (for example shift=0), got: $value"
++        return 2
++    }
++    shift=${value#shift=}
++    shift=${shift%%,*}
++    [[ "$shift" -le 10 ]] || {
++        fail "QEMU_ICOUNT shift must be between 0 and 10 for RTBENCH, got: $shift"
++        return 2
++    }
++}
++
+ default_task123_timeout() {
+     case "$mode" in
+         realtime-suite)
+@@ -198,6 +217,10 @@ validate_mode_options() {
+     elif [[ "$mode" == stability ]]; then
+         require_integer "$stability_seconds" 1 3600 seconds
+     fi
++    if [[ "$mode" == realtime-suite || "$mode" == stability ]] &&
++       [[ -n "$QEMU_ICOUNT" ]]; then
++        validate_precise_icount || return 2
++    fi
+ 
+     # A diagnostic stability run intentionally lets RT-Thread report a FAIL
+     # status for a complete 1-ms result. Keep that marker out of the early-
+@@ -591,6 +614,12 @@ resolve_rootfs_image() {
+         return
+     fi
+ 
++    local persistent_rootfs="$TGOS_SOURCE_CACHE/task123-rootfs-current/rootfs.img"
++    if [[ -s "$persistent_rootfs" ]]; then
++        ROOTFS_IMAGE="$(canonical_existing_file rootfs "$persistent_rootfs")"
++        return
++    fi
++
+     local rootfs_dir="$RUNTIME_DIR/rootfs"
+     local rootfs_candidates=()
+     run_timed "$TASK123_BUILD_TIMEOUT_S" image-pull \
+@@ -601,6 +630,21 @@ resolve_rootfs_image() {
+         return 1
+     }
+     ROOTFS_IMAGE="$(canonical_existing_file rootfs "${rootfs_candidates[0]}")"
++    publish_rootfs_artifact "$ROOTFS_IMAGE"
++}
++
++publish_rootfs_artifact() {
++    local image=$1
++    local destination="$TGOS_SOURCE_CACHE/task123-rootfs-current"
++    local temporary="$destination/rootfs.img.tmp.$$"
++
++    mkdir -p -- "$destination" || return 0
++    if cp -- "$image" "$temporary" && mv -- "$temporary" "$destination/rootfs.img"; then
++        progress "Published reusable Linux rootfs to $destination"
++    else
++        progress "Warning: failed to publish reusable Linux rootfs to $destination"
++        rm -f -- "$temporary"
++    fi
+ }
+ 
+ linux_image_has_task123_probe() {
+@@ -669,6 +713,29 @@ build_rtthread_variant() {
+             --image "$output" \
+             --source "$source_tree" \
+             --output "$metadata_output"
++    publish_rtthread_artifact "$output" "$metadata_output"
++}
++
++publish_rtthread_artifact() {
++    local image=$1
++    local metadata=$2
++    local destination="$TGOS_SOURCE_CACHE/task123-rtthread-current"
++    local image_tmp="$destination/rtthread.bin.tmp.$$"
++    local metadata_tmp="$destination/rtthread.bin.meta.json.tmp.$$"
++
++    mkdir -p -- "$destination" || return 0
++    if cp -- "$image" "$image_tmp" &&
++        cp -- "$metadata" "$metadata_tmp" &&
++        python3 "$IMAGE_METADATA" check \
++            --image "$image_tmp" \
++            --metadata "$metadata_tmp" &&
++        mv -- "$image_tmp" "$destination/rtthread.bin" &&
++        mv -- "$metadata_tmp" "$destination/rtthread.bin.meta.json"; then
++        progress "Published reusable RT-Thread image to $destination"
++    else
++        progress "Warning: failed to publish reusable RT-Thread image to $destination"
++        rm -f -- "$image_tmp" "$metadata_tmp"
++    fi
+ }
+ 
+ build_rtthread_images_if_needed() {
+@@ -863,10 +930,10 @@ record_artifact() {
+ prepare_manifest() {
+     MANIFEST_TMP="$OUTPUT/.manifest.txt.tmp"
+     : > "$MANIFEST_TMP"
+-    printf 'schema=1\napp_guest=%s\nmode=%s\ntask2_count=%s\ntask3_frames=%s\ntask3_fault=%s\nqemu_timer_slack_ns=%s\nqemu_cpu_affinity=%s\nqemu_sched_policy=%s\nqemu_sched_priority=%s\nqemu_tcg_thread=%s\n' \
++    printf 'schema=1\napp_guest=%s\nmode=%s\ntask2_count=%s\ntask3_frames=%s\ntask3_fault=%s\nqemu_cpu=cortex-a72\nqemu_timer_slack_ns=%s\nqemu_cpu_affinity=%s\nqemu_sched_policy=%s\nqemu_sched_priority=%s\nqemu_tcg_thread=%s\nqemu_icount=%s\nqemu_pmu=on\n' \
+         "$app_guest" "$mode" "$task2_count" "$task3_frames" "${task3_fault:-normal}" \
+         "$QEMU_TIMER_SLACK_NS" "${QEMU_CPU_AFFINITY:-}" "${QEMU_SCHED_POLICY:-}" \
+-        "${QEMU_SCHED_PRIORITY:-0}" "${QEMU_TCG_THREAD:-multi}" >> "$MANIFEST_TMP"
++        "${QEMU_SCHED_PRIORITY:-0}" "${QEMU_TCG_THREAD:-multi}" "$QEMU_ICOUNT" >> "$MANIFEST_TMP"
+     printf 'qemu_vcpu_affinity=%s\n' "${QEMU_VCPU_AFFINITY:-}" >> "$MANIFEST_TMP"
+     record_artifact qemu "$QEMU"
+     record_artifact axvisor "$AXVISOR_BIN"
+@@ -1032,17 +1099,24 @@ launch_one_qemu() {
+         failure_marker_args+=(--failure-marker "$failure_marker")
+     done
+ 
++    local qemu_pmu_args=()
++    local qemu_tcg_thread="${QEMU_TCG_THREAD:-multi}"
++    if [[ -n "$QEMU_ICOUNT" ]]; then
++        qemu_pmu_args=(-icount "$QEMU_ICOUNT")
++        qemu_tcg_thread=single
++    fi
+     local qemu_args=(
+         -display none
+         -monitor none
+         -snapshot
+         -name "tgoskits,debug-threads=on"
+-        -cpu cortex-a72
+-        -accel "tcg,thread=${QEMU_TCG_THREAD:-multi}"
++        -cpu cortex-a72,pmu=on
++        "${qemu_pmu_args[@]}"
++        -accel "tcg,thread=$qemu_tcg_thread"
+         -machine virt,virtualization=on,gic-version=3
+         -global virtio-mmio.force-legacy=false
+         -smp 4
+-        -device nvme,drive=disk0,serial=tgoskits,max_ioqpairs=64,msix_qsize=65
++        -device nvme,drive=disk0,serial=tgoskits,max_ioqpairs=4,msix_qsize=65
+         -drive "id=disk0,if=none,format=raw,file=$ROOTFS_IMAGE"
+         # This is the AxVisor host cmdline; Linux workload controls live only in its VM config.
+         -append 'root=/dev/nvme0n1 rw init=/bin/sh'
+diff --git a/os/axvisor/scripts/run_task123_guest_comparison.sh b/os/axvisor/scripts/run_task123_guest_comparison.sh
+index bee417dfb..519d4a5f7 100755
+--- a/os/axvisor/scripts/run_task123_guest_comparison.sh
++++ b/os/axvisor/scripts/run_task123_guest_comparison.sh
+@@ -6,7 +6,7 @@ SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+ ROOT="$(CDPATH= cd -- "$SCRIPT_DIR/../../.." && pwd)"
+ RUNNER="${TASK123_COMPARISON_RUNNER:-$SCRIPT_DIR/run_task123.sh}"
+ ANALYZER="${TASK123_COMPARISON_ANALYZER:-$SCRIPT_DIR/compare_task123_guests.py}"
+-ROOTFS_IMAGE="${ROOTFS_IMAGE:-$ROOT/tmp/source-cache/rootfs/qemu-aarch64/rootfs.img}"
++ROOTFS_IMAGE="${ROOTFS_IMAGE:-$ROOT/tmp/source-cache/task123-rootfs-current/rootfs.img}"
+ 
+ mode=quick
+ mode_set=0
+@@ -218,9 +218,13 @@ main() {
+     if [[ "$mode" == full ]]; then
+         # StarryOS needs additional time to drain the larger Task2 workload
+         # after the shared RTBench stability window has completed.
+-        RUN_TIMEOUT=$((STABILITY_SECONDS + 1800))
++        RUN_TIMEOUT=$((STABILITY_SECONDS + 3600))
+     else
+-        RUN_TIMEOUT=$((STABILITY_SECONDS + 600))
++        # The quick matrix still runs 30000 requests for each of three
++        # payloads. StarryOS's userspace network path is slower than Linux,
++        # so retain a bounded but larger allowance for the complete guest
++        # workload instead of terminating it during the final payload.
++        RUN_TIMEOUT=$((STABILITY_SECONDS + 1800))
+     fi
+     RUNNER="$(canonical_executable runner "$RUNNER")"
+     ANALYZER="$(canonical_executable analyzer "$ANALYZER")"
+diff --git a/os/axvisor/scripts/test_compare_task123_guests.sh b/os/axvisor/scripts/test_compare_task123_guests.sh
+index e74db7983..ab862a992 100755
+--- a/os/axvisor/scripts/test_compare_task123_guests.sh
++++ b/os/axvisor/scripts/test_compare_task123_guests.sh
+@@ -74,9 +74,9 @@ def write_guest(name: str, avg: int, app_guest: str) -> None:
+         (run / "manifest.txt").read_text(encoding="ascii")
+         + "result_gate=PASS\n"
+         + "ARTIFACT name=qemu path=/tmp/qemu sha256=" + "a" * 64 + "\n"
+-        + "ARTIFACT name=rtthread-normal path=/tmp/rt-normal sha256=" + "b" * 64 + "\n"
+-        + "ARTIFACT name=rtthread-drop-status path=/tmp/rt-drop sha256=" + "c" * 64 + "\n"
+-        + "ARTIFACT name=rtthread-delayed-server path=/tmp/rt-delay sha256=" + "d" * 64 + "\n"
++        # Stability comparison uses one RT-Thread image and runtime fault
++        # configuration; legacy per-fault images are not part of its manifest.
++        + "ARTIFACT name=rtthread path=/tmp/rtthread sha256=" + "b" * 64 + "\n"
+         + "ARTIFACT name=rootfs path=/tmp/rootfs sha256=" + "e" * 64 + "\n"
+         + "ARTIFACT name=model path=/tmp/model sha256=" + "f" * 64 + "\n"
+         + "ARTIFACT name=protocol-source path=/tmp/protocol.c sha256=" + "1" * 64 + "\n"
+diff --git a/os/axvisor/scripts/test_qemu_realtime_controls.sh b/os/axvisor/scripts/test_qemu_realtime_controls.sh
+index 80bf89aab..9773e0f85 100755
+--- a/os/axvisor/scripts/test_qemu_realtime_controls.sh
++++ b/os/axvisor/scripts/test_qemu_realtime_controls.sh
+@@ -98,6 +98,18 @@ rg -qF 'QEMU_TCG_THREAD' "$RUNNER" || {
+     echo "RT benchmark runner does not expose the TCG thread mode" >&2
+     exit 1
+ }
++rg -qF 'QEMU_ICOUNT="${QEMU_ICOUNT:-}"' "$TASK123_RUNNER" || {
++    echo "Task123 runner must default to wall-clock QEMU timing" >&2
++    exit 1
++}
++rg -qF 'if [[ -n "$QEMU_ICOUNT" ]]; then' "$TASK123_RUNNER" || {
++    echo "Task123 runner must make icount opt-in" >&2
++    exit 1
++}
++rg -qF 'qemu_tcg_thread="${QEMU_TCG_THREAD:-multi}"' "$TASK123_RUNNER" || {
++    echo "Task123 runner must preserve multi-threaded TCG by default" >&2
++    exit 1
++}
+ rg -qF 'qemu_cpu_affinity=' "$TASK123_RUNNER" || {
+     echo "Task123 manifest does not record QEMU CPU affinity" >&2
+     exit 1
+diff --git a/os/axvisor/scripts/test_rtbench_stability_gate.sh b/os/axvisor/scripts/test_rtbench_stability_gate.sh
+index 08456cb38..20bdc48b3 100755
+--- a/os/axvisor/scripts/test_rtbench_stability_gate.sh
++++ b/os/axvisor/scripts/test_rtbench_stability_gate.sh
+@@ -43,6 +43,13 @@ write_complete_log "$complete"
+ expect_pass complete "$VERIFY" "$complete" 300 0
+ expect_fail qemu_timeout "$VERIFY" "$complete" 300 124
+ 
++extended_begin="$TMP_DIR/extended-begin.log"
++write_complete_log "$extended_begin"
++sed -i \
++    's/RTBENCH_STABILITY_BEGIN seconds=300 expected=299999$/RTBENCH_STABILITY_BEGIN seconds=300 expected=299999 frequency=62500000 tick_hz=1000 start_tick=2067 start_counter=143931000/' \
++    "$extended_begin"
++expect_pass extended_begin "$VERIFY" "$extended_begin" 300 0
++
+ crlf="$TMP_DIR/crlf.log"
+ sed 's/$/\r/' "$complete" > "$crlf"
+ expect_pass crlf "$VERIFY" "$crlf" 300 0
+diff --git a/os/axvisor/scripts/test_rtthread_guest_memory_contract.sh b/os/axvisor/scripts/test_rtthread_guest_memory_contract.sh
+old mode 100644
+new mode 100755
+diff --git a/os/axvisor/scripts/test_rtthread_image_metadata.sh b/os/axvisor/scripts/test_rtthread_image_metadata.sh
+old mode 100644
+new mode 100755
+diff --git a/os/axvisor/scripts/test_run_task123_entrypoint.sh b/os/axvisor/scripts/test_run_task123_entrypoint.sh
+old mode 100644
+new mode 100755
+index bd7be8df0..0e5240cb7
+--- a/os/axvisor/scripts/test_run_task123_entrypoint.sh
++++ b/os/axvisor/scripts/test_run_task123_entrypoint.sh
+@@ -5,21 +5,52 @@ set -euo pipefail
+ ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/../../.." && pwd)"
+ ENTRYPOINT="$ROOT/run-task123.sh"
+ 
+-grep -Fq 'RTTHREAD_REQUIRE_IMAGE_METADATA' "$ENTRYPOINT" || {
+-    echo "FAIL: direct task123 entrypoint does not enforce RT-Thread image metadata" >&2
++grep -Fq 'cargo xtask axvisor task123' "$ENTRYPOINT" || {
++    echo "FAIL: direct task123 entrypoint does not delegate to cargo xtask" >&2
+     exit 1
+ }
+-grep -Fq 'RTTHREAD_IMAGE_META' "$ENTRYPOINT" || {
+-    echo "FAIL: direct task123 entrypoint does not propagate RT-Thread metadata" >&2
+-    exit 1
+-}
+-grep -Fq 'rt-thread-5.2.2-native-current' "$ENTRYPOINT" || {
+-    echo "FAIL: direct task123 entrypoint does not prefer the persistent RT-Thread image" >&2
+-    exit 1
+-}
+-grep -Fq 'env "${runner_environment[@]}"' "$ENTRYPOINT" || {
+-    echo "FAIL: direct task123 entrypoint does not pass resolved inputs to the runner" >&2
++grep -Fq 'exec "$@"' "$ENTRYPOINT" || {
++    echo "FAIL: direct task123 entrypoint does not preserve foreground signal handling" >&2
+     exit 1
+ }
+ 
+-echo "PASS: direct task123 entrypoint selects and validates RT-Thread image"
++echo "PASS: direct task123 entrypoint delegates to cargo xtask axvisor task123"
++
++tmp="$(mktemp -d)"
++trap 'rm -rf -- "$tmp"' EXIT
++mkdir "$tmp/bin"
++cat >"$tmp/bin/cargo" <<'EOF'
++#!/usr/bin/env bash
++printf '%s\n' "$@" > "$ENTRYPOINT_ARGUMENTS"
++EOF
++chmod +x "$tmp/bin/cargo"
++
++PATH="$tmp/bin:$PATH" ENTRYPOINT_ARGUMENTS="$tmp/no-arguments" "$ENTRYPOINT"
++diff -u --label expected --label actual - <<'EOF' "$tmp/no-arguments"
++xtask
++axvisor
++task123
++--quick
++--allow-qemu-timer-limit
++EOF
++
++PATH="$tmp/bin:$PATH" ENTRYPOINT_ARGUMENTS="$tmp/full-arguments" "$ENTRYPOINT" --full
++diff -u --label expected --label actual - <<'EOF' "$tmp/full-arguments"
++xtask
++axvisor
++task123
++--full
++--allow-qemu-timer-limit
++EOF
++
++PATH="$tmp/bin:$PATH" ENTRYPOINT_ARGUMENTS="$tmp/explicit-arguments" \
++    "$ENTRYPOINT" --full --allow-qemu-timer-limit
++diff -u --label expected --label actual - <<'EOF' "$tmp/explicit-arguments"
++xtask
++axvisor
++task123
++--full
++--allow-qemu-timer-limit
++EOF
++
++echo "PASS: direct task123 entrypoint preserves task123 arguments"
+diff --git a/os/axvisor/scripts/test_task123_guest_comparison.sh b/os/axvisor/scripts/test_task123_guest_comparison.sh
+index ef6d3167d..48ecaa244 100755
+--- a/os/axvisor/scripts/test_task123_guest_comparison.sh
++++ b/os/axvisor/scripts/test_task123_guest_comparison.sh
+@@ -50,9 +50,7 @@ run, guest, mode, count, frames, seconds = sys.argv[1:]
+ root = Path(run)
+ common = [
+     ("qemu", "a"),
+-    ("rtthread-normal", "b"),
+-    ("rtthread-drop-status", "c"),
+-    ("rtthread-delayed-server", "d"),
++    ("rtthread", "b"),
+     ("rootfs", "e"),
+     ("model", "f"),
+     ("protocol-source", "1"),
+@@ -122,7 +120,7 @@ fi
+ [[ -s "$output/comparison/comparison.json" ]] || fail "comparison JSON is missing"
+ [[ -s "$output/comparison/comparison-report.md" ]] || fail "comparison report is missing"
+ [[ "$(wc -l < "$trace")" -eq 2 ]] || fail "orchestrator did not run both guests exactly once"
+-awk '$1 == "linux" && $2 == "stability" && $3 == 30000 && $4 == 3 && $5 == 300 && $7 == 900 {next} $1 == "starryos" && $2 == "stability" && $3 == 30000 && $4 == 3 && $5 == 300 && $7 == 900 {next} {exit 1}' "$trace" ||
++awk '$1 == "linux" && $2 == "stability" && $3 == 30000 && $4 == 3 && $5 == 300 && $7 == 2100 {next} $1 == "starryos" && $2 == "stability" && $3 == 30000 && $4 == 3 && $5 == 300 && $7 == 2100 {next} {exit 1}' "$trace" ||
+     fail "quick comparison did not use the specified workload"
+ cache_one="$(awk 'NR == 1 {print $6}' "$trace")"
+ cache_two="$(awk 'NR == 2 {print $6}' "$trace")"
+@@ -143,7 +141,7 @@ if ! TASK123_COMPARISON_RUNNER="$runner" \
+     fail "full guest comparison failed"
+ fi
+ [[ "$(wc -l < "$full_trace")" -eq 2 ]] || fail "full comparison did not run both guests exactly once"
+-awk '$1 == "linux" && $2 == "stability" && $3 == 240000 && $4 == 3 && $5 == 3600 && $7 == 5400 {next} $1 == "starryos" && $2 == "stability" && $3 == 240000 && $4 == 3 && $5 == 3600 && $7 == 5400 {next} {exit 1}' "$full_trace" ||
++awk '$1 == "linux" && $2 == "stability" && $3 == 240000 && $4 == 3 && $5 == 3600 && $7 == 7200 {next} $1 == "starryos" && $2 == "stability" && $3 == 240000 && $4 == 3 && $5 == 3600 && $7 == 7200 {next} {exit 1}' "$full_trace" ||
+     fail "full comparison did not use the formal workload"
+ [[ -s "$full_output/comparison/comparison-report.md" ]] ||
+     fail "full comparison report is missing"
+diff --git a/os/axvisor/scripts/test_task123_linux_image_contract.sh b/os/axvisor/scripts/test_task123_linux_image_contract.sh
+index c9576769e..7b9d1abcb 100755
+--- a/os/axvisor/scripts/test_task123_linux_image_contract.sh
++++ b/os/axvisor/scripts/test_task123_linux_image_contract.sh
+@@ -10,10 +10,11 @@ PACKAGE="$TASK3_ROOT/buildroot/package/task3-linux/task3-linux.mk"
+ BUILD="$TASK3_ROOT/scripts/build_linux.sh"
+ RUNNER="$ROOT/os/axvisor/scripts/run_task123.sh"
+ TASK2_MAKE="$ROOT/os/axvisor/guests/rt-ipc/linux/Makefile"
+-MODEL_DIR="$TASK3_ROOT/build/model"
+-INITRAMFS=${TASK123_INITRAMFS:-"$TASK3_ROOT/build/images/linux/rootfs.cpio.gz"}
+-EXPECTED_TASK2_BIN=${TASK123_EXPECTED_TASK2_BIN:-"$TASK3_ROOT/build/alpine-root/bin/rtipic-client"}
+-EXPECTED_TASK3_BIN=${TASK123_EXPECTED_TASK3_BIN:-"$TASK3_ROOT/build/alpine-root/usr/bin/task3-linux"}
++LINUX_IMAGE_CACHE=${TASK123_LINUX_IMAGE_CACHE:-"$ROOT/tmp/source-cache/task3-alpine-linux/6.12.21-alpine-3.23.0"}
++MODEL_DIR=${TASK123_MODEL_DIR:-"$ROOT/tmp/source-cache/task3-model"}
++INITRAMFS=${TASK123_INITRAMFS:-"$LINUX_IMAGE_CACHE/images/linux/rootfs.cpio.gz"}
++EXPECTED_TASK2_BIN=${TASK123_EXPECTED_TASK2_BIN:-"$LINUX_IMAGE_CACHE/linux-app/task2/linux/target/rtipic-client"}
++EXPECTED_TASK3_BIN=${TASK123_EXPECTED_TASK3_BIN:-"$LINUX_IMAGE_CACHE/linux-app/task3-linux"}
+ 
+ fail() {
+     printf 'test_task123_linux_image_contract: %s\n' "$*" >&2
+diff --git a/os/axvisor/scripts/test_task123_result_gate.sh b/os/axvisor/scripts/test_task123_result_gate.sh
+index 1f9f0032f..a927a5171 100755
+--- a/os/axvisor/scripts/test_task123_result_gate.sh
++++ b/os/axvisor/scripts/test_task123_result_gate.sh
+@@ -196,6 +196,26 @@ rm -f -- "$tmp/ansi-console/linux.log" "$tmp/ansi-console/summary.json" \
+ run_gate "$tmp/ansi-console" smoke >/dev/null ||
+     fail "ANSI-wrapped console markers were rejected"
+ 
++cp -a "$tmp/smoke" "$tmp/repeated-vm-prefix"
++python3 - "$tmp/repeated-vm-prefix/console.log" <<'PY'
++import sys
++from pathlib import Path
++
++path = Path(sys.argv[1])
++text = path.read_text(encoding="utf-8")
++needle = "[VM 1] TASK3_FRAME_CSV=FIXED,0"
++replacement = "[VM 1] [VM 1] [VM 1] TASK3_FRAME_CSV=FIXED,0"
++if text.count(needle) != 1:
++    raise SystemExit("repeated VM-prefix fixture marker not found")
++path.write_text(text.replace(needle, replacement, 1), encoding="utf-8")
++PY
++rm -f -- "$tmp/repeated-vm-prefix/linux.log" \
++    "$tmp/repeated-vm-prefix/summary.json" \
++    "$tmp/repeated-vm-prefix/frames.csv" \
++    "$tmp/repeated-vm-prefix/summary.raw.json"
++run_gate "$tmp/repeated-vm-prefix" smoke >/dev/null ||
++    fail "repeated VM prefixes were not normalized"
++
+ make_fixture "$tmp/attached-linux-replay"
+ awk '
+     !attached && /^\[VM 1\] TASK3_FRAME_CSV=/ {
+@@ -297,6 +317,30 @@ emit_stability 1 >> "$tmp/stability/console.log"
+ run_gate "$tmp/stability" stability --seconds 1 >/dev/null ||
+     fail "stability fixture was rejected"
+ 
++cp -a "$tmp/stability" "$tmp/stability-shell-prompt"
++python3 - "$tmp/stability-shell-prompt/console.log" <<'PY'
++import sys
++from pathlib import Path
++
++path = Path(sys.argv[1])
++data = path.read_bytes()
++needle = b"[VM 3] RTBENCH_STABILITY_BEGIN"
++replacement = (
++    b"[VM 3] RTBENCH_STABILITY_BEGIN "
++    b"seconds=1 expected=999 frequency=62msh />500000 t>ick_hz=1000"
++)
++if data.count(needle) != 1:
++    raise SystemExit("stability marker fixture not found")
++data = data.replace(needle, replacement, 1)
++path.write_bytes(data)
++PY
++rm -f -- "$tmp/stability-shell-prompt/linux.log" \
++    "$tmp/stability-shell-prompt/summary.json" \
++    "$tmp/stability-shell-prompt/frames.csv" \
++    "$tmp/stability-shell-prompt/summary.raw.json"
++run_gate "$tmp/stability-shell-prompt" stability --seconds 1 >/dev/null ||
++    fail "stability marker preceded by a shell prompt was rejected"
++
+ make_fixture "$tmp/stability-qemu-timer-limit"
+ emit_stability 1 >> "$tmp/stability-qemu-timer-limit/console.log"
+ sed -i \
+diff --git a/os/axvisor/scripts/test_task123_runner_lifecycle.sh b/os/axvisor/scripts/test_task123_runner_lifecycle.sh
+index bfa33eb4c..d7e365efe 100755
+--- a/os/axvisor/scripts/test_task123_runner_lifecycle.sh
++++ b/os/axvisor/scripts/test_task123_runner_lifecycle.sh
+@@ -352,6 +352,7 @@ chmod +x "$tools"/*
+ 
+ common_env=(
+     PATH="$tools:$PATH"
++    TGOS_SOURCE_CACHE="$tmp/source-cache"
+     QEMU="$tools/qemu-system-aarch64"
+     CARGO="$tools/cargo"
+     AARCH64_STRIP="$tools/aarch64-linux-gnu-strip"
+@@ -524,9 +525,25 @@ for realtime_case in 'realtime-suite:benchmark 2' 'stability:rtbench_stability 1
+     assert_mode_contract "$realtime_mode" \
+         "$expected_guest_cmdline" \
+         "$fixtures/rtthread-normal.bin"
++    if grep -Fq -- '-icount ' "$records/qemu.log"; then
++        fail "$realtime_mode enabled QEMU icount without an explicit request"
++    fi
+     assert_reaped "$(cat "$records/qemu.pid")"
+ done
+ 
++: > "$records/qemu.log"
++: > "$records/qemu-stdin.log"
++explicit_icount_output="$tmp/explicit-icount-output"
++if ! env "${common_env[@]}" QEMU_ICOUNT=shift=0 \
++    FAKE_QEMU_EXPECT_COMMAND='rtbench_stability 1' TASK123_TIMEOUT_S=2 \
++    "$RUNNER" --mode stability --seconds 1 --task2-count 2 \
++    --output "$explicit_icount_output" >/dev/null; then
++    fail "explicit QEMU icount run failed"
++fi
++grep -Fq -- '-icount shift=0 ' "$records/qemu.log" ||
++    fail "explicit QEMU icount request was not forwarded"
++assert_reaped "$(cat "$records/qemu.pid")"
++
+ : > "$records/qemu.log"
+ : > "$records/qemu-stdin.log"
+ linux_first_output="$tmp/linux-first-output"
+@@ -560,8 +577,10 @@ for rootfs_behavior in zero multiple; do
+     : > "$records/cargo.log"
+     : > "$records/qemu.log"
+     bad_rootfs_output="$tmp/rootfs-$rootfs_behavior-output"
++    bad_rootfs_cache="$tmp/source-cache-$rootfs_behavior"
+     expect_failure "rootfs pull with $rootfs_behavior candidates returned success" \
+         env "${common_env[@]}" ROOTFS_IMAGE= \
++        TGOS_SOURCE_CACHE="$bad_rootfs_cache" \
+         FAKE_ROOTFS_BEHAVIOR="$rootfs_behavior" \
+         "$RUNNER" --mode smoke --task2-count 2 --task3-frames 3 \
+         --output "$bad_rootfs_output"
+@@ -956,6 +975,7 @@ done
+ cache_second_output="$tmp/cache-second"
+ cache_env=(
+     PATH="$tools:$PATH"
++    TGOS_SOURCE_CACHE="$tmp/source-cache"
+     QEMU="$tools/qemu-system-aarch64"
+     CARGO="$tools/cargo"
+     AARCH64_STRIP="$tools/aarch64-linux-gnu-strip"
+diff --git a/os/axvisor/scripts/verify_rtbench_stability.sh b/os/axvisor/scripts/verify_rtbench_stability.sh
+index a06b1ea02..04f7305ba 100755
+--- a/os/axvisor/scripts/verify_rtbench_stability.sh
++++ b/os/axvisor/scripts/verify_rtbench_stability.sh
+@@ -63,7 +63,10 @@ if grep -aEiq \
+ fi
+ 
+ expected=$((seconds * 1000 - 1))
+-begin_pattern="RTBENCH_STABILITY_BEGIN seconds=${seconds} expected=${expected}[[:space:]]*$"
++# RT-Thread includes calibration metadata after the required fields. Accept
++# additional key=value fields while keeping the duration and sample count
++# authenticated.
++begin_pattern="RTBENCH_STABILITY_BEGIN seconds=${seconds} expected=${expected}([[:space:]]+[A-Za-z0-9_]+=[^[:space:]]+)*[[:space:]]*$"
+ if [ "$allow_qemu_timer_limit" = allow-qemu-timer-limit ]; then
+     end_pattern="RTBENCH_STABILITY_END status=(PASS|FAIL) expected=${expected} collected=${expected} missing=0[[:space:]]*$"
+ else
+diff --git a/os/axvisor/scripts/verify_task123_results.sh b/os/axvisor/scripts/verify_task123_results.sh
+index 8a878ab54..79b2d265a 100755
+--- a/os/axvisor/scripts/verify_task123_results.sh
++++ b/os/axvisor/scripts/verify_task123_results.sh
+@@ -104,6 +104,24 @@ guest_log = re.compile(
+ data = guest_log.sub(b"", data)
+ data = re.sub(rb"\x1b\[[0-?]*[ -/]*[@-~]", b"", data)
+ data = data.replace(b"\r", b"")
++# Removing an interleaved AxVisor host record can leave the VM prefix that
++# wrapped that record behind. Collapse repeated prefixes before authentic
++# guest-line parsing so a valid marker remains associated with VM 1.
++data = re.sub(rb"(?m)^(?:\[VM 1\] )+(?=\[VM 1\] )", b"", data)
++# A command entered through the RT-Thread shell can leave its prompt attached
++# to the benchmark's first line. The prompt's `>` may also overwrite the
++# first character of the optional tick_hz calibration key. Recover only this
++# authenticated stability-begin presentation artifact.
++data = re.sub(
++    rb"(?m)^(?:\[VM 3\] )?msh /(?:>)?(?=RTBENCH_STABILITY_BEGIN)",
++    b"",
++    data,
++)
++# The same prompt can be interleaved into the first calibration value while
++# the shell echoes the command. Remove only prompt bytes before `>` or the
++# authenticated stability marker, wherever they landed in the record.
++data = data.replace(b"msh />", b"")
++data = data.replace(b"t>ick_hz=", b"tick_hz=")
+ # The observed RT-Thread logger split the `p99_9_ns` field exactly between
+ # `n` and `s`; join that field only and keep other line boundaries intact.
+ data = re.sub(rb"(?<=p99_9_n)\n(?=s=)", b"", data)
+diff --git a/os/axvisor/xtask/src/main.rs b/os/axvisor/xtask/src/main.rs
+index 276bccd9b..846579c46 100644
+--- a/os/axvisor/xtask/src/main.rs
++++ b/os/axvisor/xtask/src/main.rs
+@@ -320,7 +320,7 @@ fn normalize_command_paths(
+             }
+             TestCommand::Qemu(_) | TestCommand::Board(_) => {}
+         },
+-        Command::Defconfig(_) | Command::Config(_) => {}
++        Command::Task123(_) | Command::Defconfig(_) | Command::Config(_) => {}
+     }
+ }
+ 
+diff --git a/run-task123.sh b/run-task123.sh
+index 096a30523..538079f2d 100755
+--- a/run-task123.sh
++++ b/run-task123.sh
+@@ -3,41 +3,22 @@
+ set -Eeuo pipefail
+ 
+ SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
+-RUNNER="$SCRIPT_DIR/os/axvisor/scripts/run_task123_guest_comparison.sh"
+ 
+-if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
+-    exec "$RUNNER" --help
+-fi
+-
+-# Prefer the persistent, metadata-validated RT-Thread build used by the
+-# realtime baseline. If it is absent, the runner builds a fresh image and
+-# writes its metadata in the per-run artifact cache.
+-rtthread_build_root="${RTTHREAD_NATIVE_SRC:-$SCRIPT_DIR/tmp/rt-thread-5.2.2-native-current}"
+-rtthread_default_image="$rtthread_build_root/bsp/qemu-virt64-aarch64/rtthread.bin"
+-rtthread_image="${RTTHREAD_IMAGE:-}"
+-if [[ -z "$rtthread_image" && -f "$rtthread_default_image" &&
+-    -f "$rtthread_default_image.meta.json" ]]; then
+-    rtthread_image="$rtthread_default_image"
+-fi
+-
+-runner_environment=(
+-    RTTHREAD_REQUIRE_IMAGE_METADATA=1
+-)
+-if [[ -n "$rtthread_image" ]]; then
+-    rtthread_metadata="${RTTHREAD_IMAGE_META:-$rtthread_image.meta.json}"
+-    runner_environment+=(
+-        "RTTHREAD_IMAGE=$rtthread_image"
+-        "RTTHREAD_IMAGE_META=$rtthread_metadata"
+-    )
+-    printf 'RTTHREAD_IMAGE %s\n' "$rtthread_image"
+-    printf 'RTTHREAD_IMAGE_META %s\n' "$rtthread_metadata"
++# Compatibility entrypoint. The xtask command owns persistent RT-Thread image
++# selection and keeps the runner in the foreground process group.
++if [[ $# -eq 0 ]]; then
++    set -- --quick --allow-qemu-timer-limit
+ else
+-    printf '%s\n' 'RTTHREAD_IMAGE <build-on-demand>'
++    have_timer_limit=0
++    for argument in "$@"; do
++        case "$argument" in
++            --allow-qemu-timer-limit) have_timer_limit=1 ;;
++        esac
++    done
++    if [[ ${have_timer_limit:-0} -eq 0 ]]; then
++        set -- "$@" --allow-qemu-timer-limit
++    fi
+ fi
+-printf '%s\n' 'RTTHREAD_REQUIRE_IMAGE_METADATA 1'
+-
+-# Keep the process in the foreground. Git, Buildroot, Cargo, and QEMU inherit
+-# this terminal directly, and Ctrl+C is delivered to the whole foreground group.
+-# Quick/full comparisons are diagnostic runs under QEMU TCG: keep collecting a
+-# complete 1-ms result even when the emulator adds timer-deadline long tails.
+-exec env "${runner_environment[@]}" "$RUNNER" "${@:---quick}" --allow-qemu-timer-limit
++set -- cargo xtask axvisor task123 "$@"
++cd "$SCRIPT_DIR"
++exec "$@"
+diff --git a/scripts/axbuild/src/axvisor/mod.rs b/scripts/axbuild/src/axvisor/mod.rs
+index a186f0236..d8eca1b01 100644
+--- a/scripts/axbuild/src/axvisor/mod.rs
++++ b/scripts/axbuild/src/axvisor/mod.rs
+@@ -14,6 +14,7 @@ pub mod board;
+ pub mod build;
+ pub mod config;
+ pub mod rootfs;
++pub mod task123;
+ pub mod test;
+ 
+ /// Axvisor host-side commands
+@@ -27,6 +28,8 @@ pub enum Command {
+     Board(ArgsBoard),
+     /// Run Axvisor test suites
+     Test(ArgsTest),
++    /// Run the integrated Task123 Linux/StarryOS guest comparison
++    Task123(task123::Task123Args),
+     /// Build and run Axvisor with U-Boot
+     Uboot(ArgsUboot),
+     /// Generate a default board config
+@@ -251,6 +254,7 @@ impl Axvisor {
+             Command::Defconfig(args) => self.defconfig(args),
+             Command::Config(args) => self.config(args).await,
+             Command::Test(args) => self.test(args).await,
++            Command::Task123(args) => task123::run(self, args).await,
+         }
+     }
+ 
+@@ -457,6 +461,37 @@ mod tests {
+         }
+     }
+ 
++    #[test]
++    fn command_parses_task123() {
++        #[derive(Parser)]
++        struct Cli {
++            #[command(subcommand)]
++            command: Command,
++        }
++
++        let cli = Cli::try_parse_from([
++            "axvisor",
++            "task123",
++            "--quick",
++            "--output",
++            "/tmp/task123-results",
++            "--cache",
++            "/tmp/task123-cache",
++        ])
++        .unwrap();
++
++        match cli.command {
++            Command::Task123(args) => {
++                assert!(args.quick);
++                assert!(!args.full);
++                assert!(!args.allow_qemu_timer_limit);
++                assert_eq!(args.output, Some(PathBuf::from("/tmp/task123-results")));
++                assert_eq!(args.cache, Some(PathBuf::from("/tmp/task123-cache")));
++            }
++            _ => panic!("expected task123 command"),
++        }
++    }
++
+     #[test]
+     fn command_parses_board() {
+         #[derive(Parser)]
+diff --git a/scripts/axbuild/src/axvisor/task123.rs b/scripts/axbuild/src/axvisor/task123.rs
+new file mode 100644
+index 000000000..c18e679a8
+--- /dev/null
++++ b/scripts/axbuild/src/axvisor/task123.rs
+@@ -0,0 +1,489 @@
++use std::{
++    path::{Path, PathBuf},
++    process::Command,
++};
++
++use clap::Args;
++
++use super::Axvisor;
++
++#[derive(Args, Default)]
++pub struct Task123Args {
++    /// Run the five-minute diagnostic comparison
++    #[arg(long, conflicts_with = "full")]
++    pub quick: bool,
++
++    /// Run the one-hour formal comparison
++    #[arg(long)]
++    pub full: bool,
++
++    /// Comparison output directory
++    #[arg(long)]
++    pub output: Option<PathBuf>,
++
++    /// Shared artifact cache directory
++    #[arg(long)]
++    pub cache: Option<PathBuf>,
++
++    /// Keep complete stability results when QEMU TCG exceeds timer deadlines
++    #[arg(long)]
++    pub allow_qemu_timer_limit: bool,
++}
++
++#[derive(Debug, Default)]
++struct Task123Environment {
++    image: Option<PathBuf>,
++    image_meta: Option<PathBuf>,
++    native_source: Option<PathBuf>,
++}
++
++#[derive(serde::Deserialize)]
++struct Task123ImageMetadata {
++    schema: u32,
++    patch_set_sha256: String,
++}
++
++const RTTHREAD_PATCHES: [&str; 10] = [
++    "0000-axvisor-aarch64-port.patch",
++    "0009-native-qemu-memory-layout.patch",
++    "0002-lwip-rx-mailbox-recover-notice.patch",
++    "0003-virtio-net-reclaim-tx-used-ring.patch",
++    "0004-virtio-net-use-rx-used-ring-head.patch",
++    "0005-lwip-configurable-udp-recv-mailbox.patch",
++    "0006-gicv3-use-redistributor-pending-registers.patch",
++    "0007-gicv3-query-interrupt-enable-state.patch",
++    "0008-aarch64-gtimer-use-absolute-deadlines.patch",
++    "0010-virtio-net-benchmark-packet-hook.patch",
++];
++
++impl Task123Environment {
++    fn from_process() -> Self {
++        Self {
++            image: non_empty_env("RTTHREAD_IMAGE"),
++            image_meta: non_empty_env("RTTHREAD_IMAGE_META"),
++            native_source: non_empty_env("RTTHREAD_NATIVE_SRC"),
++        }
++    }
++}
++
++fn non_empty_env(name: &str) -> Option<PathBuf> {
++    std::env::var_os(name)
++        .filter(|value| !value.is_empty())
++        .map(PathBuf::from)
++}
++
++#[derive(Debug, Eq, PartialEq)]
++struct Task123Plan {
++    runner: PathBuf,
++    rtthread_image: Option<PathBuf>,
++    rtthread_image_meta: Option<PathBuf>,
++    require_image_metadata: bool,
++}
++
++impl Task123Plan {
++    fn resolve(workspace_root: &Path, environment: &Task123Environment) -> anyhow::Result<Self> {
++        let rtthread_image = environment.image.clone().or_else(|| {
++            let native_source = environment.native_source.clone().unwrap_or_else(|| {
++                workspace_root.join("tmp/source-cache/task123-rtthread-current")
++            });
++            let candidate = native_source.join("bsp/qemu-virt64-aarch64/rtthread.bin");
++            if candidate.is_file() {
++                let metadata = default_metadata_path(&candidate);
++                if metadata_is_current(&metadata, workspace_root) {
++                    return Some(candidate);
++                }
++            }
++
++            let candidate = native_source.join("rtthread.bin");
++            let metadata = default_metadata_path(&candidate);
++            (candidate.is_file() && metadata_is_current(&metadata, workspace_root))
++                .then_some(candidate)
++        });
++        let rtthread_image_meta = rtthread_image.as_ref().map(|image| {
++            environment
++                .image_meta
++                .clone()
++                .unwrap_or_else(|| default_metadata_path(image))
++        });
++
++        Ok(Self {
++            runner: workspace_root.join("os/axvisor/scripts/run_task123_guest_comparison.sh"),
++            rtthread_image,
++            rtthread_image_meta,
++            require_image_metadata: true,
++        })
++    }
++}
++
++fn default_metadata_path(image: &Path) -> PathBuf {
++    let mut metadata = image.as_os_str().to_os_string();
++    metadata.push(".meta.json");
++    PathBuf::from(metadata)
++}
++
++fn metadata_is_current(path: &Path, workspace_root: &Path) -> bool {
++    std::fs::File::open(path)
++        .and_then(|file| {
++            let metadata: Task123ImageMetadata = serde_json::from_reader(file)?;
++            Ok(metadata.schema == 1
++                && metadata.patch_set_sha256 == patch_set_digest(workspace_root))
++        })
++        .unwrap_or(false)
++}
++
++fn patch_set_digest(workspace_root: &Path) -> String {
++    use std::fmt::Write as _;
++
++    use sha2::{Digest, Sha256};
++
++    let mut manifest = String::new();
++    for name in RTTHREAD_PATCHES {
++        let path = workspace_root
++            .join("os/axvisor/patches/rtthread")
++            .join(name);
++        let Some(contents) = std::fs::read(path).ok() else {
++            return String::new();
++        };
++        let mut patch_digest = Sha256::new();
++        patch_digest.update(contents);
++        writeln!(&mut manifest, "{:x}  {name}", patch_digest.finalize())
++            .expect("writing an in-memory patch manifest cannot fail");
++    }
++    let mut digest = Sha256::new();
++    digest.update(manifest.as_bytes());
++    format!("{:x}", digest.finalize())
++}
++
++impl Task123Args {
++    fn runner_arguments(&self) -> Vec<String> {
++        let mut arguments = Vec::new();
++        if self.full {
++            arguments.push("--full".to_string());
++        } else {
++            arguments.push("--quick".to_string());
++        }
++        if let Some(output) = &self.output {
++            arguments.push("--output".to_string());
++            arguments.push(output.display().to_string());
++        }
++        if let Some(cache) = &self.cache {
++            arguments.push("--cache".to_string());
++            arguments.push(cache.display().to_string());
++        }
++        if self.allow_qemu_timer_limit {
++            arguments.push("--allow-qemu-timer-limit".to_string());
++        }
++        arguments
++    }
++}
++
++pub(super) async fn run(axvisor: &mut Axvisor, args: Task123Args) -> anyhow::Result<()> {
++    let workspace_root = axvisor.app.workspace_root().to_path_buf();
++    let environment = Task123Environment::from_process();
++    let plan = Task123Plan::resolve(&workspace_root, &environment)?;
++    if let Some(output) = &args.output {
++        prepare_output_parent(&workspace_root, output)?;
++    }
++    plan.execute(&args.runner_arguments())
++}
++
++fn prepare_output_parent(workspace_root: &Path, output: &Path) -> anyhow::Result<()> {
++    let parent = output.parent().unwrap_or_else(|| Path::new("."));
++    let parent = if output.is_absolute() {
++        parent.to_path_buf()
++    } else {
++        workspace_root.join(parent)
++    };
++    std::fs::create_dir_all(&parent).map_err(|error| {
++        anyhow::anyhow!(
++            "failed to create Task123 output parent {}: {error}",
++            parent.display()
++        )
++    })
++}
++
++impl Task123Plan {
++    fn execute(&self, arguments: &[String]) -> anyhow::Result<()> {
++        if let Some(image) = &self.rtthread_image {
++            println!("RTTHREAD_IMAGE {}", image.display());
++        } else {
++            println!("RTTHREAD_IMAGE <build-on-demand>");
++        }
++        if let Some(metadata) = &self.rtthread_image_meta {
++            println!("RTTHREAD_IMAGE_META {}", metadata.display());
++        }
++        println!(
++            "RTTHREAD_REQUIRE_IMAGE_METADATA {}",
++            if self.require_image_metadata { 1 } else { 0 }
++        );
++
++        let mut command = Command::new(&self.runner);
++        command.args(arguments);
++        if let Some(image) = &self.rtthread_image {
++            command.env("RTTHREAD_IMAGE", image);
++        }
++        if let Some(metadata) = &self.rtthread_image_meta {
++            command.env("RTTHREAD_IMAGE_META", metadata);
++        }
++        if self.require_image_metadata {
++            command.env("RTTHREAD_REQUIRE_IMAGE_METADATA", "1");
++        }
++        let status = command.status()?;
++        anyhow::ensure!(
++            status.success(),
++            "Task123 guest comparison exited with status {status}"
++        );
++        Ok(())
++    }
++}
++
++#[cfg(test)]
++mod tests {
++    use tempfile::tempdir;
++
++    use super::*;
++
++    #[test]
++    fn runner_arguments_default_to_quick_diagnostic_mode() {
++        let args = Task123Args::default();
++
++        assert_eq!(args.runner_arguments(), vec!["--quick"]);
++    }
++
++    #[test]
++    fn runner_arguments_preserve_user_selection() {
++        let args = Task123Args {
++            full: true,
++            ..Task123Args::default()
++        };
++
++        assert_eq!(args.runner_arguments(), vec!["--full"]);
++    }
++
++    #[test]
++    fn runner_arguments_forward_timer_limit_opt_in() {
++        let args = Task123Args {
++            full: true,
++            allow_qemu_timer_limit: true,
++            ..Task123Args::default()
++        };
++
++        assert_eq!(
++            args.runner_arguments(),
++            vec!["--full", "--allow-qemu-timer-limit"]
++        );
++    }
++
++    #[test]
++    fn runner_arguments_forward_optional_paths() {
++        let args = Task123Args {
++            quick: true,
++            output: Some(PathBuf::from("/results")),
++            cache: Some(PathBuf::from("/cache")),
++            allow_qemu_timer_limit: true,
++            ..Task123Args::default()
++        };
++
++        assert_eq!(
++            args.runner_arguments(),
++            vec![
++                "--quick",
++                "--output",
++                "/results",
++                "--cache",
++                "/cache",
++                "--allow-qemu-timer-limit"
++            ]
++        );
++    }
++
++    #[test]
++    fn prepares_missing_output_parent_for_relative_and_absolute_paths() {
++        let workspace = tempdir().unwrap();
++        let relative_output = PathBuf::from("tmp/results/run");
++        prepare_output_parent(workspace.path(), &relative_output).unwrap();
++        assert!(workspace.path().join("tmp/results").is_dir());
++
++        let absolute_output = workspace.path().join("absolute/results/run");
++        prepare_output_parent(workspace.path(), &absolute_output).unwrap();
++        assert!(workspace.path().join("absolute/results").is_dir());
++    }
++
++    #[test]
++    fn plan_uses_explicit_image_without_requiring_persistent_build() {
++        let plan = Task123Plan::resolve(
++            Path::new("/workspace"),
++            &Task123Environment {
++                image: Some(PathBuf::from("/explicit/rtthread.bin")),
++                image_meta: Some(PathBuf::from("/explicit/rtthread.meta.json")),
++                native_source: None,
++            },
++        )
++        .unwrap();
++
++        assert_eq!(
++            plan.rtthread_image,
++            Some(PathBuf::from("/explicit/rtthread.bin"))
++        );
++        assert_eq!(
++            plan.rtthread_image_meta,
++            Some(PathBuf::from("/explicit/rtthread.meta.json"))
++        );
++        assert!(plan.require_image_metadata);
++    }
++
++    #[test]
++    fn plan_selects_persistent_image_only_when_image_and_metadata_exist() {
++        let workspace = tempdir().unwrap();
++        let digest = write_patch_set(workspace.path());
++        let image = workspace
++            .path()
++            .join("tmp/source-cache/task123-rtthread-current/rtthread.bin");
++        std::fs::create_dir_all(image.parent().unwrap()).unwrap();
++        std::fs::write(&image, b"image").unwrap();
++        std::fs::write(
++            PathBuf::from(format!("{}.meta.json", image.display())),
++            &format!(r#"{{"schema":1,"patch_set_sha256":"{digest}"}}"#),
++        )
++        .unwrap();
++
++        let plan = Task123Plan::resolve(workspace.path(), &Task123Environment::default()).unwrap();
++
++        assert_eq!(plan.rtthread_image, Some(image.clone()));
++        assert_eq!(
++            plan.rtthread_image_meta,
++            Some(PathBuf::from(format!("{}.meta.json", image.display())))
++        );
++    }
++
++    #[test]
++    fn plan_rejects_persistent_image_with_unsupported_metadata_schema() {
++        let workspace = tempdir().unwrap();
++        let image = workspace
++            .path()
++            .join("tmp/source-cache/task123-rtthread-current/rtthread.bin");
++        let metadata = PathBuf::from(format!("{}.meta.json", image.display()));
++        std::fs::create_dir_all(image.parent().unwrap()).unwrap();
++        std::fs::write(&image, b"image").unwrap();
++        std::fs::write(&metadata, br#"{"schema": 0}"#).unwrap();
++
++        let plan = Task123Plan::resolve(workspace.path(), &Task123Environment::default()).unwrap();
++
++        assert_eq!(plan.rtthread_image, None);
++        assert_eq!(plan.rtthread_image_meta, None);
++    }
++
++    #[test]
++    fn plan_rejects_persistent_image_with_stale_patch_set() {
++        let workspace = tempdir().unwrap();
++        let patch_dir = workspace.path().join("os/axvisor/patches/rtthread");
++        std::fs::create_dir_all(&patch_dir).unwrap();
++        for name in RTTHREAD_PATCHES {
++            std::fs::write(patch_dir.join(name), name.as_bytes()).unwrap();
++        }
++        let image = workspace
++            .path()
++            .join("tmp/source-cache/task123-rtthread-current/rtthread.bin");
++        let metadata = PathBuf::from(format!("{}.meta.json", image.display()));
++        std::fs::create_dir_all(image.parent().unwrap()).unwrap();
++        std::fs::write(&image, b"image").unwrap();
++        std::fs::write(
++            &metadata,
++            br#"{"schema":1,"patch_set_sha256":"0000000000000000000000000000000000000000000000000000000000000000"}"#,
++        )
++        .unwrap();
++
++        let plan = Task123Plan::resolve(workspace.path(), &Task123Environment::default()).unwrap();
++
++        assert_eq!(plan.rtthread_image, None);
++        assert_eq!(plan.rtthread_image_meta, None);
++    }
++
++    #[test]
++    fn plan_builds_on_demand_without_persistent_image() {
++        let plan = Task123Plan::resolve(
++            Path::new("/definitely-missing-workspace"),
++            &Task123Environment::default(),
++        )
++        .unwrap();
++
++        assert_eq!(plan.rtthread_image, None);
++        assert_eq!(plan.rtthread_image_meta, None);
++        assert!(plan.require_image_metadata);
++    }
++
++    #[test]
++    fn plan_honors_native_source_for_persistent_image_discovery() {
++        let workspace = tempdir().unwrap();
++        let digest = write_patch_set(workspace.path());
++        let native_source = workspace.path().join("custom-native-source");
++        let image = native_source.join("bsp/qemu-virt64-aarch64/rtthread.bin");
++        std::fs::create_dir_all(image.parent().unwrap()).unwrap();
++        std::fs::write(&image, b"image").unwrap();
++        std::fs::write(
++            PathBuf::from(format!("{}.meta.json", image.display())),
++            &format!(r#"{{"schema":1,"patch_set_sha256":"{digest}"}}"#),
++        )
++        .unwrap();
++
++        let plan = Task123Plan::resolve(
++            workspace.path(),
++            &Task123Environment {
++                native_source: Some(native_source),
++                ..Task123Environment::default()
++            },
++        )
++        .unwrap();
++
++        assert_eq!(plan.rtthread_image, Some(image.clone()));
++        assert_eq!(
++            plan.rtthread_image_meta,
++            Some(PathBuf::from(format!("{}.meta.json", image.display())))
++        );
++    }
++
++    #[test]
++    fn plan_ignores_metadata_when_image_is_not_selected() {
++        let plan = Task123Plan::resolve(
++            Path::new("/definitely-missing-workspace"),
++            &Task123Environment {
++                image_meta: Some(PathBuf::from("/explicit/rtthread.meta.json")),
++                ..Task123Environment::default()
++            },
++        )
++        .unwrap();
++
++        assert_eq!(plan.rtthread_image, None);
++        assert_eq!(plan.rtthread_image_meta, None);
++    }
++
++    #[test]
++    fn patch_set_digest_matches_relative_sha256sum_manifest() {
++        let workspace = tempdir().unwrap();
++        write_patch_set(workspace.path());
++
++        let patch_dir = workspace.path().join("os/axvisor/patches/rtthread");
++        let manifest = std::process::Command::new("sha256sum")
++            .args(RTTHREAD_PATCHES)
++            .current_dir(&patch_dir)
++            .output()
++            .unwrap();
++        assert!(manifest.status.success());
++
++        let mut expected = sha2::Sha256::new();
++        use sha2::Digest as _;
++        expected.update(manifest.stdout);
++        let expected = format!("{:x}", expected.finalize());
++
++        assert_eq!(patch_set_digest(workspace.path()), expected);
++    }
++
++    fn write_patch_set(workspace_root: &Path) -> String {
++        let patch_dir = workspace_root.join("os/axvisor/patches/rtthread");
++        std::fs::create_dir_all(&patch_dir).unwrap();
++        for name in RTTHREAD_PATCHES {
++            std::fs::write(patch_dir.join(name), name.as_bytes()).unwrap();
++        }
++        patch_set_digest(workspace_root)
++    }
++}

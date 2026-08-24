@@ -1,0 +1,4 @@
+scenario,run_id,duration_s,samples,missing,result,jitter_p50_ns,jitter_p95_ns,jitter_p99_ns,jitter_p99_9_ns,jitter_max_ns,jitter_miss_100us,jitter_miss_500us,jitter_miss_1ms,callback_p50_ns,callback_p95_ns,callback_p99_ns,callback_p99_9_ns,callback_max_ns,callback_miss_100us,callback_miss_1ms
+A-native-rtthread,rtthread-native-300s,300,299999,0,PASS,384,2928,10912,37344,145696,2,0,0,112,256,6032,9856,37424,0,0
+B-axvisor-rtthread-only,20260819T135818Z,300,299999,0,PASS,2736,12800,18048,139280,488032,592,0,0,448,592,816,4512,130000,5,0
+C-axvisor-linux,20260819T124222Z,300,299999,0,PASS_WITH_QEMU_TIMER_LIMIT,19792,292560,396848,456400,2803184,84751,66,2,528,672,960,7888,163056,84,0

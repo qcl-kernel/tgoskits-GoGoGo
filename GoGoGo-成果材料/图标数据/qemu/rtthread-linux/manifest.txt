@@ -1,0 +1,36 @@
+schema=1
+rtos=rtthread
+app_guest=linux
+mode=realtime-suite
+task2_count=2
+task3_frames=3
+task3_fault=normal
+qemu_cpu=cortex-a72
+qemu_timer_slack_ns=1
+qemu_cpu_affinity=
+qemu_sched_policy=
+qemu_sched_priority=0
+qemu_tcg_thread=single
+qemu_icount=shift=0
+qemu_pmu=on
+rtbench_pmu_event=0x8
+rtbench_units=ns,cycles,instructions
+qemu_vcpu_affinity=
+ARTIFACT name=qemu path=/usr/bin/qemu-system-aarch64 sha256=30378ffc375882d3dc2d6cbb015a3a64bc28023e93e99339717a9c71b4e4c392
+ARTIFACT name=axvisor path=/home/yfblock/Code/tgoskits-GoGoGo/tmp/task123-qemu-ns-all-2/rtthread-linux/axvisor.bin sha256=e2b82c137867d3fbf9bf0d367e27e7529ba1855ed8c253c07013fcdf41236068
+ARTIFACT name=linux-kernel path=/home/yfblock/Code/tgoskits-GoGoGo/tmp/.task123-comparison-cache.task123-qemu-ns-all-2.3159981/linux-kernel sha256=d91fb60f7aeb6fd34ccd4ef3a31f300280138a6c4a18140b90d52646c4bf20a7
+ARTIFACT name=linux-initramfs path=/home/yfblock/Code/tgoskits-GoGoGo/tmp/.task123-comparison-cache.task123-qemu-ns-all-2.3159981/linux-initramfs.cpio sha256=66be4cf84765ef93c539920cf8db739dd1648c9e56728a2195b2e8d46a17a838
+ARTIFACT name=linux-vmconfig path=/home/yfblock/Code/tgoskits-GoGoGo/tmp/task123-qemu-ns-all-2/rtthread-linux/vmconfig-linux.toml sha256=4ca92ecf7c649c0d3bc4db6bcbc9db963d88a0139cf8fecbad7283ca0206c6d5
+ARTIFACT name=rtthread path=/home/yfblock/Code/tgoskits-GoGoGo/tmp/.task123-comparison-cache.task123-qemu-ns-all-2.3159981/rtthread.bin sha256=b10c8d98a505acc8590f707859940c58dffb516e601123becd810a96d86fa04c
+ARTIFACT name=rtthread-metadata path=/home/yfblock/Code/tgoskits-GoGoGo/tmp/.task123-comparison-cache.task123-qemu-ns-all-2.3159981/rtthread.bin.meta.json sha256=702f7efdf0a96f35a5abced6cabaac566c6acb129f0a43ea8b57db62eabe501f
+ARTIFACT name=rtthread-vmconfig path=/home/yfblock/Code/tgoskits-GoGoGo/tmp/task123-qemu-ns-all-2/rtthread-linux/vmconfig-rtthread.toml sha256=14e2aca2ca0332d8a4f6961ed57bcfff828e2b7cd68b1688bc189c6e1523a751
+ARTIFACT name=model path=/home/yfblock/Code/tgoskits-GoGoGo/tmp/.task123-comparison-cache.task123-qemu-ns-all-2.3159981/model_weights.h sha256=2cb5da281d088bd7650659db74914aa35642e9e0fc93489c6d7479d369315ca2
+ARTIFACT name=protocol-source path=/home/yfblock/Code/tgoskits-GoGoGo/os/axvisor/guests/rt-ipc/common/rt_ipc.c sha256=38a65d69608a5907e64fe4ba43df2faa5af173d3aa90f1300923fcebc77a2e03
+ARTIFACT name=protocol-header path=/home/yfblock/Code/tgoskits-GoGoGo/os/axvisor/guests/rt-ipc/common/rt_ipc.h sha256=e22da1b00dc144fb0c3ad5771bbcf4d9d8068f94d304fd4c70c0cb2dd75c1b60
+ARTIFACT name=rootfs path=/home/yfblock/Code/tgoskits-GoGoGo/tmp/.task123-comparison-cache.task123-qemu-ns-all-2.3159981/rootfs.img sha256=7c8d83c4c3a5c858d6ccc50847e4d4805d89736a6e63cef54ec3790eb8b003c4
+raw_qemu_exit=0
+termination_reason=marker-complete
+qemu_exit=0
+result_gate=PASS
+rtbench_pmu_status=ready
+rtbench_counter_frequency=62500000

@@ -1,0 +1,172 @@
+Booting Linux on physical CPU 0x0000000000 [0x410fd083]
+Linux version 6.12.21 (yfblock@9950x) (aarch64-linux-gnu-gcc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0, GNU ld (GNU Binutils for Ubuntu) 2.42) #1 SMP PREEMPT Thu Aug 20 15:55:43 CST 2026
+Machine model: linux,dummy-virt
+efi: UEFI not found.
+OF: reserved mem: Reserved memory: No reserved-memory node in the DT
+Zone ranges:
+  DMA      [mem 0x0000000080000000-0x000000009fffffff]
+  DMA32    empty
+  Normal   empty
+Movable zone start for each node
+Early memory node ranges
+  node   0: [mem 0x0000000080000000-0x000000009fffffff]
+Initmem setup node 0 [mem 0x0000000080000000-0x000000009fffffff]
+psci: probing for conduit method from DT.
+psci: PSCIv1.1 detected in firmware.
+psci: Using standard PSCI v0.2 function IDs
+psci: Trusted OS migration not required
+psci: SMC Calling Convention v65535.65535
+percpu: Embedded 14 pages/cpu s28248 r0 d29096 u57344
+Detected PIPT I-cache on CPU0
+CPU features: detected: GIC system register CPU interface
+CPU features: detected: Spectre-v2
+CPU features: detected: Spectre-v4
+CPU features: detected: Spectre-BHB
+CPU features: detected: ARM errata 1165522, 1319367, or 1530923
+alternatives: applying boot alternatives
+Kernel command line: console=ttyAMA0 task2.count=1000 task2.fault=none task3.frames=3 task3.fault=normal rtbench.net.count=1000
+Dentry cache hash table entries: 65536 (order: 7, 524288 bytes, linear)
+Inode-cache hash table entries: 32768 (order: 6, 262144 bytes, linear)
+Built 1 zonelists, mobility grouping on.  Total pages: 131072
+mem auto-init: stack:all(zero), heap alloc:off, heap free:off
+software IO TLB: SWIOTLB bounce buffer size adjusted to 0MB
+software IO TLB: area num 2.
+software IO TLB: mapped [mem 0x000000009f580000-0x000000009f600000] (0MB)
+SLUB: HWalign=64, Order=0-3, MinObjects=0, CPUs=2, Nodes=1
+rcu: Preemptible hierarchical RCU implementation.
+rcu: RCU calculated value of scheduler-enlistment delay is 10 jiffies.
+NR_IRQS: 64, nr_irqs: 64, preallocated irqs: 0
+GICv3: 256 SPIs implemented
+GICv3: 0 Extended SPIs implemented
+Root IRQ handler: gic_handle_irq
+GICv3: GICv3 features: 16 PPIs, RSS
+GICv3: GICD_CTRL.DS=0, SCR_EL3.FIQ=0
+GICv3: CPU0: found redistributor 0 region 0:0x00000000080a0000
+ITS [mem 0x08080000-0x0809ffff]
+ITS@0x0000000008080000: allocated 8192 Devices @80c40000 (indirect, esz 8, psz 64K, shr 1)
+ITS@0x0000000008080000: allocated 8192 Interrupt Collections @80c50000 (flat, esz 8, psz 64K, shr 1)
+GICv3: using LPI property table @0x0000000080c60000
+GICv3: CPU0: using allocated LPI pending table @0x0000000080c70000
+rcu: srcu_init: Setting srcu_struct sizes based on contention.
+arch_timer: cp15 timer(s) running at 62.50MHz (virt).
+clocksource: arch_sys_counter: mask: 0x1ffffffffffffff max_cycles: 0x1cd42e208c, max_idle_ns: 881590405314 ns
+sched_clock: 57 bits at 63MHz, resolution 16ns, wraps every 4398046511096ns
+Console: colour dummy device 80x25
+Calibrating delay loop (skipped), value calculated using timer frequency.. 125.00 BogoMIPS (lpj=625000)
+pid_max: default: 32768 minimum: 301
+Mount-cache hash table entries: 1024 (order: 1, 8192 bytes, linear)
+Mountpoint-cache hash table entries: 1024 (order: 1, 8192 bytes, linear)
+/cpus/cpu-map/socket0/cluster0/core2: Can't get CPU for leaf core
+cacheinfo: Unable to detect cache hierarchy for CPU 0
+rcu: Hierarchical SRCU implementation.
+rcu: 	Max phase no-delay instances is 1000.
+EFI services will not be available.
+smp: Bringing up secondary CPUs ...
+Detected PIPT I-cache on CPU1
+GICv3: CPU1: found redistributor 1 region 0:0x00000000080c0000
+GICv3: CPU1: using allocated LPI pending table @0x0000000080c80000
+CPU1: Booted secondary processor 0x0000000001 [0x410fd083]
+smp: Brought up 1 node, 2 CPUs
+SMP: Total of 2 processors activated.
+CPU: All CPU(s) started at EL1
+CPU features: detected: 32-bit EL0 Support
+CPU features: detected: CRC32 instructions
+alternatives: applying system-wide alternatives
+Memory: 497472K/524288K available (4864K kernel code, 700K rwdata, 936K rodata, 1152K init, 345K bss, 24608K reserved, 0K cma-reserved)
+devtmpfs: initialized
+clocksource: jiffies: mask: 0xffffffff max_cycles: 0xffffffff, max_idle_ns: 19112604462750000 ns
+futex hash table entries: 512 (order: 3, 32768 bytes, linear)
+DMI not present or invalid.
+NET: Registered PF_NETLINK/PF_ROUTE protocol family
+DMA: preallocated 128 KiB GFP_KERNEL pool for atomic allocations
+DMA: preallocated 128 KiB GFP_KERNEL|GFP_DMA pool for atomic allocations
+DMA: preallocated 128 KiB GFP_KERNEL|GFP_DMA32 pool for atomic allocations
+ASID allocator initialised with 65536 entries
+Serial: AMBA PL011 UART driver
+9000000.pl011: ttyAMA0 at MMIO 0x9000000 (irq = 13, base_baud = 0) is a PL011 rev1
+printk: legacy console [ttyAMA0] enabled
+iommu: Default domain type: Translated
+iommu: DMA domain TLB invalidation policy: strict mode
+pps_core: LinuxPPS API ver. 1 registered
+pps_core: Software ver. 5.3.6 - Copyright 2005-2007 Rodolfo Giometti <giometti@linux.it>
+PTP clock support registered
+clocksource: Switched to clocksource arch_sys_counter
+NET: Registered PF_INET protocol family
+IP idents hash table entries: 8192 (order: 4, 65536 bytes, linear)
+tcp_listen_portaddr_hash hash table entries: 256 (order: 0, 4096 bytes, linear)
+Table-perturb hash table entries: 65536 (order: 6, 262144 bytes, linear)
+TCP established hash table entries: 4096 (order: 3, 32768 bytes, linear)
+TCP bind hash table entries: 4096 (order: 5, 131072 bytes, linear)
+TCP: Hash tables configured (established 4096 bind 4096)
+UDP hash table entries: 256 (order: 1, 8192 bytes, linear)
+UDP-Lite hash table entries: 256 (order: 1, 8192 bytes, linear)
+NET: Registered PF_UNIX/PF_LOCAL protocol family
+Unpacking initramfs...
+workingset: timestamp_bits=62 max_order=17 bucket_order=0
+io scheduler mq-deadline registered
+io scheduler kyber registered
+SMCCC: SOC_ID: ARCH_SOC_ID not implemented, skipping ....
+NET: Registered PF_INET6 protocol family
+Freeing initrd memory: 5692K
+Segment Routing with IPv6
+In-situ OAM (IOAM) with IPv6
+sit: IPv6, IPv4 and MPLS over IPv4 tunneling driver
+NET: Registered PF_PACKET protocol family
+clk: Disabling unused clocks
+Freeing unused kernel memory: 1152K
+Run /init as init process
+LINUX_SMP_READY configured=2 online=0-1 nproc=2
+TASK123_LINUX_NET_READY ip=192.168.77.11 peer=192.168.77.30
+TASK3_LINUX_NET_PROBE_READY count=1000
+TASK2_LINUX_BEGIN port=9876
+=== RT-IPC Benchmark Client ===
+Target: 192.168.77.30:9876, count=1000 per size
+
+[client] fault profile: none
+RTBENCH_NET_PROBE_READY listen=9879 count=1000
+random: crng init done
+[client] connecting...
+[client] connected!
+
+--- Payload 64B ---
+[client] fault injection: force disconnect at request=500
+[client] reconnect complete recovery_ms=221 attempts=1
+RTBENCH_NET_PROBE_TRIGGERED count=1000
+  sent=1000  recv=1000  loss=0%
+  RTT: min=1ms avg=3ms max=53ms P50=3ms P95=13ms P99=19ms P99.9=33ms
+  throughput=15.85KiB/s
+  request_timeouts=0 protocol_errors=0 reconnects=1
+  transport: retrans=0 timeouts=0 dup=0 reorder=0 errors=0
+
+--- Payload 256B ---
+  sent=1000  recv=1000  loss=0%
+  RTT: min=0ms avg=2ms max=20ms P50=3ms P95=4ms P99=13ms P99.9=20ms
+  throughput=77.74KiB/s
+  request_timeouts=0 protocol_errors=0 reconnects=0
+  transport: retrans=0 timeouts=0 dup=0 reorder=0 errors=0
+
+--- Payload 1024B ---
+RTBENCH_NET_PROBE_END sent=1000 retries=0
+  sent=1000  recv=1000  loss=0%
+  RTT: min=0ms avg=2ms max=13ms P50=2ms P95=3ms P99=4ms P99.9=10ms
+  throughput=392.00KiB/s
+  request_timeouts=0 protocol_errors=0 reconnects=0
+  transport: retrans=0 timeouts=0 dup=0 reorder=0 errors=0
+
+========================================
+ALL TESTS COMPLETE
+========================================
+RT-IPC client exited with rc=0
+TASK2_LINUX_END status=PASS
+TASK3_LINUX_READY ip=192.168.77.11 peer=192.168.77.30:9877
+TASK3_FRAME_CSV=FIXED,0,0,2,2,21649,929,0,0,0,0,161,2447,0,0,0
+TASK3_FRAME_CSV=FIXED,1,1461,2,2,16624,405,0,0,0,0,436,2948,0,0,0
+TASK3_FRAME_CSV=FIXED,2,2900,2,2,32767,408,0,0,0,0,447,2592,0,0,0
+TASK3_FRAME_CSV=AI,0,0,2,2,21649,416,0,0,0,0,110,2797,0,0,0
+TASK3_FRAME_CSV=AI,1,1461,2,2,16624,404,0,0,0,0,87,2466,0,0,0
+TASK3_FRAME_CSV=AI,2,2900,2,2,32767,417,0,0,0,0,87,2628,0,0,0
+TASK3_SUMMARY_JSON={"schema":1,"frames_per_mode":3,"records":6,"elapsed_us":457434,"requests":6,"successes":6,"success_rate":1.000000,"application_errors":0,"application_timeouts":0,"transport_retries":0,"duplicates":0,"recovered":0,"reconnects":0,"injected_drops":0,"classification":{"correct":3,"total":3,"accuracy":1.000000,"confusion_matrix":[[0,0,0],[0,3,0],[0,0,0]]},"inference_us":{"min":404,"mean":496,"p50":408,"p95":929,"p99":929,"max":929},"round_trip_us":{"min":2447,"mean":2646,"p50":2592,"p95":2948,"p99":2948,"max":2948},"tracking_error_q15":{"fixed":{"min":0,"mean":1453,"p50":1461,"p95":2900,"p99":2900,"max":2900},"ai":{"min":0,"mean":1453,"p50":1461,"p95":2900,"p99":2900,"max":2900}},"settling":{"fixed":{"direction_changes":0,"successes":0,"mean_frames":0,"max_frames":0},"ai":{"direction_changes":0,"successes":0,"mean_frames":0,"max_frames":0}},"effective_payload_bytes_per_second":314}
+TASK3_LINUX_END status=PASS
+TASK123_LINUX_END status=PASS
+reboot: Power down
+

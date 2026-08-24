@@ -1,0 +1,109 @@
+{
+  "application_errors": 0,
+  "classification": {
+    "accuracy": 1.0,
+    "confusion_matrix": [
+      [
+        0,
+        0,
+        0
+      ],
+      [
+        0,
+        3,
+        0
+      ],
+      [
+        0,
+        0,
+        0
+      ]
+    ],
+    "correct": 3,
+    "total": 3
+  },
+  "duplicates": 0,
+  "effective_payload_bytes_per_second": 311,
+  "elapsed_us": 462698,
+  "frames_per_mode": 3,
+  "gates": {
+    "ai_tracking_mae_improves_at_least_30_percent": false,
+    "classification_accuracy_at_least_95_percent": true,
+    "success_rate_at_least_99_5_percent": true
+  },
+  "gates_enforced": false,
+  "inference_us": {
+    "max": 917,
+    "mean": 505,
+    "min": 419,
+    "p50": 423,
+    "p95": 917,
+    "p99": 917
+  },
+  "injected_drops": 0,
+  "reconnects": 0,
+  "recoveries": 0,
+  "requests": 6,
+  "round_trip_us": {
+    "max": 29489,
+    "mean": 7456,
+    "min": 2680,
+    "p50": 3034,
+    "p95": 29489,
+    "p99": 29489
+  },
+  "rtos_processing_us": {
+    "max": 329,
+    "mean": 132,
+    "min": 73,
+    "p50": 76,
+    "p95": 329,
+    "p99": 329
+  },
+  "schema": 1,
+  "settling": {
+    "ai": {
+      "direction_changes": 0,
+      "max_frames": 0,
+      "mean_frames": 0,
+      "successes": 0
+    },
+    "fixed": {
+      "direction_changes": 0,
+      "max_frames": 0,
+      "mean_frames": 0,
+      "successes": 0
+    }
+  },
+  "sources": {
+    "frames_csv": "/home/yfblock/Code/hyper-rtos/tgoskits/tmp/rtthread-realtime-current-quick-20260820/axvisor-linux-suite/frames.csv",
+    "linux_log": "/home/yfblock/Code/hyper-rtos/tgoskits/tmp/rtthread-realtime-current-quick-20260820/axvisor-linux-suite/linux.log",
+    "rtthread_log": "/home/yfblock/Code/hyper-rtos/tgoskits/tmp/rtthread-realtime-current-quick-20260820/axvisor-linux-suite/rtthread.log"
+  },
+  "success_rate": 1.0,
+  "successes": 6,
+  "timeouts": 0,
+  "tracking_error_q15": {
+    "ai": {
+      "max": 2900,
+      "mean": 1453,
+      "min": 0,
+      "p50": 1461,
+      "p95": 2900,
+      "p99": 2900
+    },
+    "fixed": {
+      "max": 2900,
+      "mean": 1453,
+      "min": 0,
+      "p50": 1461,
+      "p95": 2900,
+      "p99": 2900
+    }
+  },
+  "transport_retries": 0,
+  "transport_retries_by_side": {
+    "linux": 0,
+    "rtthread": 0
+  }
+}

@@ -1,0 +1,606 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1480" viewBox="0 0 1600 1480" role="img" aria-label="RTBench nanosecond metrics: complete captures only">
+<rect width="1600" height="1480" fill="#ffffff"/>
+<style>text{font-family:Arial,sans-serif} .grid{stroke:#d1d5db;stroke-width:1} .frame{fill:none;stroke:#374151;stroke-width:1} .na{fill:#e5e7eb;stroke:#9ca3af;stroke-width:1}</style>
+<text x="24.0" y="30.0" font-size="20px" text-anchor="start" font-weight="bold" fill="#111827">RTBench nanosecond metrics: complete captures only</text>
+<text x="28.0" y="75.0" font-size="14px" text-anchor="start" font-weight="bold" fill="#111827">mean ns</text>
+<text x="240.4" y="81.0" font-size="9px" text-anchor="middle" font-weight="normal" fill="#111827">Q-RT/L</text>
+<text x="391.1" y="81.0" font-size="9px" text-anchor="middle" font-weight="normal" fill="#111827">Q-RT/S</text>
+<text x="541.9" y="81.0" font-size="9px" text-anchor="middle" font-weight="normal" fill="#111827">Q-Z/L</text>
+<text x="692.6" y="81.0" font-size="9px" text-anchor="middle" font-weight="normal" fill="#111827">Q-Z/S</text>
+<text x="157.0" y="113.4" font-size="9px" text-anchor="end" font-weight="normal" fill="#111827">timer_jitter</text>
+<rect x="165.0" y="89.0" width="149.8" height="34.9" fill="rgb(166,194,242)"/>
+<text x="240.4" y="113.4" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">2.82e+06</text>
+<rect x="315.8" y="89.0" width="149.8" height="34.9" fill="rgb(222,234,252)"/>
+<text x="391.1" y="113.4" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">6.19e+05</text>
+<rect x="466.5" y="89.0" width="149.8" height="34.9" fill="rgb(238,245,254)"/>
+<text x="541.9" y="113.4" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">72</text>
+<rect x="617.2" y="89.0" width="149.8" height="34.9" fill="rgb(232,241,253)"/>
+<text x="692.6" y="113.4" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">2.7e+05</text>
+<text x="157.0" y="149.3" font-size="9px" text-anchor="end" font-weight="normal" fill="#111827">callback_exec</text>
+<rect x="165.0" y="124.9" width="149.8" height="34.9" fill="rgb(238,245,254)"/>
+<text x="240.4" y="149.3" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">133</text>
+<rect x="315.8" y="124.9" width="149.8" height="34.9" fill="rgb(238,245,254)"/>
+<text x="391.1" y="149.3" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">136</text>
+<rect x="466.5" y="124.9" width="149.8" height="34.9" fill="rgb(239,246,255)"/>
+<text x="541.9" y="149.3" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">16</text>
+<rect x="617.2" y="124.9" width="149.8" height="34.9" fill="rgb(239,246,255)"/>
+<text x="692.6" y="149.3" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">16</text>
+<text x="157.0" y="185.1" font-size="9px" text-anchor="end" font-weight="normal" fill="#111827">preemption</text>
+<rect x="165.0" y="160.8" width="149.8" height="34.9" fill="rgb(238,245,254)"/>
+<text x="240.4" y="185.1" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">608</text>
+<rect x="315.8" y="160.8" width="149.8" height="34.9" fill="rgb(238,245,254)"/>
+<text x="391.1" y="185.1" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">616</text>
+<rect x="466.5" y="160.8" width="149.8" height="34.9" fill="rgb(239,246,255)"/>
+<text x="541.9" y="185.1" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">16</text>
+<rect x="617.2" y="160.8" width="149.8" height="34.9" fill="rgb(239,246,255)"/>
+<text x="692.6" y="185.1" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">16</text>
+<text x="157.0" y="221.0" font-size="9px" text-anchor="end" font-weight="normal" fill="#111827">irq</text>
+<rect x="165.0" y="196.6" width="149.8" height="34.9" fill="rgb(237,244,254)"/>
+<text x="240.4" y="221.0" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">7.31e+04</text>
+<rect x="315.8" y="196.6" width="149.8" height="34.9" fill="rgb(232,241,253)"/>
+<text x="391.1" y="221.0" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">2.59e+05</text>
+<rect x="466.5" y="196.6" width="149.8" height="34.9" fill="rgb(239,246,255)"/>
+<text x="541.9" y="221.0" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">16</text>
+<rect x="617.2" y="196.6" width="149.8" height="34.9" fill="rgb(239,246,255)"/>
+<text x="692.6" y="221.0" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">16</text>
+<text x="157.0" y="256.9" font-size="9px" text-anchor="end" font-weight="normal" fill="#111827">irq_to_task</text>
+<rect x="165.0" y="232.5" width="149.8" height="34.9" fill="rgb(208,224,249)"/>
+<text x="240.4" y="256.9" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">1.18e+06</text>
+<rect x="315.8" y="232.5" width="149.8" height="34.9" fill="rgb(193,213,246)"/>
+<text x="391.1" y="256.9" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">1.77e+06</text>
+<rect x="466.5" y="232.5" width="149.8" height="34.9" fill="rgb(239,246,255)"/>
+<text x="541.9" y="256.9" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">16</text>
+<rect x="617.2" y="232.5" width="149.8" height="34.9" fill="rgb(239,246,255)"/>
+<text x="692.6" y="256.9" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">16</text>
+<text x="157.0" y="292.8" font-size="9px" text-anchor="end" font-weight="normal" fill="#111827">irq_disabled_duration</text>
+<rect x="165.0" y="268.4" width="149.8" height="34.9" fill="rgb(238,245,254)"/>
+<text x="240.4" y="292.8" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">416</text>
+<rect x="315.8" y="268.4" width="149.8" height="34.9" fill="rgb(238,245,254)"/>
+<text x="391.1" y="292.8" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">424</text>
+<rect x="466.5" y="268.4" width="149.8" height="34.9" fill="rgb(239,246,255)"/>
+<text x="541.9" y="292.8" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">16</text>
+<rect x="617.2" y="268.4" width="149.8" height="34.9" fill="rgb(239,246,255)"/>
+<text x="692.6" y="292.8" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">16</text>
+<text x="157.0" y="328.6" font-size="9px" text-anchor="end" font-weight="normal" fill="#111827">mutex_inversion</text>
+<rect x="165.0" y="304.2" width="149.8" height="34.9" fill="rgb(238,245,254)"/>
+<text x="240.4" y="328.6" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">2.82e+03</text>
+<rect x="315.8" y="304.2" width="149.8" height="34.9" fill="rgb(238,245,254)"/>
+<text x="391.1" y="328.6" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">3e+03</text>
+<rect x="466.5" y="304.2" width="149.8" height="34.9" fill="rgb(239,246,255)"/>
+<text x="541.9" y="328.6" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">16</text>
+<rect x="617.2" y="304.2" width="149.8" height="34.9" fill="rgb(239,246,255)"/>
+<text x="692.6" y="328.6" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">16</text>
+<text x="157.0" y="364.5" font-size="9px" text-anchor="end" font-weight="normal" fill="#111827">wake_under_load</text>
+<rect x="165.0" y="340.1" width="149.8" height="34.9" fill="rgb(238,245,254)"/>
+<text x="240.4" y="364.5" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">608</text>
+<rect x="315.8" y="340.1" width="149.8" height="34.9" fill="rgb(238,245,254)"/>
+<text x="391.1" y="364.5" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">616</text>
+<rect x="466.5" y="340.1" width="149.8" height="34.9" fill="rgb(239,246,255)"/>
+<text x="541.9" y="364.5" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">16</text>
+<rect x="617.2" y="340.1" width="149.8" height="34.9" fill="rgb(239,246,255)"/>
+<text x="692.6" y="364.5" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">16</text>
+<text x="157.0" y="400.4" font-size="9px" text-anchor="end" font-weight="normal" fill="#111827">context_switch</text>
+<rect x="165.0" y="376.0" width="149.8" height="34.9" fill="rgb(238,245,254)"/>
+<text x="240.4" y="400.4" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">424</text>
+<rect x="315.8" y="376.0" width="149.8" height="34.9" fill="rgb(238,245,254)"/>
+<text x="391.1" y="400.4" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">416</text>
+<rect x="466.5" y="376.0" width="149.8" height="34.9" fill="rgb(239,246,255)"/>
+<text x="541.9" y="400.4" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">16</text>
+<rect x="617.2" y="376.0" width="149.8" height="34.9" fill="rgb(239,246,255)"/>
+<text x="692.6" y="400.4" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">16</text>
+<text x="157.0" y="436.3" font-size="9px" text-anchor="end" font-weight="normal" fill="#111827">scheduler_decision</text>
+<rect x="165.0" y="411.9" width="149.8" height="34.9" fill="rgb(238,245,254)"/>
+<text x="240.4" y="436.3" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">128</text>
+<rect x="315.8" y="411.9" width="149.8" height="34.9" fill="rgb(238,245,254)"/>
+<text x="391.1" y="436.3" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">120</text>
+<rect x="466.5" y="411.9" width="149.8" height="34.9" fill="rgb(239,246,255)"/>
+<text x="541.9" y="436.3" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">16</text>
+<rect x="617.2" y="411.9" width="149.8" height="34.9" fill="rgb(239,246,255)"/>
+<text x="692.6" y="436.3" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">16</text>
+<text x="157.0" y="472.1" font-size="9px" text-anchor="end" font-weight="normal" fill="#111827">sync_sem</text>
+<rect x="165.0" y="447.8" width="149.8" height="34.9" fill="rgb(238,245,254)"/>
+<text x="240.4" y="472.1" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">352</text>
+<rect x="315.8" y="447.8" width="149.8" height="34.9" fill="rgb(238,245,254)"/>
+<text x="391.1" y="472.1" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">336</text>
+<rect x="466.5" y="447.8" width="149.8" height="34.9" fill="rgb(239,246,255)"/>
+<text x="541.9" y="472.1" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">16</text>
+<rect x="617.2" y="447.8" width="149.8" height="34.9" fill="rgb(239,246,255)"/>
+<text x="692.6" y="472.1" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">16</text>
+<text x="157.0" y="508.0" font-size="9px" text-anchor="end" font-weight="normal" fill="#111827">sync_mutex</text>
+<rect x="165.0" y="483.6" width="149.8" height="34.9" fill="rgb(238,245,254)"/>
+<text x="240.4" y="508.0" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">1.42e+03</text>
+<rect x="315.8" y="483.6" width="149.8" height="34.9" fill="rgb(238,245,254)"/>
+<text x="391.1" y="508.0" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">448</text>
+<rect x="466.5" y="483.6" width="149.8" height="34.9" fill="rgb(239,246,255)"/>
+<text x="541.9" y="508.0" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">16</text>
+<rect x="617.2" y="483.6" width="149.8" height="34.9" fill="rgb(239,246,255)"/>
+<text x="692.6" y="508.0" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">16</text>
+<text x="157.0" y="543.9" font-size="9px" text-anchor="end" font-weight="normal" fill="#111827">sync_mailbox</text>
+<rect x="165.0" y="519.5" width="149.8" height="34.9" fill="rgb(238,245,254)"/>
+<text x="240.4" y="543.9" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">368</text>
+<rect x="315.8" y="519.5" width="149.8" height="34.9" fill="rgb(238,245,254)"/>
+<text x="391.1" y="543.9" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">368</text>
+<rect x="466.5" y="519.5" width="149.8" height="34.9" fill="rgb(239,246,255)"/>
+<text x="541.9" y="543.9" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">16</text>
+<rect x="617.2" y="519.5" width="149.8" height="34.9" fill="rgb(239,246,255)"/>
+<text x="692.6" y="543.9" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">16</text>
+<text x="157.0" y="579.8" font-size="9px" text-anchor="end" font-weight="normal" fill="#111827">irq_handler_exec</text>
+<rect x="165.0" y="555.4" width="149.8" height="34.9" fill="rgb(239,246,255)"/>
+<text x="240.4" y="579.8" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">16</text>
+<rect x="315.8" y="555.4" width="149.8" height="34.9" fill="rgb(238,245,254)"/>
+<text x="391.1" y="579.8" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">24</text>
+<rect x="466.5" y="555.4" width="149.8" height="34.9" fill="rgb(239,246,255)"/>
+<text x="541.9" y="579.8" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">16</text>
+<rect x="617.2" y="555.4" width="149.8" height="34.9" fill="rgb(239,246,255)"/>
+<text x="692.6" y="579.8" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">16</text>
+<text x="157.0" y="615.6" font-size="9px" text-anchor="end" font-weight="normal" fill="#111827">deadline_miss_under_load</text>
+<rect x="165.0" y="591.2" width="149.8" height="34.9" fill="rgb(232,241,253)"/>
+<text x="240.4" y="615.6" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">2.56e+05</text>
+<rect x="315.8" y="591.2" width="149.8" height="34.9" fill="rgb(221,233,251)"/>
+<text x="391.1" y="615.6" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">6.79e+05</text>
+<rect x="466.5" y="591.2" width="149.8" height="34.9" fill="rgb(239,246,255)"/>
+<text x="541.9" y="615.6" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">16</text>
+<rect x="617.2" y="591.2" width="149.8" height="34.9" fill="rgb(239,246,255)"/>
+<text x="692.6" y="615.6" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">16</text>
+<text x="157.0" y="651.5" font-size="9px" text-anchor="end" font-weight="normal" fill="#111827">net_event_latency</text>
+<rect x="165.0" y="627.1" width="149.8" height="34.9" fill="rgb(69,126,225)"/>
+<text x="240.4" y="651.5" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">6.58e+06</text>
+<rect x="315.8" y="627.1" width="149.8" height="34.9" fill="rgb(212,227,250)"/>
+<text x="391.1" y="651.5" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">1.01e+06</text>
+<rect x="466.5" y="627.1" width="149.8" height="34.9" fill="rgb(239,246,255)"/>
+<text x="541.9" y="651.5" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">16</text>
+<rect x="617.2" y="627.1" width="149.8" height="34.9" fill="rgb(239,246,255)"/>
+<text x="692.6" y="651.5" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">16</text>
+<text x="30.0" y="679.0" font-size="10px" text-anchor="start" font-weight="normal" fill="#111827">unit: ns; color scale min=16 max=6.58e+06</text>
+<text x="818.0" y="75.0" font-size="14px" text-anchor="start" font-weight="bold" fill="#111827">p95 ns</text>
+<text x="1030.4" y="81.0" font-size="9px" text-anchor="middle" font-weight="normal" fill="#111827">Q-RT/L</text>
+<text x="1181.1" y="81.0" font-size="9px" text-anchor="middle" font-weight="normal" fill="#111827">Q-RT/S</text>
+<text x="1331.9" y="81.0" font-size="9px" text-anchor="middle" font-weight="normal" fill="#111827">Q-Z/L</text>
+<text x="1482.6" y="81.0" font-size="9px" text-anchor="middle" font-weight="normal" fill="#111827">Q-Z/S</text>
+<text x="947.0" y="113.4" font-size="9px" text-anchor="end" font-weight="normal" fill="#111827">timer_jitter</text>
+<rect x="955.0" y="89.0" width="149.8" height="34.9" fill="rgb(179,203,244)"/>
+<text x="1030.4" y="113.4" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">4.55e+06</text>
+<rect x="1105.8" y="89.0" width="149.8" height="34.9" fill="rgb(224,236,252)"/>
+<text x="1181.1" y="113.4" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">1.08e+06</text>
+<rect x="1256.5" y="89.0" width="149.8" height="34.9" fill="rgb(239,246,255)"/>
+<text x="1331.9" y="113.4" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">0</text>
+<rect x="1407.2" y="89.0" width="149.8" height="34.9" fill="rgb(239,246,255)"/>
+<text x="1482.6" y="113.4" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">0</text>
+<text x="947.0" y="149.3" font-size="9px" text-anchor="end" font-weight="normal" fill="#111827">callback_exec</text>
+<rect x="955.0" y="124.9" width="149.8" height="34.9" fill="rgb(238,245,254)"/>
+<text x="1030.4" y="149.3" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">139</text>
+<rect x="1105.8" y="124.9" width="149.8" height="34.9" fill="rgb(238,245,254)"/>
+<text x="1181.1" y="149.3" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">139</text>
+<rect x="1256.5" y="124.9" width="149.8" height="34.9" fill="rgb(238,245,254)"/>
+<text x="1331.9" y="149.3" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">16</text>
+<rect x="1407.2" y="124.9" width="149.8" height="34.9" fill="rgb(238,245,254)"/>
+<text x="1482.6" y="149.3" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">16</text>
+<text x="947.0" y="185.1" font-size="9px" text-anchor="end" font-weight="normal" fill="#111827">preemption</text>
+<rect x="955.0" y="160.8" width="149.8" height="34.9" fill="rgb(238,245,254)"/>
+<text x="1030.4" y="185.1" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">608</text>
+<rect x="1105.8" y="160.8" width="149.8" height="34.9" fill="rgb(238,245,254)"/>
+<text x="1181.1" y="185.1" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">624</text>
+<rect x="1256.5" y="160.8" width="149.8" height="34.9" fill="rgb(238,245,254)"/>
+<text x="1331.9" y="185.1" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">16</text>
+<rect x="1407.2" y="160.8" width="149.8" height="34.9" fill="rgb(238,245,254)"/>
+<text x="1482.6" y="185.1" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">16</text>
+<text x="947.0" y="221.0" font-size="9px" text-anchor="end" font-weight="normal" fill="#111827">irq</text>
+<rect x="955.0" y="196.6" width="149.8" height="34.9" fill="rgb(237,244,254)"/>
+<text x="1030.4" y="221.0" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">1.19e+05</text>
+<rect x="1105.8" y="196.6" width="149.8" height="34.9" fill="rgb(233,242,254)"/>
+<text x="1181.1" y="221.0" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">4.07e+05</text>
+<rect x="1256.5" y="196.6" width="149.8" height="34.9" fill="rgb(238,245,254)"/>
+<text x="1331.9" y="221.0" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">16</text>
+<rect x="1407.2" y="196.6" width="149.8" height="34.9" fill="rgb(238,245,254)"/>
+<text x="1482.6" y="221.0" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">16</text>
+<text x="947.0" y="256.9" font-size="9px" text-anchor="end" font-weight="normal" fill="#111827">irq_to_task</text>
+<rect x="955.0" y="232.5" width="149.8" height="34.9" fill="rgb(209,225,249)"/>
+<text x="1030.4" y="256.9" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">2.24e+06</text>
+<rect x="1105.8" y="232.5" width="149.8" height="34.9" fill="rgb(193,214,247)"/>
+<text x="1181.1" y="256.9" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">3.44e+06</text>
+<rect x="1256.5" y="232.5" width="149.8" height="34.9" fill="rgb(238,245,254)"/>
+<text x="1331.9" y="256.9" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">16</text>
+<rect x="1407.2" y="232.5" width="149.8" height="34.9" fill="rgb(238,245,254)"/>
+<text x="1482.6" y="256.9" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">16</text>
+<text x="947.0" y="292.8" font-size="9px" text-anchor="end" font-weight="normal" fill="#111827">irq_disabled_duration</text>
+<rect x="955.0" y="268.4" width="149.8" height="34.9" fill="rgb(238,245,254)"/>
+<text x="1030.4" y="292.8" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">416</text>
+<rect x="1105.8" y="268.4" width="149.8" height="34.9" fill="rgb(238,245,254)"/>
+<text x="1181.1" y="292.8" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">432</text>
+<rect x="1256.5" y="268.4" width="149.8" height="34.9" fill="rgb(238,245,254)"/>
+<text x="1331.9" y="292.8" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">16</text>
+<rect x="1407.2" y="268.4" width="149.8" height="34.9" fill="rgb(238,245,254)"/>
+<text x="1482.6" y="292.8" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">16</text>
+<text x="947.0" y="328.6" font-size="9px" text-anchor="end" font-weight="normal" fill="#111827">mutex_inversion</text>
+<rect x="955.0" y="304.2" width="149.8" height="34.9" fill="rgb(238,245,254)"/>
+<text x="1030.4" y="328.6" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">2.82e+03</text>
+<rect x="1105.8" y="304.2" width="149.8" height="34.9" fill="rgb(238,245,254)"/>
+<text x="1181.1" y="328.6" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">3.18e+03</text>
+<rect x="1256.5" y="304.2" width="149.8" height="34.9" fill="rgb(238,245,254)"/>
+<text x="1331.9" y="328.6" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">16</text>
+<rect x="1407.2" y="304.2" width="149.8" height="34.9" fill="rgb(238,245,254)"/>
+<text x="1482.6" y="328.6" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">16</text>
+<text x="947.0" y="364.5" font-size="9px" text-anchor="end" font-weight="normal" fill="#111827">wake_under_load</text>
+<rect x="955.0" y="340.1" width="149.8" height="34.9" fill="rgb(238,245,254)"/>
+<text x="1030.4" y="364.5" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">608</text>
+<rect x="1105.8" y="340.1" width="149.8" height="34.9" fill="rgb(238,245,254)"/>
+<text x="1181.1" y="364.5" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">624</text>
+<rect x="1256.5" y="340.1" width="149.8" height="34.9" fill="rgb(238,245,254)"/>
+<text x="1331.9" y="364.5" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">16</text>
+<rect x="1407.2" y="340.1" width="149.8" height="34.9" fill="rgb(238,245,254)"/>
+<text x="1482.6" y="364.5" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">16</text>
+<text x="947.0" y="400.4" font-size="9px" text-anchor="end" font-weight="normal" fill="#111827">context_switch</text>
+<rect x="955.0" y="376.0" width="149.8" height="34.9" fill="rgb(238,245,254)"/>
+<text x="1030.4" y="400.4" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">432</text>
+<rect x="1105.8" y="376.0" width="149.8" height="34.9" fill="rgb(238,245,254)"/>
+<text x="1181.1" y="400.4" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">416</text>
+<rect x="1256.5" y="376.0" width="149.8" height="34.9" fill="rgb(238,245,254)"/>
+<text x="1331.9" y="400.4" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">16</text>
+<rect x="1407.2" y="376.0" width="149.8" height="34.9" fill="rgb(238,245,254)"/>
+<text x="1482.6" y="400.4" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">16</text>
+<text x="947.0" y="436.3" font-size="9px" text-anchor="end" font-weight="normal" fill="#111827">scheduler_decision</text>
+<rect x="955.0" y="411.9" width="149.8" height="34.9" fill="rgb(238,245,254)"/>
+<text x="1030.4" y="436.3" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">128</text>
+<rect x="1105.8" y="411.9" width="149.8" height="34.9" fill="rgb(238,245,254)"/>
+<text x="1181.1" y="436.3" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">128</text>
+<rect x="1256.5" y="411.9" width="149.8" height="34.9" fill="rgb(238,245,254)"/>
+<text x="1331.9" y="436.3" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">16</text>
+<rect x="1407.2" y="411.9" width="149.8" height="34.9" fill="rgb(238,245,254)"/>
+<text x="1482.6" y="436.3" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">16</text>
+<text x="947.0" y="472.1" font-size="9px" text-anchor="end" font-weight="normal" fill="#111827">sync_sem</text>
+<rect x="955.0" y="447.8" width="149.8" height="34.9" fill="rgb(238,245,254)"/>
+<text x="1030.4" y="472.1" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">352</text>
+<rect x="1105.8" y="447.8" width="149.8" height="34.9" fill="rgb(238,245,254)"/>
+<text x="1181.1" y="472.1" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">336</text>
+<rect x="1256.5" y="447.8" width="149.8" height="34.9" fill="rgb(238,245,254)"/>
+<text x="1331.9" y="472.1" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">16</text>
+<rect x="1407.2" y="447.8" width="149.8" height="34.9" fill="rgb(238,245,254)"/>
+<text x="1482.6" y="472.1" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">16</text>
+<text x="947.0" y="508.0" font-size="9px" text-anchor="end" font-weight="normal" fill="#111827">sync_mutex</text>
+<rect x="955.0" y="483.6" width="149.8" height="34.9" fill="rgb(238,245,254)"/>
+<text x="1030.4" y="508.0" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">2.4e+03</text>
+<rect x="1105.8" y="483.6" width="149.8" height="34.9" fill="rgb(238,245,254)"/>
+<text x="1181.1" y="508.0" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">448</text>
+<rect x="1256.5" y="483.6" width="149.8" height="34.9" fill="rgb(238,245,254)"/>
+<text x="1331.9" y="508.0" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">16</text>
+<rect x="1407.2" y="483.6" width="149.8" height="34.9" fill="rgb(238,245,254)"/>
+<text x="1482.6" y="508.0" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">16</text>
+<text x="947.0" y="543.9" font-size="9px" text-anchor="end" font-weight="normal" fill="#111827">sync_mailbox</text>
+<rect x="955.0" y="519.5" width="149.8" height="34.9" fill="rgb(238,245,254)"/>
+<text x="1030.4" y="543.9" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">368</text>
+<rect x="1105.8" y="519.5" width="149.8" height="34.9" fill="rgb(238,245,254)"/>
+<text x="1181.1" y="543.9" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">368</text>
+<rect x="1256.5" y="519.5" width="149.8" height="34.9" fill="rgb(238,245,254)"/>
+<text x="1331.9" y="543.9" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">16</text>
+<rect x="1407.2" y="519.5" width="149.8" height="34.9" fill="rgb(238,245,254)"/>
+<text x="1482.6" y="543.9" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">16</text>
+<text x="947.0" y="579.8" font-size="9px" text-anchor="end" font-weight="normal" fill="#111827">irq_handler_exec</text>
+<rect x="955.0" y="555.4" width="149.8" height="34.9" fill="rgb(238,245,254)"/>
+<text x="1030.4" y="579.8" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">16</text>
+<rect x="1105.8" y="555.4" width="149.8" height="34.9" fill="rgb(238,245,254)"/>
+<text x="1181.1" y="579.8" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">32</text>
+<rect x="1256.5" y="555.4" width="149.8" height="34.9" fill="rgb(238,245,254)"/>
+<text x="1331.9" y="579.8" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">16</text>
+<rect x="1407.2" y="555.4" width="149.8" height="34.9" fill="rgb(238,245,254)"/>
+<text x="1482.6" y="579.8" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">16</text>
+<text x="947.0" y="615.6" font-size="9px" text-anchor="end" font-weight="normal" fill="#111827">deadline_miss_under_load</text>
+<rect x="955.0" y="591.2" width="149.8" height="34.9" fill="rgb(234,243,254)"/>
+<text x="1030.4" y="615.6" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">3.18e+05</text>
+<rect x="1105.8" y="591.2" width="149.8" height="34.9" fill="rgb(224,235,252)"/>
+<text x="1181.1" y="615.6" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">1.12e+06</text>
+<rect x="1256.5" y="591.2" width="149.8" height="34.9" fill="rgb(238,245,254)"/>
+<text x="1331.9" y="615.6" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">16</text>
+<rect x="1407.2" y="591.2" width="149.8" height="34.9" fill="rgb(238,245,254)"/>
+<text x="1482.6" y="615.6" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">16</text>
+<text x="947.0" y="651.5" font-size="9px" text-anchor="end" font-weight="normal" fill="#111827">net_event_latency</text>
+<rect x="955.0" y="627.1" width="149.8" height="34.9" fill="rgb(69,126,225)"/>
+<text x="1030.4" y="651.5" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">1.3e+07</text>
+<rect x="1105.8" y="627.1" width="149.8" height="34.9" fill="rgb(219,232,251)"/>
+<text x="1181.1" y="651.5" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">1.5e+06</text>
+<rect x="1256.5" y="627.1" width="149.8" height="34.9" fill="rgb(238,245,254)"/>
+<text x="1331.9" y="651.5" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">16</text>
+<rect x="1407.2" y="627.1" width="149.8" height="34.9" fill="rgb(238,245,254)"/>
+<text x="1482.6" y="651.5" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">16</text>
+<text x="820.0" y="679.0" font-size="10px" text-anchor="start" font-weight="normal" fill="#111827">unit: ns; color scale min=0 max=1.3e+07</text>
+<text x="28.0" y="750.0" font-size="14px" text-anchor="start" font-weight="bold" fill="#111827">p99 ns</text>
+<text x="240.4" y="756.0" font-size="9px" text-anchor="middle" font-weight="normal" fill="#111827">Q-RT/L</text>
+<text x="391.1" y="756.0" font-size="9px" text-anchor="middle" font-weight="normal" fill="#111827">Q-RT/S</text>
+<text x="541.9" y="756.0" font-size="9px" text-anchor="middle" font-weight="normal" fill="#111827">Q-Z/L</text>
+<text x="692.6" y="756.0" font-size="9px" text-anchor="middle" font-weight="normal" fill="#111827">Q-Z/S</text>
+<text x="157.0" y="788.4" font-size="9px" text-anchor="end" font-weight="normal" fill="#111827">timer_jitter</text>
+<rect x="165.0" y="764.0" width="149.8" height="34.9" fill="rgb(179,203,244)"/>
+<text x="240.4" y="788.4" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">4.55e+06</text>
+<rect x="315.8" y="764.0" width="149.8" height="34.9" fill="rgb(224,236,252)"/>
+<text x="391.1" y="788.4" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">1.08e+06</text>
+<rect x="466.5" y="764.0" width="149.8" height="34.9" fill="rgb(239,246,255)"/>
+<text x="541.9" y="788.4" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">0</text>
+<rect x="617.2" y="764.0" width="149.8" height="34.9" fill="rgb(239,246,255)"/>
+<text x="692.6" y="788.4" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">0</text>
+<text x="157.0" y="824.3" font-size="9px" text-anchor="end" font-weight="normal" fill="#111827">callback_exec</text>
+<rect x="165.0" y="799.9" width="149.8" height="34.9" fill="rgb(238,245,254)"/>
+<text x="240.4" y="824.3" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">139</text>
+<rect x="315.8" y="799.9" width="149.8" height="34.9" fill="rgb(238,245,254)"/>
+<text x="391.1" y="824.3" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">139</text>
+<rect x="466.5" y="799.9" width="149.8" height="34.9" fill="rgb(238,245,254)"/>
+<text x="541.9" y="824.3" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">16</text>
+<rect x="617.2" y="799.9" width="149.8" height="34.9" fill="rgb(238,245,254)"/>
+<text x="692.6" y="824.3" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">16</text>
+<text x="157.0" y="860.1" font-size="9px" text-anchor="end" font-weight="normal" fill="#111827">preemption</text>
+<rect x="165.0" y="835.8" width="149.8" height="34.9" fill="rgb(238,245,254)"/>
+<text x="240.4" y="860.1" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">608</text>
+<rect x="315.8" y="835.8" width="149.8" height="34.9" fill="rgb(238,245,254)"/>
+<text x="391.1" y="860.1" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">624</text>
+<rect x="466.5" y="835.8" width="149.8" height="34.9" fill="rgb(238,245,254)"/>
+<text x="541.9" y="860.1" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">16</text>
+<rect x="617.2" y="835.8" width="149.8" height="34.9" fill="rgb(238,245,254)"/>
+<text x="692.6" y="860.1" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">16</text>
+<text x="157.0" y="896.0" font-size="9px" text-anchor="end" font-weight="normal" fill="#111827">irq</text>
+<rect x="165.0" y="871.6" width="149.8" height="34.9" fill="rgb(237,244,254)"/>
+<text x="240.4" y="896.0" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">1.19e+05</text>
+<rect x="315.8" y="871.6" width="149.8" height="34.9" fill="rgb(233,242,254)"/>
+<text x="391.1" y="896.0" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">4.07e+05</text>
+<rect x="466.5" y="871.6" width="149.8" height="34.9" fill="rgb(238,245,254)"/>
+<text x="541.9" y="896.0" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">16</text>
+<rect x="617.2" y="871.6" width="149.8" height="34.9" fill="rgb(238,245,254)"/>
+<text x="692.6" y="896.0" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">16</text>
+<text x="157.0" y="931.9" font-size="9px" text-anchor="end" font-weight="normal" fill="#111827">irq_to_task</text>
+<rect x="165.0" y="907.5" width="149.8" height="34.9" fill="rgb(209,225,249)"/>
+<text x="240.4" y="931.9" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">2.24e+06</text>
+<rect x="315.8" y="907.5" width="149.8" height="34.9" fill="rgb(193,214,247)"/>
+<text x="391.1" y="931.9" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">3.44e+06</text>
+<rect x="466.5" y="907.5" width="149.8" height="34.9" fill="rgb(238,245,254)"/>
+<text x="541.9" y="931.9" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">16</text>
+<rect x="617.2" y="907.5" width="149.8" height="34.9" fill="rgb(238,245,254)"/>
+<text x="692.6" y="931.9" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">16</text>
+<text x="157.0" y="967.8" font-size="9px" text-anchor="end" font-weight="normal" fill="#111827">irq_disabled_duration</text>
+<rect x="165.0" y="943.4" width="149.8" height="34.9" fill="rgb(238,245,254)"/>
+<text x="240.4" y="967.8" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">416</text>
+<rect x="315.8" y="943.4" width="149.8" height="34.9" fill="rgb(238,245,254)"/>
+<text x="391.1" y="967.8" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">432</text>
+<rect x="466.5" y="943.4" width="149.8" height="34.9" fill="rgb(238,245,254)"/>
+<text x="541.9" y="967.8" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">16</text>
+<rect x="617.2" y="943.4" width="149.8" height="34.9" fill="rgb(238,245,254)"/>
+<text x="692.6" y="967.8" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">16</text>
+<text x="157.0" y="1003.6" font-size="9px" text-anchor="end" font-weight="normal" fill="#111827">mutex_inversion</text>
+<rect x="165.0" y="979.2" width="149.8" height="34.9" fill="rgb(238,245,254)"/>
+<text x="240.4" y="1003.6" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">2.82e+03</text>
+<rect x="315.8" y="979.2" width="149.8" height="34.9" fill="rgb(238,245,254)"/>
+<text x="391.1" y="1003.6" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">3.18e+03</text>
+<rect x="466.5" y="979.2" width="149.8" height="34.9" fill="rgb(238,245,254)"/>
+<text x="541.9" y="1003.6" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">16</text>
+<rect x="617.2" y="979.2" width="149.8" height="34.9" fill="rgb(238,245,254)"/>
+<text x="692.6" y="1003.6" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">16</text>
+<text x="157.0" y="1039.5" font-size="9px" text-anchor="end" font-weight="normal" fill="#111827">wake_under_load</text>
+<rect x="165.0" y="1015.1" width="149.8" height="34.9" fill="rgb(238,245,254)"/>
+<text x="240.4" y="1039.5" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">608</text>
+<rect x="315.8" y="1015.1" width="149.8" height="34.9" fill="rgb(238,245,254)"/>
+<text x="391.1" y="1039.5" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">624</text>
+<rect x="466.5" y="1015.1" width="149.8" height="34.9" fill="rgb(238,245,254)"/>
+<text x="541.9" y="1039.5" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">16</text>
+<rect x="617.2" y="1015.1" width="149.8" height="34.9" fill="rgb(238,245,254)"/>
+<text x="692.6" y="1039.5" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">16</text>
+<text x="157.0" y="1075.4" font-size="9px" text-anchor="end" font-weight="normal" fill="#111827">context_switch</text>
+<rect x="165.0" y="1051.0" width="149.8" height="34.9" fill="rgb(238,245,254)"/>
+<text x="240.4" y="1075.4" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">432</text>
+<rect x="315.8" y="1051.0" width="149.8" height="34.9" fill="rgb(238,245,254)"/>
+<text x="391.1" y="1075.4" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">416</text>
+<rect x="466.5" y="1051.0" width="149.8" height="34.9" fill="rgb(238,245,254)"/>
+<text x="541.9" y="1075.4" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">16</text>
+<rect x="617.2" y="1051.0" width="149.8" height="34.9" fill="rgb(238,245,254)"/>
+<text x="692.6" y="1075.4" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">16</text>
+<text x="157.0" y="1111.3" font-size="9px" text-anchor="end" font-weight="normal" fill="#111827">scheduler_decision</text>
+<rect x="165.0" y="1086.9" width="149.8" height="34.9" fill="rgb(238,245,254)"/>
+<text x="240.4" y="1111.3" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">128</text>
+<rect x="315.8" y="1086.9" width="149.8" height="34.9" fill="rgb(238,245,254)"/>
+<text x="391.1" y="1111.3" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">128</text>
+<rect x="466.5" y="1086.9" width="149.8" height="34.9" fill="rgb(238,245,254)"/>
+<text x="541.9" y="1111.3" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">16</text>
+<rect x="617.2" y="1086.9" width="149.8" height="34.9" fill="rgb(238,245,254)"/>
+<text x="692.6" y="1111.3" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">16</text>
+<text x="157.0" y="1147.1" font-size="9px" text-anchor="end" font-weight="normal" fill="#111827">sync_sem</text>
+<rect x="165.0" y="1122.8" width="149.8" height="34.9" fill="rgb(238,245,254)"/>
+<text x="240.4" y="1147.1" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">352</text>
+<rect x="315.8" y="1122.8" width="149.8" height="34.9" fill="rgb(238,245,254)"/>
+<text x="391.1" y="1147.1" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">336</text>
+<rect x="466.5" y="1122.8" width="149.8" height="34.9" fill="rgb(238,245,254)"/>
+<text x="541.9" y="1147.1" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">16</text>
+<rect x="617.2" y="1122.8" width="149.8" height="34.9" fill="rgb(238,245,254)"/>
+<text x="692.6" y="1147.1" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">16</text>
+<text x="157.0" y="1183.0" font-size="9px" text-anchor="end" font-weight="normal" fill="#111827">sync_mutex</text>
+<rect x="165.0" y="1158.6" width="149.8" height="34.9" fill="rgb(238,245,254)"/>
+<text x="240.4" y="1183.0" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">2.4e+03</text>
+<rect x="315.8" y="1158.6" width="149.8" height="34.9" fill="rgb(238,245,254)"/>
+<text x="391.1" y="1183.0" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">448</text>
+<rect x="466.5" y="1158.6" width="149.8" height="34.9" fill="rgb(238,245,254)"/>
+<text x="541.9" y="1183.0" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">16</text>
+<rect x="617.2" y="1158.6" width="149.8" height="34.9" fill="rgb(238,245,254)"/>
+<text x="692.6" y="1183.0" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">16</text>
+<text x="157.0" y="1218.9" font-size="9px" text-anchor="end" font-weight="normal" fill="#111827">sync_mailbox</text>
+<rect x="165.0" y="1194.5" width="149.8" height="34.9" fill="rgb(238,245,254)"/>
+<text x="240.4" y="1218.9" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">368</text>
+<rect x="315.8" y="1194.5" width="149.8" height="34.9" fill="rgb(238,245,254)"/>
+<text x="391.1" y="1218.9" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">368</text>
+<rect x="466.5" y="1194.5" width="149.8" height="34.9" fill="rgb(238,245,254)"/>
+<text x="541.9" y="1218.9" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">16</text>
+<rect x="617.2" y="1194.5" width="149.8" height="34.9" fill="rgb(238,245,254)"/>
+<text x="692.6" y="1218.9" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">16</text>
+<text x="157.0" y="1254.8" font-size="9px" text-anchor="end" font-weight="normal" fill="#111827">irq_handler_exec</text>
+<rect x="165.0" y="1230.4" width="149.8" height="34.9" fill="rgb(238,245,254)"/>
+<text x="240.4" y="1254.8" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">16</text>
+<rect x="315.8" y="1230.4" width="149.8" height="34.9" fill="rgb(238,245,254)"/>
+<text x="391.1" y="1254.8" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">32</text>
+<rect x="466.5" y="1230.4" width="149.8" height="34.9" fill="rgb(238,245,254)"/>
+<text x="541.9" y="1254.8" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">16</text>
+<rect x="617.2" y="1230.4" width="149.8" height="34.9" fill="rgb(238,245,254)"/>
+<text x="692.6" y="1254.8" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">16</text>
+<text x="157.0" y="1290.6" font-size="9px" text-anchor="end" font-weight="normal" fill="#111827">deadline_miss_under_load</text>
+<rect x="165.0" y="1266.2" width="149.8" height="34.9" fill="rgb(234,243,254)"/>
+<text x="240.4" y="1290.6" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">3.18e+05</text>
+<rect x="315.8" y="1266.2" width="149.8" height="34.9" fill="rgb(224,235,252)"/>
+<text x="391.1" y="1290.6" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">1.12e+06</text>
+<rect x="466.5" y="1266.2" width="149.8" height="34.9" fill="rgb(238,245,254)"/>
+<text x="541.9" y="1290.6" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">16</text>
+<rect x="617.2" y="1266.2" width="149.8" height="34.9" fill="rgb(238,245,254)"/>
+<text x="692.6" y="1290.6" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">16</text>
+<text x="157.0" y="1326.5" font-size="9px" text-anchor="end" font-weight="normal" fill="#111827">net_event_latency</text>
+<rect x="165.0" y="1302.1" width="149.8" height="34.9" fill="rgb(69,126,225)"/>
+<text x="240.4" y="1326.5" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">1.3e+07</text>
+<rect x="315.8" y="1302.1" width="149.8" height="34.9" fill="rgb(219,232,251)"/>
+<text x="391.1" y="1326.5" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">1.5e+06</text>
+<rect x="466.5" y="1302.1" width="149.8" height="34.9" fill="rgb(238,245,254)"/>
+<text x="541.9" y="1326.5" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">16</text>
+<rect x="617.2" y="1302.1" width="149.8" height="34.9" fill="rgb(238,245,254)"/>
+<text x="692.6" y="1326.5" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">16</text>
+<text x="30.0" y="1354.0" font-size="10px" text-anchor="start" font-weight="normal" fill="#111827">unit: ns; color scale min=0 max=1.3e+07</text>
+<text x="818.0" y="750.0" font-size="14px" text-anchor="start" font-weight="bold" fill="#111827">max ns</text>
+<text x="1030.4" y="756.0" font-size="9px" text-anchor="middle" font-weight="normal" fill="#111827">Q-RT/L</text>
+<text x="1181.1" y="756.0" font-size="9px" text-anchor="middle" font-weight="normal" fill="#111827">Q-RT/S</text>
+<text x="1331.9" y="756.0" font-size="9px" text-anchor="middle" font-weight="normal" fill="#111827">Q-Z/L</text>
+<text x="1482.6" y="756.0" font-size="9px" text-anchor="middle" font-weight="normal" fill="#111827">Q-Z/S</text>
+<text x="947.0" y="788.4" font-size="9px" text-anchor="end" font-weight="normal" fill="#111827">timer_jitter</text>
+<rect x="955.0" y="764.0" width="149.8" height="34.9" fill="rgb(179,203,244)"/>
+<text x="1030.4" y="788.4" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">4.55e+06</text>
+<rect x="1105.8" y="764.0" width="149.8" height="34.9" fill="rgb(224,236,252)"/>
+<text x="1181.1" y="788.4" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">1.08e+06</text>
+<rect x="1256.5" y="764.0" width="149.8" height="34.9" fill="rgb(238,245,254)"/>
+<text x="1331.9" y="788.4" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">144</text>
+<rect x="1407.2" y="764.0" width="149.8" height="34.9" fill="rgb(231,241,253)"/>
+<text x="1482.6" y="788.4" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">5.4e+05</text>
+<text x="947.0" y="824.3" font-size="9px" text-anchor="end" font-weight="normal" fill="#111827">callback_exec</text>
+<rect x="955.0" y="799.9" width="149.8" height="34.9" fill="rgb(238,245,254)"/>
+<text x="1030.4" y="824.3" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">139</text>
+<rect x="1105.8" y="799.9" width="149.8" height="34.9" fill="rgb(238,245,254)"/>
+<text x="1181.1" y="824.3" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">139</text>
+<rect x="1256.5" y="799.9" width="149.8" height="34.9" fill="rgb(239,246,255)"/>
+<text x="1331.9" y="824.3" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">16</text>
+<rect x="1407.2" y="799.9" width="149.8" height="34.9" fill="rgb(239,246,255)"/>
+<text x="1482.6" y="824.3" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">16</text>
+<text x="947.0" y="860.1" font-size="9px" text-anchor="end" font-weight="normal" fill="#111827">preemption</text>
+<rect x="955.0" y="835.8" width="149.8" height="34.9" fill="rgb(238,245,254)"/>
+<text x="1030.4" y="860.1" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">608</text>
+<rect x="1105.8" y="835.8" width="149.8" height="34.9" fill="rgb(238,245,254)"/>
+<text x="1181.1" y="860.1" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">624</text>
+<rect x="1256.5" y="835.8" width="149.8" height="34.9" fill="rgb(239,246,255)"/>
+<text x="1331.9" y="860.1" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">16</text>
+<rect x="1407.2" y="835.8" width="149.8" height="34.9" fill="rgb(239,246,255)"/>
+<text x="1482.6" y="860.1" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">16</text>
+<text x="947.0" y="896.0" font-size="9px" text-anchor="end" font-weight="normal" fill="#111827">irq</text>
+<rect x="955.0" y="871.6" width="149.8" height="34.9" fill="rgb(237,244,254)"/>
+<text x="1030.4" y="896.0" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">1.19e+05</text>
+<rect x="1105.8" y="871.6" width="149.8" height="34.9" fill="rgb(233,242,254)"/>
+<text x="1181.1" y="896.0" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">4.07e+05</text>
+<rect x="1256.5" y="871.6" width="149.8" height="34.9" fill="rgb(239,246,255)"/>
+<text x="1331.9" y="896.0" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">16</text>
+<rect x="1407.2" y="871.6" width="149.8" height="34.9" fill="rgb(239,246,255)"/>
+<text x="1482.6" y="896.0" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">16</text>
+<text x="947.0" y="931.9" font-size="9px" text-anchor="end" font-weight="normal" fill="#111827">irq_to_task</text>
+<rect x="955.0" y="907.5" width="149.8" height="34.9" fill="rgb(209,225,249)"/>
+<text x="1030.4" y="931.9" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">2.24e+06</text>
+<rect x="1105.8" y="907.5" width="149.8" height="34.9" fill="rgb(193,214,247)"/>
+<text x="1181.1" y="931.9" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">3.44e+06</text>
+<rect x="1256.5" y="907.5" width="149.8" height="34.9" fill="rgb(239,246,255)"/>
+<text x="1331.9" y="931.9" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">16</text>
+<rect x="1407.2" y="907.5" width="149.8" height="34.9" fill="rgb(239,246,255)"/>
+<text x="1482.6" y="931.9" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">16</text>
+<text x="947.0" y="967.8" font-size="9px" text-anchor="end" font-weight="normal" fill="#111827">irq_disabled_duration</text>
+<rect x="955.0" y="943.4" width="149.8" height="34.9" fill="rgb(238,245,254)"/>
+<text x="1030.4" y="967.8" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">416</text>
+<rect x="1105.8" y="943.4" width="149.8" height="34.9" fill="rgb(238,245,254)"/>
+<text x="1181.1" y="967.8" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">432</text>
+<rect x="1256.5" y="943.4" width="149.8" height="34.9" fill="rgb(239,246,255)"/>
+<text x="1331.9" y="967.8" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">16</text>
+<rect x="1407.2" y="943.4" width="149.8" height="34.9" fill="rgb(239,246,255)"/>
+<text x="1482.6" y="967.8" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">16</text>
+<text x="947.0" y="1003.6" font-size="9px" text-anchor="end" font-weight="normal" fill="#111827">mutex_inversion</text>
+<rect x="955.0" y="979.2" width="149.8" height="34.9" fill="rgb(238,245,254)"/>
+<text x="1030.4" y="1003.6" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">2.82e+03</text>
+<rect x="1105.8" y="979.2" width="149.8" height="34.9" fill="rgb(238,245,254)"/>
+<text x="1181.1" y="1003.6" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">3.18e+03</text>
+<rect x="1256.5" y="979.2" width="149.8" height="34.9" fill="rgb(239,246,255)"/>
+<text x="1331.9" y="1003.6" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">16</text>
+<rect x="1407.2" y="979.2" width="149.8" height="34.9" fill="rgb(239,246,255)"/>
+<text x="1482.6" y="1003.6" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">16</text>
+<text x="947.0" y="1039.5" font-size="9px" text-anchor="end" font-weight="normal" fill="#111827">wake_under_load</text>
+<rect x="955.0" y="1015.1" width="149.8" height="34.9" fill="rgb(238,245,254)"/>
+<text x="1030.4" y="1039.5" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">608</text>
+<rect x="1105.8" y="1015.1" width="149.8" height="34.9" fill="rgb(238,245,254)"/>
+<text x="1181.1" y="1039.5" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">624</text>
+<rect x="1256.5" y="1015.1" width="149.8" height="34.9" fill="rgb(239,246,255)"/>
+<text x="1331.9" y="1039.5" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">16</text>
+<rect x="1407.2" y="1015.1" width="149.8" height="34.9" fill="rgb(239,246,255)"/>
+<text x="1482.6" y="1039.5" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">16</text>
+<text x="947.0" y="1075.4" font-size="9px" text-anchor="end" font-weight="normal" fill="#111827">context_switch</text>
+<rect x="955.0" y="1051.0" width="149.8" height="34.9" fill="rgb(238,245,254)"/>
+<text x="1030.4" y="1075.4" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">432</text>
+<rect x="1105.8" y="1051.0" width="149.8" height="34.9" fill="rgb(238,245,254)"/>
+<text x="1181.1" y="1075.4" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">416</text>
+<rect x="1256.5" y="1051.0" width="149.8" height="34.9" fill="rgb(239,246,255)"/>
+<text x="1331.9" y="1075.4" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">16</text>
+<rect x="1407.2" y="1051.0" width="149.8" height="34.9" fill="rgb(239,246,255)"/>
+<text x="1482.6" y="1075.4" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">16</text>
+<text x="947.0" y="1111.3" font-size="9px" text-anchor="end" font-weight="normal" fill="#111827">scheduler_decision</text>
+<rect x="955.0" y="1086.9" width="149.8" height="34.9" fill="rgb(238,245,254)"/>
+<text x="1030.4" y="1111.3" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">128</text>
+<rect x="1105.8" y="1086.9" width="149.8" height="34.9" fill="rgb(238,245,254)"/>
+<text x="1181.1" y="1111.3" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">128</text>
+<rect x="1256.5" y="1086.9" width="149.8" height="34.9" fill="rgb(239,246,255)"/>
+<text x="1331.9" y="1111.3" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">16</text>
+<rect x="1407.2" y="1086.9" width="149.8" height="34.9" fill="rgb(239,246,255)"/>
+<text x="1482.6" y="1111.3" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">16</text>
+<text x="947.0" y="1147.1" font-size="9px" text-anchor="end" font-weight="normal" fill="#111827">sync_sem</text>
+<rect x="955.0" y="1122.8" width="149.8" height="34.9" fill="rgb(238,245,254)"/>
+<text x="1030.4" y="1147.1" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">352</text>
+<rect x="1105.8" y="1122.8" width="149.8" height="34.9" fill="rgb(238,245,254)"/>
+<text x="1181.1" y="1147.1" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">336</text>
+<rect x="1256.5" y="1122.8" width="149.8" height="34.9" fill="rgb(239,246,255)"/>
+<text x="1331.9" y="1147.1" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">16</text>
+<rect x="1407.2" y="1122.8" width="149.8" height="34.9" fill="rgb(239,246,255)"/>
+<text x="1482.6" y="1147.1" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">16</text>
+<text x="947.0" y="1183.0" font-size="9px" text-anchor="end" font-weight="normal" fill="#111827">sync_mutex</text>
+<rect x="955.0" y="1158.6" width="149.8" height="34.9" fill="rgb(238,245,254)"/>
+<text x="1030.4" y="1183.0" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">2.4e+03</text>
+<rect x="1105.8" y="1158.6" width="149.8" height="34.9" fill="rgb(238,245,254)"/>
+<text x="1181.1" y="1183.0" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">448</text>
+<rect x="1256.5" y="1158.6" width="149.8" height="34.9" fill="rgb(239,246,255)"/>
+<text x="1331.9" y="1183.0" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">16</text>
+<rect x="1407.2" y="1158.6" width="149.8" height="34.9" fill="rgb(239,246,255)"/>
+<text x="1482.6" y="1183.0" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">16</text>
+<text x="947.0" y="1218.9" font-size="9px" text-anchor="end" font-weight="normal" fill="#111827">sync_mailbox</text>
+<rect x="955.0" y="1194.5" width="149.8" height="34.9" fill="rgb(238,245,254)"/>
+<text x="1030.4" y="1218.9" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">368</text>
+<rect x="1105.8" y="1194.5" width="149.8" height="34.9" fill="rgb(238,245,254)"/>
+<text x="1181.1" y="1218.9" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">368</text>
+<rect x="1256.5" y="1194.5" width="149.8" height="34.9" fill="rgb(239,246,255)"/>
+<text x="1331.9" y="1218.9" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">16</text>
+<rect x="1407.2" y="1194.5" width="149.8" height="34.9" fill="rgb(239,246,255)"/>
+<text x="1482.6" y="1218.9" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">16</text>
+<text x="947.0" y="1254.8" font-size="9px" text-anchor="end" font-weight="normal" fill="#111827">irq_handler_exec</text>
+<rect x="955.0" y="1230.4" width="149.8" height="34.9" fill="rgb(239,246,255)"/>
+<text x="1030.4" y="1254.8" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">16</text>
+<rect x="1105.8" y="1230.4" width="149.8" height="34.9" fill="rgb(238,245,254)"/>
+<text x="1181.1" y="1254.8" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">32</text>
+<rect x="1256.5" y="1230.4" width="149.8" height="34.9" fill="rgb(239,246,255)"/>
+<text x="1331.9" y="1254.8" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">16</text>
+<rect x="1407.2" y="1230.4" width="149.8" height="34.9" fill="rgb(239,246,255)"/>
+<text x="1482.6" y="1254.8" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">16</text>
+<text x="947.0" y="1290.6" font-size="9px" text-anchor="end" font-weight="normal" fill="#111827">deadline_miss_under_load</text>
+<rect x="955.0" y="1266.2" width="149.8" height="34.9" fill="rgb(234,243,254)"/>
+<text x="1030.4" y="1290.6" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">3.18e+05</text>
+<rect x="1105.8" y="1266.2" width="149.8" height="34.9" fill="rgb(224,235,252)"/>
+<text x="1181.1" y="1290.6" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">1.12e+06</text>
+<rect x="1256.5" y="1266.2" width="149.8" height="34.9" fill="rgb(239,246,255)"/>
+<text x="1331.9" y="1290.6" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">16</text>
+<rect x="1407.2" y="1266.2" width="149.8" height="34.9" fill="rgb(239,246,255)"/>
+<text x="1482.6" y="1290.6" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">16</text>
+<text x="947.0" y="1326.5" font-size="9px" text-anchor="end" font-weight="normal" fill="#111827">net_event_latency</text>
+<rect x="955.0" y="1302.1" width="149.8" height="34.9" fill="rgb(69,126,225)"/>
+<text x="1030.4" y="1326.5" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">1.3e+07</text>
+<rect x="1105.8" y="1302.1" width="149.8" height="34.9" fill="rgb(219,232,251)"/>
+<text x="1181.1" y="1326.5" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">1.5e+06</text>
+<rect x="1256.5" y="1302.1" width="149.8" height="34.9" fill="rgb(239,246,255)"/>
+<text x="1331.9" y="1326.5" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">16</text>
+<rect x="1407.2" y="1302.1" width="149.8" height="34.9" fill="rgb(239,246,255)"/>
+<text x="1482.6" y="1326.5" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">16</text>
+<text x="820.0" y="1354.0" font-size="10px" text-anchor="start" font-weight="normal" fill="#111827">unit: ns; color scale min=16 max=1.3e+07</text>
+<text x="24.0" y="1460.0" font-size="11px" text-anchor="start" font-weight="normal" fill="#111827">ROCK 4D captures without the complete 16-metric ns contract are omitted.</text>
+</svg>

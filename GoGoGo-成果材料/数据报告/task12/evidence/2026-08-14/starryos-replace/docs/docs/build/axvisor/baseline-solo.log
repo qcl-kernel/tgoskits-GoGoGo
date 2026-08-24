@@ -1,0 +1,156 @@
+VM Load @PA:0x40200000
+VM Load Offset: 0xffff0000c0200000
+Memory Map:
+  Free   0x00000040000000 - 0x00000040200000 (2 MiB)
+  KImg   0x00000040200000 - 0x00000040800000 (6 MiB)
+  Free   0x00000040800000 - 0x00000050000000 (248 MiB)
+Initialize RAM allocator: 0x40800000..0x50000000
+Reserving CPU-local areas
+CPU-local area stride: 0x44000 bytes
+Total CPU-local allocation: 0x44000 bytes (1 CPUs)
+Flushed RAM used range to memory map: 0x40800000..0x40900000, current: 0x40900000
+Flushed RAM used range to memory map: 0x40900000..0x40944000, current: 0x40944000
+CPU-local areas allocated at 0x40900000 - 0x40944000
+EL: 2
+Mapping early memory regions...
+Ram                 : [0x0000000040000000, 0x0000000050000000) -> [0x0000000040000000, 0x0000000050000000) (256 MiB)
+KImage              : [0x0000ffff80000000, 0x0000ffff80600000) -> [0x0000000040200000, 0x0000000040800000) (6 MiB)
+PerCpu              : [0x0000ff0040900000, 0x0000ff0040944000) -> [0x0000000040900000, 0x0000000040944000) (272 KiB)
+Debug serial        : [0x0000000009000000, 0x0000000009001000) -> [0x0000000009000000, 0x0000000009001000) (4 KiB)
+Boot page table at physical address: PA:0x40944000
+Setting up table registers...
+MMU Entry point at physical address: 0x40456bf4
+Trap vector at 0xffff8025a800
+Memory Map:
+  MMIO   0x00000009000000 - 0x00000009001000 (4 KiB)
+  Free   0x00000040000000 - 0x00000040200000 (2 MiB)
+  KImg   0x00000040200000 - 0x00000040800000 (6 MiB)
+  Rsv    0x00000040800000 - 0x00000040900000 (1 MiB)
+  PerCPU 0x00000040900000 - 0x00000040944000 (272 KiB)
+  Rsv    0x00000040944000 - 0x0000004094e000 (40 KiB)
+  Free   0x0000004094e000 - 0x00000050000000 (246.7 MiB)
+Jumping to main entry point at 0xffff8023ea20 with SP 0x0000ff0040944000
+
+       d8888                            .d88888b.   .d8888b.
+      d88888                           d88P" "Y88b d88P  Y88b
+     d88P888                           888     888 Y88b.
+    d88P 888 888d888  .d8888b  .d88b.  888     888  "Y888b.
+   d88P  888 888P"   d88P"    d8P  Y8b 888     888     "Y88b.
+  d88P   888 888     888      88888888 888     888       "888
+ d8888888888 888     Y88b.    Y8b.     Y88b. .d88P Y88b  d88P
+d88P     888 888      "Y8888P  "Y8888   "Y88888P"   "Y8888P"
+
+arch = aarch64
+platform = linux,dummy-virt
+target = aarch64-unknown-none-softfloat
+build_mode = 
+log_level = info
+backtrace = false
+smp = 1
+
+[37m[  0.054847 ax_runtime:220] [32mLogging is enabled.[m
+[m[37m[  0.055209 ax_runtime:221] [32mPrimary CPU 0 started, arg = 0x40800000.[m
+[m[37m[  0.055307 ax_runtime:223] [32mFound physcial memory regions:[m
+[m[37m[  0.056119 ax_runtime:225] [32m  [PA:0x9000000, PA:0x9001000) mmio (READ | WRITE | DEVICE | RESERVED)[m
+[m[37m[  0.056332 ax_runtime:225] [32m  [PA:0x40000000, PA:0x40200000) free memory (READ | WRITE | FREE)[m
+[m[37m[  0.056463 ax_runtime:225] [32m  [PA:0x40200000, PA:0x40800000) reserved (READ | WRITE | EXECUTE | RESERVED)[m
+[m[37m[  0.056581 ax_runtime:225] [32m  [PA:0x40800000, PA:0x40900000) reserved (READ | WRITE | EXECUTE | RESERVED)[m
+[m[37m[  0.056695 ax_runtime:225] [32m  [PA:0x40900000, PA:0x40944000) reserved (READ | WRITE | EXECUTE | RESERVED)[m
+[m[37m[  0.056809 ax_runtime:225] [32m  [PA:0x40944000, PA:0x4094e000) reserved (READ | WRITE | EXECUTE | RESERVED)[m
+[m[37m[  0.056930 ax_runtime:225] [32m  [PA:0x4094e000, PA:0x50000000) free memory (READ | WRITE | FREE)[m
+[m[37m[  0.057052 ax_runtime:373] [32mInitialize global memory allocator...[m
+[m[37m[  0.057151 ax_runtime:374] [32m  use buddy-slab-allocator allocator.[m
+[m[37m[  0.057331 ax_alloc::buddy_slab:158] [32mInitialize global memory allocator, start_vaddr: 0x4094e000, size: 0xf6b2000[m
+[m[37m[  0.058093 ax_alloc::buddy_slab:424] [32mglobal allocator initialized[m
+[m[37m[  0.058248 ax_alloc::buddy_slab:168] [32mAdd memory region, start_vaddr: 0x40000000, size: 0x200000[m
+[m[37m[  0.058405 buddy_slab_allocator::global:151] [32mGlobalAllocator: skip region 0x40000000+0x200000, no allocator-visible memory after 2097152 alignment[m
+[m[37m[  0.058718 ax_runtime:260] [32mkernel aspace: [VA:0x0, VA:0xffffffffffffffff)[m
+[m[37m[  0.058845 ax_mm:103] [32mInitialize virtual memory management...[m
+[m[37m[  0.080680 ax_runtime:272] [32mInitialize platform devices...[m
+[m[37m[  0.086466 someboot::arch::power:23] [32mPower management method : SMC[m
+[m[37m[  0.086643 somehal::driver:5] [32mInitializing rdrive with FDT at 0x40800000[m
+[m[37m[  0.097890 somehal::arch::gic::v3:284] [32mGICv3 CPU 0 EOI mode: two_step=true[m
+[m[37m[  0.103205 ax_task::api:137] [32mInitialize scheduling...[m
+[m[37m[  0.104070 ax_task::api:145] [32m  use FIFO scheduler.[m
+[m[37m[  0.104296 ax_runtime:298] [32mInitialize interrupt handlers...[m
+[m[37m[  0.105842 ax_runtime::devices:2] [32mProbe platform devices...[m
+[m[37m[  0.126118 ax_driver::block::nvme:42] [32mNVMe PCI endpoint 0000:00:02.0: BAR0=0x8000004000..0x8000008000, int_pin=1, int_line=0[m
+[m[37m[  0.136420 nvme_driver::nvme:161] [32mNVME @0x8000004000 deferred init, version: 1.4.0[m
+[m[37m[  0.136874 ax_driver::block::nvme:74] [32mNVMe block device registered at 0000:00:02.0 with 65 MSI-X vectors[m
+[m[37m[  0.141970 ax_fs_ng::block::runtime::lifecycle::device:300] [32mblock device nvme IRQ source 0 (IrqId { domain: IrqDomainId(9), hwirq: HwIrq(0) }) fixed to CPU 0 for queue mask 0x0[m
+[m[37m[  0.160925 ax_fs_ng::block::runtime::hctx:177] [32mblock hctx 0 bound to CPU 0 with hardware depth 63[m
+[m[37m[  0.161355 ax_fs_ng::block::runtime::lifecycle::device:300] [32mblock device nvme IRQ source 1 (IrqId { domain: IrqDomainId(9), hwirq: HwIrq(1) }) fixed to CPU 0 for queue mask 0x1[m
+[m[37m[  0.166251 ax_fs_ng::root:341] [32m    raw device fs=Some(Ext4)[m
+[m[37m[  0.166400 ax_fs_ng::root:372] [32m  block device 0 (nvme) has no usable partition table; treating the whole disk as a candidate[m
+[m[37m[  0.166839 ax_fs_ng::root:553] [32m  only one raw block device is available; using it as root[m
+[m[37m[  0.167125 ax_fs_ng:86] [32mInitialize filesystem subsystem...[m
+[m[37m[  0.167201 ax_fs_ng:87] [32m  selected root device: disk0 raw device[m
+[m[37m[  0.169490 rsext4::crc32c::arm64:54] [33mID_AA64ISAR0_EL1[19:16]: 0x1[m
+[m[37m[  0.169585 rsext4::crc32c::arm64:57] [33mHardware CRC32C support detected.[m
+[m[37m[  0.180372 rsext4::ext4::mount:331] [32m/lost+found exists (superblock hint inode=11)[m
+[m[37m[  0.181223 rsext4::ext4::mount:466] [32mExt4 filesystem mounted[m
+[m[37m[  0.181302 rsext4::ext4::mount:467] [32m  - block size: 4096 bytes[m
+[m[37m[  0.181377 rsext4::ext4::mount:468] [32m  - total blocks: 8192[m
+[m[37m[  0.181445 rsext4::ext4::mount:469] [32m  - free blocks: 1393[m
+[m[37m[  0.181513 rsext4::ext4::mount:470] [32m  - total inodes: 8192[m
+[m[37m[  0.181582 rsext4::ext4::mount:471] [32m  - free inodes: 8153[m
+[m[37m[  0.181663 rsext4::ext4::sync:13] [32mSyncing filesystem...[m
+[m[37m[  0.209856 rsext4::ext4::mount:550] [32mExt4 filesystem mounted[m
+[m[37m[  0.210258 ax_fs_ng:99] [32m  filesystem type: "ext4"[m
+[m[37m[  0.210747 ax_runtime:346] [32mPrimary CPU 0 init OK.[m
+[m[37m[  0.210938 0:2 ax_fs_ng::block::runtime::lifecycle::device:369] [32mblock device nvme online with 1 hctxs across 1 CPUs[m
+[m
+
+       d8888            888     888  d8b
+      d88888            888     888  Y8P
+     d88P888            888     888
+    d88P 888  888  888  Y88b   d88P  888  .d8888b    .d88b.   888d888
+   d88P  888  `Y8bd8P'   Y88b d88P   888  88K       d88""88b  888P"
+  d88P   888    X88K      Y88o88P    888  "Y8888b.  888  888  888
+ d8888888888  .d8""8b.     Y888P     888       X88  Y88..88P  888
+d88P     888  888  888      Y8P      888   88888P'   "Y88P"   888
+
+
+by AxVisor Team
+
+[37m[  0.212736 0:2 axvisor:73] [32mStarting virtualization...[m
+[m[37m[  0.212826 0:2 axvm::host::arceos:349] [32mEnabling hardware virtualization support on all cores...[m
+[m[37m[  0.212949 0:2 axvm::host::arceos:355] [32mCore 0 is initializing hardware virtualization support...[m
+[m[37m[  0.213068 0:2 axvm::timer:318] [32mInitializing AxVM timer wheel...[m
+[m[37m[  0.217099 0:2 axvm::host::arceos:357] [32mHardware virtualization support enabled on core 0[m
+[m[37m[  0.217218 0:2 axvm::host::arceos:383] [32mWaiting for all cores to enable hardware virtualization...[m
+[m[37m[  0.217338 0:2 axvm::host::arceos:399] [32mAll cores have enabled hardware virtualization support.[m
+[m[37m[  0.220421 0:2 axvisor::manager:143] [32mNOT find dir: /guest/vm_default in filesystem[m
+[m[37m[  0.220579 0:2 axvisor::config:90] [32mUsing static VM configs.[m
+[m[37m[  0.229954 0:2 axvm::arch::aarch64::fdt::core:79] [32mVM[1] virtual GIC follows host firmware resources: GuestGicProfile { compatible: "arm,gic-v3", node_path: "/intc@8000000", node_phandle: Some(32770), distributor: GuestMmioRegion { base: 134217728, length: 65536 }, cpu_region: Redistributors(GuestGicRedistributorProfile { regions: [GuestMmioRegion { base: 134873088, length: 16121856 }], stride: 131072 }), its: [GuestItsProfile { id: ItsId(0), node_path: "/intc@8000000/its@8080000", node_phandle: Some(32771), registers: GuestMmioRegion { base: 134742016, length: 131072 } }] }[m
+[m[37m[  0.231635 0:2 axvm::arch::aarch64::fdt::core:93] [32mVM[1] architectural timer follows host firmware PPIs[m
+[m[37m[  0.234671 0:2 axvm::arch::aarch64::fdt::core::parser:442] [32mCPU node: /cpus/cpu@0, node_id: 0x0, hardware_cpu_id: 0x0[m
+[m[37m[  0.234871 0:2 axvm::arch::aarch64::fdt::core::parser:449] [32mFound 1 host CPU nodes[m
+[m[37m[  0.235197 0:2 axvm::arch::aarch64::fdt::core:144] [32mVM[1] DTB not found, generating from the VM configuration[m
+[m[37m[  0.243574 0:2 axvm::arch::aarch64::fdt::core::device:96] [32mFound excluded devices: ["/pl061@9030000", "/pl031@9010000", "/gpio-key-poweroff", "/intc@8000000", "/pl011@9000000", "/timer", "/intc@8000000/its@8080000"][m
+[m[37m[  0.248917 0:2 axvm::arch::aarch64::fdt::core::device:96] [32mFound excluded devices: ["/pl061@9030000", "/pl031@9010000", "/gpio-key-poweroff", "/intc@8000000", "/pl011@9000000", "/timer", "/intc@8000000/its@8080000"][m
+[m[37m[  0.249712 0:2 axvisor::config:137] [32mCreating VM[1] "rtthread-baseline"[m
+[m[37m[  0.260306 0:2 axvm::vm:815] [32mVM created: id=1[m
+[m[37m[  0.261353 0:2 axvisor::config:149] [32mVM[1] created success, loading images...[m
+[m[37m[  0.261969 0:2 arm_vcpu::architecture::exception:334] [31mESR_EL2: 0x96000045[m
+[m[37m[  0.262053 0:2 arm_vcpu::architecture::exception:335] [31mException Class: 0x25[m
+[m[37m[  0.262132 0:2 arm_vcpu::architecture::exception:336] [31mInstruction Specific Syndrome: 0x45[m
+[m[37m[  0.263183 0:2 arm_vcpu::architecture::exception:334] [31mESR_EL2: 0x96000006[m
+[m[37m[  0.263256 0:2 arm_vcpu::architecture::exception:335] [31mException Class: 0x25[m
+[m[37m[  0.263325 0:2 arm_vcpu::architecture::exception:336] [31mInstruction Specific Syndrome: 0x6[m
+[m[37m[  0.263404 0:2 arm_vcpu::architecture::exception:334] [31mESR_EL2: 0x96000006[m
+[m[37m[  0.263472 0:2 arm_vcpu::architecture::exception:335] [31mException Class: 0x25[m
+[m[37m[  0.263541 0:2 arm_vcpu::architecture::exception:336] [31mInstruction Specific Syndrome: 0x6[m
+[m[37m[  0.263620 0:2 arm_vcpu::architecture::exception:334] [31mESR_EL2: 0x96000006[m
+[m[37m[  0.263688 0:2 arm_vcpu::architecture::exception:335] [31mException Class: 0x25[m
+[m[37m[  0.263758 0:2 arm_vcpu::architecture::exception:336] [31mInstruction Specific Syndrome: 0x6[m
+[m[37m[  0.263836 0:2 arm_vcpu::architecture::exception:334] [31mESR_EL2: 0x96000006[m
+[m[37m[  0.263904 0:2 arm_vcpu::architecture::exception:335] [31mException Class: 0x25[m
+[m[37m[  0.263973 0:2 arm_vcpu::architecture::exception:336] [31mInstruction Specific Syndrome: 0x6[m
+[m[37m[  0.264052 0:2 arm_vcpu::architecture::exception:334] [31mESR_EL2: 0x96000006[m
+[m[37m[  0.264120 0:2 arm_vcpu::architecture::exception:335] [31mException Class: 0x25[m
+[m[37m[  0.264219 0:2 arm_vcpu::architecture::exception:336] [31mInstruction Specific Syndrome: 0x6[m
+[m[37m[  0.264299 0:2 arm_vcpu::architecture::exception:334] [31mESR_EL2: 0x96000006[m
+[m[37m[  0.264366 0:2 arm_vcpu::architecture::exception:335] [31mException Class: 0x25[m
+[m[37m[  0.264435 0:2 arm_vcpu::architecture::exception:336] [31mInstruction Specific Syndrome: 0x6[m
+[mqemu-system-aarch64: terminating on signal 15 from pid 178000 (timeout)

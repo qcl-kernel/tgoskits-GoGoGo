@@ -1,0 +1,2 @@
+qemu-system-aarch64: warning: hub 77 is not connected to host network
+qemu-system-aarch64: terminating on signal 15 from pid 1166749 (/bin/bash)

@@ -1,0 +1,3 @@
+native-stability	PASS
+axvisor-only-stability	PASS
+axvisor-linux-stability	FAIL-CONTINUE	rc=1

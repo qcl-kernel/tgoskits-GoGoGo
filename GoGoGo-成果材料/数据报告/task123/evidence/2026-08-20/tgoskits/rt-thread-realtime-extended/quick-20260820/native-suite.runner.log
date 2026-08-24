@@ -1,0 +1,274 @@
+=== Native RT-Thread hard-timer baseline ===
+[1/3] Preparing the pinned RT-Thread source...
+Using cached RT-Thread source at /home/yfblock/Code/hyper-rtos/tgoskits/tmp/source-cache/rt-thread/ddf52e2cdd977f14fc04035c88672ac204aec713/source (ddf52e2cdd977f14fc04035c88672ac204aec713)
+Prepared RT-Thread source at /home/yfblock/Code/hyper-rtos/tgoskits/tmp/rt-thread-5.2.2-native-current (ddf52e2cdd977f14fc04035c88672ac204aec713)
+Applying RT-Thread patches for axvisor...
+Applied the AxVisor AArch64 base port
+Removed RT_USING_VIRTIO_MMIO_ALIGN from rtconfig.h
+the lwIP RX mailbox fix is already applied
+the virtio-net TX used-ring reclaim fix is already applied
+the virtio-net RX used-ring head fix is already applied
+the lwIP UDP receive mailbox configuration is already applied
+the GICv3 pending-register fix is already applied
+the GICv3 interrupt enable-state query is already applied
+the absolute virtual-timer deadline fix is already applied
+Applied the virtio-net benchmark packet hook
+Installed RT-IPC server into /home/yfblock/Code/hyper-rtos/tgoskits/tmp/rt-thread-5.2.2-native-current/bsp/qemu-virt64-aarch64/applications/rt-ipc-test
+Installed Task 3 server into /home/yfblock/Code/hyper-rtos/tgoskits/tmp/rt-thread-5.2.2-native-current/bsp/qemu-virt64-aarch64/applications/task3
+Installed RT benchmark into /home/yfblock/Code/hyper-rtos/tgoskits/tmp/rt-thread-5.2.2-native-current/bsp/qemu-virt64-aarch64/applications
+Patches are applied in-place in the RT-Thread source tree.
+Key changes:
+  - rtconfig.h: RT_LWIP_DHCP removed, IP addresses quoted, virtio-net enabled
+  - rtconfig.h: SAL/socket support enabled for RT-IPC
+  - virtio.h: _virtio_va2pa_safe() with identity mapping fallback
+  - virtio.c: 64-bit queue registers with 44-bit PA mask
+  - virtio_net.c: volatile feature negotiation, interrupt-only RX
+  - virtio_net.c: separate TX and RX descriptor buffers
+  - lwIP: 16-slot UDP receive mailbox and matching netbuf pool
+  - GICv3: local SGI/PPI pending state uses redistributor registers
+  - AArch64 GIC: interrupt enable state is queryable for benchmark cleanup
+  - AArch64 timer: absolute CNTV deadlines with elapsed-tick compensation
+  - applications/rt-ipc-test/: RT-IPC UDP server installed
+  - applications/task3/: Task 3 UDP/9877 control server installed
+  - applications/rt_benchmark.c: canonical real-time benchmark installed
+Configured native QEMU virtio IRQ base: 48
+Configured native QEMU virtio vendor ID: 0x554d4551
+Applied native QEMU memory layout
+[2/3] Building the canonical hard-timer benchmark...
+scons: Entering directory `/home/yfblock/Code/hyper-rtos/tgoskits/tmp/rt-thread-5.2.2-native-current/bsp/qemu-virt64-aarch64'
+scons: Reading SConscript files ...
+Musl version: unknown
+scons: done reading SConscript files.
+scons: Cleaning targets ...
+scons: done cleaning targets.
+scons: Entering directory `/home/yfblock/Code/hyper-rtos/tgoskits/tmp/rt-thread-5.2.2-native-current/bsp/qemu-virt64-aarch64'
+scons: Reading SConscript files ...
+Musl version: unknown
+scons: done reading SConscript files.
+scons: Building targets ...
+scons: building associated VariantDir targets: build
+CC build/applications/main.o
+CC build/applications/rt-ipc-test/rt_ipc.o
+CC build/applications/rt-ipc-test/rtipc_echo_responder.o
+CC build/applications/rt-ipc-test/rtipc_peer.o
+CC build/applications/rt-ipc-test/rtipc_server.o
+CC build/applications/rt-ipc-test/rtipc_server_status.o
+CC build/applications/rt-ipc-test/rtipc_time.o
+CC build/applications/rt_benchmark.o
+CC build/applications/task3/controller.o
+CC build/applications/task3/session.o
+CC build/applications/task3/task3_protocol.o
+CC build/applications/task3/task3_server.o
+CC build/drivers/board.o
+CC build/drivers/drv_uart.o
+CC build/drivers/drv_virtio.o
+CC build/kernel/components/dfs/dfs_v1/filesystems/devfs/devfs.o
+CC build/kernel/components/dfs/dfs_v1/src/dfs.o
+CC build/kernel/components/dfs/dfs_v1/src/dfs_file.o
+CC build/kernel/components/dfs/dfs_v1/src/dfs_fs.o
+CC build/kernel/components/dfs/dfs_v1/src/dfs_posix.o
+CC build/kernel/components/drivers/clk/clk-fixed-rate.o
+CC build/kernel/components/drivers/clk/clk.o
+CC build/kernel/components/drivers/core/bus.o
+CC build/kernel/components/drivers/core/device.o
+CC build/kernel/components/drivers/core/dm.o
+CC build/kernel/components/drivers/core/driver.o
+CC build/kernel/components/drivers/core/mnt.o
+CC build/kernel/components/drivers/core/numa.o
+CC build/kernel/components/drivers/core/platform.o
+CC build/kernel/components/drivers/core/platform_ofw.o
+CC build/kernel/components/drivers/core/power_domain.o
+CC build/kernel/components/drivers/iio/iio.o
+CC build/kernel/components/drivers/ipc/completion_comm.o
+CC build/kernel/components/drivers/ipc/completion_up.o
+CC build/kernel/components/drivers/ipc/condvar.o
+CC build/kernel/components/drivers/ipc/dataqueue.o
+CC build/kernel/components/drivers/ipc/pipe.o
+CC build/kernel/components/drivers/ipc/ringblk_buf.o
+CC build/kernel/components/drivers/ipc/ringbuffer.o
+CC build/kernel/components/drivers/ipc/waitqueue.o
+CC build/kernel/components/drivers/ipc/workqueue.o
+CC build/kernel/components/drivers/ktime/src/aarch64/cputimer.o
+CC build/kernel/components/drivers/ktime/src/boottime.o
+CC build/kernel/components/drivers/ktime/src/cputimer.o
+CC build/kernel/components/drivers/ktime/src/hrtimer.o
+CC build/kernel/components/drivers/misc/rt_null.o
+CC build/kernel/components/drivers/misc/rt_random.o
+CC build/kernel/components/drivers/misc/rt_zero.o
+CC build/kernel/components/drivers/ofw/base.o
+CC build/kernel/components/drivers/ofw/fdt.o
+CC build/kernel/components/drivers/ofw/io.o
+CC build/kernel/components/drivers/ofw/libfdt/fdt.o
+CC build/kernel/components/drivers/ofw/libfdt/fdt_addresses.o
+CC build/kernel/components/drivers/ofw/libfdt/fdt_empty_tree.o
+CC build/kernel/components/drivers/ofw/libfdt/fdt_overlay.o
+CC build/kernel/components/drivers/ofw/libfdt/fdt_ro.o
+CC build/kernel/components/drivers/ofw/libfdt/fdt_rw.o
+CC build/kernel/components/drivers/ofw/libfdt/fdt_strerror.o
+CC build/kernel/components/drivers/ofw/libfdt/fdt_sw.o
+CC build/kernel/components/drivers/ofw/libfdt/fdt_wip.o
+CC build/kernel/components/drivers/ofw/ofw.o
+CC build/kernel/components/drivers/ofw/raw.o
+CC build/kernel/components/drivers/pin/dev_pin.o
+CC build/kernel/components/drivers/pin/dev_pin_dm.o
+CC build/kernel/components/drivers/pin/dev_pin_ofw.o
+CC build/kernel/components/drivers/pm/lptimer.o
+CC build/kernel/components/drivers/pm/pm.o
+CC build/kernel/components/drivers/rtc/dev_rtc.o
+CC build/kernel/components/drivers/rtc/dev_soft_rtc.o
+CC build/kernel/components/drivers/serial/dev_serial.o
+CC build/kernel/components/drivers/serial/serial_dm.o
+CC build/kernel/components/drivers/virtio/virtio.o
+CC build/kernel/components/drivers/virtio/virtio_blk.o
+CC build/kernel/components/drivers/virtio/virtio_console.o
+CC build/kernel/components/drivers/virtio/virtio_gpu.o
+CC build/kernel/components/drivers/virtio/virtio_input.o
+CC build/kernel/components/drivers/virtio/virtio_net.o
+CC build/kernel/components/finsh/cmd.o
+CC build/kernel/components/finsh/msh.o
+CC build/kernel/components/finsh/msh_file.o
+CC build/kernel/components/finsh/msh_parse.o
+CC build/kernel/components/finsh/shell.o
+CC build/kernel/components/libc/compilers/common/cctype.o
+CC build/kernel/components/libc/compilers/common/cstdlib.o
+CC build/kernel/components/libc/compilers/common/cstring.o
+CC build/kernel/components/libc/compilers/common/ctime.o
+CC build/kernel/components/libc/compilers/common/cunistd.o
+CC build/kernel/components/libc/compilers/common/cwchar.o
+CC build/kernel/components/libc/compilers/musl/syscalls.o
+CC build/kernel/components/libc/posix/delay/delay.o
+CC build/kernel/components/mm/avl_adpt.o
+CC build/kernel/components/mm/ioremap.o
+CC build/kernel/components/mm/mm_anon.o
+CC build/kernel/components/mm/mm_aspace.o
+CC build/kernel/components/mm/mm_fault.o
+CC build/kernel/components/mm/mm_kmem.o
+CC build/kernel/components/mm/mm_memblock.o
+CC build/kernel/components/mm/mm_object.o
+CC build/kernel/components/mm/mm_page.o
+CC build/kernel/components/net/lwip/lwip-2.1.2/src/api/api_lib.o
+CC build/kernel/components/net/lwip/lwip-2.1.2/src/api/api_msg.o
+CC build/kernel/components/net/lwip/lwip-2.1.2/src/api/err.o
+CC build/kernel/components/net/lwip/lwip-2.1.2/src/api/if_api.o
+CC build/kernel/components/net/lwip/lwip-2.1.2/src/api/netbuf.o
+CC build/kernel/components/net/lwip/lwip-2.1.2/src/api/netdb.o
+CC build/kernel/components/net/lwip/lwip-2.1.2/src/api/netifapi.o
+CC build/kernel/components/net/lwip/lwip-2.1.2/src/api/sockets.o
+CC build/kernel/components/net/lwip/lwip-2.1.2/src/api/tcpip.o
+CC build/kernel/components/net/lwip/lwip-2.1.2/src/apps/ping/ping.o
+CC build/kernel/components/net/lwip/lwip-2.1.2/src/core/altcp.o
+CC build/kernel/components/net/lwip/lwip-2.1.2/src/core/altcp_alloc.o
+CC build/kernel/components/net/lwip/lwip-2.1.2/src/core/altcp_tcp.o
+CC build/kernel/components/net/lwip/lwip-2.1.2/src/core/def.o
+CC build/kernel/components/net/lwip/lwip-2.1.2/src/core/dns.o
+CC build/kernel/components/net/lwip/lwip-2.1.2/src/core/inet_chksum.o
+CC build/kernel/components/net/lwip/lwip-2.1.2/src/core/init.o
+CC build/kernel/components/net/lwip/lwip-2.1.2/src/core/ip.o
+CC build/kernel/components/net/lwip/lwip-2.1.2/src/core/ipv4/autoip.o
+CC build/kernel/components/net/lwip/lwip-2.1.2/src/core/ipv4/dhcp.o
+CC build/kernel/components/net/lwip/lwip-2.1.2/src/core/ipv4/etharp.o
+CC build/kernel/components/net/lwip/lwip-2.1.2/src/core/ipv4/icmp.o
+CC build/kernel/components/net/lwip/lwip-2.1.2/src/core/ipv4/igmp.o
+CC build/kernel/components/net/lwip/lwip-2.1.2/src/core/ipv4/ip4.o
+CC build/kernel/components/net/lwip/lwip-2.1.2/src/core/ipv4/ip4_addr.o
+CC build/kernel/components/net/lwip/lwip-2.1.2/src/core/ipv4/ip4_frag.o
+CC build/kernel/components/net/lwip/lwip-2.1.2/src/core/memp.o
+CC build/kernel/components/net/lwip/lwip-2.1.2/src/core/netif.o
+CC build/kernel/components/net/lwip/lwip-2.1.2/src/core/pbuf.o
+CC build/kernel/components/net/lwip/lwip-2.1.2/src/core/raw.o
+CC build/kernel/components/net/lwip/lwip-2.1.2/src/core/stats.o
+CC build/kernel/components/net/lwip/lwip-2.1.2/src/core/sys.o
+CC build/kernel/components/net/lwip/lwip-2.1.2/src/core/tcp.o
+CC build/kernel/components/net/lwip/lwip-2.1.2/src/core/tcp_in.o
+CC build/kernel/components/net/lwip/lwip-2.1.2/src/core/tcp_out.o
+CC build/kernel/components/net/lwip/lwip-2.1.2/src/core/timeouts.o
+CC build/kernel/components/net/lwip/lwip-2.1.2/src/core/udp.o
+CC build/kernel/components/net/lwip/lwip-2.1.2/src/netif/ethernet.o
+CC build/kernel/components/net/lwip/lwip-2.1.2/src/netif/lowpan6.o
+CC build/kernel/components/net/lwip/port/ethernetif.o
+CC build/kernel/components/net/lwip/port/sys_arch.o
+CC build/kernel/components/net/netdev/src/netdev.o
+CC build/kernel/components/net/netdev/src/netdev_ipaddr.o
+CC build/kernel/components/net/sal/dfs_net/dfs_net.o
+CC build/kernel/components/net/sal/impl/af_inet_lwip.o
+CC build/kernel/components/net/sal/socket/net_netdb.o
+CC build/kernel/components/net/sal/socket/net_sockets.o
+CC build/kernel/components/net/sal/src/sal_socket.o
+CC build/kernel/components/utilities/libadt/avl/avl.o
+CC build/kernel/components/utilities/resource/resource_id.o
+CC build/kernel/components/utilities/resource/rid_bitmap.o
+CC build/kernel/libcpu/aarch64/common/atomic_aarch64.o
+CC build/kernel/libcpu/aarch64/common/backtrace.o
+AS build/kernel/libcpu/aarch64/common/cache.o
+CC build/kernel/libcpu/aarch64/common/cache_ops.o
+CC build/kernel/libcpu/aarch64/common/cpu.o
+AS build/kernel/libcpu/aarch64/common/cpu_gcc.o
+CC build/kernel/libcpu/aarch64/common/cpu_psci.o
+CC build/kernel/libcpu/aarch64/common/cpu_spin_table.o
+CC build/kernel/libcpu/aarch64/common/cpuport.o
+CC build/kernel/libcpu/aarch64/common/exception.o
+CC build/kernel/libcpu/aarch64/common/gic.o
+CC build/kernel/libcpu/aarch64/common/gicv3.o
+CC build/kernel/libcpu/aarch64/common/gtimer.o
+CC build/kernel/libcpu/aarch64/common/hypercall.o
+CC build/kernel/libcpu/aarch64/common/interrupt.o
+CC build/kernel/libcpu/aarch64/common/mmu.o
+CC build/kernel/libcpu/aarch64/common/psci.o
+CC build/kernel/libcpu/aarch64/common/setup.o
+AS build/kernel/libcpu/aarch64/common/smccc.o
+CC build/kernel/libcpu/aarch64/common/stack.o
+AS build/kernel/libcpu/aarch64/common/stack_gcc.o
+AS build/kernel/libcpu/aarch64/common/startup_gcc.o
+CC build/kernel/libcpu/aarch64/common/trap.o
+AS build/kernel/libcpu/aarch64/common/up/context_gcc.o
+AS build/kernel/libcpu/aarch64/common/up/vector_gcc.o
+AS build/kernel/libcpu/aarch64/common/vector_gcc.o
+AS build/kernel/libcpu/aarch64/cortex-a/entry_point.o
+CC build/kernel/src/clock.o
+CC build/kernel/src/components.o
+CC build/kernel/src/cpu_up.o
+CC build/kernel/src/defunct.o
+CC build/kernel/src/idle.o
+CC build/kernel/src/ipc.o
+CC build/kernel/src/irq.o
+CC build/kernel/src/klibc/kerrno.o
+CC build/kernel/src/klibc/kstdio.o
+CC build/kernel/src/klibc/kstring.o
+CC build/kernel/src/klibc/rt_vsnprintf_std.o
+CC build/kernel/src/klibc/rt_vsscanf.o
+CC build/kernel/src/kservice.o
+CC build/kernel/src/mem.o
+CC build/kernel/src/memheap.o
+CC build/kernel/src/mempool.o
+CC build/kernel/src/object.o
+CC build/kernel/src/scheduler_comm.o
+CC build/kernel/src/scheduler_up.o
+CC build/kernel/src/thread.o
+CC build/kernel/src/timer.o
+LINK rtthread.elf
+Memory region         Used Size  Region Size  %age Used
+aarch64-linux-musl-objcopy -O binary rtthread.elf rtthread.bin
+aarch64-linux-musl-size rtthread.elf
+   text	   data	    bss	    dec	    hex	filename
+ 508480	   6000	 748896	1263376	 134710	rtthread.elf
+scons: done building targets.
+[3/3] Running suite benchmark on QEMU virt/GICv3/Cortex-A72...
+QEMU realtime control applied: pid=2578525 uclamp.min=1024
+msh />RTBENCH_BEGIN samples=10 frequency=62500000
+RTBENCH metric=timer_jitter run=1 expected=10 collected=10 missing=0 p50_ns=1408 p95_ns=41632 p99_ns=41632 p99_9_ns=41632 max_ns=41632 miss_100us=0 miss_500us=0 miss_1ms=0 mean_ns=5401
+RTBENCH metric=callback_exec run=1 expected=10 collected=10 missing=0 p50_ns=96 p95_ns=35072 p99_ns=35072 p99_9_ns=35072 max_ns=35072 miss_100us=0 miss_500us=0 miss_1ms=0 mean_ns=3604
+RTBENCH metric=timer_jitter run=2 expected=10 collected=10 missing=0 p50_ns=800 p95_ns=3872 p99_ns=3872 p99_9_ns=3872 max_ns=3872 miss_100us=0 miss_500us=0 miss_1ms=0 mean_ns=1387
+RTBENCH metric=callback_exec run=2 expected=10 collected=10 missing=0 p50_ns=96 p95_ns=192 p99_ns=192 p99_9_ns=192 max_ns=192 miss_100us=0 miss_500us=0 miss_1ms=0 mean_ns=102
+RTBENCH metric=timer_jitter run=3 expected=10 collected=10 missing=0 p50_ns=704 p95_ns=1456 p99_ns=1456 p99_9_ns=1456 max_ns=1456 miss_100us=0 miss_500us=0 miss_1ms=0 mean_ns=728
+RTBENCH metric=callback_exec run=3 expected=10 collected=10 missing=0 p50_ns=80 p95_ns=112 p99_ns=112 p99_9_ns=112 max_ns=112 miss_100us=0 miss_500us=0 miss_1ms=0 mean_ns=89
+RTBENCH metric=preemption run=1 expected=10 collected=10 missing=0 p50_ns=1712 p95_ns=8240 p99_ns=8240 p99_9_ns=8240 max_ns=8240 miss_100us=0 miss_500us=0 miss_1ms=0 mean_ns=2544
+RTBENCH metric=irq run=1 expected=10 collected=10 missing=0 p50_ns=1424 p95_ns=41456 p99_ns=41456 p99_9_ns=41456 max_ns=41456 miss_100us=0 miss_500us=0 miss_1ms=0 mean_ns=5472
+RTBENCH metric=irq_to_task run=1 expected=10 collected=10 missing=0 p50_ns=2480 p95_ns=18640 p99_ns=18640 p99_9_ns=18640 max_ns=18640 miss_100us=0 miss_500us=0 miss_1ms=0 mean_ns=4163
+RTBENCH metric=irq_disabled_duration run=1 expected=10 collected=10 missing=0 p50_ns=240 p95_ns=16736 p99_ns=16736 p99_9_ns=16736 max_ns=16736 miss_100us=0 miss_500us=0 miss_1ms=0 mean_ns=1899
+RTBENCH metric=mutex_inversion run=1 expected=10 collected=10 missing=0 p50_ns=6336 p95_ns=18976 p99_ns=18976 p99_9_ns=18976 max_ns=18976 miss_100us=0 miss_500us=0 miss_1ms=0 mean_ns=7736
+RTBENCH metric=wake_under_load run=1 expected=10 collected=10 missing=0 p50_ns=1440 p95_ns=7056 p99_ns=7056 p99_9_ns=7056 max_ns=7056 miss_100us=0 miss_500us=0 miss_1ms=0 mean_ns=2001
+RTBENCH metric=net_event_latency run=1 expected=10 collected=10 missing=0 p50_ns=25136 p95_ns=60816 p99_ns=60816 p99_9_ns=60816 max_ns=60816 miss_100us=0 miss_500us=0 miss_1ms=0 mean_ns=29464
+RTBENCH_END status=PASS
+PASS: RT benchmark suite completed (10 samples per metric)
+Native guest log: /home/yfblock/Code/hyper-rtos/tgoskits/tmp/rtthread-realtime-current-quick-20260820/native-suite.log
+Native QEMU log: /home/yfblock/Code/hyper-rtos/tgoskits/tmp/rtthread-realtime-current-quick-20260820/native-suite.qemu.log

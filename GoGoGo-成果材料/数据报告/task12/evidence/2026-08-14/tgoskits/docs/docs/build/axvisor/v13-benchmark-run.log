@@ -1,0 +1,1049 @@
+qemu-system-aarch64: warning: hub 77 is not connected to host network
+root=/dev/nvme0n1 rw init=/bin/sh
+VM Load @0x40200000
+VM Load Offset: 0xffff0000c0200000
+Memory Map:
+  Free   0x00000040000000 - 0x00000040200000 (2 MiB)
+  KImg   0x00000040200000 - 0x00000043800000 (54 MiB)
+  Free   0x00000043800000 - 0x00000240000000 (7.95 GiB)
+Initialize RAM allocator: 0x43800000..0x240000000
+Reserving CPU-local areas
+CPU-local area stride: 0x44000 bytes
+Total CPU-local allocation: 0x110000 bytes (4 CPUs)
+Flushed RAM used range to memory map: 0x43800000..0x43900000, current: 0x43900000
+Flushed RAM used range to memory map: 0x43900000..0x43a10000, current: 0x43a10000
+CPU-local areas allocated at 0x43900000 - 0x43a10000
+EL: 2
+Mapping early memory regions...
+Ram                 : [0x0000000040000000, 0x0000000240000000) -> [0x0000000040000000, 0x0000000240000000) (8 GiB)
+KImage              : [0x0000ffff80000000, 0x0000ffff83600000) -> [0x0000000040200000, 0x0000000043800000) (54 MiB)
+PerCpu              : [0x0000ff0043900000, 0x0000ff0043a10000) -> [0x0000000043900000, 0x0000000043a10000) (1.06 MiB)
+Debug serial        : [0x0000000009000000, 0x0000000009001000) -> [0x0000000009000000, 0x0000000009001000) (4 KiB)
+Boot page table at physical address: 0x43a10000
+Setting up table registers...
+MMU Entry point at physical address: 0x4038fba0
+Trap vector at 0xffff80190800
+Memory Map:
+  MMIO   0x00000009000000 - 0x00000009001000 (4 KiB)
+  Free   0x00000040000000 - 0x00000040200000 (2 MiB)
+  KImg   0x00000040200000 - 0x00000043800000 (54 MiB)
+  Rsv    0x00000043800000 - 0x00000043900000 (1 MiB)
+  PerCPU 0x00000043900000 - 0x00000043a10000 (1.06 MiB)
+  Rsv    0x00000043a10000 - 0x00000043a1a000 (40 KiB)
+  Free   0x00000043a1a000 - 0x00000240000000 (7.94 GiB)
+Jumping to main entry point at 0xffff80175d80 with SP 0x0000ff0043944000
+
+       d8888                            .d88888b.   .d8888b.
+      d88888                           d88P" "Y88b d88P  Y88b
+     d88P888                           888     888 Y88b.
+    d88P 888 888d888  .d8888b  .d88b.  888     888  "Y888b.
+   d88P  888 888P"   d88P"    d8P  Y8b 888     888     "Y88b.
+  d88P   888 888     888      88888888 888     888       "888
+ d8888888888 888     Y88b.    Y8b.     Y88b. .d88P Y88b  d88P
+d88P     888 888      "Y8888P  "Y8888   "Y88888P"   "Y8888P"
+
+arch = aarch64
+platform = linux,dummy-virt
+target = aarch64-unknown-none-softfloat
+build_mode = 
+log_level = info
+backtrace = false
+smp = 4
+
+[37m[  0.050226 ax_runtime:219] [32mLogging is enabled.[m
+[m[37m[  0.050528 ax_runtime:220] [32mPrimary CPU 0 started, arg = 0x43800000.[m
+[m[37m[  0.050607 ax_runtime:222] [32mFound physcial memory regions:[m
+[m[37m[  0.051377 ax_runtime:224] [32m  [PA:0x9000000, PA:0x9001000) mmio (READ | WRITE | DEVICE | RESERVED)[m
+[m[37m[  0.051567 ax_runtime:224] [32m  [PA:0x40000000, PA:0x40200000) free memory (READ | WRITE | FREE)[m
+[m[37m[  0.051672 ax_runtime:224] [32m  [PA:0x40200000, PA:0x43800000) reserved (READ | WRITE | EXECUTE | RESERVED)[m
+[m[37m[  0.051766 ax_runtime:224] [32m  [PA:0x43800000, PA:0x43900000) reserved (READ | WRITE | EXECUTE | RESERVED)[m
+[m[37m[  0.051857 ax_runtime:224] [32m  [PA:0x43900000, PA:0x43a10000) reserved (READ | WRITE | EXECUTE | RESERVED)[m
+[m[37m[  0.051948 ax_runtime:224] [32m  [PA:0x43a10000, PA:0x43a1a000) reserved (READ | WRITE | EXECUTE | RESERVED)[m
+[m[37m[  0.052038 ax_runtime:224] [32m  [PA:0x43a1a000, PA:0x240000000) free memory (READ | WRITE | FREE)[m
+[m[37m[  0.052136 ax_runtime:372] [32mInitialize global memory allocator...[m
+[m[37m[  0.052214 ax_runtime:373] [32m  use buddy-slab-allocator allocator.[m
+[m[37m[  0.052358 ax_alloc::buddy_slab:158] [32mInitialize global memory allocator, start_vaddr: 0x43a1a000, size: 0x1fc5e6000[m
+[m[37m[  0.057378 ax_alloc::buddy_slab:410] [32mglobal allocator initialized[m
+[m[37m[  0.057527 ax_alloc::buddy_slab:168] [32mAdd memory region, start_vaddr: 0x40000000, size: 0x200000[m
+[m[37m[  0.057654 buddy_slab_allocator::global:143] [32mGlobalAllocator: skip region 0x40000000+0x200000, no allocator-visible memory after 2097152 alignment[m
+[m[37m[  0.057907 ax_runtime:259] [32mkernel aspace: [VA:0x0, VA:0xffffffffffffffff)[m
+[m[37m[  0.058020 ax_mm:92] [32mInitialize virtual memory management...[m
+[m[37m[  0.354394 ax_runtime:271] [32mInitialize platform devices...[m
+[m[37m[  0.359203 someboot::arch::power:23] [32mPower management method : SMC[m
+[m[37m[  0.359344 somehal::driver:5] [32mInitializing rdrive with FDT at 0x43800000[m
+[m[37m[  0.367810 somehal::arch::gic::v3:255] [32mGICv3 CPU 0 EOI mode: two_step=true[m
+[m[37m[  0.373125 ax_task::api:152] [32mInitialize scheduling...[m
+[m[37m[  0.374068 ax_task::api:160] [32m  use FIFO scheduler.[m
+[m[37m[  0.374145 ax_runtime:297] [32mInitialize interrupt handlers...[m
+[m[37m[  0.375702 ax_runtime::devices:2] [32mProbe platform devices...[m
+[m[37m[  0.389078 ax_driver::block::nvme:42] [32mNVMe PCI endpoint 0000:00:01.0: BAR0=0x8000000000..0x8000004000, int_pin=1, int_line=0[m
+[m[37m[  0.399642 nvme_driver::nvme:161] [32mNVME @0x8000000000 deferred init, version: 1.4.0[m
+[m[37m[  0.400147 ax_driver::block::nvme:74] [32mNVMe block device registered at 0000:00:01.0 with 65 MSI-X vectors[m
+[m[37m[  0.404078 ax_fs_ng::block::runtime::lifecycle::device:300] [32mblock device nvme IRQ source 0 (IrqId { domain: IrqDomainId(9), hwirq: HwIrq(0) }) fixed to CPU 0 for queue mask 0x0[m
+[m[37m[  0.450058 ax_fs_ng::block::runtime::hctx:173] [32mblock hctx 0 bound to CPU 0 with hardware depth 63[m
+[m[37m[  0.450435 ax_fs_ng::block::runtime::lifecycle::device:300] [32mblock device nvme IRQ source 1 (IrqId { domain: IrqDomainId(9), hwirq: HwIrq(1) }) fixed to CPU 0 for queue mask 0x1[m
+[m[37m[  0.455675 ax_fs_ng::root:341] [32m    raw device fs=Some(Ext4)[m
+[m[37m[  0.455851 ax_fs_ng::root:372] [32m  block device 0 (nvme) has no usable partition table; treating the whole disk as a candidate[m
+[m[37m[  0.456192 ax_fs_ng::root:481] [32m  matched root by raw device path on disk0 raw device[m
+[m[37m[  0.456522 ax_fs_ng:79] [32mInitialize filesystem subsystem...[m
+[m[37m[  0.456597 ax_fs_ng:80] [32m  selected root device: disk0 raw device[m
+[m[37m[  0.458965 rsext4::crc32c::arm64:54] [33mID_AA64ISAR0_EL1[19:16]: 0x1[m
+[m[37m[  0.459057 rsext4::crc32c::arm64:57] [33mHardware CRC32C support detected.[m
+[m[37m[  0.475610 rsext4::ext4::mount:327] [32m/lost+found exists (superblock hint inode=11)[m
+[m[37m[  0.486436 rsext4::ext4::mount:462] [32mExt4 filesystem mounted[m
+[m[37m[  0.486551 rsext4::ext4::mount:463] [32m  - block size: 4096 bytes[m
+[m[37m[  0.486629 rsext4::ext4::mount:464] [32m  - total blocks: 8192[m
+[m[37m[  0.486700 rsext4::ext4::mount:465] [32m  - free blocks: 1226[m
+[m[37m[  0.486770 rsext4::ext4::mount:466] [32m  - total inodes: 8192[m
+[m[37m[  0.486841 rsext4::ext4::mount:467] [32m  - free inodes: 8151[m
+[m[37m[  0.486920 rsext4::ext4::sync:13] [32mSyncing filesystem...[m
+[m[37m[  0.505647 rsext4::ext4::mount:546] [32mExt4 filesystem mounted[m
+[m[37m[  0.506042 ax_fs_ng:92] [32m  filesystem type: "ext4"[m
+[m[37m[  0.513099 somehal::arch::gic::v3:255] [32mGICv3 CPU 1 EOI mode: two_step=true[m
+[m[37m[  0.513441 ax_runtime::mp:79] [32mSecondary CPU 1 started.[m
+[m[37m[  0.513970 ax_runtime::mp:107] [32mSecondary CPU 1 init OK.[m
+[m[37m[  0.519667 somehal::arch::gic::v3:255] [32mGICv3 CPU 2 EOI mode: two_step=true[m
+[m[37m[  0.519879 ax_runtime::mp:79] [32mSecondary CPU 2 started.[m
+[m[37m[  0.520163 ax_runtime::mp:107] [32mSecondary CPU 2 init OK.[m
+[m[37m[  0.526138 somehal::arch::gic::v3:255] [32mGICv3 CPU 3 EOI mode: two_step=true[m
+[m[37m[  0.526247 ax_runtime::mp:79] [32mSecondary CPU 3 started.[m
+[m[37m[  0.526289 ax_runtime:345] [32mPrimary CPU 0 init OK.[m
+[m[37m[  0.526449 ax_runtime::mp:107] [32mSecondary CPU 3 init OK.[m
+[m
+
+       d8888            888     888  d8b
+      d88888            888     888  Y8P
+     d88P888            888     888
+    d88P 888  888  888  Y88b   d88P  888  .d8888b    .d88b.   888d888
+   d88P  888  `Y8bd8P'   Y88b d88P   888  88K       d88""88b  888P"
+  d88P   888    X88K      Y88o88P    888  "Y8888b.  888  888  888
+ d8888888888  .d8""8b.     Y888P     888       X88  Y88..88P  888
+d88P     888  888  888      Y8P      888   88888P'   "Y88P"   888
+
+
+by AxVisor Team
+
+[37m[  0.528607 0:2 axvisor:73] [32mStarting virtualization...[m
+[m[37m[  0.528748 0:2 axvm::host::arceos:205] [32mEnabling hardware virtualization support on all cores...[m
+[m[37m[  0.528873 0:2 axvm::host::arceos:211] [32mCore 0 is initializing hardware virtualization support...[m
+[m[37m[  0.528996 0:2 axvm::timer:292] [32mInitializing AxVM timer wheel...[m
+[m[37m[  0.529667 0:2 axvm::host::arceos:213] [32mHardware virtualization support enabled on core 0[m
+[m[37m[  0.530079 0:2 axvm::host::arceos:239] [32mWaiting for all cores to enable hardware virtualization...[m
+[m[37m[  0.530188 3:14 axvm::host::arceos:223] [32mCore 3 is initializing hardware virtualization support...[m
+[m[37m[  0.530174 1:12 axvm::host::arceos:223] [32mCore 1 is initializing hardware virtualization support...[m
+[m[37m[  0.530353 3:14 axvm::timer:292] [32mInitializing AxVM timer wheel...[m
+[m[37m[  0.530621 1:12 axvm::timer:292] [32mInitializing AxVM timer wheel...[m
+[m[37m[  0.530285 2:13 axvm::host::arceos:223] [32mCore 2 is initializing hardware virtualization support...[m
+[m[37m[  0.531042 3:14 axvm::host::arceos:226] [32mHardware virtualization support enabled on core 3[m
+[m[37m[  0.531132 1:12 axvm::host::arceos:226] [32mHardware virtualization support enabled on core 1[m
+[m[37m[  0.531162 2:13 axvm::timer:292] [32mInitializing AxVM timer wheel...[m
+[m[37m[  0.531558 2:13 axvm::host::arceos:226] [32mHardware virtualization support enabled on core 2[m
+[m[37m[  0.531711 0:2 axvm::host::arceos:255] [32mAll cores have enabled hardware virtualization support.[m
+[m[37m[  0.534964 0:2 axvisor::manager:137] [32mNOT find dir: /guest/vm_default in filesystem[m
+[m[37m[  0.535120 0:2 axvisor::config:102] [32mUsing static VM configs.[m
+[m[37m[  0.544203 0:2 axvm::arch::aarch64::fdt::core::parser:386] [32mCPU node: /cpus/cpu@0, node_id: 0x0, hardware_cpu_id: 0x0[m
+[m[37m[  0.544389 0:2 axvm::arch::aarch64::fdt::core::parser:386] [32mCPU node: /cpus/cpu@1, node_id: 0x1, hardware_cpu_id: 0x1[m
+[m[37m[  0.544525 0:2 axvm::arch::aarch64::fdt::core::parser:386] [32mCPU node: /cpus/cpu@2, node_id: 0x2, hardware_cpu_id: 0x2[m
+[m[37m[  0.544639 0:2 axvm::arch::aarch64::fdt::core::parser:386] [32mCPU node: /cpus/cpu@3, node_id: 0x3, hardware_cpu_id: 0x3[m
+[m[37m[  0.544797 0:2 axvm::arch::aarch64::fdt::core::parser:393] [32mFound 4 host CPU nodes[m
+[m[37m[  0.545144 0:2 axvm::arch::aarch64::fdt::core:77] [32mVM[1] DTB not found, generating from the VM configuration[m
+[m[37m[  0.549901 0:2 axvm::arch::aarch64::fdt::core::device:96] [32mFound excluded devices: [][m
+[m[37m[  0.556902 0:2 configured host policy: timer={:?}, vcpu_yield={}, vcpu_idle={:?}:199] [32mVM[1] configured host policy: timer=Periodic, vcpu_yield=false, vcpu_idle=Halt[m
+[m[37m[  0.557087 0:2 axvisor::config:149] [32mCreating VM[1] "linux-net"[m
+[m[37m[  0.557639 0:2 axvm::vm:613] [32mVM created: id=1[m
+[m[37m[  0.559579 0:2 axvisor::config:161] [32mVM[1] created success, loading images...[m
+[m[37m[  0.639668 0:2 axvm::boot::images:140] [32mLoading ramdisk image from memory (2946048 bytes) into GPA @0x8c000000[m
+[m[37m[  0.652625 0:2 axdevice::device:1143] [32mDeviceRuntime: registered device id=0[m
+[m[37m[  0.653265 0:2 axdevice::device:1143] [32mDeviceRuntime: registered device id=1[m
+[m[37m[  0.653580 0:2 axdevice::device:1143] [32mDeviceRuntime: registered device id=2[m
+[m[37m[  0.653898 0:2 axdevice::device:1143] [32mDeviceRuntime: registered device id=3[m
+[m[37m[  0.654001 0:2 axdevice::device:1143] [32mDeviceRuntime: registered device id=4[m
+[m[37m[  0.654087 0:2 axdevice::device:1143] [32mDeviceRuntime: registered device id=5[m
+[m[37m[  0.656115 0:2 axvm::vm::prepare:146] [32mVM setup: id=1[m
+[m[37m[  0.656512 0:2 axvisor::manager:245] [32mRegistering 1 AArch64 routed SPI(s) for VM[1] on VCpu[0]/pCPU0[m
+[m[37m[  0.656985 0:2 axplat_dyn::irq::aarch64_hv:130] [32mAArch64 routed SPI: physical_intid=48 -> VM[1] VCpu[0] guest_intid=48, pCPU=0[m
+[m[37m[  0.659418 0:2 axvm::arch::aarch64::fdt::core::parser:386] [32mCPU node: /cpus/cpu@0, node_id: 0x0, hardware_cpu_id: 0x0[m
+[m[37m[  0.659550 0:2 axvm::arch::aarch64::fdt::core::parser:386] [32mCPU node: /cpus/cpu@1, node_id: 0x1, hardware_cpu_id: 0x1[m
+[m[37m[  0.659664 0:2 axvm::arch::aarch64::fdt::core::parser:386] [32mCPU node: /cpus/cpu@2, node_id: 0x2, hardware_cpu_id: 0x2[m
+[m[37m[  0.659776 0:2 axvm::arch::aarch64::fdt::core::parser:386] [32mCPU node: /cpus/cpu@3, node_id: 0x3, hardware_cpu_id: 0x3[m
+[m[37m[  0.659900 0:2 axvm::arch::aarch64::fdt::core::parser:393] [32mFound 4 host CPU nodes[m
+[m[37m[  0.659988 0:2 axvm::arch::aarch64::fdt::core:77] [32mVM[3] DTB not found, generating from the VM configuration[m
+[m[37m[  0.662168 0:2 axvm::arch::aarch64::fdt::core::device:96] [32mFound excluded devices: [][m
+[m[37m[  0.666207 0:2 configured host policy: timer={:?}, vcpu_yield={}, vcpu_idle={:?}:199] [32mVM[3] configured host policy: timer=Periodic, vcpu_yield=false, vcpu_idle=Halt[m
+[m[37m[  0.666355 0:2 axvisor::config:149] [32mCreating VM[3] "rtthread-net"[m
+[m[37m[  0.666453 0:2 axvm::vm:613] [32mVM created: id=3[m
+[m[37m[  0.667291 0:2 axvisor::config:161] [32mVM[3] created success, loading images...[m
+[m[37m[  0.670466 0:2 axdevice::device:1143] [32mDeviceRuntime: registered device id=0[m
+[m[37m[  0.670559 0:2 axdevice::device:1143] [32mDeviceRuntime: registered device id=1[m
+[m[37m[  0.670642 0:2 axdevice::device:1143] [32mDeviceRuntime: registered device id=2[m
+[m[37m[  0.670715 0:2 axdevice::device:1143] [32mDeviceRuntime: registered device id=3[m
+[m[37m[  0.670789 0:2 axdevice::device:1143] [32mDeviceRuntime: registered device id=4[m
+[m[37m[  0.670861 0:2 axdevice::device:1143] [32mDeviceRuntime: registered device id=5[m
+[m[37m[  0.671159 0:2 axvm::vm::prepare:146] [32mVM setup: id=3[m
+[m[37m[  0.671340 0:2 axvisor::manager:245] [32mRegistering 1 AArch64 routed SPI(s) for VM[3] on VCpu[0]/pCPU2[m
+[m[37m[  0.671447 0:2 axplat_dyn::irq::aarch64_hv:130] [32mAArch64 routed SPI: physical_intid=50 -> VM[3] VCpu[0] guest_intid=50, pCPU=2[m
+[m[37m[  0.671598 0:2 axvm::runtime:104] [32mInitializing VMM...[m
+[m[37m[  0.671687 0:2 axvm::runtime:109] [32mVMM starting, booting VMs...[m
+[m[37m[  0.671911 0:2 axvm::vm:795] [32mStarting VM[1][m
+[m[37m[  0.672119 0:2 axvm::runtime::vcpus:235] [32mSpawning task for VM[1] VCpu[0][m
+[m[37m[  0.672407 0:2 axvm::runtime::vcpus:252] [32mVCpu task Task(15, "VM[1]-VCpu[0]") created cpumask: [0, ][m
+[m[37m[  0.672979 0:2 axvm::runtime:115] [32mVM[1] boot success[m
+[m[37m[  0.673046 0:2 axvm::vm:795] [32mStarting VM[3][m
+[m[37m[  0.673098 0:2 axvm::runtime::vcpus:235] [32mSpawning task for VM[3] VCpu[0][m
+[m[37m[  0.673181 0:2 axvm::runtime::vcpus:252] [32mVCpu task Task(16, "VM[3]-VCpu[0]") created cpumask: [2, ][m
+[m[37m[  0.673295 0:2 axvm::runtime:115] [32mVM[3] boot success[m
+[m[37m[  0.673600 0:15 axvm::runtime::vcpus:401] [32mVM[1] VCpu[0] waiting for running[m
+[m[37m[  0.673751 0:15 axvm::runtime::vcpus:404] [32mVM[1] VCpu[0] running...[m
+[m[37m[  0.680199 2:16 axvm::runtime::vcpus:401] [32mVM[3] VCpu[0] waiting for running[m
+[m[37m[  0.680380 2:16 axvm::runtime::vcpus:404] [32mVM[3] VCpu[0] running...[m
+[mR12345ABCDEFG6[32m[I/rtdm.ofw] Booting RT-Thread on physical CPU 0x0[0m
+[32m[I/rtdm.ofw] Machine model: linux,dummy-virt[0m
+[32m[I/rtdm.ofw] Memory node(0) ranges: 0x00000000a0000000 - 0x00000000b0000000[0m
+[32m[I/mm.memblock] System memory:[0m
+[32m[I/mm.memblock]                    [0x00000000a0000000, 0x00000000b0000000][0m
+[32m[I/mm.memblock] Reserved memory:[0m
+[32m[I/mm.memblock]                    [0x00000000a0000000, 0x00000000a0112000][0m
+[32m[I/mm.memblock]                    [0x00000000a0112000, 0x00000000a4112000][0m
+[32m[I/mm.memblock]                    [0x00000000a4112000, 0x00000000a4312000][0m
+[32m[I/mm.memblock]                    [0x00000000a4312000, 0x00000000a4313000][0m
+[32m[I/mm.memblock] physical memory region [0x00000000a4313000-0x00000000b0000000] installed to system page[0m
+[32m[I/mm.memblock] 198 MB memory installed to system page[0m
+[37m[  0.697563 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa0022354, FAR=Ok(GPA(0x8000004)), ESR=0x93800007[m
+[m[37m[  0.698268 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa0022384, FAR=Ok(GPA(0x8000000)), ESR=0x939f0047[m
+[m[37m[  0.698875 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa0021334, FAR=Ok(GPA(0x8000000)), ESR=0x93820007[m
+[m[37m[  0.699259 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002246c, FAR=Ok(GPA(0x8000c08)), ESR=0x939f0047[m
+[m[37m[  0.699609 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002246c, FAR=Ok(GPA(0x8000c0c)), ESR=0x939f0047[m
+[m[37m[  0.699780 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002246c, FAR=Ok(GPA(0x8000c10)), ESR=0x939f0047[m
+[m[37m[  0.699913 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002246c, FAR=Ok(GPA(0x8000c14)), ESR=0x939f0047[m
+[m[37m[  0.700044 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002246c, FAR=Ok(GPA(0x8000c18)), ESR=0x939f0047[m
+[m[37m[  0.700177 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002246c, FAR=Ok(GPA(0x8000c1c)), ESR=0x939f0047[m
+[m[37m[  0.700308 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002246c, FAR=Ok(GPA(0x8000c20)), ESR=0x939f0047[m
+[m[37m[  0.700439 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002246c, FAR=Ok(GPA(0x8000c24)), ESR=0x939f0047[m
+[m[37m[  0.700573 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002246c, FAR=Ok(GPA(0x8000c28)), ESR=0x939f0047[m
+[m[37m[  0.700704 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002246c, FAR=Ok(GPA(0x8000c2c)), ESR=0x939f0047[m
+[m[37m[  0.700835 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002246c, FAR=Ok(GPA(0x8000c30)), ESR=0x939f0047[m
+[m[37m[  0.700966 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002246c, FAR=Ok(GPA(0x8000c34)), ESR=0x939f0047[m
+[m[37m[  0.701096 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002246c, FAR=Ok(GPA(0x8000c38)), ESR=0x939f0047[m
+[m[37m[  0.701227 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002246c, FAR=Ok(GPA(0x8000c3c)), ESR=0x939f0047[m
+[m[37m[  0.701362 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa0021334, FAR=Ok(GPA(0x8000000)), ESR=0x93820007[m
+[m[37m[  0.701503 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x8006100)), ESR=0x93c08047[m
+[m[37m[  0.701979 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x8006108)), ESR=0x93c08047[m
+[m[37m[  0.702360 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x8006110)), ESR=0x93c08047[m
+[m[37m[  0.702531 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x8006118)), ESR=0x93c08047[m
+[m[37m[  0.702694 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x8006120)), ESR=0x93c08047[m
+[m[37m[  0.702869 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x8006128)), ESR=0x93c08047[m
+[m[37m[  0.703032 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x8006130)), ESR=0x93c08047[m
+[m[37m[  0.703200 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x8006138)), ESR=0x93c08047[m
+[m[37m[  0.703378 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x8006140)), ESR=0x93c08047[m
+[m[37m[  0.703560 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x8006148)), ESR=0x93c08047[m
+[m[37m[  0.703743 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x8006150)), ESR=0x93c08047[m
+[m[37m[  0.703947 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x8006158)), ESR=0x93c08047[m
+[m[37m[  0.704274 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x8006160)), ESR=0x93c08047[m
+[m[37m[  0.704475 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x8006168)), ESR=0x93c08047[m
+[m[37m[  0.704814 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x8006170)), ESR=0x93c08047[m
+[m[37m[  0.705107 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x8006178)), ESR=0x93c08047[m
+[m[37m[  0.705365 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x8006180)), ESR=0x93c08047[m
+[m[37m[  0.705507 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x8006188)), ESR=0x93c08047[m
+[m[37m[  0.705643 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x8006190)), ESR=0x93c08047[m
+[m[37m[  0.705774 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x8006198)), ESR=0x93c08047[m
+[m[37m[  0.705899 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x80061a0)), ESR=0x93c08047[m
+[m[37m[  0.706027 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x80061a8)), ESR=0x93c08047[m
+[m[37m[  0.706152 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x80061b0)), ESR=0x93c08047[m
+[m[37m[  0.706283 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x80061b8)), ESR=0x93c08047[m
+[m[37m[  0.706408 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x80061c0)), ESR=0x93c08047[m
+[m[37m[  0.706578 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x80061c8)), ESR=0x93c08047[m
+[m[37m[  0.706708 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x80061d0)), ESR=0x93c08047[m
+[m[37m[  0.706839 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x80061d8)), ESR=0x93c08047[m
+[m[37m[  0.706967 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x80061e0)), ESR=0x93c08047[m
+[m[37m[  0.707096 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x80061e8)), ESR=0x93c08047[m
+[m[37m[  0.707226 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x80061f0)), ESR=0x93c08047[m
+[m[37m[  0.707360 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x80061f8)), ESR=0x93c08047[m
+[m[37m[  0.707494 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x8006200)), ESR=0x93c08047[m
+[m[37m[  0.707628 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x8006208)), ESR=0x93c08047[m
+[m[37m[  0.707757 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x8006210)), ESR=0x93c08047[m
+[m[37m[  0.707890 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x8006218)), ESR=0x93c08047[m
+[m[37m[  0.708018 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x8006220)), ESR=0x93c08047[m
+[m[37m[  0.708153 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x8006228)), ESR=0x93c08047[m
+[m[37m[  0.708284 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x8006230)), ESR=0x93c08047[m
+[m[37m[  0.708418 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x8006238)), ESR=0x93c08047[m
+[m[37m[  0.708546 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x8006240)), ESR=0x93c08047[m
+[m[37m[  0.708670 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x8006248)), ESR=0x93c08047[m
+[m[37m[  0.708791 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x8006250)), ESR=0x93c08047[m
+[m[37m[  0.708929 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x8006258)), ESR=0x93c08047[m
+[m[37m[  0.709055 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x8006260)), ESR=0x93c08047[m
+[m[37m[  0.709187 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x8006268)), ESR=0x93c08047[m
+[m[37m[  0.709314 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x8006270)), ESR=0x93c08047[m
+[m[37m[  0.709446 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x8006278)), ESR=0x93c08047[m
+[m[37m[  0.709580 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x8006280)), ESR=0x93c08047[m
+[m[37m[  0.709703 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x8006288)), ESR=0x93c08047[m
+[m[37m[  0.709826 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x8006290)), ESR=0x93c08047[m
+[m[37m[  0.709953 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x8006298)), ESR=0x93c08047[m
+[m[37m[  0.710074 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x80062a0)), ESR=0x93c08047[m
+[m[37m[  0.710204 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x80062a8)), ESR=0x93c08047[m
+[m[37m[  0.710336 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x80062b0)), ESR=0x93c08047[m
+[m[37m[  0.710456 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x80062b8)), ESR=0x93c08047[m
+[m[37m[  0.710581 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x80062c0)), ESR=0x93c08047[m
+[m[37m[  0.710705 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x80062c8)), ESR=0x93c08047[m
+[m[37m[  0.710838 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x80062d0)), ESR=0x93c08047[m
+[m[37m[  0.710965 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x80062d8)), ESR=0x93c08047[m
+[m[37m[  0.711096 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x80062e0)), ESR=0x93c08047[m
+[m[37m[  0.711227 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x80062e8)), ESR=0x93c08047[m
+[m[37m[  0.711366 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x80062f0)), ESR=0x93c08047[m
+[m[37m[  0.711500 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x80062f8)), ESR=0x93c08047[m
+[m[37m[  0.711631 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x8006300)), ESR=0x93c08047[m
+[m[37m[  0.711752 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x8006308)), ESR=0x93c08047[m
+[m[37m[  0.711882 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x8006310)), ESR=0x93c08047[m
+[m[37m[  0.712012 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x8006318)), ESR=0x93c08047[m
+[m[37m[  0.712143 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x8006320)), ESR=0x93c08047[m
+[m[37m[  0.712278 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x8006328)), ESR=0x93c08047[m
+[m[37m[  0.712405 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x8006330)), ESR=0x93c08047[m
+[m[37m[  0.712536 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x8006338)), ESR=0x93c08047[m
+[m[37m[  0.712659 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x8006340)), ESR=0x93c08047[m
+[m[37m[  0.712784 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x8006348)), ESR=0x93c08047[m
+[m[37m[  0.712910 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x8006350)), ESR=0x93c08047[m
+[m[37m[  0.713035 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x8006358)), ESR=0x93c08047[m
+[m[37m[  0.713162 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x8006360)), ESR=0x93c08047[m
+[m[37m[  0.713289 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x8006368)), ESR=0x93c08047[m
+[m[37m[  0.713421 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x8006370)), ESR=0x93c08047[m
+[m[37m[  0.713550 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x8006378)), ESR=0x93c08047[m
+[m[37m[  0.713684 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x8006380)), ESR=0x93c08047[m
+[m[37m[  0.713810 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x8006388)), ESR=0x93c08047[m
+[m[37m[  0.713937 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x8006390)), ESR=0x93c08047[m
+[m[37m[  0.714099 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x8006398)), ESR=0x93c08047[m
+[m[37m[  0.714228 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x80063a0)), ESR=0x93c08047[m
+[m[37m[  0.714359 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x80063a8)), ESR=0x93c08047[m
+[m[37m[  0.714487 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x80063b0)), ESR=0x93c08047[m
+[m[37m[  0.714614 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x80063b8)), ESR=0x93c08047[m
+[m[37m[  0.714746 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x80063c0)), ESR=0x93c08047[m
+[m[37m[  0.714874 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x80063c8)), ESR=0x93c08047[m
+[m[37m[  0.714999 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x80063d0)), ESR=0x93c08047[m
+[m[37m[  0.715131 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x80063d8)), ESR=0x93c08047[m
+[m[37m[  0.715272 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x80063e0)), ESR=0x93c08047[m
+[m[37m[  0.715398 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x80063e8)), ESR=0x93c08047[m
+[m[37m[  0.715530 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x80063f0)), ESR=0x93c08047[m
+[m[37m[  0.715663 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x80063f8)), ESR=0x93c08047[m
+[m[37m[  0.715797 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x8006400)), ESR=0x93c08047[m
+[m[37m[  0.715924 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x8006408)), ESR=0x93c08047[m
+[m[37m[  0.716054 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x8006410)), ESR=0x93c08047[m
+[m[37m[  0.716184 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x8006418)), ESR=0x93c08047[m
+[m[37m[  0.716312 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x8006420)), ESR=0x93c08047[m
+[m[37m[  0.716445 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x8006428)), ESR=0x93c08047[m
+[m[37m[  0.716605 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x8006430)), ESR=0x93c08047[m
+[m[37m[  0.716740 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x8006438)), ESR=0x93c08047[m
+[m[37m[  0.716866 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x8006440)), ESR=0x93c08047[m
+[m[37m[  0.716996 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x8006448)), ESR=0x93c08047[m
+[m[37m[  0.717124 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x8006450)), ESR=0x93c08047[m
+[m[37m[  0.717259 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x8006458)), ESR=0x93c08047[m
+[m[37m[  0.717389 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x8006460)), ESR=0x93c08047[m
+[m[37m[  0.717528 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x8006468)), ESR=0x93c08047[m
+[m[37m[  0.717661 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x8006470)), ESR=0x93c08047[m
+[m[37m[  0.717790 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x8006478)), ESR=0x93c08047[m
+[m[37m[  0.717918 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x8006480)), ESR=0x93c08047[m
+[m[37m[  0.718050 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x8006488)), ESR=0x93c08047[m
+[m[37m[  0.718185 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x8006490)), ESR=0x93c08047[m
+[m[37m[  0.718315 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x8006498)), ESR=0x93c08047[m
+[m[37m[  0.718448 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x80064a0)), ESR=0x93c08047[m
+[m[37m[  0.718578 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x80064a8)), ESR=0x93c08047[m
+[m[37m[  0.718706 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x80064b0)), ESR=0x93c08047[m
+[m[37m[  0.718838 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x80064b8)), ESR=0x93c08047[m
+[m[37m[  0.718968 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x80064c0)), ESR=0x93c08047[m
+[m[37m[  0.719100 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x80064c8)), ESR=0x93c08047[m
+[m[37m[  0.719226 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x80064d0)), ESR=0x93c08047[m
+[m[37m[  0.719355 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x80064d8)), ESR=0x93c08047[m
+[m[37m[  0.719495 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x80064e0)), ESR=0x93c08047[m
+[m[37m[  0.719627 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x80064e8)), ESR=0x93c08047[m
+[m[37m[  0.719762 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x80064f0)), ESR=0x93c08047[m
+[m[37m[  0.719886 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x80064f8)), ESR=0x93c08047[m
+[m[37m[  0.720014 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x8006500)), ESR=0x93c08047[m
+[m[37m[  0.720143 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x8006508)), ESR=0x93c08047[m
+[m[37m[  0.720275 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x8006510)), ESR=0x93c08047[m
+[m[37m[  0.720407 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x8006518)), ESR=0x93c08047[m
+[m[37m[  0.720539 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x8006520)), ESR=0x93c08047[m
+[m[37m[  0.720666 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x8006528)), ESR=0x93c08047[m
+[m[37m[  0.720800 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x8006530)), ESR=0x93c08047[m
+[m[37m[  0.720928 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x8006538)), ESR=0x93c08047[m
+[m[37m[  0.721054 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x8006540)), ESR=0x93c08047[m
+[m[37m[  0.721183 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x8006548)), ESR=0x93c08047[m
+[m[37m[  0.721311 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x8006550)), ESR=0x93c08047[m
+[m[37m[  0.721445 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x8006558)), ESR=0x93c08047[m
+[m[37m[  0.721575 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x8006560)), ESR=0x93c08047[m
+[m[37m[  0.721709 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x8006568)), ESR=0x93c08047[m
+[m[37m[  0.721838 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x8006570)), ESR=0x93c08047[m
+[m[37m[  0.721970 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x8006578)), ESR=0x93c08047[m
+[m[37m[  0.722102 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x8006580)), ESR=0x93c08047[m
+[m[37m[  0.722232 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x8006588)), ESR=0x93c08047[m
+[m[37m[  0.722363 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x8006590)), ESR=0x93c08047[m
+[m[37m[  0.722495 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x8006598)), ESR=0x93c08047[m
+[m[37m[  0.722628 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x80065a0)), ESR=0x93c08047[m
+[m[37m[  0.722755 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x80065a8)), ESR=0x93c08047[m
+[m[37m[  0.722882 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x80065b0)), ESR=0x93c08047[m
+[m[37m[  0.723014 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x80065b8)), ESR=0x93c08047[m
+[m[37m[  0.723140 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x80065c0)), ESR=0x93c08047[m
+[m[37m[  0.723266 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x80065c8)), ESR=0x93c08047[m
+[m[37m[  0.723396 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x80065d0)), ESR=0x93c08047[m
+[m[37m[  0.723527 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x80065d8)), ESR=0x93c08047[m
+[m[37m[  0.723654 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x80065e0)), ESR=0x93c08047[m
+[m[37m[  0.723787 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x80065e8)), ESR=0x93c08047[m
+[m[37m[  0.723915 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x80065f0)), ESR=0x93c08047[m
+[m[37m[  0.724076 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x80065f8)), ESR=0x93c08047[m
+[m[37m[  0.724204 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x8006600)), ESR=0x93c08047[m
+[m[37m[  0.724333 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x8006608)), ESR=0x93c08047[m
+[m[37m[  0.724463 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x8006610)), ESR=0x93c08047[m
+[m[37m[  0.724596 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x8006618)), ESR=0x93c08047[m
+[m[37m[  0.724727 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x8006620)), ESR=0x93c08047[m
+[m[37m[  0.724854 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x8006628)), ESR=0x93c08047[m
+[m[37m[  0.724984 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x8006630)), ESR=0x93c08047[m
+[m[37m[  0.725113 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x8006638)), ESR=0x93c08047[m
+[m[37m[  0.725243 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x8006640)), ESR=0x93c08047[m
+[m[37m[  0.725373 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x8006648)), ESR=0x93c08047[m
+[m[37m[  0.725501 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x8006650)), ESR=0x93c08047[m
+[m[37m[  0.725636 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x8006658)), ESR=0x93c08047[m
+[m[37m[  0.725767 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x8006660)), ESR=0x93c08047[m
+[m[37m[  0.725892 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x8006668)), ESR=0x93c08047[m
+[m[37m[  0.726023 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x8006670)), ESR=0x93c08047[m
+[m[37m[  0.726160 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x8006678)), ESR=0x93c08047[m
+[m[37m[  0.726288 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x8006680)), ESR=0x93c08047[m
+[m[37m[  0.726418 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x8006688)), ESR=0x93c08047[m
+[m[37m[  0.726588 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x8006690)), ESR=0x93c08047[m
+[m[37m[  0.726719 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x8006698)), ESR=0x93c08047[m
+[m[37m[  0.726849 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x80066a0)), ESR=0x93c08047[m
+[m[37m[  0.726982 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x80066a8)), ESR=0x93c08047[m
+[m[37m[  0.727108 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x80066b0)), ESR=0x93c08047[m
+[m[37m[  0.727216 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c5fc, FAR=Ok(GPA(0x800ffe8)), ESR=0x93800007[m
+[m[37m[  0.727246 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x80066b8)), ESR=0x93c08047[m
+[m[37m[  0.727482 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x80066c0)), ESR=0x93c08047[m
+[m[37m[  0.727622 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x80066c8)), ESR=0x93c08047[m
+[m[37m[  0.727749 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x80066d0)), ESR=0x93c08047[m
+[m[37m[  0.727878 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x80066d8)), ESR=0x93c08047[m
+[m[37m[  0.728004 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x80066e0)), ESR=0x93c08047[m
+[m[37m[  0.728157 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x80066e8)), ESR=0x93c08047[m
+[m[37m[  0.728343 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x80066f0)), ESR=0x93c08047[m
+[m[37m[  0.728476 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x80066f8)), ESR=0x93c08047[m
+[m[37m[  0.728483 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88bf04, FAR=Ok(GPA(0x8000004)), ESR=0x93970007[m
+[m[37m[  0.728710 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x8006700)), ESR=0x93c08047[m
+[m[37m[  0.728845 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88bf10, FAR=Ok(GPA(0x8000008)), ESR=0x93800007[m
+[m[37m[  0.728874 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x8006708)), ESR=0x93c08047[m
+[m[37m[  0.729101 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x8006710)), ESR=0x93c08047[m
+[m[37m[  0.729232 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c438, FAR=Ok(GPA(0x800000c)), ESR=0x93800007[m
+[m[37m[  0.729236 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x8006718)), ESR=0x93c08047[m
+[m[37m[  0.729487 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x8006720)), ESR=0x93c08047[m
+[m[37m[  0.729813 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x8006728)), ESR=0x93c08047[m
+[m[37m[  0.730110 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x8006730)), ESR=0x93c08047[m
+[m[37m[  0.730343 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x8006738)), ESR=0x93c08047[m
+[m[37m[  0.730484 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x8006740)), ESR=0x93c08047[m
+[m[37m[  0.730625 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x8006748)), ESR=0x93c08047[m
+[m[37m[  0.730771 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x8006750)), ESR=0x93c08047[m
+[m[37m[  0.730813 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153c002f68, FAR=Ok(GPA(0x80affe8)), ESR=0x93800007[m
+[m[37m[  0.730964 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x8006758)), ESR=0x93c08047[m
+[m[37m[  0.731136 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x8006760)), ESR=0x93c08047[m
+[m[37m[  0.731137 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153c002f84, FAR=Ok(GPA(0x80a0008)), ESR=0x93d48007[m
+[m[37m[  0.731304 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x8006768)), ESR=0x93c08047[m
+[m[37m[  0.731477 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153c00374c, FAR=Ok(GPA(0x80a0008)), ESR=0x93c08007[m
+[m[37m[  0.731510 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x8006770)), ESR=0x93c08047[m
+[m[37m[  0.731673 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153c003750, FAR=Ok(GPA(0x80a0000)), ESR=0x93850007[m
+[m[37m[  0.731772 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x8006778)), ESR=0x93c08047[m
+[m[37m[  0.731957 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x8006780)), ESR=0x93c08047[m
+[m[37m[  0.732061 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c0b8, FAR=Ok(GPA(0x8000000)), ESR=0x93800007[m
+[m[37m[  0.732151 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x8006788)), ESR=0x93c08047[m
+[m[37m[  0.732380 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c0ec, FAR=Ok(GPA(0x8000000)), ESR=0x939f0047[m
+[m[37m[  0.732489 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x8006790)), ESR=0x93c08047[m
+[m[37m[  0.732658 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153c002cbc, FAR=Ok(GPA(0x8000000)), ESR=0x93820007[m
+[m[37m[  0.732667 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x8006798)), ESR=0x93c08047[m
+[m[37m[  0.732899 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c134, FAR=Ok(GPA(0x8000084)), ESR=0x93830047[m
+[m[37m[  0.732907 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x80067a0)), ESR=0x93c08047[m
+[m[37m[  0.733155 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x80067a8)), ESR=0x93c08047[m
+[m[37m[  0.733160 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c134, FAR=Ok(GPA(0x8000088)), ESR=0x93830047[m
+[m[37m[  0.733383 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x80067b0)), ESR=0x93c08047[m
+[m[37m[  0.733534 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c134, FAR=Ok(GPA(0x800008c)), ESR=0x93830047[m
+[m[37m[  0.733541 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x80067b8)), ESR=0x93c08047[m
+[m[37m[  0.733778 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c134, FAR=Ok(GPA(0x8000090)), ESR=0x93830047[m
+[m[37m[  0.733787 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x80067c0)), ESR=0x93c08047[m
+[m[37m[  0.734025 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c134, FAR=Ok(GPA(0x8000094)), ESR=0x93830047[m
+[m[37m[  0.734115 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x80067c8)), ESR=0x93c08047[m
+[m[37m[  0.734293 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c134, FAR=Ok(GPA(0x8000098)), ESR=0x93830047[m
+[m[37m[  0.734301 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x80067d0)), ESR=0x93c08047[m
+[m[37m[  0.734546 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c134, FAR=Ok(GPA(0x800009c)), ESR=0x93830047[m
+[m[37m[  0.734550 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x80067d8)), ESR=0x93c08047[m
+[m[37m[  0.734790 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c134, FAR=Ok(GPA(0x80000a0)), ESR=0x93830047[m
+[m[37m[  0.734800 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x80067e0)), ESR=0x93c08047[m
+[m[37m[  0.735052 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x80067e8)), ESR=0x93c08047[m
+[m[37m[  0.735060 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153c001b94, FAR=Ok(GPA(0x8000c08)), ESR=0x939f0047[m
+[m[37m[  0.735258 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x80067f0)), ESR=0x93c08047[m
+[m[37m[  0.735426 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002247c, FAR=Ok(GPA(0x80067f8)), ESR=0x93c08047[m
+[m[37m[  0.735428 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153c001b94, FAR=Ok(GPA(0x8000c0c)), ESR=0x939f0047[m
+[m[37m[  0.735651 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa0021334, FAR=Ok(GPA(0x8000000)), ESR=0x93820007[m
+[m[37m[  0.735781 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153c001b94, FAR=Ok(GPA(0x8000c10)), ESR=0x939f0047[m
+[m[37m[  0.735893 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa0022488, FAR=Ok(GPA(0x8000420)), ESR=0x92000047[m
+[m[37m[  0.736046 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153c001b94, FAR=Ok(GPA(0x8000c14)), ESR=0x939f0047[m
+[m[37m[  0.736190 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa0022488, FAR=Ok(GPA(0x8000420)), ESR=0x92000047[m
+[m[37m[  0.736263 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153c001b94, FAR=Ok(GPA(0x8000c18)), ESR=0x939f0047[m
+[m[37m[  0.736418 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa0022488, FAR=Ok(GPA(0x8000420)), ESR=0x92000047[m
+[m[37m[  0.736564 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153c001b94, FAR=Ok(GPA(0x8000c1c)), ESR=0x939f0047[m
+[m[37m[  0.736683 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa0022488, FAR=Ok(GPA(0x8000420)), ESR=0x92000047[m
+[m[37m[  0.736844 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153c001b94, FAR=Ok(GPA(0x8000c20)), ESR=0x939f0047[m
+[m[37m[  0.736861 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa0022488, FAR=Ok(GPA(0x8000420)), ESR=0x92000047[m
+[m[37m[  0.737087 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153c001b94, FAR=Ok(GPA(0x8000c24)), ESR=0x939f0047[m
+[m[37m[  0.737099 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa0022488, FAR=Ok(GPA(0x8000420)), ESR=0x92000047[m
+[m[37m[  0.737322 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153c001b94, FAR=Ok(GPA(0x8000c28)), ESR=0x939f0047[m
+[m[37m[  0.737349 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa0022488, FAR=Ok(GPA(0x8000420)), ESR=0x92000047[m
+[m[37m[  0.737566 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153c001b94, FAR=Ok(GPA(0x8000c2c)), ESR=0x939f0047[m
+[m[37m[  0.737595 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa0022488, FAR=Ok(GPA(0x8000420)), ESR=0x92000047[m
+[m[37m[  0.737811 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153c001b94, FAR=Ok(GPA(0x8000c30)), ESR=0x939f0047[m
+[m[37m[  0.737822 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa0022488, FAR=Ok(GPA(0x8000420)), ESR=0x92000047[m
+[m[37m[  0.738049 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153c001b94, FAR=Ok(GPA(0x8000c34)), ESR=0x939f0047[m
+[m[37m[  0.738066 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa0022488, FAR=Ok(GPA(0x8000420)), ESR=0x92000047[m
+[m[37m[  0.738290 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153c001b94, FAR=Ok(GPA(0x8000c38)), ESR=0x939f0047[m
+[m[37m[  0.738302 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa0022488, FAR=Ok(GPA(0x8000420)), ESR=0x92000047[m
+[m[37m[  0.738531 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153c001b94, FAR=Ok(GPA(0x8000c3c)), ESR=0x939f0047[m
+[m[37m[  0.738547 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa0022488, FAR=Ok(GPA(0x8000420)), ESR=0x92000047[m
+[m[37m[  0.738771 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153c001b94, FAR=Ok(GPA(0x8000c40)), ESR=0x939f0047[m
+[m[37m[  0.738784 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa0022488, FAR=Ok(GPA(0x8000420)), ESR=0x92000047[m
+[m[37m[  0.739010 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153c001b94, FAR=Ok(GPA(0x8000c44)), ESR=0x939f0047[m
+[m[37m[  0.739022 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa0022488, FAR=Ok(GPA(0x8000420)), ESR=0x92000047[m
+[m[37m[  0.739256 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153c001bbc, FAR=Ok(GPA(0x8000420)), ESR=0x93820047[m
+[m[37m[  0.739261 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa0022488, FAR=Ok(GPA(0x8000420)), ESR=0x92000047[m
+[m[37m[  0.739488 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153c001bbc, FAR=Ok(GPA(0x8000424)), ESR=0x93820047[m
+[m[37m[  0.739522 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa0022488, FAR=Ok(GPA(0x8000420)), ESR=0x92000047[m
+[m[37m[  0.739708 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153c001bbc, FAR=Ok(GPA(0x8000428)), ESR=0x93820047[m
+[m[37m[  0.739841 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa0022488, FAR=Ok(GPA(0x8000420)), ESR=0x92000047[m
+[m[37m[  0.739964 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153c001bbc, FAR=Ok(GPA(0x800042c)), ESR=0x93820047[m
+[m[37m[  0.740091 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa0022488, FAR=Ok(GPA(0x8000420)), ESR=0x92000047[m
+[m[37m[  0.740196 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153c001bbc, FAR=Ok(GPA(0x8000430)), ESR=0x93820047[m
+[m[37m[  0.740338 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa0022488, FAR=Ok(GPA(0x8000420)), ESR=0x92000047[m
+[m[37m[  0.740445 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153c001bbc, FAR=Ok(GPA(0x8000434)), ESR=0x93820047[m
+[m[37m[  0.740572 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa0022488, FAR=Ok(GPA(0x8000420)), ESR=0x92000047[m
+[m[37m[  0.740720 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153c001bbc, FAR=Ok(GPA(0x8000438)), ESR=0x93820047[m
+[m[37m[  0.740796 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa0022488, FAR=Ok(GPA(0x8000420)), ESR=0x92000047[m
+[m[37m[  0.740968 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153c001bbc, FAR=Ok(GPA(0x800043c)), ESR=0x93820047[m
+[m[37m[  0.741007 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa0022488, FAR=Ok(GPA(0x8000420)), ESR=0x92000047[m
+[m[37m[  0.741204 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153c001bbc, FAR=Ok(GPA(0x8000440)), ESR=0x93820047[m
+[m[37m[  0.741311 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa0022488, FAR=Ok(GPA(0x8000420)), ESR=0x92000047[m
+[m[37m[  0.741435 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153c001bbc, FAR=Ok(GPA(0x8000444)), ESR=0x93820047[m
+[m[37m[  0.741555 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa0022488, FAR=Ok(GPA(0x8000420)), ESR=0x92000047[m
+[m[37m[  0.741696 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153c001bbc, FAR=Ok(GPA(0x8000448)), ESR=0x93820047[m
+[m[37m[  0.741823 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa0022488, FAR=Ok(GPA(0x8000420)), ESR=0x92000047[m
+[m[37m[  0.741960 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153c001bbc, FAR=Ok(GPA(0x800044c)), ESR=0x93820047[m
+[m[37m[  0.742063 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa0022488, FAR=Ok(GPA(0x8000420)), ESR=0x92000047[m
+[m[37m[  0.742218 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153c001bbc, FAR=Ok(GPA(0x8000450)), ESR=0x93820047[m
+[m[37m[  0.742246 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa0022488, FAR=Ok(GPA(0x8000420)), ESR=0x92000047[m
+[m[37m[  0.742429 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153c001bbc, FAR=Ok(GPA(0x8000454)), ESR=0x93820047[m
+[m[37m[  0.742561 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa0022488, FAR=Ok(GPA(0x8000420)), ESR=0x92000047[m
+[m[37m[  0.742696 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153c001bbc, FAR=Ok(GPA(0x8000458)), ESR=0x93820047[m
+[m[37m[  0.742796 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa0022488, FAR=Ok(GPA(0x8000420)), ESR=0x92000047[m
+[m[37m[  0.742958 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153c001bbc, FAR=Ok(GPA(0x800045c)), ESR=0x93820047[m
+[m[37m[  0.743002 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa0022488, FAR=Ok(GPA(0x8000420)), ESR=0x92000047[m
+[m[37m[  0.743194 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153c001bbc, FAR=Ok(GPA(0x8000460)), ESR=0x93820047[m
+[m[37m[  0.743316 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa0022488, FAR=Ok(GPA(0x8000420)), ESR=0x92000047[m
+[m[37m[  0.743448 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153c001bbc, FAR=Ok(GPA(0x8000464)), ESR=0x93820047[m
+[m[37m[  0.743573 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa0022488, FAR=Ok(GPA(0x8000420)), ESR=0x92000047[m
+[m[37m[  0.743692 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153c001bbc, FAR=Ok(GPA(0x8000468)), ESR=0x93820047[m
+[m[37m[  0.743812 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa0022488, FAR=Ok(GPA(0x8000420)), ESR=0x92000047[m
+[m[37m[  0.743950 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153c001bbc, FAR=Ok(GPA(0x800046c)), ESR=0x93820047[m
+[m[37m[  0.744021 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa0022488, FAR=Ok(GPA(0x8000420)), ESR=0x92000047[m
+[m[37m[  0.744206 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153c001bbc, FAR=Ok(GPA(0x8000470)), ESR=0x93820047[m
+[m[37m[  0.744300 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa0022488, FAR=Ok(GPA(0x8000420)), ESR=0x92000047[m
+[m[37m[  0.744438 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153c001bbc, FAR=Ok(GPA(0x8000474)), ESR=0x93820047[m
+[m[37m[  0.744549 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa0022488, FAR=Ok(GPA(0x8000420)), ESR=0x92000047[m
+[m[37m[  0.744690 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153c001bbc, FAR=Ok(GPA(0x8000478)), ESR=0x93820047[m
+[m[37m[  0.744782 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa0022488, FAR=Ok(GPA(0x8000420)), ESR=0x92000047[m
+[m[37m[  0.744955 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153c001bbc, FAR=Ok(GPA(0x800047c)), ESR=0x93820047[m
+[m[37m[  0.744979 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa0022488, FAR=Ok(GPA(0x8000420)), ESR=0x92000047[m
+[m[37m[  0.745188 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153c001bbc, FAR=Ok(GPA(0x8000480)), ESR=0x93820047[m
+[m[37m[  0.745269 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa0022488, FAR=Ok(GPA(0x8000420)), ESR=0x92000047[m
+[m[37m[  0.745424 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153c001bbc, FAR=Ok(GPA(0x8000484)), ESR=0x93820047[m
+[m[37m[  0.745546 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa0022488, FAR=Ok(GPA(0x8000420)), ESR=0x92000047[m
+[m[37m[  0.745684 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153c001bbc, FAR=Ok(GPA(0x8000488)), ESR=0x93820047[m
+[m[37m[  0.745772 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa0022488, FAR=Ok(GPA(0x8000420)), ESR=0x92000047[m
+[m[37m[  0.745938 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153c001bbc, FAR=Ok(GPA(0x800048c)), ESR=0x93820047[m
+[m[37m[  0.745986 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa0022488, FAR=Ok(GPA(0x8000420)), ESR=0x92000047[m
+[m[37m[  0.746180 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153c001bbc, FAR=Ok(GPA(0x8000490)), ESR=0x93820047[m
+[m[37m[  0.746207 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa0022488, FAR=Ok(GPA(0x8000420)), ESR=0x92000047[m
+[m[37m[  0.746420 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153c001bbc, FAR=Ok(GPA(0x8000494)), ESR=0x93820047[m
+[m[37m[  0.746447 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa0022488, FAR=Ok(GPA(0x8000420)), ESR=0x92000047[m
+[m[37m[  0.746647 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153c001bbc, FAR=Ok(GPA(0x8000498)), ESR=0x93820047[m
+[m[37m[  0.746761 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa0022488, FAR=Ok(GPA(0x8000420)), ESR=0x92000047[m
+[m[37m[  0.746925 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153c001bbc, FAR=Ok(GPA(0x800049c)), ESR=0x93820047[m
+[m[37m[  0.746969 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa0022488, FAR=Ok(GPA(0x8000420)), ESR=0x92000047[m
+[m[37m[  0.747168 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153c001bbc, FAR=Ok(GPA(0x80004a0)), ESR=0x93820047[m
+[m[37m[  0.747221 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa0022488, FAR=Ok(GPA(0x8000420)), ESR=0x92000047[m
+[m[37m[  0.747395 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153c001bbc, FAR=Ok(GPA(0x80004a4)), ESR=0x93820047[m
+[m[37m[  0.747527 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa0022488, FAR=Ok(GPA(0x8000420)), ESR=0x92000047[m
+[m[37m[  0.747647 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153c001bbc, FAR=Ok(GPA(0x80004a8)), ESR=0x93820047[m
+[m[37m[  0.747760 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa0022488, FAR=Ok(GPA(0x8000420)), ESR=0x92000047[m
+[m[37m[  0.747910 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153c001bbc, FAR=Ok(GPA(0x80004ac)), ESR=0x93820047[m
+[m[37m[  0.747951 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa0022488, FAR=Ok(GPA(0x8000420)), ESR=0x92000047[m
+[m[37m[  0.748141 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153c001bbc, FAR=Ok(GPA(0x80004b0)), ESR=0x93820047[m
+[m[37m[  0.748220 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa0022488, FAR=Ok(GPA(0x8000420)), ESR=0x92000047[m
+[m[37m[  0.748374 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153c001bbc, FAR=Ok(GPA(0x80004b4)), ESR=0x93820047[m
+[m[37m[  0.748487 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa0022488, FAR=Ok(GPA(0x8000420)), ESR=0x92000047[m
+[m[37m[  0.748645 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153c001bbc, FAR=Ok(GPA(0x80004b8)), ESR=0x93820047[m
+[m[37m[  0.748681 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa0022488, FAR=Ok(GPA(0x8000420)), ESR=0x92000047[m
+[m[37m[  0.748880 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153c001bbc, FAR=Ok(GPA(0x80004bc)), ESR=0x93820047[m
+[m[37m[  0.748971 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa0022488, FAR=Ok(GPA(0x8000420)), ESR=0x92000047[m
+[m[37m[  0.749133 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153c001bbc, FAR=Ok(GPA(0x80004c0)), ESR=0x93820047[m
+[m[37m[  0.749176 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa0022488, FAR=Ok(GPA(0x8000420)), ESR=0x92000047[m
+[m[37m[  0.749352 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153c001bbc, FAR=Ok(GPA(0x80004c4)), ESR=0x93820047[m
+[m[37m[  0.749464 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa0022488, FAR=Ok(GPA(0x8000420)), ESR=0x92000047[m
+[m[37m[  0.749615 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153c001bbc, FAR=Ok(GPA(0x80004c8)), ESR=0x93820047[m
+[m[37m[  0.749642 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa0021334, FAR=Ok(GPA(0x8000000)), ESR=0x93820007[m
+[m[37m[  0.749841 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153c001bbc, FAR=Ok(GPA(0x80004cc)), ESR=0x93820047[m
+[m[37m[  0.749969 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa00224a0, FAR=Ok(GPA(0x8000280)), ESR=0x93820047[m
+[m[37m[  0.750057 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153c001bbc, FAR=Ok(GPA(0x80004d0)), ESR=0x93820047[m
+[m[37m[  0.750238 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153c001bbc, FAR=Ok(GPA(0x80004d4)), ESR=0x93820047[m
+[m[37m[  0.750248 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa00224a4, FAR=Ok(GPA(0x8000180)), ESR=0x93820047[m
+[m[37m[  0.750464 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153c001bbc, FAR=Ok(GPA(0x80004d8)), ESR=0x93820047[m
+[m[37m[  0.750621 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa00224a0, FAR=Ok(GPA(0x8000284)), ESR=0x93820047[m
+[m[37m[  0.750632 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153c001bbc, FAR=Ok(GPA(0x80004dc)), ESR=0x93820047[m
+[m[37m[  0.750867 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa00224a4, FAR=Ok(GPA(0x8000184)), ESR=0x93820047[m
+[m[37m[  0.750901 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153c001bbc, FAR=Ok(GPA(0x80004e0)), ESR=0x93820047[m
+[m[37m[  0.751121 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa00224a0, FAR=Ok(GPA(0x8000288)), ESR=0x93820047[m
+[m[37m[  0.751139 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153c001bbc, FAR=Ok(GPA(0x80004e4)), ESR=0x93820047[m
+[m[37m[  0.751363 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa00224a4, FAR=Ok(GPA(0x8000188)), ESR=0x93820047[m
+[m[37m[  0.751396 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153c001bbc, FAR=Ok(GPA(0x80004e8)), ESR=0x93820047[m
+[m[37m[  0.751619 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa00224a0, FAR=Ok(GPA(0x800028c)), ESR=0x93820047[m
+[m[37m[  0.751637 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153c001bbc, FAR=Ok(GPA(0x80004ec)), ESR=0x93820047[m
+[m[37m[  0.751863 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa00224a4, FAR=Ok(GPA(0x800018c)), ESR=0x93820047[m
+[m[37m[  0.751915 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153c001bbc, FAR=Ok(GPA(0x80004f0)), ESR=0x93820047[m
+[m[37m[  0.752115 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa00224a0, FAR=Ok(GPA(0x8000290)), ESR=0x93820047[m
+[m[37m[  0.752135 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153c001bbc, FAR=Ok(GPA(0x80004f4)), ESR=0x93820047[m
+[m[37m[  0.752352 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa00224a4, FAR=Ok(GPA(0x8000190)), ESR=0x93820047[m
+[m[37m[  0.752421 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153c001bbc, FAR=Ok(GPA(0x80004f8)), ESR=0x93820047[m
+[m[37m[  0.752603 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa00224a0, FAR=Ok(GPA(0x8000294)), ESR=0x93820047[m
+[m[37m[  0.752666 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153c001bbc, FAR=Ok(GPA(0x80004fc)), ESR=0x93820047[m
+[m[37m[  0.752854 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa00224a4, FAR=Ok(GPA(0x8000194)), ESR=0x93820047[m
+[m[37m[  0.752888 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153c001bbc, FAR=Ok(GPA(0x8000500)), ESR=0x93820047[m
+[m[37m[  0.753094 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa00224a0, FAR=Ok(GPA(0x8000298)), ESR=0x93820047[m
+[m[37m[  0.753136 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153c001bbc, FAR=Ok(GPA(0x8000504)), ESR=0x93820047[m
+[m[37m[  0.753341 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa00224a4, FAR=Ok(GPA(0x8000198)), ESR=0x93820047[m
+[m[37m[  0.753364 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153c001bbc, FAR=Ok(GPA(0x8000508)), ESR=0x93820047[m
+[m[37m[  0.753589 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa00224a0, FAR=Ok(GPA(0x800029c)), ESR=0x93820047[m
+[m[37m[  0.753604 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153c001bbc, FAR=Ok(GPA(0x800050c)), ESR=0x93820047[m
+[m[37m[  0.753825 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa00224a4, FAR=Ok(GPA(0x800019c)), ESR=0x93820047[m
+[m[37m[  0.753865 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153c001bbc, FAR=Ok(GPA(0x8000510)), ESR=0x93820047[m
+[m[37m[  0.754060 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa0021334, FAR=Ok(GPA(0x8000000)), ESR=0x93820007[m
+[m[37m[  0.754216 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153c001bbc, FAR=Ok(GPA(0x8000514)), ESR=0x93820047[m
+[m[37m[  0.754255 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa00224b8, FAR=Ok(GPA(0x8000080)), ESR=0x93840047[m
+[m[37m[  0.754449 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153c001bbc, FAR=Ok(GPA(0x8000518)), ESR=0x93820047[m
+[m[37m[  0.754609 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa00224b8, FAR=Ok(GPA(0x8000084)), ESR=0x93840047[m
+[m[37m[  0.754616 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153c001bbc, FAR=Ok(GPA(0x800051c)), ESR=0x93820047[m
+[m[37m[  0.754851 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa00224b8, FAR=Ok(GPA(0x8000088)), ESR=0x93840047[m
+[m[37m[  0.754901 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153c001be4, FAR=Ok(GPA(0x8000384)), ESR=0x93850047[m
+[m[37m[  0.755106 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa00224b8, FAR=Ok(GPA(0x800008c)), ESR=0x93840047[m
+[m[37m[  0.755185 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153c001bf0, FAR=Ok(GPA(0x8000184)), ESR=0x93850047[m
+[m[37m[  0.755363 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa00224b8, FAR=Ok(GPA(0x8000090)), ESR=0x93840047[m
+[m[37m[  0.755438 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153c001be4, FAR=Ok(GPA(0x8000388)), ESR=0x93850047[m
+[m[37m[  0.755617 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa00224b8, FAR=Ok(GPA(0x8000094)), ESR=0x93840047[m
+[m[37m[  0.755749 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153c001bf0, FAR=Ok(GPA(0x8000188)), ESR=0x93850047[m
+[m[37m[  0.755891 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa00224b8, FAR=Ok(GPA(0x8000098)), ESR=0x93840047[m
+[m[37m[  0.756026 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153c001be4, FAR=Ok(GPA(0x800038c)), ESR=0x93850047[m
+[m[37m[  0.756103 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa00224b8, FAR=Ok(GPA(0x800009c)), ESR=0x93840047[m
+[m[37m[  0.756291 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153c001bf0, FAR=Ok(GPA(0x800018c)), ESR=0x93850047[m
+[m[37m[  0.756327 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa0021334, FAR=Ok(GPA(0x8000000)), ESR=0x93820007[m
+[m[37m[  0.756555 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153c001be4, FAR=Ok(GPA(0x8000390)), ESR=0x93850047[m
+[m[37m[  0.756655 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002244c, FAR=Ok(GPA(0x8000000)), ESR=0x93800047[m
+[m[37m[  0.756824 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153c001bf0, FAR=Ok(GPA(0x8000190)), ESR=0x93850047[m
+[m[37m[  0.756967 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002256c, FAR=Ok(GPA(0x80a0014)), ESR=0x93800007[m
+[m[37m[  0.756980 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153c001be4, FAR=Ok(GPA(0x8000394)), ESR=0x93850047[m
+[m[37m[  0.757192 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa0022574, FAR=Ok(GPA(0x80a0014)), ESR=0x93800047[m
+[m[37m[  0.757331 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153c001bf0, FAR=Ok(GPA(0x8000194)), ESR=0x93850047[m
+[m[37m[  0.757471 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa0022578, FAR=Ok(GPA(0x80a0014)), ESR=0x93800007[m
+[m[37m[  0.757497 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153c001be4, FAR=Ok(GPA(0x8000398)), ESR=0x93850047[m
+[m[37m[  0.757683 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa002258c, FAR=Ok(GPA(0x80b0180)), ESR=0x93940047[m
+[m[37m[  0.757836 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153c001bf0, FAR=Ok(GPA(0x8000198)), ESR=0x93850047[m
+[m[37m[  0.757884 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa0021334, FAR=Ok(GPA(0x80a0000)), ESR=0x93820007[m
+[m[37m[  0.758084 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153c001be4, FAR=Ok(GPA(0x800039c)), ESR=0x93850047[m
+[m[37m[  0.758107 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa00225a0, FAR=Ok(GPA(0x80b0280)), ESR=0x93940047[m
+[m[37m[  0.758328 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153c001bf0, FAR=Ok(GPA(0x800019c)), ESR=0x93850047[m
+[m[37m[  0.758354 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa00225a8, FAR=Ok(GPA(0x80b0080)), ESR=0x93940047[m
+[m[37m[  0.758572 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153c001be4, FAR=Ok(GPA(0x80003a0)), ESR=0x93850047[m
+[m[37m[  0.758595 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa00225b0, FAR=Ok(GPA(0x80b0d00)), ESR=0x93940047[m
+[m[37m[  0.758817 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153c001bf0, FAR=Ok(GPA(0x80001a0)), ESR=0x93850047[m
+[m[37m[  0.758845 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa00225b8, FAR=Ok(GPA(0x80b0c04)), ESR=0x939f0047[m
+[m[37m[  0.759078 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c210, FAR=Ok(GPA(0x8000000)), ESR=0x93800047[m
+[m[37m[  0.759187 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa0021578, FAR=Ok(GPA(0x80b0100)), ESR=0x93950047[m
+[m[37m[  0.759261 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153c002cbc, FAR=Ok(GPA(0x8000000)), ESR=0x93820007[m
+[m[37m[  0.759471 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x8006100)), ESR=0x93c28047[m
+[m[37m[  0.759618 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x8006108)), ESR=0x93c28047[m
+[m[37m[  0.759754 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x8006110)), ESR=0x93c28047[m
+[m[37m[  0.759882 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x8006118)), ESR=0x93c28047[m
+[m[37m[  0.760009 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x8006120)), ESR=0x93c28047[m
+[m[37m[  0.760136 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x8006128)), ESR=0x93c28047[m
+[m[37m[  0.760283 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x8006130)), ESR=0x93c28047[m
+[m[37m[  0.760420 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x8006138)), ESR=0x93c28047[m
+[m[32m[I/osi.psci] [37m[  0.7605Using PSCI v1.1 Function IDs75 [0m
+0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x8006140)), ESR=0x93c28047[m
+[m[37m[  0.760749 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x8006148)), ESR=0x93c28047[m
+[m[37m[  0.760883 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x8006150)), ESR=0x93c28047[m
+[m[37m[  0.761
+ \ | /
+01- RT -     Th5 0re:15ad Operating System
+ arm_vcp / | \     5.2.2 build Aug 14 2026 07:53:00
+u::ex 2006 - 2024 Copyright by RT-Thread team
+ception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x8006158)), ESR=0x93c28047[m
+[m[37m[  0.761232 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x8006160)), ESR=0x93c28047[m
+[m[37m[  0.761362 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x8006168)), ESR=0x93c28047[m
+[m[37m[  0.761497 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x8006170)), ESR=0x93c28047[m
+[m[37m[  0.761634 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x8006178)), ESR=0x93c28047[m
+[m[37m[  0.761768 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x8006180)), ESR=0x93c28047[m
+[m[37m[  0.761907 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x8006188)), ESR=0x93c28047[m
+[m[37m[  0.762047 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x8006190)), ESR=0x93c28047[m
+[m[37m[  0.762175 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x8006198)), ESR=0x93c28047[m
+[m[37m[  0.762301 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x80061a0)), ESR=0x93c28047[m
+[m[37m[  0.762436 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x80061a8)), ESR=0x93c28047[m
+[m[37m[  0.762572 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x80061b0)), ESR=0x93c28047[m
+[m[37m[  0.762705 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x80061b8)), ESR=0x93c28047[m
+[m[37m[  0.762837 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x80061c0)), ESR=0x93c28047[m
+[m[37m[  0.762972 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x80061c8)), ESR=0x93c28047[m
+[m[37m[  0.763100 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x80061d0)), ESR=0x93c28047[m
+[m[37m[  0.763230 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x80061d8)), ESR=0x93c28047[m
+[m[37m[  0.763358 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x80061e0)), ESR=0x93c28047[m
+[m[37m[  0.763487 0:15 arm_vcpu:lwIP-2.1.2 initialized!
+:exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x80061e8)), ESR=0x93c28047[m
+[m[37m[  0.763643 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x80061f0)), ESR=0x93c28047[m
+[m[37m[  0.763770 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x80061f8)), ESR=0x93c28047[m
+[m[37m[  0.763898 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153VIRTIO: mmiod_base=0xd006140088c26, scanning 1 devices
+8, FAR=Ok(GPA(0x8006200)), ESR=0x93c28047[m
+VIRTIO: [0] magic=0x74726976 [mversion=0x2 vendor=0x554d4551 dev_id=1
+[37m[  NET_INIT: enter
+0.7641NET_INIT: mmio=0x0000ffffd0061400 irq=50
+66 0:15 arm_vNET_INIT: malloc ok, resetting device
+cpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x8006208)), ESR=0x93c28047[m
+[m[37m[  0.764392 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x8006210)), ESR=0x93c28047[m
+[m[37m[  0.764548 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x8006218)), ESR=0x93c28047[m
+[m[37m[  0.764692 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x8006220)), ESR=0x93c28047[m
+[m[37m[  0.764751 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa0021ad0, FAR=Ok(GPA(0x8006190)), ESR=0x93c28047[m
+[m[37m[  0.764913 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x8006228)), ESR=0x93c28047[m
+[m[37m[  0.765006 2:16 arm_vcpu::exception:91] [33mDataAbort: ELR=0xa00215a4, FAR=Ok(GPA(0x8000104)), ESR=0x93950047[m
+[m[37m[  0.765151 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x8006230)), ESR=0x93c28047[m
+[m[37m[  0.765304 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x8006238)), ESR=0x93c28047[m
+[m[37m[  0.765434 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x8006240)), ESR=0x93c28047[m
+[m[37m[  0.765564 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x8006248)), ESR=0x93c28047[m
+[m[37m[  0.765701 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x8006250)), ESR=0x93c28047[m
+[m[37m[  0.765829 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x8006258)), ESR=0x93c28047[m
+[m[37m[  0.765956 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x8006260)), ESR=0x93c28047[m
+[m[37m[  0.766091 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x8006268)), ESR=0x93c28047[m
+[m[37m[  0.766224 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x8006270)), ESR=0x93c28047[m
+[m[37m[  0.766351 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d8VIRTIO: init_handler 8creturned 0
+268, FAR=Ok(GPA(0x8006278)), ESR=0x93c28047[m
+[m[37m[  0.766529 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x8006280)), ESR=0x93c28047[m
+[m[32m[I/sal.skt] [3Socket Abstraction Layer initialize 7m[  0.766665 success.0:1[0m
+5 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x8006288)), ESR=0x93c28047[m
+[m[37m[  0.766834 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x8006290)), ESR=0x93c28047[m
+[m[37m[  0.766961 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x8006298)), ESR=0x93c28047[m
+[m[37m[  0.767103 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x80062a0)), ESR=0x93c28047[m
+[m[37m[  0.767230 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x80062a8)), ESR=0x93c28047[m
+[m[37m[  0.767357 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x80062b0)), ESR=0x93c28047[m
+[m[32m[I/rtdm.mnt] File system initialization done[0m
+
+=========================================
+[3 RT-Thread Axvisor 7m[ Guest Starting...
+ 0.7======================================6751===
+8 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x80062b8)), ESR=0x93c28047[m
+[m[37m[  0.767712 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x80062c0)), ESR=0x93c28047[m
+[m[37m[  0.767839 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x80062c8)), ESR=0x93c28047[m
+[m[37m[  0.767966 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x80062d0)), ESR=0x93c28047[m
+[m[37m[  0.768124 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x80062d8)), ESR=0x93c28047[m
+[m[37m[  0.768253 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x80062e0)), ESR=0x93c28047[m
+[m[37m[  0.768381 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x80msh />062e8)), ESR=0x93c28047[m
+[m[37m[  0.768515 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x80062f0)), ESR=0x93c28047[m
+[m[37m[  0.768642 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x80062f8)), ESR=0x93c28047[m
+[m[37m[  0.768770 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x8006300)), ESR=0x93c28047[m
+[m[37m[  0.768897 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x8006308)), ESR=0x93c28047[m
+[m[37m[  0.769025 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x8006310)), ESR=0x93c28047[m
+[m[37m[  0.769153 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x8006318)), ESR=0x93c28047[m
+[m[37m[  0.769280 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x8006320)), ESR=0x93c28047[m
+[m[37m[  0.769408 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x8006328)), ESR=0x93c28047[m
+[m[37m[  0.769537 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x8006330)), ESR=0x93c28047[m
+[m[37m[  0.769664 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x8006338)), ESR=0x93c28047[m
+[m[37m[  0.769792 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x8006340)), ESR=0x93c28047[m
+[m[37m[  0.769919 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x8006348)), ESR=0x93c28047[m
+[m[37m[  0.770051 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x8006350)), ESR=0x93c28047[m
+[m[37m[  0.770178 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x8006358)), ESR=0x93c28047[m
+[m[37m[  0.770307 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x8006360)), ESR=0x93c28047[m
+[m[37m[  0.770436 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x8006368)), ESR=0x93c28047[m
+[m[37m[  0.770568 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x8006370)), ESR=0x93c28047[m
+[m[37m[  0.770696 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x8006378)), ESR=0x93c28047[m
+[m[37m[  0.770825 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x8006380)), ESR=0x93c28047[m
+[m[37m[  0.770955 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x8006388)), ESR=0x93c28047[m
+[m[37m[  0.771093 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x8006390)), ESR=0x93c28047[m
+[m[37m[  0.771222 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x8006398)), ESR=0x93c28047[m
+[m[37m[  0.771351 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x80063a0)), ESR=0x93c28047[m
+[m[37m[  0.771480 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x80063a8)), ESR=0x93c28047[m
+[m[37m[  0.771612 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x80063b0)), ESR=0x93c28047[m
+[m[37m[  0.771742 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x80063b8)), ESR=0x93c28047[m
+[m[37m[  0.771872 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x80063c0)), ESR=0x93c28047[m
+[m[37m[  0.772002 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x80063c8)), ESR=0x93c28047[m
+[m[37m[  0.772141 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x80063d0)), ESR=0x93c28047[m
+[m[37m[  0.772271 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x80063d8)), ESR=0x93c28047[m
+[m[37m[  0.772402 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x80063e0)), ESR=0x93c28047[m
+[m[37m[  0.772535 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x80063e8)), ESR=0x93c28047[m
+[m[37m[  0.772665 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x80063f0)), ESR=0x93c28047[m
+[m[37m[  0.772796 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x80063f8)), ESR=0x93c28047[m
+[m[37m[  0.772926 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x8006400)), ESR=0x93c28047[m
+[m[37m[  0.773058 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x8006408)), ESR=0x93c28047[m
+[m[37m[  0.773189 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x8006410)), ESR=0x93c28047[m
+[m[37m[  0.773319 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x8006418)), ESR=0x93c28047[m
+[m[37m[  0.773450 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x8006420)), ESR=0x93c28047[m
+[m[37m[  0.773582 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x8006428)), ESR=0x93c28047[m
+[m[37m[  0.773712 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x8006430)), ESR=0x93c28047[m
+[m[37m[  0.773842 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x8006438)), ESR=0x93c28047[m
+[m[37m[  0.773983 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x8006440)), ESR=0x93c28047[m
+[m[37m[  0.774124 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x8006448)), ESR=0x93c28047[m
+[m[37m[  0.774255 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x8006450)), ESR=0x93c28047[m
+[m[37m[  0.774388 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x8006458)), ESR=0x93c28047[m
+[m[37m[  0.774524 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x8006460)), ESR=0x93c28047[m
+[m[37m[  0.774655 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x8006468)), ESR=0x93c28047[m
+[m[37m[  0.774786 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x8006470)), ESR=0x93c28047[m
+[m[37m[  0.774917 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x8006478)), ESR=0x93c28047[m
+[m[37m[  0.775047 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x8006480)), ESR=0x93c28047[m
+[m[37m[  0.775187 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x8006488)), ESR=0x93c28047[m
+[m[37m[  0.775317 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x8006490)), ESR=0x93c28047[m
+[m[37m[  0.775448 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x8006498)), ESR=0x93c28047[m
+[m[37m[  0.775580 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x80064a0)), ESR=0x93c28047[m
+[m[37m[  0.775711 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x80064a8)), ESR=0x93c28047[m
+[m[37m[  0.775841 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x80064b0)), ESR=0x93c28047[m
+[m[37m[  0.775971 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x80064b8)), ESR=0x93c28047[m
+[m[37m[  0.776106 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x80064c0)), ESR=0x93c28047[m
+[m[37m[  0.776236 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x80064c8)), ESR=0x93c28047[m
+[m[37m[  0.776367 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x80064d0)), ESR=0x93c28047[m
+[m[37m[  0.776521 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x80064d8)), ESR=0x93c28047[m
+[m[37m[  0.776652 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x80064e0)), ESR=0x93c28047[m
+[m[37m[  0.776782 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x80064e8)), ESR=0x93c28047[m
+[m[37m[  0.776912 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x80064f0)), ESR=0x93c28047[m
+[m[37m[  0.777042 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x80064f8)), ESR=0x93c28047[m
+[m[37m[  0.777185 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x8006500)), ESR=0x93c28047[m
+[m[37m[  0.777315 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x8006508)), ESR=0x93c28047[m
+[m[37m[  0.777445 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x8006510)), ESR=0x93c28047[m
+[m[37m[  0.777578 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x8006518)), ESR=0x93c28047[m
+[m[37m[  0.777708 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x8006520)), ESR=0x93c28047[m
+[m[37m[  0.777839 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x8006528)), ESR=0x93c28047[m
+[m[37m[  0.777970 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x8006530)), ESR=0x93c28047[m
+[m[37m[  0.778103 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x8006538)), ESR=0x93c28047[m
+[m[37m[  0.778234 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x8006540)), ESR=0x93c28047[m
+[m[37m[  0.778364 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x8006548)), ESR=0x93c28047[m
+[m[37m[  0.778494 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x8006550)), ESR=0x93c28047[m
+[m[37m[  0.778627 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x8006558)), ESR=0x93c28047[m
+[m[37m[  0.778757 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x8006560)), ESR=0x93c28047[m
+[m[37m[  0.778888 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x8006568)), ESR=0x93c28047[m
+[m[37m[  0.779019 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x8006570)), ESR=0x93c28047[m
+[m[37m[  0.779159 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x8006578)), ESR=0x93c28047[m
+[m[37m[  0.779290 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x8006580)), ESR=0x93c28047[m
+[m[37m[  0.779420 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x8006588)), ESR=0x93c28047[m
+[m[37m[  0.779553 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x8006590)), ESR=0x93c28047[m
+[m[37m[  0.779683 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x8006598)), ESR=0x93c28047[m
+[m[37m[  0.779814 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x80065a0)), ESR=0x93c28047[m
+[m[37m[  0.779944 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x80065a8)), ESR=0x93c28047[m
+[m[37m[  0.780075 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x80065b0)), ESR=0x93c28047[m
+[m[37m[  0.780216 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x80065b8)), ESR=0x93c28047[m
+[m[37m[  0.780346 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x80065c0)), ESR=0x93c28047[m
+[m[37m[  0.780477 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x80065c8)), ESR=0x93c28047[m
+[m[37m[  0.780610 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x80065d0)), ESR=0x93c28047[m
+[m[37m[  0.780740 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x80065d8)), ESR=0x93c28047[m
+[m[37m[  0.780871 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x80065e0)), ESR=0x93c28047[m
+[m[37m[  0.781001 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x80065e8)), ESR=0x93c28047[m
+[m[37m[  0.781138 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x80065f0)), ESR=0x93c28047[m
+[m[37m[  0.781269 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x80065f8)), ESR=0x93c28047[m
+[m[37m[  0.781400 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x8006600)), ESR=0x93c28047[m
+[m[37m[  0.781533 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x8006608)), ESR=0x93c28047[m
+[m[37m[  0.781663 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x8006610)), ESR=0x93c28047[m
+[m[37m[  0.781794 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x8006618)), ESR=0x93c28047[m
+[m[37m[  0.781924 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x8006620)), ESR=0x93c28047[m
+[m[37m[  0.782055 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x8006628)), ESR=0x93c28047[m
+[m[37m[  0.782196 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x8006630)), ESR=0x93c28047[m
+[m[37m[  0.782327 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x8006638)), ESR=0x93c28047[m
+[m[37m[  0.782458 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x8006640)), ESR=0x93c28047[m
+[m[37m[  0.782591 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x8006648)), ESR=0x93c28047[m
+[m[37m[  0.782722 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x8006650)), ESR=0x93c28047[m
+[m[37m[  0.782853 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x8006658)), ESR=0x93c28047[m
+[m[37m[  0.782984 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x8006660)), ESR=0x93c28047[m
+[m[37m[  0.783115 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x8006668)), ESR=0x93c28047[m
+[m[37m[  0.783253 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x8006670)), ESR=0x93c28047[m
+[m[37m[  0.783385 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x8006678)), ESR=0x93c28047[m
+[m[37m[  0.783518 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x8006680)), ESR=0x93c28047[m
+[m[37m[  0.783649 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x8006688)), ESR=0x93c28047[m
+[m[37m[  0.783780 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x8006690)), ESR=0x93c28047[m
+[m[37m[  0.783911 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x8006698)), ESR=0x93c28047[m
+[m[37m[  0.784079 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x80066a0)), ESR=0x93c28047[m
+[m[37m[  0.784222 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x80066a8)), ESR=0x93c28047[m
+[m[37m[  0.784353 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x80066b0)), ESR=0x93c28047[m
+[m[37m[  0.784483 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x80066b8)), ESR=0x93c28047[m
+[m[37m[  0.784616 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x80066c0)), ESR=0x93c28047[m
+[m[37m[  0.784747 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x80066c8)), ESR=0x93c28047[m
+[m[37m[  0.784878 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x80066d0)), ESR=0x93c28047[m
+[m[37m[  0.785009 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x80066d8)), ESR=0x93c28047[m
+[m[37m[  0.785139 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x80066e0)), ESR=0x93c28047[m
+[m[37m[  0.785279 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x80066e8)), ESR=0x93c28047[m
+[m[37m[  0.785409 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x80066f0)), ESR=0x93c28047[m
+[m[37m[  0.785542 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x80066f8)), ESR=0x93c28047[m
+[m[37m[  0.785673 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x8006700)), ESR=0x93c28047[m
+[m[37m[  0.785803 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x8006708)), ESR=0x93c28047[m
+[m[37m[  0.785933 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x8006710)), ESR=0x93c28047[m
+[m[37m[  0.786064 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x8006718)), ESR=0x93c28047[m
+[m[37m[  0.786196 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x8006720)), ESR=0x93c28047[m
+[m[37m[  0.786326 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x8006728)), ESR=0x93c28047[m
+[m[37m[  0.786465 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x8006730)), ESR=0x93c28047[m
+[m[37m[  0.786609 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x8006738)), ESR=0x93c28047[m
+[m[37m[  0.786740 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x8006740)), ESR=0x93c28047[m
+[m[37m[  0.786870 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x8006748)), ESR=0x93c28047[m
+[m[37m[  0.787001 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x8006750)), ESR=0x93c28047[m
+[m[37m[  0.787131 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x8006758)), ESR=0x93c28047[m
+[m[37m[  0.787269 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x8006760)), ESR=0x93c28047[m
+[m[37m[  0.787400 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x8006768)), ESR=0x93c28047[m
+[m[37m[  0.787533 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x8006770)), ESR=0x93c28047[m
+[m[37m[  0.787664 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x8006778)), ESR=0x93c28047[m
+[m[37m[  0.787794 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x8006780)), ESR=0x93c28047[m
+[m[37m[  0.787925 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x8006788)), ESR=0x93c28047[m
+[m[37m[  0.788055 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x8006790)), ESR=0x93c28047[m
+[m[37m[  0.788185 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x8006798)), ESR=0x93c28047[m
+[m[37m[  0.788318 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x80067a0)), ESR=0x93c28047[m
+[m[37m[  0.788448 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x80067a8)), ESR=0x93c28047[m
+[m[37m[  0.788581 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x80067b0)), ESR=0x93c28047[m
+[m[37m[  0.788712 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x80067b8)), ESR=0x93c28047[m
+[m[37m[  0.788842 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x80067c0)), ESR=0x93c28047[m
+[m[37m[  0.788973 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x80067c8)), ESR=0x93c28047[m
+[m[37m[  0.789103 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x80067d0)), ESR=0x93c28047[m
+[m[37m[  0.789241 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x80067d8)), ESR=0x93c28047[m
+[m[37m[  0.789372 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x80067e0)), ESR=0x93c28047[m
+[m[37m[  0.789503 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x80067e8)), ESR=0x93c28047[m
+[m[37m[  0.789635 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x80067f0)), ESR=0x93c28047[m
+[m[37m[  0.789766 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x80067f8)), ESR=0x93c28047[m
+[m[37m[  0.789897 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x8006800)), ESR=0x93c28047[m
+[m[37m[  0.790027 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x8006808)), ESR=0x93c28047[m
+[m[37m[  0.790158 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x8006810)), ESR=0x93c28047[m
+[m[37m[  0.790297 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x8006818)), ESR=0x93c28047[m
+[m[37m[  0.790428 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x8006820)), ESR=0x93c28047[m
+[m[37m[  0.790561 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x8006828)), ESR=0x93c28047[m
+[m[37m[  0.790692 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x8006830)), ESR=0x93c28047[m
+[m[37m[  0.790823 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x8006838)), ESR=0x93c28047[m
+[m[37m[  0.790954 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x8006840)), ESR=0x93c28047[m
+[m[37m[  0.791085 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x8006848)), ESR=0x93c28047[m
+[m[37m[  0.791223 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x8006850)), ESR=0x93c28047[m
+[m[37m[  0.791354 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x8006858)), ESR=0x93c28047[m
+[m[37m[  0.791486 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x8006860)), ESR=0x93c28047[m
+[m[37m[  0.791620 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x8006868)), ESR=0x93c28047[m
+[m[37m[  0.791751 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x8006870)), ESR=0x93c28047[m
+[m[37m[  0.791882 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x8006878)), ESR=0x93c28047[m
+[m[37m[  0.792014 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x8006880)), ESR=0x93c28047[m
+[m[37m[  0.792145 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x8006888)), ESR=0x93c28047[m
+[m[37m[  0.792287 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x8006890)), ESR=0x93c28047[m
+[m[37m[  0.792418 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x8006898)), ESR=0x93c28047[m
+[m[37m[  0.792552 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x80068a0)), ESR=0x93c28047[m
+[m[37m[  0.792683 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x80068a8)), ESR=0x93c28047[m
+[m[37m[  0.792814 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x80068b0)), ESR=0x93c28047[m
+[m[37m[  0.792945 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x80068b8)), ESR=0x93c28047[m
+[m[37m[  0.793076 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x80068c0)), ESR=0x93c28047[m
+[m[37m[  0.793207 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x80068c8)), ESR=0x93c28047[m
+[m[37m[  0.793343 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x80068d0)), ESR=0x93c28047[m
+[m[37m[  0.793474 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x80068d8)), ESR=0x93c28047[m
+[m[37m[  0.793608 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x80068e0)), ESR=0x93c28047[m
+[m[37m[  0.793740 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x80068e8)), ESR=0x93c28047[m
+[m[37m[  0.793870 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x80068f0)), ESR=0x93c28047[m
+[m[37m[  0.794032 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c268, FAR=Ok(GPA(0x80068f8)), ESR=0x93c28047[m
+[m[37m[  0.794173 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153c002f68, FAR=Ok(GPA(0x80affe8)), ESR=0x93800007[m
+[m[37m[  0.794316 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153c002f84, FAR=Ok(GPA(0x80a0008)), ESR=0x93d48007[m
+[m[37m[  0.794487 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153c0042d4, FAR=Ok(GPA(0x80a0008)), ESR=0x93c48007[m
+[m[37m[  0.794703 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153c00387c, FAR=Ok(GPA(0x80a0014)), ESR=0x93800007[m
+[m[37m[  0.794843 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153c00388c, FAR=Ok(GPA(0x80a0014)), ESR=0x93800047[m
+[m[37m[  0.794982 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153c0038b0, FAR=Ok(GPA(0x80a0014)), ESR=0x93800007[m
+[m[37m[  0.795143 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153c003a70, FAR=Ok(GPA(0x80b0080)), ESR=0x93840047[m
+[m[37m[  0.795302 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153c001c34, FAR=Ok(GPA(0x80b0380)), ESR=0x93860047[m
+[m[37m[  0.795439 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153c001c40, FAR=Ok(GPA(0x80b0180)), ESR=0x93860047[m
+[m[37m[  0.795584 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153c001c7c, FAR=Ok(GPA(0x80b0400)), ESR=0x93820047[m
+[m[37m[  0.795726 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153c001c7c, FAR=Ok(GPA(0x80b0404)), ESR=0x93820047[m
+[m[37m[  0.795856 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153c001c7c, FAR=Ok(GPA(0x80b0408)), ESR=0x93820047[m
+[m[37m[  0.795986 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153c001c7c, FAR=Ok(GPA(0x80b040c)), ESR=0x93820047[m
+[m[37m[  0.796115 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153c001c7c, FAR=Ok(GPA(0x80b0410)), ESR=0x93820047[m
+[m[37m[  0.796243 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153c001c7c, FAR=Ok(GPA(0x80b0414)), ESR=0x93820047[m
+[m[37m[  0.796378 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153c001c7c, FAR=Ok(GPA(0x80b0418)), ESR=0x93820047[m
+[m[37m[  0.796537 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153c001c7c, FAR=Ok(GPA(0x80b041c)), ESR=0x93820047[m
+[m[37m[  0.796676 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153c002cbc, FAR=Ok(GPA(0x80a0000)), ESR=0x93820007[m
+[m[37m[  0.799228 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153c00355c, FAR=Ok(GPA(0x80b0100)), ESR=0x93830047[m
+[m[37m[  0.799429 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153c00355c, FAR=Ok(GPA(0x80b0100)), ESR=0x93830047[m
+[m[37m[  0.799576 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153c00355c, FAR=Ok(GPA(0x80b0100)), ESR=0x93830047[m
+[m[37m[  0.799713 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153c00355c, FAR=Ok(GPA(0x80b0100)), ESR=0x93830047[m
+[m[37m[  0.799849 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153c00355c, FAR=Ok(GPA(0x80b0100)), ESR=0x93830047[m
+[m[37m[  0.799985 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153c00355c, FAR=Ok(GPA(0x80b0100)), ESR=0x93830047[m
+[m[37m[  0.800121 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153c00355c, FAR=Ok(GPA(0x80b0100)), ESR=0x93830047[m
+[m[37m[  0.800257 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153c00355c, FAR=Ok(GPA(0x80b0100)), ESR=0x93830047[m
+[m[37m[  0.800451 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88c378, FAR=Ok(GPA(0x8000004)), ESR=0x93800007[m
+[m[37m[  0.802570 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88e0f8, FAR=Ok(GPA(0x80a0000)), ESR=0x93810007[m
+[m[37m[  0.802727 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153d88e468, FAR=Ok(GPA(0x80a0070)), ESR=0x93c08007[m
+[m[37m[  0.803318 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153c00bdb8, FAR=Ok(GPA(0x80a0008)), ESR=0x93c38007[m
+[m[37m[  0.803463 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153c00bdc0, FAR=Ok(GPA(0x80a0000)), ESR=0x93950007[m
+[m[37m[  0.803649 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153c00c07c, FAR=Ok(GPA(0x80a0000)), ESR=0x93950047[m
+[m[37m[  0.803798 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153c00c0a0, FAR=Ok(GPA(0x80a0000)), ESR=0x93800007[m
+[m[37m[  0.803932 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153c00c0a8, FAR=Ok(GPA(0x80a0000)), ESR=0x93960007[m
+[m[37m[  0.804119 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153c00be84, FAR=Ok(GPA(0x80a0000)), ESR=0x93800007[m
+[m[37m[  0.804268 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153c00bee8, FAR=Ok(GPA(0x80a0070)), ESR=0x93c38047[m
+[m[37m[  0.804442 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153c00beec, FAR=Ok(GPA(0x80a0070)), ESR=0x93c78007[m
+[m[37m[  0.804585 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153c00bf28, FAR=Ok(GPA(0x80a0078)), ESR=0x93c18047[m
+[m[37m[  0.804736 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153c00bf2c, FAR=Ok(GPA(0x80a0078)), ESR=0x93c18007[m
+[m[37m[  0.804884 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153c00bf3c, FAR=Ok(GPA(0x80a0000)), ESR=0x93800007[m
+[m[37m[  0.805017 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153c00bf44, FAR=Ok(GPA(0x80a0000)), ESR=0x93800047[m
+[m[37m[  0.805291 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153c00aaa0, FAR=Ok(GPA(0x80a0008)), ESR=0x93c08007[m
+[m[37m[  0.808940 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153c001af4, FAR=Ok(GPA(0x80b0c04)), ESR=0x93800007[m
+[m[37m[  0.809931 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153c001af4, FAR=Ok(GPA(0x80b0c04)), ESR=0x93800007[m
+[m[37m[  0.810084 0:15 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153c00355c, FAR=Ok(GPA(0x80b0100)), ESR=0x93830047[m
+[m[37m[  0.849152 0:15 axvm::arch::aarch64::cpu_up:36] [32mVM[1]'s VCpu[0] try to boot target_cpu [1] entry_point=GPA:0x81e3f570 arg=0x0[m
+[m[37m[  0.849478 0:15 axvm::runtime::vcpus:235] [32mSpawning task for VM[1] VCpu[1][m
+[m[37m[  0.849599 0:15 axvm::runtime::vcpus:252] [32mVCpu task Task(17, "VM[1]-VCpu[1]") created cpumask: [1, ][m
+[m[37m[  0.854003 1:17 axvm::runtime::vcpus:401] [32mVM[1] VCpu[1] waiting for running[m
+[m[37m[  0.854155 1:17 axvm::runtime::vcpus:404] [32mVM[1] VCpu[1] running...[m
+[m[37m[  0.855205 1:17 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153c002f68, FAR=Ok(GPA(0x80affe8)), ESR=0x93800007[m
+[m[37m[  0.855367 1:17 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153c002f84, FAR=Ok(GPA(0x80a0008)), ESR=0x93d48007[m
+[m[37m[  0.855511 1:17 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153c0042d4, FAR=Ok(GPA(0x80a0008)), ESR=0x93c48007[m
+[m[37m[  0.857176 1:17 arm_vcpu::exception:91] [33mDataAbort: ELR=0xffffa9153c003b2c, FAR=Ok(GPA(0x8000004)), ESR=0x93800007[m
+[m[32m[I/rtipic.srv] server starting on 192.168.77.30:9876[0m
+[32m[I/rtipic.srv] listening...[0m
+
+=== RT-Thread Comprehensive Real-Time Benchmark v11 ===
+Clock: 62500000 Hz
+
+--- Timer Jitter Benchmark ---
+Period: 1000 us, Samples: 5000, Rounds: 3
+JITTER round=1 samples=4999
+  min_us=996 max_us=1032 avg_us=1006 jitter_pp_us=36
+  p50_us=1006 p90_us=1010 p99_us=1016 p999_us=1026
+  miss_gt100us=0 miss_gt1ms=0
+  callback_max_ns=69808
+[32m[I/rtipic.srv] stats: msgs=0 bytes=0KB conn=0[0m
+JITTER round=2 samples=4999
+  min_us=988 max_us=1030 avg_us=1006 jitter_pp_us=42
+  p50_us=1006 p90_us=1009 p99_us=1016 p999_us=1025
+  miss_gt100us=0 miss_gt1ms=0
+  callback_max_ns=9056
+JITTER round=3 samples=4999
+  min_us=997 max_us=1065 avg_us=1006 jitter_pp_us=68
+  p50_us=1006 p90_us=1009 p99_us=1016 p999_us=1031
+  miss_gt100us=0 miss_gt1ms=0
+  callback_max_ns=9120
+
+--- Preemption Latency Benchmark ---
+Samples: 500
+PREEMPT samples=500
+  min_ns=1152 max_ns=16400 avg_ns=1664
+  p50_ns=1632 p90_ns=1792 p99_ns=2432 p999_ns=16400
+
+--- Interrupt Latency Benchmark ---
+Samples: 500 (1-tick one-shot timer)
+[32m[I/rtipic.srv] stats: msgs=0 bytes=0KB conn=0[0m
+IRQLAT samples=500
+  min_us=301 max_us=1037 avg_us=999
+  p50_us=1000 p90_us=1004 p99_us=1009 p999_us=1037
+
+--- Long-Term Stability Test (60 seconds) ---
+Period: 1000 us, Reporting every 5 s
+STAB window=1 elapsed~5s samples=4999
+  w_min_us=995 w_max_us=1032 w_avg_us=1006 w_miss100=0 w_miss1ms=0
+
+--- Long-Term Stability Summary ---
+STAB total_samples=4999 duration~60s
+  global_min_us=995 global_max_us=1032 global_avg_us=1006
+  global_miss_gt100us=0 global_miss_gt1ms=0
+  miss_rate_100us=0.000% miss_rate_1ms=0.000%
+  callback_max_ns=30464
+
+=== All Benchmarks Complete ===
+[32m[I/rtipic.srv] stats: msgs=0 bytes=0KB conn=0[0m
+[32m[I/rtipic.srv] stats: msgs=0 bytes=0KB conn=0[0m
+

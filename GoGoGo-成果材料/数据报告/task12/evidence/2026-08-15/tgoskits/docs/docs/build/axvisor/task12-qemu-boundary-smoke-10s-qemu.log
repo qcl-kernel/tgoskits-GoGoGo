@@ -1,0 +1,5 @@
+qemu-system-aarch64: -serial unix:/tmp/tmp.5JK7jI0Kz7/serial.sock,server=on,wait=on: info: QEMU waiting for connection on: disconnected:unix:/tmp/tmp.5JK7jI0Kz7/serial.sock,server=on
+qemu-system-aarch64: warning: hub 77 is not connected to host network
+AX_QEMU_TIMER_BOUNDARY cpu=2 intid=27 cval=0x63cd53 assert_match=1 assert_late_ns=20064 assert_to_iar_ns=628020 iar_late_ns=648048
+AX_QEMU_TIMER_BOUNDARY cpu=2 intid=27 cval=0x914b967 assert_match=1 assert_late_ns=667472 assert_to_iar_ns=2290 iar_late_ns=669776
+qemu-system-aarch64: terminating on signal 15 from pid 2934319 (bash)
