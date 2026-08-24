@@ -491,6 +491,14 @@ impl DmaPollableDeviceOps for VirtioNetRuntimeDevice {
                     self.endpoint.requeue_deferred_ingress(frame);
                     break;
                 }
+                Err(axvirtio_net::NetError::NotReady) => {
+                    // Driver/queue readiness is transient during guest boot
+                    // and reset. Retain the frame until the guest kicks RX;
+                    // treating it as a permanent error loses the first
+                    // network request after a virtio reset.
+                    self.endpoint.requeue_deferred_ingress(frame);
+                    break;
+                }
                 Err(error) => {
                     self.endpoint.finish_ingress_attempt();
                     warn!("virtio-net drops an ingress frame: {error:?}");

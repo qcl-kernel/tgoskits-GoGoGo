@@ -6,14 +6,20 @@ rtipc_echo_result_t rtipc_echo_process_actions(
 {
     rtipc_echo_result_t result = {0};
     bool deferred_delivery = false;
+    bool retry_pending = false;
 
     const rtipc_action_t *action;
     while ((action = rtipc_action_next(connection)) != NULL) {
         switch (action->type) {
         case RTIPC_ACTION_SEND:
             if (send_packet(action->data, action->data_len,
-                            send_context) != 0)
+                            send_context) != 0) {
                 result.send_errors++;
+                retry_pending = true;
+                if (!rtipc_action_defer(connection, action))
+                    result.response_errors++;
+                break;
+            }
             break;
         case RTIPC_ACTION_CONNECTED:
             result.connected_events++;
@@ -43,10 +49,10 @@ rtipc_echo_result_t rtipc_echo_process_actions(
         default:
             break;
         }
-        if (deferred_delivery)
+        if (deferred_delivery || retry_pending)
             break;
     }
-    if (!deferred_delivery)
+    if (!deferred_delivery && !retry_pending)
         rtipc_action_clear(connection);
     return result;
 }

@@ -24,10 +24,8 @@ write_complete_log() {
 [VM 1] LINUX_SMP_READY configured=2 online=0-1 nproc=2
 [VM 1] --- Payload 64B ---
 [VM 1] [progress] size=64 idx=49 sent=50 recv=49 state=3
-[VM 1] [client] fault injection: force disconnect at request=50
-[VM 1] [client] reconnect complete recovery_ms=200 attempts=1
 [VM 1]   sent=$count  recv=$count  loss=0%
-[VM 1]   request_timeouts=0 protocol_errors=0 reconnects=1
+[VM 1]   request_timeouts=0 protocol_errors=0 reconnects=0
 [VM 1]   transport: retrans=0 timeouts=0 dup=0 reorder=0 errors=0
 [VM 1] --- Payload 256B ---
 [VM 1] [progress] size=256 idx=49 sent=50 recv=49 state=3
@@ -103,26 +101,22 @@ sed -i '0,/transport: retrans=0 timeouts=0 dup=0 reorder=0 errors=0/{
 expect_pass recovered_transport_anomalies \
     "$VERIFY" "$recovered_transport" 100 0
 
+write_reliability_log() {
+    log=$1
+    count=$2
+    write_complete_log "$log" "$count"
+    sed -i '1a [VM 1] [client] fault profile: reliability' "$log"
+    sed -i '/Payload 64B/a [VM 1] [client] fault injection: force disconnect at request=50\n[VM 1] [client] reconnect complete recovery_ms=200 attempts=1\n[VM 1] [client] fault injection: drop tx payload=64 seq=0' "$log"
+    sed -i '0,/reconnects=0/s//reconnects=1/; 0,/transport: retrans=0/s//transport: retrans=1/' "$log"
+    sed -i '/Payload 256B/a [VM 1] [client] fault injection: duplicate rx payload=256 seq=0' "$log"
+    sed -i '0,/transport: retrans=0 timeouts=0 dup=0 reorder=0 errors=0/s//transport: retrans=0 timeouts=0 dup=1 reorder=0 errors=0/' "$log"
+    sed -i '/Payload 1024B/a [VM 1] [client] fault injection: reorder rx payload=1024 first_seq=0 second_seq=1' "$log"
+    sed -i '0,/transport: retrans=0 timeouts=0 dup=0 reorder=0 errors=0/s//transport: retrans=0 timeouts=0 dup=0 reorder=1 errors=0/' "$log"
+    sed -i '/ALL TESTS COMPLETE/i [VM 1] [client] fault profile complete: drop=1 duplicate=1 reorder=1' "$log"
+}
+
 reliability="$TMP_DIR/reliability.log"
-write_complete_log "$reliability" 100
-sed -i '1a [VM 1] [client] fault profile: reliability' "$reliability"
-sed -i '/Payload 64B/a [VM 1] [client] fault injection: drop tx payload=64 seq=0' \
-    "$reliability"
-sed -i '0,/transport: retrans=0 timeouts=0 dup=0 reorder=0 errors=0/{
-    s//transport: retrans=1 timeouts=0 dup=0 reorder=0 errors=0/
-}' "$reliability"
-sed -i '/Payload 256B/a [VM 1] [client] fault injection: duplicate rx payload=256 seq=0' \
-    "$reliability"
-sed -i '0,/transport: retrans=0 timeouts=0 dup=0 reorder=0 errors=0/{
-    s//transport: retrans=0 timeouts=0 dup=1 reorder=0 errors=0/
-}' "$reliability"
-sed -i '/Payload 1024B/a [VM 1] [client] fault injection: reorder rx payload=1024 first_seq=0 second_seq=1' \
-    "$reliability"
-sed -i '0,/transport: retrans=0 timeouts=0 dup=0 reorder=0 errors=0/{
-    s//transport: retrans=0 timeouts=0 dup=0 reorder=1 errors=0/
-}' "$reliability"
-sed -i '/ALL TESTS COMPLETE/i [VM 1] [client] fault profile complete: drop=1 duplicate=1 reorder=1' \
-    "$reliability"
+write_reliability_log "$reliability" 100
 expect_pass reliability_profile \
     "$VERIFY" "$reliability" 100 0 reliability
 
@@ -155,41 +149,41 @@ sed -i 's/sent=100  recv=100  loss=0%/sent=100  recv=99  loss=1%/' "$incomplete"
 expect_fail incomplete_payload "$VERIFY" "$incomplete" 100 0
 
 no_recovery="$TMP_DIR/no-recovery.log"
-write_complete_log "$no_recovery" 100
+write_reliability_log "$no_recovery" 100
 sed -i '/fault injection:/d; /reconnect complete/d' "$no_recovery"
-expect_fail missing_recovery "$VERIFY" "$no_recovery" 100 0
+expect_fail missing_recovery "$VERIFY" "$no_recovery" 100 0 reliability
 
 bad_recovery_count="$TMP_DIR/bad-recovery-count.log"
-write_complete_log "$bad_recovery_count" 100
+write_reliability_log "$bad_recovery_count" 100
 sed -i '0,/reconnects=1/s//reconnects=0/' "$bad_recovery_count"
-expect_fail missing_reconnect_count "$VERIFY" "$bad_recovery_count" 100 0
+expect_fail missing_reconnect_count "$VERIFY" "$bad_recovery_count" 100 0 reliability
 
 client_failed="$TMP_DIR/client-failed.log"
 write_complete_log "$client_failed" 100
 sed -i 's/client exited with rc=0/client exited with rc=1/' "$client_failed"
-expect_fail client_failure "$VERIFY" "$client_failed" 100 0
+expect_fail client_failure "$VERIFY" "$client_failed" 100 0 reliability
 
 conflicting_client_status="$TMP_DIR/conflicting-client-status.log"
 write_complete_log "$conflicting_client_status" 100
 printf '%s\n' '[VM 1] RT-IPC client exited with rc=9' >> "$conflicting_client_status"
 expect_fail conflicting_client_status \
-    "$VERIFY" "$conflicting_client_status" 100 0
+    "$VERIFY" "$conflicting_client_status" 100 0 reliability
 
 conflicting_test_status="$TMP_DIR/conflicting-test-status.log"
 write_complete_log "$conflicting_test_status" 100
 printf '%s\n' '[VM 1] TESTS FAILED' >> "$conflicting_test_status"
 expect_fail conflicting_test_status \
-    "$VERIFY" "$conflicting_test_status" 100 0
+    "$VERIFY" "$conflicting_test_status" 100 0 reliability
 
 panic_log="$TMP_DIR/panic.log"
 write_complete_log "$panic_log" 100
 printf '%s\n' 'panicked at virtualization/axvm/src/runtime/vcpus.rs' >>"$panic_log"
-expect_fail panic "$VERIFY" "$panic_log" 100 0
+expect_fail panic "$VERIFY" "$panic_log" 100 0 reliability
 
-expect_fail qemu_failure "$VERIFY" "$complete" 100 1
+expect_fail qemu_failure "$VERIFY" "$complete" 100 1 reliability
 for invalid_qemu_rc in '' abc 999999999999999999999; do
     set +e
-    "$VERIFY" "$complete" 100 "$invalid_qemu_rc" \
+    "$VERIFY" "$complete" 100 "$invalid_qemu_rc" reliability \
         >"$TMP_DIR/invalid-qemu-rc.out" 2>&1
     invalid_status=$?
     set -e
@@ -198,7 +192,7 @@ for invalid_qemu_rc in '' abc 999999999999999999999; do
         exit 1
     fi
     set +e
-    "$VERIFY" "$TMP_DIR/missing-invalid.log" 100 "$invalid_qemu_rc" \
+    "$VERIFY" "$TMP_DIR/missing-invalid.log" 100 "$invalid_qemu_rc" reliability \
         >"$TMP_DIR/missing-invalid-qemu-rc.out" 2>&1
     missing_invalid_status=$?
     set -e

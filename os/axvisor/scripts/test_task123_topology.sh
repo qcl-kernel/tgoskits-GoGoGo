@@ -6,12 +6,14 @@ ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/../../.." && pwd)"
 LINUX_CONFIG="$ROOT/os/axvisor/configs/vms/qemu/aarch64/linux-net.toml"
 STARRYOS_CONFIG="$ROOT/os/axvisor/configs/vms/qemu/aarch64/starryos-task123.toml"
 RTTHREAD_CONFIG="$ROOT/os/axvisor/configs/vms/qemu/aarch64/rtthread-net.toml"
+ZEPHYR_CONFIG="$ROOT/os/axvisor/configs/vms/qemu/aarch64/zephyr-task123.toml"
 
 cargo run -q -p axvmconfig -- check --config-path "$LINUX_CONFIG"
 cargo run -q -p axvmconfig -- check --config-path "$STARRYOS_CONFIG"
 cargo run -q -p axvmconfig -- check --config-path "$RTTHREAD_CONFIG"
+cargo run -q -p axvmconfig -- check --config-path "$ZEPHYR_CONFIG"
 
-python3 - "$LINUX_CONFIG" "$STARRYOS_CONFIG" "$RTTHREAD_CONFIG" <<'PY'
+python3 - "$LINUX_CONFIG" "$STARRYOS_CONFIG" "$RTTHREAD_CONFIG" "$ZEPHYR_CONFIG" <<'PY'
 import sys
 import tomllib
 from pathlib import Path
@@ -37,10 +39,12 @@ def virtual_net_mac(config: dict, label: str) -> list[int]:
 linux = load(sys.argv[1])
 starryos = load(sys.argv[2])
 rtthread = load(sys.argv[3])
+zephyr = load(sys.argv[4])
 
 linux_base = linux["base"]
 starryos_base = starryos["base"]
 rtthread_base = rtthread["base"]
+zephyr_base = zephyr["base"]
 
 require(linux_base.get("cpu_num"), 2, "Linux vCPU count")
 require(linux_base.get("phys_cpu_ids"), [0, 1], "Linux initial pCPU placement")
@@ -68,6 +72,7 @@ require(rtthread_base.get("cpu_num"), 1, "RT-Thread vCPU count")
 require(rtthread_base.get("phys_cpu_ids"), [2], "RT-Thread initial pCPU placement")
 require(rtthread_base.get("phys_cpu_sets"), [0b0100], "RT-Thread allowed pCPU mask")
 require(rtthread_base.get("host_vcpu_idle_policy"), "busy", "RT-Thread idle policy")
+require(zephyr_base.get("host_vcpu_idle_policy"), "halt", "Zephyr idle policy")
 require(
     rtthread["kernel"].get("memory_regions"),
     [[0x40000000, 0x40000000, 0x7, 0]],

@@ -14,6 +14,14 @@ from pathlib import Path
 SCHEMA = 1
 EXPECTED_VENDOR_ID = "0x554d4551"
 EXPECTED_IRQ = 48
+BUILD_INPUT_TREES = (
+    "os/axvisor/patches/rtthread",
+    "os/axvisor/guests/rt-ipc/common",
+    "os/axvisor/guests/rt-ipc/rtthread",
+    "os/axvisor/guests/task3/src/common",
+    "os/axvisor/guests/task3/src/rtthread",
+    "os/axvisor/guests/rt-benchmark/rtthread",
+)
 
 
 def fail(message: str) -> "NoReturn":
@@ -69,6 +77,37 @@ def patch_digest(source: Path, supplied: str | None) -> str:
     return value
 
 
+def input_digest(value: str) -> str:
+    digest = value.strip()
+    if len(digest) != 64 or any(character not in "0123456789abcdef" for character in digest):
+        fail("RT-Thread build input digest must be a lowercase SHA-256 value")
+    return digest
+
+
+def calculate_input_digest(root: Path) -> str:
+    digest = hashlib.sha256()
+    root = root.resolve()
+    for relative_tree in BUILD_INPUT_TREES:
+        tree = root / relative_tree
+        if not tree.is_dir():
+            fail(f"RT-Thread build input tree is missing: {tree}")
+        files = sorted(path for path in tree.rglob("*") if path.is_file())
+        if not files:
+            fail(f"RT-Thread build input tree is empty: {tree}")
+        for path in files:
+            relative_path = path.relative_to(root).as_posix().encode("utf-8")
+            digest.update(len(relative_path).to_bytes(8, "big"))
+            digest.update(relative_path)
+            with path.open("rb") as stream:
+                for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+                    digest.update(chunk)
+    return digest.hexdigest()
+
+
+def print_input_digest(args: argparse.Namespace) -> None:
+    print(calculate_input_digest(Path(args.root)))
+
+
 def read_metadata(path: Path) -> dict[str, object]:
     try:
         value = json.loads(path.read_text(encoding="utf-8"))
@@ -100,6 +139,7 @@ def write_metadata(args: argparse.Namespace) -> None:
         },
         "source": {"commit": source_commit(source)},
         "patch_set_sha256": digest,
+        "build_inputs_sha256": input_digest(args.input_digest),
         "virtio": {"vendor_id": EXPECTED_VENDOR_ID, "irq": EXPECTED_IRQ},
     }
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -160,6 +200,14 @@ def check_metadata(args: argparse.Namespace) -> None:
                 f"current={expected_patch}"
             )
 
+    if args.input_digest:
+        expected_inputs = input_digest(args.input_digest)
+        if metadata.get("build_inputs_sha256") != expected_inputs:
+            fail(
+                f"build input digest mismatch: metadata="
+                f"{metadata.get('build_inputs_sha256')}, current={expected_inputs}"
+            )
+
     print(f"RTTHREAD_IMAGE_METADATA_OK {image}")
 
 
@@ -171,6 +219,7 @@ def parser() -> argparse.ArgumentParser:
     writer.add_argument("--image", required=True)
     writer.add_argument("--source", required=True)
     writer.add_argument("--patch-digest")
+    writer.add_argument("--input-digest", required=True)
     writer.add_argument("--output", required=True)
     writer.set_defaults(function=write_metadata)
 
@@ -179,7 +228,12 @@ def parser() -> argparse.ArgumentParser:
     checker.add_argument("--metadata", required=True)
     checker.add_argument("--source")
     checker.add_argument("--patch-digest")
+    checker.add_argument("--input-digest")
     checker.set_defaults(function=check_metadata)
+
+    digest = subcommands.add_parser("input-digest")
+    digest.add_argument("--root", required=True)
+    digest.set_defaults(function=print_input_digest)
     return command
 
 

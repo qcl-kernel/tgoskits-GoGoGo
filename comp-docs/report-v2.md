@@ -512,6 +512,37 @@ RTOS 实时性结论，后续应单独修复 runner 的 attached-console 提取�
 硬件或 KVM 重测，并继续缩短虚拟 timer/VGIC、vCPU 唤醒、virtio-net 事件和 AxVisor
 后台任务的临界路径；不能仅通过静态 CPU 绑定宣称已经消除最坏情况延迟。
 
+### 11.6 三计数器联合实时性分析
+
+当前 RTBench 在同一个样本的 start/end 边界读取 `CNTVCT_EL0`、`PMCCNTR_EL0` 和
+`PMEVCNTR0_EL0`。分析器同时使用三类结果：
+
+| 维度 | 用途 |
+|---|---|
+| `ns` | 实时性主判定，检查 P99、P99.9、max 和 `max <= 1 ms` |
+| `cycles` | 判断 QEMU/AxVisor 虚拟执行工作量是否增加 |
+| `instructions` | 判断 Guest 执行路径是否增加 |
+
+联合分析使用同一批样本的均值计算 `ns/instruction`、`cycles/instruction` 和
+`ns/cycle`，并使用三类 P99 的相对变化进行归因：
+
+- `latency_only`：ns 增大而 cycles/instructions 基本不变，优先检查调度、虚拟中断、
+  设备模拟或宿主竞争；
+- `path_expansion`：三者同时增大，优先检查锁、重试或额外执行路径；
+- `mixed`：延迟增大且只有部分工作量指标增大；
+- `stable`：三类 P99 均未超过 1.20 倍基线。
+
+三类 P99 是独立分布，不能假设三个 P99 来自同一个样本；均值效率比才是同一采样窗口的
+聚合关系。该归因是定位工具，不是硬实时证明。运行基准脚本后新增文件为：
+
+```text
+realtime-suite-joint.csv
+realtime-stability-joint.csv
+```
+
+JSON 中的 `joint_analysis` 和 Markdown 中的“联合三指标分析”表包含 B/A、C/A、C/B
+三组比较。最终结论同时保留“是否超时”和“超时来自什么类型开销”两层信息。
+
 ## 12. vCPU 线程亲和性优化复测（2026-08-20）
 
 在上一轮全 QEMU 进程固定 CPU 的基础上，新增 QEMU vCPU 线程级绑定：QEMU 外层线程使用

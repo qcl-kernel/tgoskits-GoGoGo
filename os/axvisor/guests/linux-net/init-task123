@@ -107,7 +107,7 @@ main() {
             --target 192.168.77.30 \
             --port 9878 \
             --count "$rtbench_net_count" \
-            --interval-us 0 > /dev/console 2>&1 &
+            --interval-us 2000 > /dev/console 2>&1 &
         net_probe_pid=$!
         console "TASK3_LINUX_NET_PROBE_READY count=$rtbench_net_count"
     fi

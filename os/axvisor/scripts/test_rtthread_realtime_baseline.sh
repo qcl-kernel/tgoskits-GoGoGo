@@ -17,8 +17,10 @@ for required_pattern in \
     'RTTHREAD_REQUIRE_IMAGE_METADATA=1' \
     'summarize_rtthread_realtime.py' \
     'realtime-suite.json' \
+    'realtime-suite-joint.csv' \
     'realtime-suite.md' \
     'realtime-stability.json' \
+    'realtime-stability-joint.csv' \
     'realtime-stability.md' \
     'TASK123_ALLOW_QEMU_TIMER_LIMIT=1'; do
     grep -Fq -- "$required_pattern" "$RUNNER" || {
@@ -46,6 +48,12 @@ for required_pattern in \
     'bus=virtio-mmio-bus.2' \
     'benchmark_core' \
     '--core-suite' \
+    'QEMU_ICOUNT="${QEMU_ICOUNT:-shift=3}"' \
+    '-cpu cortex-a72,pmu=on' \
+    'qemu_icount_args=(-icount "$QEMU_ICOUNT")' \
+    'qemu_tcg_thread=single' \
+    'marker="RTBENCH_END status=PASS"' \
+    'marker="RTBENCH_STABILITY_END status=PASS"' \
     '"$mode" != suite || "$core_suite" -eq 1' \
     'if [[ "$core_suite" -eq 0 ]]; then' \
     'trap cleanup EXIT HUP INT TERM' \
@@ -61,6 +69,8 @@ for required_pattern in \
 done
 for required_pattern in \
     '--markdown-output "$output/realtime-suite.md"' \
+    '--joint-csv-output "$output/realtime-suite-joint.csv"' \
+    '--joint-csv-output "$output/realtime-stability-joint.csv"' \
     '--markdown-output "$output/realtime-stability.md"'; do
     grep -Fq -- "$required_pattern" "$RUNNER" || {
         echo "FAIL: realtime baseline runner is missing: $required_pattern" >&2

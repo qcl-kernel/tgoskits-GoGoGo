@@ -53,7 +53,7 @@ cargo arceos qemu --package arceos-httpserver   # 同上
 | **OS 子系统** | | |
 | `cargo xtask arceos` | ArceOS 构建/运行/测试 | [ArceOS](./arceos/overview) |
 | `cargo xtask starry` | StarryOS 构建/运行/测试/app/perf/kmod | [StarryOS](./starry/overview) |
-| `cargo xtask axvisor` | Axvisor 构建/运行/测试（含 `test uboot`） | [Axvisor](./axvisor/overview) |
+| `cargo xtask axvisor` | Axvisor 构建/运行/测试（含 `task123`、`test uboot`） | [Axvisor](./axvisor/overview) |
 
 通用的参数解析、Snapshot、Build Info、feature 校验和 QEMU `to_bin` 契约见 [参数与配置](./configuration)；三套系统共享的 QEMU/板卡测试编排（用例发现、build wrapper、pipeline 类型、rootfs 缓存、grouped runner）见 [测试基础设施](./test_infra)；CI 自动化见 [自动 CI 测试](./ci)。
 
@@ -473,6 +473,7 @@ cargo xtask starry kmod build [--arch <ARCH>] [--target <TARGET>] [--config <PAT
 | `test qemu` | QEMU 测试 |
 | `test uboot` | U-Boot 测试（Axvisor 独有） |
 | `test board` | 板级测试 |
+| `task123` | Task 1/2/3 的 RTOS/应用客户机实验与矩阵汇总 | [Task 1/2/3 实验](./axvisor/task123) |
 | `defconfig <BOARD>` | 生成默认板卡配置 |
 | `config ls` | 列出可用板卡名称 |
 

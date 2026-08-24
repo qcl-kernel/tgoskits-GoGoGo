@@ -35,7 +35,7 @@ PATCH_SET_DIGEST="$({
     "$PATCHDIR/0007-gicv3-query-interrupt-enable-state.patch" \
     "$PATCHDIR/0008-aarch64-gtimer-use-absolute-deadlines.patch" \
     "$PATCHDIR/0010-virtio-net-benchmark-packet-hook.patch" \
-    "$PATCHDIR/0011-rock4d-board-port.patch"
+    "$PATCHDIR/0011-virtio-net-rx-dma-cache.patch"
 } | sha256sum | awk '{print $1}')"
 if [[ -f "$PATCH_STATE" ]]; then
     if [[ "$(<"$PATCH_STATE")" != "$PATCH_SET_DIGEST" ]]; then
@@ -151,15 +151,12 @@ NET_BENCH_HOOK_PATCH="$PATCHDIR/0010-virtio-net-benchmark-packet-hook.patch"
 apply_patch_exactly "$RTDIR" "$NET_BENCH_HOOK_PATCH" \
     "the virtio-net benchmark packet hook"
 
-# ROCK 4D (RK3576) board port. The QEMU-virt BSP assumes PL011@0x09000000,
-# GICv3@0x08000000, and virtio@0x0a000000; the physical board instead uses
-# GIC-400 (GICv2)@0x2a701000/0x2a702000 and an NS16550@0x2ad40000 (reg-shift
-# 2) console. Remap the device region, select GICv2, switch rt_kprintf to the
-# polled 16550, auto-run the stability benchmark (no interactive console), and
-# gate the RT-IPC/task3 servers behind RT_USING_TASK123_SERVER.
-BOARD_PORT_PATCH="$PATCHDIR/0011-rock4d-board-port.patch"
-apply_patch_exactly "$RTDIR" "$BOARD_PORT_PATCH" \
-    "the ROCK 4D board port"
+# AxVisor writes the RX used ring and packet buffers from outside the guest.
+# In the non-coherent guest mapping, invalidate those cache lines before the
+# ISR gates on used->idx and before the RX worker consumes the completion.
+RX_DMA_CACHE_PATCH="$PATCHDIR/0011-virtio-net-rx-dma-cache.patch"
+apply_patch_exactly "$RTDIR" "$RX_DMA_CACHE_PATCH" \
+    "the virtio-net RX DMA cache-coherency fix"
 
 if [[ "$TGOSKITS_SKIP_PATCH_APPLICATION" == 0 ]]; then
     printf '%s\n' "$PATCH_SET_DIGEST" >"$PATCH_STATE"
@@ -171,14 +168,14 @@ GUESTDIR="$(cd "$PATCHDIR/../../guests/rt-ipc" && pwd)"
 APPDIR="$BSPDIR/applications/rt-ipc-test"
 mkdir -p "$APPDIR"
 cp "$GUESTDIR/rtthread/rtipc_server.c" "$APPDIR/"
-cp "$GUESTDIR/rtthread/rtipc_echo_responder.c" "$APPDIR/"
-cp "$GUESTDIR/rtthread/rtipc_echo_responder.h" "$APPDIR/"
-cp "$GUESTDIR/rtthread/rtipc_peer.c" "$APPDIR/"
-cp "$GUESTDIR/rtthread/rtipc_peer.h" "$APPDIR/"
+cp "$GUESTDIR/common/rtipc_echo_responder.c" "$APPDIR/"
+cp "$GUESTDIR/common/rtipc_echo_responder.h" "$APPDIR/"
+cp "$GUESTDIR/common/rtipc_peer.c" "$APPDIR/"
+cp "$GUESTDIR/common/rtipc_peer.h" "$APPDIR/"
 cp "$GUESTDIR/rtthread/rtipc_server_status.c" "$APPDIR/"
 cp "$GUESTDIR/rtthread/rtipc_server_status.h" "$APPDIR/"
-cp "$GUESTDIR/rtthread/rtipc_time.c" "$APPDIR/"
-cp "$GUESTDIR/rtthread/rtipc_time.h" "$APPDIR/"
+cp "$GUESTDIR/common/rtipc_time.c" "$APPDIR/"
+cp "$GUESTDIR/common/rtipc_time.h" "$APPDIR/"
 cp "$GUESTDIR/common/rt_ipc.c" "$APPDIR/"
 cp "$GUESTDIR/common/rt_ipc.h" "$APPDIR/"
 cp "$GUESTDIR/rtthread/SConscript" "$APPDIR/"
@@ -191,6 +188,10 @@ TASK3_APPDIR="$BSPDIR/applications/task3"
 mkdir -p "$TASK3_APPDIR"
 cp "$TASK3DIR/src/rtthread/task3_server.c" "$TASK3_APPDIR/"
 cp "$TASK3DIR/src/rtthread/SConscript" "$TASK3_APPDIR/"
+cp "$TASK3DIR/src/common/task3_server_core.c" \
+    "$TASK3_APPDIR/task3_server_core.c"
+cp "$TASK3DIR/src/common/task3_server_core.h" \
+    "$TASK3_APPDIR/task3_server_core.h"
 cp "$TASK3DIR/src/common/controller.c" "$TASK3_APPDIR/"
 cp "$TASK3DIR/src/common/controller.h" "$TASK3_APPDIR/"
 cp "$TASK3DIR/src/common/task3_protocol.c" "$TASK3_APPDIR/"

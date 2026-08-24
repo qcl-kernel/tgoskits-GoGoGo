@@ -9,6 +9,23 @@ RTIPC_COMMON="$GUESTS_ROOT/rt-ipc/common"
 TASK123_INIT="$GUESTS_ROOT/linux-net/init-task123"
 TASK3_SERVICE="$TASK3_ROOT/buildroot/rootfs-overlay/etc/init.d/S99task3"
 TASK3_SERVER="$TASK3_ROOT/src/rtthread/task3_server.c"
+TASK3_SERVER_CORE="$TASK3_ROOT/src/common/task3_server_core.c"
+RTTHREAD_PATCH_SCRIPT="$TASK3_ROOT/../../patches/rtthread/apply-rtthread-patches.sh"
+
+test -f "$TASK3_SERVER_CORE"
+if [ -e "$TASK3_ROOT/src/common/task3_server.c" ]; then
+    echo 'common task3_server.c collides with the RT-Thread adapter name' >&2
+    exit 1
+fi
+grep -F 'cp "$TASK3DIR/src/common/task3_server_core.c" \\
+    "$TASK3_APPDIR/task3_server_core.c"' "$RTTHREAD_PATCH_SCRIPT" >/dev/null
+grep -F 'cp "$TASK3DIR/src/common/task3_server_core.h" \\
+    "$TASK3_APPDIR/task3_server_core.h"' "$RTTHREAD_PATCH_SCRIPT" >/dev/null
+if grep -Eq 'cp "[^"]*/task3_server\.c" "\\$TASK3_APPDIR/"' \
+    "$RTTHREAD_PATCH_SCRIPT"; then
+    echo 'RT-Thread Task 3 installation copies an ambiguous task3_server.c' >&2
+    exit 1
+fi
 
 grep -Eq '^#define[[:space:]]+RTIPC_HEADER_SIZE[[:space:]]+20$' \
     "$RTIPC_COMMON/rt_ipc.h"

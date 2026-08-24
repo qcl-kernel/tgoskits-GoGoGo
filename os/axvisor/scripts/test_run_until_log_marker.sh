@@ -211,6 +211,69 @@ if [ "$(cat "$marker_reason_file")" != marker-complete ]; then
     exit 1
 fi
 
+fragmented_marker_log="$TMP_DIR/fragmented-marker.log"
+set +e
+"$RUN_UNTIL" 2 "$fragmented_marker_log" \
+    'RTIPC_SERVER_READY ip=192.168.77.30 port=9876' -- sh -c '
+    printf "RTIPC_SERVER_READY ip=192.168.77." >> "$1"
+    sleep 0.1
+    printf "30 port=9876\\n" >> "$1"
+    sleep 10
+' sh "$fragmented_marker_log"
+fragmented_marker_rc=$?
+set -e
+if [ "$fragmented_marker_rc" -ne 0 ]; then
+    echo "FAIL: marker watcher rejected a marker split across writes" >&2
+    exit 1
+fi
+
+rtos_final_record_log="$TMP_DIR/rtos-final-record.log"
+set +e
+"$RUN_UNTIL" 2 "$rtos_final_record_log" \
+    'TASK3_RTOS_FINAL_COMPLETE' -- sh -c '
+    printf "TASK3_RTOS_FINAL requests=6 errors=0 duplicates=0 applied_st" >> "$1"
+    sleep 0.1
+    printf "eps=6 retries=0\n" >> "$1"
+    sleep 10
+' sh "$rtos_final_record_log"
+rtos_final_record_rc=$?
+set -e
+if [ "$rtos_final_record_rc" -ne 0 ] ||
+   ! grep -Fq 'TASK3_RTOS_FINAL requests=6 errors=0 duplicates=0 applied_steps=6 retries=0' \
+       "$rtos_final_record_log"; then
+    echo "FAIL: marker watcher did not wait for the complete RTOS final record" >&2
+    exit 1
+fi
+
+host_interleaved_marker_log="$TMP_DIR/host-interleaved-marker.log"
+set +e
+"$RUN_UNTIL" 2 "$host_interleaved_marker_log" \
+    'LINUX_SMP_READY configured=2' -- sh -c '
+    printf "LINUX_SMP_READY confi" >> "$1"
+    sleep 0.1
+    printf "\033[37m[ 1.000000 0:1 axvisor::test:1] \033[33mhost record\033[m\r\n\033[mgured=2\\n" >> "$1"
+    sleep 10
+' sh "$host_interleaved_marker_log"
+host_interleaved_marker_rc=$?
+set -e
+if [ "$host_interleaved_marker_rc" -ne 0 ]; then
+    echo "FAIL: marker watcher rejected a guest marker interleaved with an AxVisor host record" >&2
+    exit 1
+fi
+
+tail_after_marker_log="$TMP_DIR/tail-after-marker.log"
+RUN_UNTIL_COMPLETION_GRACE_MS=250 \
+"$RUN_UNTIL" 2 "$tail_after_marker_log" 'MARKER COMPLETE' -- sh -c '
+    printf "MARKER COMPLETE\\n" >> "$1"
+    sleep 0.05
+    printf "REPORT TAIL\\n" >> "$1"
+    sleep 10
+' sh "$tail_after_marker_log"
+if ! grep -Fq 'REPORT TAIL' "$tail_after_marker_log"; then
+    echo "FAIL: marker completion dropped output written during the drain window" >&2
+    exit 1
+fi
+
 failure_marker_log="$TMP_DIR/failure-marker.log"
 failure_marker_status_file="$TMP_DIR/failure-marker.status"
 failure_marker_reason_file="$TMP_DIR/failure-marker.reason"
@@ -232,6 +295,24 @@ if [ "$failure_marker_rc" -eq 0 ] || [ "$failure_marker_elapsed_ms" -ge 1800 ]; 
 fi
 if [ "$(cat "$failure_marker_reason_file" 2>/dev/null)" != failure-marker ]; then
     echo "FAIL: failure marker termination reason was not recorded" >&2
+    exit 1
+fi
+
+host_interleaved_failure_log="$TMP_DIR/host-interleaved-failure.log"
+host_interleaved_failure_start_ns=$(date +%s%N)
+set +e
+"$RUN_UNTIL" 2 "$host_interleaved_failure_log" 'NEVER WRITTEN' \
+    --failure-marker 'TASK123_LINUX_END status=FAIL' -- sh -c '
+    printf "TASK123_LINUX_END sta" >> "$1"
+    printf "\033[37m[ 1.000000 0:1 axvisor::test:1] \033[33mhost record\033[m\r\n\033[mtus=FAIL\\n" >> "$1"
+    sleep 10
+' sh "$host_interleaved_failure_log"
+host_interleaved_failure_rc=$?
+set -e
+host_interleaved_failure_elapsed_ms=$(( ($(date +%s%N) - host_interleaved_failure_start_ns) / 1000000 ))
+if [ "$host_interleaved_failure_rc" -eq 0 ] ||
+   [ "$host_interleaved_failure_elapsed_ms" -ge 1800 ]; then
+    echo "FAIL: interleaved failure marker did not stop the child promptly" >&2
     exit 1
 fi
 

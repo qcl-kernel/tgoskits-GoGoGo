@@ -17,11 +17,11 @@ target/loopback_test: loopback_test.c ../common/rt_ipc.c ../common/rt_ipc.h
 	$(CC) $(CFLAGS) -o target/loopback_test loopback_test.c ../common/rt_ipc.c
 
 target/echo_responder_test: echo_responder_test.c ../common/rt_ipc.c ../common/rt_ipc.h \
-		../rtthread/rtipc_echo_responder.c ../rtthread/rtipc_echo_responder.h \
+		../common/rtipc_echo_responder.c ../common/rtipc_echo_responder.h \
 		../rtthread/rtipc_server_status.c ../rtthread/rtipc_server_status.h
 	mkdir -p target
 	$(CC) $(CFLAGS) -o target/echo_responder_test echo_responder_test.c \
-		../common/rt_ipc.c ../rtthread/rtipc_echo_responder.c \
+		../common/rt_ipc.c ../common/rtipc_echo_responder.c \
 		../rtthread/rtipc_server_status.c
 
 target/fault_profile_test: fault_profile_test.c ../common/rt_ipc.c \
@@ -37,11 +37,11 @@ target/state_machine_regression_test: state_machine_regression_test.c \
 		state_machine_regression_test.c ../common/rt_ipc.c
 
 target/platform_safety_test: platform_safety_test.c \
-		../rtthread/rtipc_peer.c ../rtthread/rtipc_peer.h \
-		../rtthread/rtipc_time.c ../rtthread/rtipc_time.h
+		../common/rtipc_peer.c ../common/rtipc_peer.h \
+		../common/rtipc_time.c ../common/rtipc_time.h
 	mkdir -p target
 	$(CC) $(CFLAGS) -o target/platform_safety_test platform_safety_test.c \
-		../rtthread/rtipc_peer.c ../rtthread/rtipc_time.c
+		../common/rtipc_peer.c ../common/rtipc_time.c
 
 target/crc_concurrency_test: crc_concurrency_test.c ../common/rt_ipc.c \
 		../common/rt_ipc.h
@@ -91,6 +91,7 @@ test: all
 	./target/linux_shutdown_test
 	./target/platform_safety_test
 	bash ./test_rtthread_server_contract.sh
+	bash ./test_rtipc_client_startup_contract.sh
 
 test_loopback: target/loopback_test
 	./target/loopback_test

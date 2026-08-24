@@ -36,6 +36,7 @@ template="$test_tmp/template.toml"
 cat > "$template" <<'EOF'
 [base]
 id = 3
+host_vcpu_idle_policy = "busy"
 [kernel]
 kernel_path = "/stale/hard-coded/rtthread.bin"
 entry_point = 0xa000_0000
@@ -55,6 +56,17 @@ grep -Fxq 'entry_point = 0xa000_0000' "$generated" || \
     fail "generator must preserve non-kernel VM configuration"
 [[ "$(grep -c '^kernel_path = ' "$generated")" -eq 1 ]] || \
     fail "generator must emit exactly one kernel_path"
+
+halt_runtime="$test_root/tmp/rtthread-runtime.HALT01"
+mkdir -p "$halt_runtime"
+halt_generated="$($VMCONFIG_GENERATOR "$test_root" "$template" "$kernel" "$halt_runtime" "task3.fault=normal" halt)"
+grep -Fxq 'host_vcpu_idle_policy = "halt"' "$halt_generated" || \
+    fail "generator must support a runtime halt idle policy override"
+
+if "$VMCONFIG_GENERATOR" "$test_root" "$template" "$kernel" "$test_root/tmp/rtthread-runtime.BAD01" \
+    "task3.fault=normal" invalid >/dev/null 2>&1; then
+    fail "generator must reject an invalid runtime idle policy"
+fi
 
 outside="$test_tmp/outside-runtime"
 mkdir -p "$outside"

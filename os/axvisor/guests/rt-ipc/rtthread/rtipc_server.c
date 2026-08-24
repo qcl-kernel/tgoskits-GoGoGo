@@ -202,7 +202,11 @@ static void rtipc_server_entry(void *param)
     rtipc_config_default(&cfg);
     cfg.auto_reconnect = false;
     cfg.heartbeat_interval_ms = 500;
-    cfg.heartbeat_timeout_ms = 2000;
+    /* QEMU TCG can delay a vCPU and its virtio RX path for several seconds.
+     * Keep the server session alive for the same recovery window used by the
+     * Linux client instead of closing while a valid request is retrying. */
+    cfg.heartbeat_timeout_ms = 10000;
+    cfg.max_retries = 8;
     cfg.session_id_seed = (now_ms() << 32) ^ (uint64_t)(uintptr_t)&s_conn;
     rtipc_connection_init(&s_conn, &cfg);
     rt_kprintf("RTIPC_SERVER_READY ip=%s port=%d\n", SERVER_IP, RTIPC_PORT);

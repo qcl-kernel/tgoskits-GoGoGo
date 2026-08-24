@@ -91,6 +91,7 @@ install -m 0755 "$SCRIPT_DIR/rootfs/init" "$stage/init"
 required_files=(
     bin/busybox
     bin/rtipic-client
+    usr/bin/rtbench-net-probe
     usr/bin/task3-linux
     opt/task3/line-follow.y4m
     opt/task3/truth.csv

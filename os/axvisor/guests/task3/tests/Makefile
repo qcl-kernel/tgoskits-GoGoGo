@@ -11,7 +11,8 @@ METRICS_BIN := $(BIN_DIR)/test_metrics
 DEADLINE_BIN := $(BIN_DIR)/test_deadline
 LINUX_BIN := $(BIN_DIR)/task3-linux-host
 RTTHREAD_SERVER_BIN := $(BIN_DIR)/test_rtthread_server
-MODEL_DIR ?= ../build/model
+SOURCE_CACHE_ROOT := $(if $(strip $(TGOS_SOURCE_CACHE)),$(TGOS_SOURCE_CACHE),../../../../../tmp/source-cache)
+MODEL_DIR ?= $(SOURCE_CACHE_ROOT)/task3-model
 RTIPC_DIR ?= ../../rt-ipc/common
 
 ifeq ($(SANITIZE),1)
@@ -89,9 +90,9 @@ test_linux_cli: $(LINUX_BIN)
 test_rtthread_server: $(RTTHREAD_SERVER_BIN)
 	$(RTTHREAD_SERVER_BIN)
 
-$(RTTHREAD_SERVER_BIN): test_rtthread_server.c ../src/rtthread/task3_server.c ../src/common/controller.c ../src/common/controller.h ../src/common/task3_protocol.c ../src/common/task3_protocol.h
+$(RTTHREAD_SERVER_BIN): test_rtthread_server.c ../src/rtthread/task3_server.c ../src/common/task3_server_core.c ../src/common/task3_server_core.h ../src/common/controller.c ../src/common/controller.h ../src/common/task3_protocol.c ../src/common/task3_protocol.h
 	mkdir -p $(BIN_DIR)
-	$(CC) -Irtthread_stubs -I../src/common -I$(RTIPC_DIR) $(CFLAGS) -o $@ test_rtthread_server.c ../src/common/controller.c ../src/common/task3_protocol.c $(LDFLAGS)
+	$(CC) -DTASK3_HOST_TEST=1 -Irtthread_stubs -I../src/common -I$(RTIPC_DIR) $(CFLAGS) -o $@ test_rtthread_server.c ../src/common/task3_server_core.c ../src/common/controller.c ../src/common/task3_protocol.c $(LDFLAGS)
 
 test_doctor:
 	sh ./test_doctor.sh

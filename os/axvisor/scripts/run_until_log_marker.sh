@@ -11,6 +11,7 @@ child_rc=
 completion_recorded=0
 launch_in_progress=0
 pending_signal_rc=
+helper_pid_published=0
 
 atomic_write_completion() {
     local destination=$1
@@ -76,9 +77,14 @@ reap_child() {
     if [ -z "$child_pid" ]; then
         return
     fi
+    child_pid_for_wait=$child_pid
+    child_pid=
     set +e
-    wait "$child_pid" 2>/dev/null
-    child_rc=$?
+    if wait "$child_pid_for_wait" 2>/dev/null; then
+        child_rc=0
+    else
+        child_rc=$?
+    fi
     set -e
     child_pid=
 }
@@ -102,6 +108,7 @@ terminate_unowned_child() {
 
 terminate_child_group() {
     local deadline_ns
+    local force_deadline_ns
 
     if [ -z "$child_pgid" ]; then
         return
@@ -120,9 +127,22 @@ terminate_child_group() {
 
     if child_group_is_running; then
         kill -KILL -- "-$child_pgid" 2>/dev/null || true
+        force_deadline_ns=$(( $(date +%s%N) + 1000000000 ))
+        while child_group_is_running &&
+              [ "$(date +%s%N)" -lt "$force_deadline_ns" ]; do
+            sleep 0.01
+        done
+        if child_group_is_running; then
+            echo "child process group $child_pgid ignored SIGKILL" >&2
+            return 1
+        fi
     fi
     reap_child
     child_pgid=
+}
+
+stop_child_for_completion() {
+    terminate_child_group
 }
 
 handle_exit() {
@@ -130,6 +150,9 @@ handle_exit() {
 
     trap - EXIT HUP INT TERM
     set +e
+    if [ "$helper_pid_published" -eq 1 ] && [ -n "${RUN_UNTIL_HELPER_PID_FILE:-}" ]; then
+        rm -f -- "$RUN_UNTIL_HELPER_PID_FILE"
+    fi
     terminate_child_group
     if [ "$completion_recorded" -eq 0 ]; then
         record_completion internal-error "$exit_rc"
@@ -196,10 +219,27 @@ case "$timeout_s" in
         ;;
 esac
 
+completion_grace_ms=${RUN_UNTIL_COMPLETION_GRACE_MS:-250}
+case "$completion_grace_ms" in
+    ''|*[!0-9]*)
+        echo "invalid completion grace: $completion_grace_ms" >&2
+        exit 2
+        ;;
+esac
+
+sleep_milliseconds() {
+    local milliseconds=$1
+    printf -v seconds '%d.%03d' "$((milliseconds / 1000))" "$((milliseconds % 1000))"
+    sleep "$seconds"
+}
+
 if [ -n "${RUN_UNTIL_PRE_CHILD_READY_FILE:-}" ]; then
     atomic_write_completion "$RUN_UNTIL_PRE_CHILD_READY_FILE" ready
 fi
-
+if [ -n "${RUN_UNTIL_HELPER_PID_FILE:-}" ]; then
+    atomic_write_completion "$RUN_UNTIL_HELPER_PID_FILE" "$$"
+    helper_pid_published=1
+fi
 if { [ -n "${RUN_UNTIL_LAUNCH_READY_FILE:-}" ] &&
      [ -z "${RUN_UNTIL_LAUNCH_RELEASE_FILE:-}" ]; } ||
    { [ -z "${RUN_UNTIL_LAUNCH_READY_FILE:-}" ] &&
@@ -221,15 +261,74 @@ else
 fi
 child_pid=$!
 child_pgid=$child_pid
+child_pid_for_wait=$child_pid
 if [ -n "${RUN_UNTIL_CHILD_PID_FILE:-}" ]; then
     printf '%s\n' "$child_pid" > "$RUN_UNTIL_CHILD_PID_FILE"
 fi
 if [ -n "${RUN_UNTIL_LAUNCH_READY_FILE:-}" ]; then
     atomic_write_completion "$RUN_UNTIL_LAUNCH_READY_FILE" ready
-    while [ ! -e "$RUN_UNTIL_LAUNCH_RELEASE_FILE" ]; do
+    # Do not wait forever if the child exits before the parent releases it.
+    # The parent's error path can then terminate this helper promptly.
+    while [ ! -e "$RUN_UNTIL_LAUNCH_RELEASE_FILE" ] && child_is_running; do
         sleep 0.01
     done
 fi
+
+normalized_marker_present() {
+    local marker=$1
+
+    # AxVisor host records and guest UART bytes share one stream. A host
+    # record can therefore be inserted between bytes of a guest marker.
+    # Remove only the colored host presentation records, then strip the
+    # remaining ANSI control sequences so the guest bytes become contiguous.
+    python3 - "$log" "$marker" <<'PY'
+import re
+import sys
+from pathlib import Path
+
+data = Path(sys.argv[1]).read_bytes()
+data = re.sub(
+    rb"(?:\[VM [0-9]+\] )?\x1b\[37m\[[^\r\n]*?\x1b\[m\r?\n?",
+    b"",
+    data,
+)
+data = re.sub(rb"\x1b\[[0-?]*[ -/]*[@-~]", b"", data)
+marker = sys.argv[2].encode()
+if marker == b"TASK3_RTOS_FINAL_COMPLETE":
+    data = data.replace(b"\r\n", b"\n").replace(b"\r", b"\n")
+    found = re.search(
+        rb"TASK3_RTOS_FINAL requests=[0-9]+ errors=[0-9]+ duplicates=[0-9]+ "
+        rb"applied_steps=[0-9]+ retries=[0-9]+\n",
+        data,
+    )
+elif marker == b"RTBENCH_STABILITY_END status=":
+    found = re.search(
+        rb"RTBENCH_STABILITY_END status=(PASS|FAIL) expected=[0-9]+ "
+        rb"collected=[0-9]+ missing=0(?:\s|$)",
+        data,
+    )
+else:
+    found = marker in data
+sys.exit(0 if found else 1)
+PY
+}
+
+marker_present() {
+    local marker=$1
+
+    if [ "$marker" = 'TASK3_RTOS_FINAL_COMPLETE' ]; then
+        normalized_marker_present "$marker"
+    elif [ "$marker" = 'RTBENCH_STABILITY_END status=' ]; then
+        grep -aEq -- \
+            'RTBENCH_STABILITY_END status=(PASS|FAIL) expected=[0-9]+ collected=[0-9]+ missing=0([[:space:]]|$)' \
+            "$log" && return 0
+    else
+        grep -aFq -- "$marker" "$log" && return 0
+    fi
+    normalized_marker_present "$marker"
+}
+
+launch_in_progress=0
 if ! wait_for_child_group; then
     terminate_unowned_child
     launch_in_progress=0
@@ -241,6 +340,7 @@ if ! wait_for_child_group; then
     echo 'child did not establish its process group' >&2
     exit 1
 fi
+set -e
 launch_in_progress=0
 if [ -n "$pending_signal_rc" ]; then
     deferred_signal_rc=$pending_signal_rc
@@ -248,6 +348,7 @@ if [ -n "$pending_signal_rc" ]; then
     handle_signal "$deferred_signal_rc"
 fi
 deadline_ns=$(( $(date +%s%N) + timeout_s * 1000000000 ))
+set -e
 
 while :; do
     all_markers_present=1
@@ -255,7 +356,7 @@ while :; do
         all_markers_present=0
     else
         for failure_marker in "${failure_markers[@]}"; do
-            if grep -aFq -- "$failure_marker" "$log"; then
+            if marker_present "$failure_marker"; then
                 terminate_child_group
                 failure_status=${child_rc:-1}
                 if [ "$failure_status" -eq 0 ]; then
@@ -266,18 +367,25 @@ while :; do
             fi
         done
         for marker in "${markers[@]}"; do
-            if ! grep -aFq -- "$marker" "$log"; then
+            if ! marker_present "$marker"; then
                 all_markers_present=0
                 break
             fi
         done
     fi
     if [ "$all_markers_present" -eq 1 ]; then
+        # Guest UART writes and AxVisor host records share one pipe. A marker
+        # can become visible before the remainder of the same report write is
+        # drained by tee; keep the child alive briefly so the evidence after
+        # the marker reaches the log before controlled termination.
+        if child_is_running && [ "$completion_grace_ms" -gt 0 ]; then
+            sleep_milliseconds "$completion_grace_ms"
+        fi
         terminated_by_helper=0
         if child_is_running; then
             terminated_by_helper=1
         fi
-        terminate_child_group
+        stop_child_for_completion
         record_completion marker-complete "$child_rc" || true
         if [ "$child_rc" -eq 0 ] || \
            { [ "$terminated_by_helper" -eq 1 ] && \
@@ -286,6 +394,10 @@ while :; do
         fi
         exit "$child_rc"
     fi
+
+    # Bash's wait(2) does not wake for ordinary output pipelines; poll the
+    # marker and timeout state while QEMU remains alive.
+    sleep 0.1
 
     if ! child_is_running; then
         reap_child
