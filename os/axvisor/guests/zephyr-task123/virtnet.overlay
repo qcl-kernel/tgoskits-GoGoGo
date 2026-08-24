@@ -8,7 +8,7 @@
 
 &virtio_mmio0 {
 	status = "okay";
-	interrupts = <GIC_SPI 16 IRQ_TYPE_EDGE IRQ_DEFAULT_PRIORITY>;
+	interrupts = <GIC_SPI 16 IRQ_TYPE_LEVEL IRQ_DEFAULT_PRIORITY>;
 
 	virtio_net: virtio-net {
 		compatible = "virtio,net";

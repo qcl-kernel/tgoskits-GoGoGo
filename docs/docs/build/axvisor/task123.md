@@ -75,16 +75,21 @@ cargo xtask axvisor task123 \
 precise icount 和单线程 TCG，可能比墙钟时间慢很多；普通主机上的 AArch64 TCG
 长尾不能直接等价为物理板的硬实时上界。
 
-RTBench 日志中应重点检查以下指标：
+RTBench 日志统一使用纳秒字段；同一探针只有在日志明确输出并且
+`expected == collected`、`missing == 0` 时才进入图表：
 
-- `timer_jitter`：周期任务抖动，包含 `p50/p95/p99/p99_9/max` 的纳秒、cycles
-  和 instructions 数据。旧版 RTBench 日志可能使用 `stability_jitter`，矩阵汇总会
-  兼容读取这两个字段；
+- `timer_jitter`：周期任务抖动，包含 `p50/p95/p99/p99_9/max` 纳秒数据；
 - `callback_exec`：周期回调执行开销；
 - `preemption`、`irq`、`irq_to_task`：抢占、硬件中断和中断到任务唤醒延迟；
 - `irq_disabled_duration`、`mutex_inversion`、`wake_under_load`：关中断、锁反转和
   负载下唤醒的长尾；
 - `net_event_latency`：网络事件到任务处理的延迟。
+
+`cycles` 和 `instructions` 属于可选的 PMU 扩展，不参与矩阵完整性判断，因为
+AxVisor 当前不能在 QEMU 和 ROCK 4D 间一致虚拟化 guest PMU。当前 Zephyr 只实现
+`timer_jitter` 和 `callback_exec` 两个纳秒探针；其余探针在图表中显示 `NA`，不会
+复制其它指标或填入 `16`/`0` 等合成值。RT-Thread/Linux 的 ROCK 4D 串口重试会按
+指标合并所有完整记录，损坏字段会被丢弃并保留原始日志路径。
 
 各组合原始数据位于 `<output>/<rtos>-<app-guest>/`：
 
@@ -114,6 +119,43 @@ cargo xtask axvisor task123 \
 通常不需要手工设置。
 
 ## 5. 入口边界
+
+### ROCK 4D 真机四种组合
+
+四种组合分别使用一条 U-Boot 命令。四条命令都会先准备 Linux/StarryOS 客户机资产、
+构建对应 RTOS 和 AxVisor，然后通过 `rock-4d-uboot-local.toml` 使用
+`/dev/ttyUSB0` 启动真机：
+
+```bash
+# RT-Thread + Linux
+cargo xtask axvisor task123 uboot --rtos rtthread --app-guest linux \
+  --realtime-suite --rtbench-samples 10 \
+  --config os/axvisor/configs/board/rock-4d-task123-linuxleg.toml \
+  --uboot-config os/StarryOS/configs/board/rock-4d-uboot-local.toml
+
+# RT-Thread + StarryOS
+cargo xtask axvisor task123 uboot --rtos rtthread --app-guest starryos \
+  --realtime-suite --rtbench-samples 10 \
+  --config os/axvisor/configs/board/rock-4d-task123-twoguest.toml \
+  --uboot-config os/StarryOS/configs/board/rock-4d-uboot-local.toml
+
+# Zephyr + Linux
+cargo xtask axvisor task123 uboot --rtos zephyr --app-guest linux \
+  --realtime-suite --rtbench-samples 10 \
+  --config os/axvisor/configs/board/rock-4d-task123-zephyr-linux.toml \
+  --uboot-config os/StarryOS/configs/board/rock-4d-uboot-local.toml
+
+# Zephyr + StarryOS
+cargo xtask axvisor task123 uboot --rtos zephyr --app-guest starryos \
+  --realtime-suite --rtbench-samples 10 \
+  --config os/axvisor/configs/board/rock-4d-task123-zephyr-starryos.toml \
+  --uboot-config os/StarryOS/configs/board/rock-4d-uboot-local.toml
+```
+
+每次运行完成后，U-Boot 串口匹配同时要求 RTBench 和对应应用客户机的
+`TASK123_*_END status=PASS` 标记；运行日志由 ostool 输出，建议另存到 `tmp/hardware/`。
+板级 VM 配置固定使用 10 次 Task 2 请求，因此 U-Boot 子命令不再接受不会生效的
+`--task2-count` 参数。
 
 Rust `xtask` 负责命令参数校验、组合展开、输出目录策略、共享缓存传递、真实 QEMU
 runner 的前台执行以及矩阵 JSON/Markdown 汇总。QEMU 生命周期、guest 串口 marker、

@@ -6,6 +6,8 @@ ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/../../../.." && pwd)"
 PREPARE="$ROOT/os/axvisor/patches/rtthread/prepare_rtthread_source.sh"
 APPLY="$ROOT/os/axvisor/patches/rtthread/apply-rtthread-patches.sh"
 VERIFY="$ROOT/os/axvisor/patches/rtthread/test-rtthread-patches.sh"
+SET_KCONFIG="$ROOT/os/axvisor/guests/task3/scripts/set_kconfig.py"
+KCONFIG_FRAGMENT="$ROOT/os/axvisor/guests/task3/configs/rtthread.config"
 SCONS_REQUIREMENT="scons==4.11.0"
 TEST_ROOT="$(mktemp -d /tmp/tgoskits-rtthread-patchset.XXXXXX)"
 SOURCE="$TEST_ROOT/rt-thread"
@@ -40,6 +42,8 @@ fi
 "$APPLY" "$SOURCE"
 "$APPLY" "$SOURCE"
 "$VERIFY" "$SOURCE"
+python3 "$SET_KCONFIG" "$BSP/.config" --fragment "$KCONFIG_FRAGMENT"
+grep -Fx '#define RT_USING_TASK123_SERVER' "$BSP/rtconfig.h" >/dev/null
 
 if rg -n '/home/[^/]+/' \
     "$SOURCE/bsp/qemu-virt64-aarch64/SConstruct" \
@@ -63,6 +67,11 @@ if [[ "${RTTHREAD_TEST_BUILD:-1}" == 1 ]]; then
     if ! grep -Fq 'rt_ofw_bootargs_select("task3.fault="' \
         "$SOURCE/bsp/qemu-virt64-aarch64/applications/task3/task3_server.c"; then
         echo "FAIL: Task 3 runtime fault selection is missing" >&2
+        exit 1
+    fi
+    if ! grep -Fq 'RT_NULL, 4096, 20, 10' \
+        "$SOURCE/bsp/qemu-virt64-aarch64/applications/main.c"; then
+        echo "FAIL: board stability benchmark must run below network servers" >&2
         exit 1
     fi
 fi

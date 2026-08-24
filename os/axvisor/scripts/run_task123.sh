@@ -840,7 +840,16 @@ zephyr_cached_image_is_current() {
     [[ "$(wc -l < "$input_digest_file")" -eq 1 ]] || return 1
     python3 "$ZEPHYR_IMAGE_METADATA_TOOL" check \
         --image "$current/zephyr.bin" \
-        --metadata "$current/zephyr.bin.meta.json" >/dev/null
+        --metadata "$current/zephyr.bin.meta.json" \
+        --board-target "$(zephyr_board_target)" >/dev/null
+}
+
+zephyr_board_target() {
+    case "${ZEPHYR_TASK123_BOARD:-qemu}" in
+        qemu) echo qemu_cortex_a53/qemu_cortex_a53 ;;
+        rock-4d) echo axvisor_rock4d/qemu_cortex_a53 ;;
+        *) fail "unsupported Zephyr board: ${ZEPHYR_TASK123_BOARD:-qemu}" ;;
+    esac
 }
 
 build_zephyr_image_if_needed() {
@@ -913,7 +922,8 @@ resolve_or_build_images() {
         run_timed "$TASK123_PHASE_TIMEOUT_S" zephyr-image-metadata-check \
             python3 "$ZEPHYR_IMAGE_METADATA_TOOL" check \
                 --image "$ZEPHYR_IMAGE" \
-                --metadata "$ZEPHYR_IMAGE_METADATA"
+                --metadata "$ZEPHYR_IMAGE_METADATA" \
+                --board-target "$(zephyr_board_target)"
     fi
     if [[ "$app_guest" == linux ]]; then
         LINUX_KERNEL_IMAGE="$(canonical_existing_file linux-kernel "$LINUX_KERNEL_IMAGE")"

@@ -60,6 +60,35 @@ write_complete_log "$complete"
 expect_pass complete "$VERIFY" "$complete" 1000 0
 expect_fail qemu_timeout "$VERIFY" "$complete" 1000 124
 
+compact="$TMP_DIR/compact.log"
+python3 - "$complete" "$compact" <<'PY'
+import re
+import sys
+from pathlib import Path
+
+source, destination = map(Path, sys.argv[1:])
+output = []
+for line in source.read_text().splitlines():
+    match = re.search(
+        r"RTBENCH metric=(\w+) run=(\d+) .*?"
+        r"expected=(\d+) collected=(\d+) missing=(\d+) "
+        r"p50_ns=(\d+) p95_ns=(\d+) p99_ns=(\d+) p99_9_ns=(\d+) "
+        r"max_ns=(\d+).*?mean_ns=(\d+)",
+        line,
+    )
+    if match:
+        metric, run, expected, collected, missing, p50, p95, p99, p999, maximum, mean = match.groups()
+        output.append(
+            f"[VM 3] RTBENCH_NS metric={metric} run={run} expected={expected} "
+            f"collected={collected} missing={missing} p50_ns={p50} p95_ns={p95} "
+            f"p99_ns={p99} p99_9_ns={p999} max_ns={maximum} mean_ns={mean}"
+        )
+    elif "RTBENCH metric=" not in line:
+        output.append(line)
+destination.write_text("\n".join(output) + "\n")
+PY
+expect_pass compact "$VERIFY" "$compact" 1000 0
+
 zephyr_complete="$TMP_DIR/zephyr-complete.log"
 sed 's/RTBENCH_BEGIN samples=1000 frequency=/RTBENCH_BEGIN samples=1000 expected=1000 frequency=/' \
     "$complete" > "$zephyr_complete"

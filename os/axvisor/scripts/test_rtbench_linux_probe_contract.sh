@@ -23,6 +23,11 @@ grep -Eq 'SO_RCVTIMEO' "$PROBE_SOURCE"
 grep -Eq '^#define RTBENCH_NET_PROBE_TIMEOUT_USEC[[:space:]]+500000U$' "$PROBE_SOURCE"
 grep -Eq '^#define RTBENCH_NET_PROBE_ATTEMPTS[[:space:]]+8U$' "$PROBE_SOURCE"
 grep -Eq 'RTBENCH_NET_PROBE_READY' "$PROBE_SOURCE"
+grep -Eq '^#define RTBENCH_NET_DONE[[:space:]]+UINT32_C\(0xfffffffd\)$' "$PROBE_SOURCE"
+grep -Eq 'wait_for_completion' "$PROBE_SOURCE"
+grep -Eq 'RTBENCH_NET_DONE' "$BENCH"
+grep -Fxq 'CONFIG_RT_USING_THREADSAFE_PRINTF=y' \
+    "$ROOT/os/axvisor/guests/task3/configs/rtthread.config"
 grep -Eq 'ECONNREFUSED' "$PROBE_SOURCE"
 grep -Eq 'sendto\(socket_fd, payload' "$BENCH"
 python3 - "$PROBE_SOURCE" <<'PY'
@@ -35,5 +40,10 @@ end = source.index("if (!acknowledged)", start)
 window = source[start:end]
 if "for (;;)" not in window:
     raise SystemExit("FAIL: probe must ignore stale control packets while waiting for a matching ACK")
+
+completion = source.index("wait_for_completion")
+end_marker = source.index("RTBENCH_NET_PROBE_END")
+if completion > end_marker:
+    raise SystemExit("FAIL: probe must wait for RT-Thread completion before exiting")
 PY
 echo "PASS: Linux network probe is ACK-paced and guest budget covers coexistence RTT"

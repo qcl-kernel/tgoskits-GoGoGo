@@ -22,128 +22,39 @@ diff --git a/bsp/qemu-virt64-aarch64/applications/main.c b/bsp/qemu-virt64-aarch
 index ab5481a..f9c6e72 100644
 --- a/bsp/qemu-virt64-aarch64/applications/main.c
 +++ b/bsp/qemu-virt64-aarch64/applications/main.c
-@@ -1,12 +1,126 @@
+@@ -1,12 +1,37 @@
  /*
   * Axvisor RT-Thread guest entry. Keep this minimal: the RT-IPC server is
 - * initialized by INIT_APP_EXPORT, and benchmarks run only on demand so they
 - * do not contend with the network service during latency measurements.
 + * initialized by INIT_APP_EXPORT. On the physical board there is no
-+ * interactive console feed, so the stability benchmark auto-runs after a
-+ * fixed settle delay (identical in both comparison legs) instead of being
-+ * typed at the msh prompt like the QEMU runner does.
++ * interactive console feed, so the complete benchmark suite is started
++ * automatically after the RT-IPC task has had time to settle.
   */
  #include <rtthread.h>
  
  int main(void)
  {
-+    rt_kprintf("MAIN-REACHED pre-init\n");
      rt_kprintf("Axvisor RT-Thread guest ready\n");
      return 0;
  }
 +
-+/* Board polling stability benchmark: RT-Thread's IRQ-driven tick is not
-+ * reliably injected on this platform yet, so the 1ms period is driven by
-+ * busy-polling the architectural counter instead. The same code runs in
-+ * both comparison legs, so relative jitter between co-tenants is valid. */
++/* Run the complete benchmark suite used by the QEMU runner. */
 +static void rtbench_auto_entry(void *parameter)
 +{
 +    (void)parameter;
-+    rt_uint64_t freq;
-+    __asm__ volatile("mrs %0, cntfrq_el0" : "=r"(freq));
-+    rt_uint64_t period_ticks = freq / 1000; /* 1ms */
-+
-+    rt_kprintf("RTBENCH_AUTO settling for 30s before stability run\n");
-+    rt_kprintf("polling counter freq=%llu Hz period=%llu ticks\n",
-+               (unsigned long long)freq, (unsigned long long)period_ticks);
-+    /* busy settle */
++    rt_thread_delay(rt_tick_from_millisecond(30000));
 +    {
-+        rt_uint64_t t0, now;
-+        __asm__ volatile("mrs %0, cntvct_el0" : "=r"(t0));
-+        do {
-+            __asm__ volatile("mrs %0, cntvct_el0" : "=r"(now));
-+        } while ((now - t0) / freq < 30);
++        char command[] = "benchmark 10";
++        extern int msh_exec(char *cmd, rt_size_t length);
++        (void)msh_exec(command, sizeof(command) - 1);
 +    }
-+
-+    const rt_uint64_t expected = 300000ULL - 1; /* 300s at 1ms */
-+    static rt_uint64_t jitter_us[300000];
-+    rt_kprintf("RTBENCH_STABILITY_BEGIN seconds=300 expected=%llu\n",
-+               (unsigned long long)expected);
-+
-+    rt_uint64_t next, now;
-+    __asm__ volatile("mrs %0, cntvct_el0" : "=r"(now));
-+    next = now + period_ticks;
-+    rt_uint64_t collected = 0;
-+    rt_uint64_t miss_100us = 0, miss_500us = 0, miss_1ms = 0;
-+    rt_uint64_t max_ns = 0, sum_ns = 0;
-+    /* simple histogram-free capture for percentiles via reservoir-lite:
-+     * store every sample; 300k * 8B = 2.4MB on a 1GB guest, acceptable. */
-+    for (rt_uint64_t i = 0; i < expected; i++)
-+    {
-+        rt_uint64_t t;
-+        do {
-+            __asm__ volatile("mrs %0, cntvct_el0" : "=r"(t));
-+        } while (t < next);
-+        rt_uint64_t late_ns = (t - next) * 1000000000ULL / freq;
-+        jitter_us[i] = late_ns;
-+        sum_ns += late_ns;
-+        if (late_ns > max_ns) max_ns = late_ns;
-+        if (late_ns > 100000) miss_100us++;
-+        if (late_ns > 500000) miss_500us++;
-+        if (late_ns > 1000000) miss_1ms++;
-+        collected++;
-+        next += period_ticks;
-+    }
-+
-+    /* sort for percentiles (insertion on already-nearly-sorted is fine but
-+     * use qsort from libc-less: simple shell sort on 300k is too slow; use
-+     * histogram of 10us buckets up to 10ms + overflow max. */
-+    {
-+        /* bucket by 10us: 0..1000 buckets, plus overflow counter */
-+        static rt_uint32_t hist[1001];
-+        rt_uint64_t overflow = 0;
-+        for (rt_uint64_t i = 0; i < collected; i++)
-+        {
-+            rt_uint64_t b = jitter_us[i] / 10000;
-+            if (b >= 1000) overflow++; else hist[b]++;
-+        }
-+        rt_uint64_t p50 = 0, p95 = 0, p99 = 0, p999 = 0;
-+        rt_uint64_t acc = 0;
-+        rt_uint64_t targets[4] = {collected / 2, collected * 95 / 100,
-+                                  collected * 99 / 100, collected * 999 / 1000};
-+        int ti = 0;
-+        for (int b = 0; b < 1001 && ti < 4; b++)
-+        {
-+            rt_uint64_t cnt = (b == 1000) ? overflow : hist[b];
-+            acc += cnt;
-+            while (ti < 4 && acc >= targets[ti])
-+            {
-+                rt_uint64_t v = (rt_uint64_t)b * 10000;
-+                if (ti == 0) p50 = v; else if (ti == 1) p95 = v;
-+                else if (ti == 2) p99 = v; else p999 = v;
-+                ti++;
-+            }
-+        }
-+        rt_kprintf("RTBENCH metric=stability_jitter run=1 expected=%llu "
-+                   "collected=%llu missing=0 p50_ns=%llu p95_ns=%llu p99_ns=%llu "
-+                   "p99_9_ns=%llu max_ns=%llu miss_100us=%llu miss_500us=%llu "
-+                   "miss_1ms=%llu mean_ns=%llu\n",
-+                   (unsigned long long)expected, (unsigned long long)collected,
-+                   (unsigned long long)p50, (unsigned long long)p95,
-+                   (unsigned long long)p99, (unsigned long long)p999,
-+                   (unsigned long long)max_ns,
-+                   (unsigned long long)miss_100us, (unsigned long long)miss_500us,
-+                   (unsigned long long)miss_1ms,
-+                   (unsigned long long)(collected ? sum_ns / collected : 0));
-+    }
-+    rt_kprintf("RTBENCH_STABILITY_END status=PASS expected=%llu collected=%llu missing=0\n",
-+               (unsigned long long)expected, (unsigned long long)collected);
-+    rt_kprintf("RTBENCH_STABILITY_DONE\n");
 +}
 +
 +static int rtbench_auto_init(void)
 +{
 +    rt_thread_t tid = rt_thread_create("rtbench_auto", rtbench_auto_entry,
-+                                       RT_NULL, 4096, 15, 10);
++                                       RT_NULL, 4096, 20, 10);
 +    if (tid)
 +    {
 +        rt_thread_startup(tid);

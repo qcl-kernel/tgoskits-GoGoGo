@@ -227,6 +227,21 @@ fn parse_firmware_config_file(config_file: &ConfigFile) -> Option<FirmwareImage>
     Some(FirmwareImage { id, bios })
 }
 
+fn print_memory_image_rerun_paths(config_files: &[ConfigFile]) {
+    for config_file in config_files {
+        if let Some(image) = parse_config_file(config_file) {
+            for path in [Some(image.kernel), image.dtb, image.bios, image.ramdisk]
+                .into_iter()
+                .flatten()
+            {
+                println!("cargo:rerun-if-changed={}", path.display());
+            }
+        } else if let Some(image) = parse_firmware_config_file(config_file) {
+            println!("cargo:rerun-if-changed={}", image.bios.display());
+        }
+    }
+}
+
 /// Generate function to load guest images from config
 /// Toml file must be provided to load from memory.
 fn generate_guest_img_loading_functions(
@@ -379,6 +394,7 @@ fn main() -> anyhow::Result<()> {
 
     match config_files {
         Ok(config_files) => {
+            print_memory_image_rerun_paths(&config_files);
             let output = if config_files.is_empty() {
                 quote! {
                     pub fn static_vm_configs() -> Vec<&'static str> {

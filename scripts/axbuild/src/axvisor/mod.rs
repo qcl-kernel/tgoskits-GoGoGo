@@ -409,6 +409,28 @@ impl Axvisor {
         let uboot = self.load_uboot_config(&request, &cargo).await?;
         self.app.uboot(cargo, request.build_info_path, uboot).await
     }
+
+    pub(super) async fn run_task123_uboot(
+        &mut self,
+        config: PathBuf,
+        uboot_config: PathBuf,
+    ) -> anyhow::Result<()> {
+        let build = ArgsBuild {
+            config: Some(config),
+            arch: None,
+            target: None,
+            smp: None,
+            debug: false,
+            vmconfigs: Vec::new(),
+        };
+        let request = self.prepare_request(
+            (&build).into(),
+            None,
+            Some(uboot_config),
+            SnapshotPersistence::Store,
+        )?;
+        self.run_uboot_request(request).await
+    }
 }
 
 fn default_qemu_config_template_path(axvisor_dir: &Path, arch: &str) -> PathBuf {

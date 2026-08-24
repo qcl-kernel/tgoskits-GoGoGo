@@ -155,7 +155,12 @@ main() {
     if [ "$task2_status" -eq 0 ] && [ "$task3_status" -eq 0 ]; then
         console 'TASK123_LINUX_END status=PASS'
         if [ -n "$net_probe_pid" ]; then
-            wait "$net_probe_pid" || true
+            if wait "$net_probe_pid"; then
+                console 'TASK123_LINUX_RTBENCH_END status=PASS'
+            else
+                console 'TASK123_LINUX_RTBENCH_END status=FAIL'
+                finish 1
+            fi
         fi
         finish 0
     fi

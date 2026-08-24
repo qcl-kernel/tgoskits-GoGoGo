@@ -96,6 +96,20 @@ fi
 # echo. Both forms are valid only when the requested sample count is present.
 begin_pattern="RTBENCH_BEGIN samples=${samples}( expected=${samples})? frequency=[1-9][0-9]* pmu_event=0x8[[:space:]]*$"
 metric_suffix="expected=${samples} collected=${samples} missing=0 p50_ns=[0-9]+ p95_ns=[0-9]+ p99_ns=[0-9]+ p99_9_ns=[0-9]+ max_ns=[0-9]+ miss_100us=[0-9]+ miss_500us=[0-9]+ miss_1ms=[0-9]+ mean_ns=[0-9]+ p50_cycles=[0-9]+ p95_cycles=[0-9]+ p99_cycles=[0-9]+ p99_9_cycles=[0-9]+ max_cycles=[0-9]+ mean_cycles=[0-9]+ p50_instructions=[0-9]+ p95_instructions=[0-9]+ p99_instructions=[0-9]+ p99_9_instructions=[0-9]+ max_instructions=[0-9]+ mean_instructions=[0-9]+[[:space:]]*$"
+ns_metric_suffix="expected=${samples} collected=${samples} missing=0 p50_ns=[0-9]+ p95_ns=[0-9]+ p99_ns=[0-9]+ p99_9_ns=[0-9]+ max_ns=[0-9]+ mean_ns=[0-9]+[[:space:]]*$"
+
+metric_record_count() {
+    local metric=$1
+    local run=$2
+    local verbose_count compact_count
+    verbose_count="$(grep -aEc "RTBENCH metric=${metric} run=${run} ${metric_suffix}" "$log")"
+    compact_count="$(grep -aEc "RTBENCH_NS metric=${metric} run=${run} ${ns_metric_suffix}" "$log")"
+    if [ "$((verbose_count + compact_count))" -ge 1 ]; then
+        echo 1
+    else
+        echo 0
+    fi
+}
 
 if [ "$(grep -aEc "$begin_pattern" "$log")" -ne 1 ]; then
     echo "missing or duplicate benchmark suite begin marker" >&2
@@ -104,33 +118,26 @@ fi
 
 required_runs=$( [ "$rtos" = zephyr ] && echo 1 || echo '1 2 3' )
 for run in $required_runs; do
-    if [ "$(grep -aEc "RTBENCH metric=timer_jitter run=${run} ${metric_suffix}" "$log")" -ne 1 ]; then
+    if [ "$(metric_record_count timer_jitter "$run")" -ne 1 ]; then
         echo "timer jitter run ${run} is missing or incomplete" >&2
         exit 1
     fi
-    if [ "$(grep -aEc "RTBENCH metric=callback_exec run=${run} ${metric_suffix}" "$log")" -ne 1 ]; then
+    if [ "$(metric_record_count callback_exec "$run")" -ne 1 ]; then
         echo "callback execution run ${run} is missing or incomplete" >&2
         exit 1
     fi
 done
 
-if [ "$rtos" = rtthread ]; then
-    metrics='preemption irq irq_to_task irq_disabled_duration mutex_inversion wake_under_load context_switch scheduler_decision sync_sem sync_mutex sync_mailbox irq_handler_exec deadline_miss_under_load'
-else
-    metrics=''
+metrics='preemption irq irq_to_task irq_disabled_duration mutex_inversion wake_under_load context_switch scheduler_decision sync_sem sync_mutex sync_mailbox irq_handler_exec deadline_miss_under_load'
+if [ "$rtos" = zephyr ] || [ "$suite_mode" = full ]; then
+    metrics="$metrics net_event_latency"
 fi
 for metric in $metrics; do
-    if [ "$(grep -aEc "RTBENCH metric=${metric} run=1 ${metric_suffix}" "$log")" -ne 1 ]; then
+    if [ "$(metric_record_count "$metric" 1)" -ne 1 ]; then
         echo "${metric} benchmark is missing or incomplete" >&2
         exit 1
     fi
 done
-
-if [ "$rtos" = rtthread ] && [ "$suite_mode" = full ] &&
-    [ "$(grep -aEc "RTBENCH metric=net_event_latency run=1 ${metric_suffix}" "$log")" -ne 1 ]; then
-    echo "net_event_latency benchmark is missing or incomplete" >&2
-    exit 1
-fi
 
 end_pattern="RTBENCH_END status=PASS( expected=${samples} collected=${samples} missing=0)?[[:space:]]*$"
 if [ "$(grep -aEc "$end_pattern" "$log")" -ne 1 ]; then

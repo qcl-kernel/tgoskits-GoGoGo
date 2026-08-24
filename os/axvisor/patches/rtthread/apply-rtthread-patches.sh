@@ -16,6 +16,9 @@ RTCONFIG="$BSPDIR/rtconfig.h"
 RTBENCH="$(cd "$PATCHDIR/../../guests/rt-benchmark/rtthread" && pwd)"
 TASK3DIR="$(cd "$PATCHDIR/../../guests/task3" && pwd)"
 BENCHMARK_APPDIR="$BSPDIR/applications"
+KCONFIG_FRAGMENT="$TASK3DIR/configs/rtthread.config"
+KCONFIG_SETTER="$TASK3DIR/scripts/set_kconfig.py"
+ROCK4D_BOARD_PATCH="$PATCHDIR/0011-rock4d-board-port.patch"
 
 # shellcheck source=patch_helpers.sh
 source "$PATCHDIR/patch_helpers.sh"
@@ -23,19 +26,24 @@ source "$PATCHDIR/patch_helpers.sh"
 echo "Applying RT-Thread patches for axvisor..."
 
 PATCH_STATE="$RTDIR/.axvisor-rtthread-patch-state"
-PATCH_SET_DIGEST="$({
-    sha256sum \
-    "$PATCHDIR/0000-axvisor-aarch64-port.patch" \
-    "$PATCHDIR/0009-native-qemu-memory-layout.patch" \
-    "$PATCHDIR/0002-lwip-rx-mailbox-recover-notice.patch" \
-    "$PATCHDIR/0003-virtio-net-reclaim-tx-used-ring.patch" \
-    "$PATCHDIR/0004-virtio-net-use-rx-used-ring-head.patch" \
-    "$PATCHDIR/0005-lwip-configurable-udp-recv-mailbox.patch" \
-    "$PATCHDIR/0006-gicv3-use-redistributor-pending-registers.patch" \
-    "$PATCHDIR/0007-gicv3-query-interrupt-enable-state.patch" \
-    "$PATCHDIR/0008-aarch64-gtimer-use-absolute-deadlines.patch" \
-    "$PATCHDIR/0010-virtio-net-benchmark-packet-hook.patch" \
+PATCH_INPUTS=(
+    "$PATCHDIR/0000-axvisor-aarch64-port.patch"
+    "$PATCHDIR/0009-native-qemu-memory-layout.patch"
+    "$PATCHDIR/0002-lwip-rx-mailbox-recover-notice.patch"
+    "$PATCHDIR/0003-virtio-net-reclaim-tx-used-ring.patch"
+    "$PATCHDIR/0004-virtio-net-use-rx-used-ring-head.patch"
+    "$PATCHDIR/0005-lwip-configurable-udp-recv-mailbox.patch"
+    "$PATCHDIR/0006-gicv3-use-redistributor-pending-registers.patch"
+    "$PATCHDIR/0007-gicv3-query-interrupt-enable-state.patch"
+    "$PATCHDIR/0008-aarch64-gtimer-use-absolute-deadlines.patch"
+    "$PATCHDIR/0010-virtio-net-benchmark-packet-hook.patch"
     "$PATCHDIR/0011-virtio-net-rx-dma-cache.patch"
+)
+if [[ "${TGOSKITS_ROCK4D_BOARD_PORT:-0}" == 1 ]]; then
+    PATCH_INPUTS+=("$ROCK4D_BOARD_PATCH")
+fi
+PATCH_SET_DIGEST="$({
+    sha256sum "${PATCH_INPUTS[@]}"
 } | sha256sum | awk '{print $1}')"
 if [[ -f "$PATCH_STATE" ]]; then
     if [[ "$(<"$PATCH_STATE")" != "$PATCH_SET_DIGEST" ]]; then
@@ -157,6 +165,42 @@ apply_patch_exactly "$RTDIR" "$NET_BENCH_HOOK_PATCH" \
 RX_DMA_CACHE_PATCH="$PATCHDIR/0011-virtio-net-rx-dma-cache.patch"
 apply_patch_exactly "$RTDIR" "$RX_DMA_CACHE_PATCH" \
     "the virtio-net RX DMA cache-coherency fix"
+
+if [[ "${TGOSKITS_ROCK4D_BOARD_PORT:-0}" == 1 ]]; then
+    apply_patch_exactly "$RTDIR" "$ROCK4D_BOARD_PATCH" \
+        "the ROCK 4D board port"
+fi
+
+# The board-port SConscript gates the Task123 applications on this symbol.
+# Keep the fragment at the task boundary and apply it before any SCons build,
+# so a standalone patch application has the same contract as xtask.
+if [[ ! -f "$BSPDIR/.config" ]]; then
+    echo "RT-Thread BSP .config is missing: $BSPDIR/.config" >&2
+    exit 1
+fi
+python3 "$KCONFIG_SETTER" "$BSPDIR/.config" --fragment "$KCONFIG_FRAGMENT"
+grep -Fx 'CONFIG_RT_USING_TASK123_SERVER=y' "$BSPDIR/.config" >/dev/null
+echo "Enabled CONFIG_RT_USING_TASK123_SERVER in $BSPDIR/.config"
+
+# SCons selects application sources from rtconfig.h, not directly from the
+# Kconfig .config file.  The pinned BSP header also carries compatibility
+# definitions (for example NETDEV_IPV6=0) that the generic RT-Thread header
+# generator treats differently, so update only the task123 gate here.
+if ! grep -Fx '#define RT_USING_TASK123_SERVER' "$RTCONFIG" >/dev/null; then
+    printf '\n/* Task123 application groups enabled by the xtask pipeline. */\n' >>"$RTCONFIG"
+    printf '#define RT_USING_TASK123_SERVER\n' >>"$RTCONFIG"
+fi
+grep -Fx '#define RT_USING_TASK123_SERVER' "$RTCONFIG" >/dev/null
+echo "Synchronized RT_USING_TASK123_SERVER in rtconfig.h"
+
+# RTBench and the network services print from multiple RT-Thread workers.
+# Serialize complete formatted records so the shared board UART cannot merge
+# fields from concurrent callers.
+if ! grep -Fx '#define RT_USING_THREADSAFE_PRINTF 1' "$RTCONFIG" >/dev/null; then
+    printf '#define RT_USING_THREADSAFE_PRINTF 1\n' >>"$RTCONFIG"
+fi
+grep -Fx '#define RT_USING_THREADSAFE_PRINTF 1' "$RTCONFIG" >/dev/null
+echo "Synchronized RT_USING_THREADSAFE_PRINTF in rtconfig.h"
 
 if [[ "$TGOSKITS_SKIP_PATCH_APPLICATION" == 0 ]]; then
     printf '%s\n' "$PATCH_SET_DIGEST" >"$PATCH_STATE"

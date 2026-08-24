@@ -20,6 +20,10 @@ TASK3_COMMON="$ROOT/os/axvisor/guests/task3/src/common"
 [[ -f "$NETWORK_ENV" ]] ||
     { echo "FAIL: shared download proxy environment is missing" >&2; exit 1; }
 [[ -f "$APP/prj.conf" ]] || { echo "FAIL: Zephyr Task123 app is missing" >&2; exit 1; }
+[[ -f "$APP/boards/arm64/axvisor_rock4d/axvisor_rock4d.dts" ]] ||
+    { echo "FAIL: ROCK 4D Zephyr board DTS is missing" >&2; exit 1; }
+[[ -f "$APP/boards/arm64/axvisor_rock4d/board.yml" ]] ||
+    { echo "FAIL: ROCK 4D Zephyr board metadata is missing" >&2; exit 1; }
 [[ -f "$RTIPC_COMMON/rtipc_echo_responder.c" ]] ||
     { echo "FAIL: RT-IPC action pump must be platform independent" >&2; exit 1; }
 [[ -f "$RTIPC_COMMON/rtipc_peer.c" ]] ||
@@ -55,6 +59,15 @@ grep -Fq 'RTBENCH_MAX_SAMPLES 299999U' "$APP/src/main.c" ||
     { echo "FAIL: Zephyr stability storage must support the 300s contract" >&2; exit 1; }
 grep -Fq 'SHELL_CMD_REGISTER(benchmark' "$APP/src/main.c" ||
     { echo "FAIL: Zephyr must accept the runner benchmark command" >&2; exit 1; }
+grep -Fq 'RTBENCH_AUTO samples=10' "$APP/src/main.c" ||
+    { echo "FAIL: Zephyr Task123 must run the board benchmark without shell routing" >&2; exit 1; }
+grep -Fq '#if defined(CONFIG_BOARD_AXVISOR_ROCK4D)' "$APP/src/main.c" ||
+    { echo "FAIL: Zephyr automatic benchmark must be restricted to ROCK 4D" >&2; exit 1; }
+grep -Fq 'reason=guest_pmu_unavailable' "$APP/src/main.c" ||
+    { echo "FAIL: Zephyr benchmark must report unavailable guest PMU support" >&2; exit 1; }
+if grep -Fq 'mrs %0, pmcr_el0' "$APP/src/main.c"; then
+    { echo "FAIL: Zephyr benchmark must not access unvirtualized PMU registers" >&2; exit 1; }
+fi
 grep -Fqx 'CONFIG_NET_SOCKETS=y' "$APP/prj.conf" ||
     { echo "FAIL: Zephyr guest needs native UDP sockets" >&2; exit 1; }
 grep -Fqx 'CONFIG_NET_QEMU_ETHERNET=y' "$APP/prj.conf" ||
@@ -74,8 +87,14 @@ grep -Fq 'zephyr.bin.meta.json' "$BUILD" ||
     { echo "FAIL: Zephyr builder does not publish image metadata" >&2; exit 1; }
 grep -Fq -- '--input-digest' "$BUILD" ||
     { echo "FAIL: Zephyr builder does not expose input digest mode" >&2; exit 1; }
+grep -Fq 'rock-4d)' "$BUILD" ||
+    { echo "FAIL: Zephyr builder does not expose the ROCK 4D board" >&2; exit 1; }
 grep -Fq 'zephyr.bin.inputs.sha256' "$BUILD" ||
     { echo "FAIL: Zephyr builder does not publish input digest metadata" >&2; exit 1; }
+grep -Fq 'build_cache_matches_board' "$BUILD" ||
+    { echo "FAIL: Zephyr builder does not reject stale cross-board CMake caches" >&2; exit 1; }
+grep -Fq -- '--board-target' "$BUILD" ||
+    { echo "FAIL: Zephyr builder does not validate the cached image board target" >&2; exit 1; }
 grep -Fq 'flock' "$BUILD" ||
     { echo "FAIL: Zephyr image cache publication is not serialized" >&2; exit 1; }
 grep -Fq 'zephyr_image_metadata.py" check' "$BUILD" ||
@@ -86,6 +105,10 @@ grep -Fq 'zephyr.bin.inputs.sha256' "$RUNNER" ||
     { echo "FAIL: Task123 runner does not validate the Zephyr input digest" >&2; exit 1; }
 grep -Fq 'ZEPHYR_IMAGE_METADATA_TOOL" check' "$RUNNER" ||
     { echo "FAIL: Task123 runner does not authenticate cached Zephyr image bytes" >&2; exit 1; }
+grep -Fq -- '--board-target' "$RUNNER" ||
+    { echo "FAIL: Task123 runner does not validate the cached image board target" >&2; exit 1; }
+grep -Fq -- '--board-target' "$ZEPHYR_METADATA" ||
+    { echo "FAIL: Zephyr metadata validator does not support board target checks" >&2; exit 1; }
 grep -Fq 'network_env.sh' "$BUILD" ||
     { echo "FAIL: Zephyr builder does not load the shared proxy environment" >&2; exit 1; }
 grep -Fq 'http://172.16.0.254:7897' "$NETWORK_ENV" ||
@@ -94,6 +117,8 @@ grep -Fq 'NO_PROXY' "$NETWORK_ENV" ||
     { echo "FAIL: shared proxy environment must preserve local-address traffic" >&2; exit 1; }
 grep -Fq 'Zephyr DTB must stay in RAM' "$SCRIPT_DIR/generate_zephyr_vmconfig.sh" ||
     { echo "FAIL: Zephyr VM generator lacks RAM/overlap validation" >&2; exit 1; }
+grep -Fq 'print_memory_image_rerun_paths' "$ROOT/os/axvisor/build.rs" ||
+    { echo "FAIL: AxVisor build must invalidate static guest images when bytes change" >&2; exit 1; }
 
 vmconfig_fixture="$(mktemp -d "$ROOT/tmp/test-zephyr-vmconfig.XXXXXX")"
 trap 'rm -rf -- "$vmconfig_fixture"' EXIT
@@ -127,6 +152,16 @@ digest_after="$(ZEPHYR_TASK123_APP="$digest_fixture" "$BUILD" --input-digest)"
     { echo "FAIL: Zephyr input digest is not a SHA-256 value" >&2; exit 1; }
 [[ "$digest_before" != "$digest_after" ]] ||
     { echo "FAIL: Zephyr application changes do not invalidate the image digest" >&2; exit 1; }
+qemu_digest="$($BUILD --board qemu --input-digest)"
+rock4d_digest="$($BUILD --board rock-4d --input-digest)"
+[[ "$qemu_digest" != "$rock4d_digest" ]] ||
+    { echo "FAIL: QEMU and ROCK 4D Zephyr input digests must differ" >&2; exit 1; }
+for address in 0x2a701000 0x2a702000 0x2ad40000 0xa000000; do
+    grep -Fqi "$address" "$APP/boards/arm64/axvisor_rock4d/axvisor_rock4d.dts" ||
+        { echo "FAIL: ROCK 4D DTS is missing address $address" >&2; exit 1; }
+done
+grep -Fq 'GIC_SPI 16 IRQ_TYPE_LEVEL' "$APP/boards/arm64/axvisor_rock4d/axvisor_rock4d.dts" ||
+    { echo "FAIL: ROCK 4D virtio SPI must be level-triggered" >&2; exit 1; }
 
 publication_root="$vmconfig_fixture/publication-cache"
 publication_output="$publication_root/current-image"
@@ -139,7 +174,7 @@ make_generation_fixture() {
     mkdir -p -- "$fixture"
     printf '%s\n' "$payload" > "$fixture/zephyr.bin"
     printf '%s\n' \
-        '{"entry_point":1073746180,"zephyr_version":"fixture","zephyr_commit":"fixture","zephyr_sdk_version":"fixture","board":"qemu_cortex_a53"}' \
+        '{"entry_point":1073746180,"zephyr_version":"fixture","zephyr_commit":"fixture","zephyr_sdk_version":"fixture","board":"qemu_cortex_a53","board_target":"qemu_cortex_a53/qemu_cortex_a53"}' \
         > "$fixture/build-meta.json"
     "$ZEPHYR_METADATA" write \
         --image "$fixture/zephyr.bin" \
@@ -217,5 +252,20 @@ cache_is_current "$current_digest" ||
 "$ZEPHYR_METADATA" check \
     --image "$publication_output/current/zephyr.bin" \
     --metadata "$publication_output/current/zephyr.bin.meta.json" >/dev/null
+
+stale_build="$vmconfig_fixture/stale-build"
+mkdir -p -- "$stale_build/zephyr"
+printf '%s\n' 'CONFIG_BOARD="axvisor_rock4d"' 'CONFIG_BOARD_TARGET="axvisor_rock4d/qemu_cortex_a53"' > "$stale_build/zephyr/.config"
+if ZEPHYR_TASK123_BUILD_LIB_ONLY=1 bash -c '
+    set -euo pipefail
+    source "$1"
+    BUILD="$2"
+    BOARD_NAME=qemu_cortex_a53
+    BOARD_TARGET=qemu_cortex_a53/qemu_cortex_a53
+    build_cache_matches_board
+' bash "$BUILD" "$stale_build"; then
+    echo "FAIL: stale ROCK 4D Zephyr cache was accepted for QEMU" >&2
+    exit 1
+fi
 
 echo "PASS: Zephyr pinned source and real-interrupt build contract"

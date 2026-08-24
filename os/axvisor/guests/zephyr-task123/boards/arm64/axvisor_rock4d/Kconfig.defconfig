@@ -1,0 +1,9 @@
+if BOARD_AXVISOR_ROCK4D
+
+config BUILD_OUTPUT_BIN
+	default y
+
+config MAX_THREAD_BYTES
+	default 3
+
+endif

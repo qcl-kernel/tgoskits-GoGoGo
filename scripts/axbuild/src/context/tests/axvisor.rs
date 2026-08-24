@@ -339,6 +339,7 @@ vm_configs = ["os/axvisor/configs/vms/qemu/x86_64/arceos-smp1.toml"]
 arch = "x86_64"
 target = "x86_64-unknown-none"
 vmconfigs = ["os/axvisor/configs/vms/qemu/x86_64/linux-smp1.toml"]
+smp = 4
 "#,
     )
     .unwrap();
@@ -361,6 +362,8 @@ vmconfigs = ["os/axvisor/configs/vms/qemu/x86_64/linux-smp1.toml"]
     .unwrap();
 
     assert_eq!(request.build_info_path, explicit);
+    assert_eq!(request.smp, None);
     assert!(request.vmconfigs.is_empty());
+    assert_eq!(snapshot.smp, None);
     assert!(snapshot.vmconfigs.is_empty());
 }

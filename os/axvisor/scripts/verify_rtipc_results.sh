@@ -110,12 +110,12 @@ for payload_size in 64 256 1024; do
         waiting { print }
     ' "$log")
 
+    # Serial output from multiple guests may splice the final summary onto a
+    # progress line. Keep the last sent/recv record in the payload section;
+    # the final record is the authenticated per-payload result.
     summary=$(printf '%s\n' "$section" | awk '
-        $0 !~ /\[progress\]/ &&
-        $0 ~ /sent=[0-9]+[[:space:]]+recv=[0-9]+/ {
-            print
-            exit
-        }
+        $0 ~ /sent=[0-9]+[[:space:]]+recv=[0-9]+/ { last = $0 }
+        END { print last }
     ')
 
     if [ -z "$summary" ]; then

@@ -6,13 +6,50 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
-use clap::{Args, ValueEnum};
+use anyhow::Context;
+use clap::{Args, Subcommand, ValueEnum};
 use serde_json::{Map, Value, json};
 
 use super::Axvisor;
 
+#[derive(Subcommand)]
+pub enum Task123Command {
+    /// Build and run one Task123 combination on a physical board through U-Boot.
+    Uboot(Task123UbootArgs),
+}
+
+#[derive(Args)]
+pub struct Task123UbootArgs {
+    /// RTOS guest paired with the application guest.
+    #[arg(long, value_enum)]
+    pub rtos: Task123Rtos,
+
+    /// Application guest paired with the RTOS guest.
+    #[arg(long, value_enum)]
+    pub app_guest: Task123AppGuest,
+
+    /// AxVisor board build configuration for this combination.
+    #[arg(long)]
+    pub config: PathBuf,
+
+    /// Local U-Boot serial and reset configuration.
+    #[arg(long)]
+    pub uboot_config: PathBuf,
+
+    /// Run the physical-board realtime benchmark before checking the guest marker.
+    #[arg(long)]
+    pub realtime_suite: bool,
+
+    /// Number of realtime samples requested by the guest benchmark.
+    #[arg(long)]
+    pub rtbench_samples: Option<u32>,
+}
+
 #[derive(Args, Default)]
 pub struct Task123Args {
+    #[command(subcommand)]
+    pub command: Option<Task123Command>,
+
     /// Run the five-minute diagnostic comparison
     #[arg(long, conflicts_with_all = ["full", "realtime_suite"])]
     pub quick: bool,
@@ -272,6 +309,9 @@ impl Task123Args {
 }
 
 pub(super) async fn run(axvisor: &mut Axvisor, args: Task123Args) -> anyhow::Result<()> {
+    if let Some(Task123Command::Uboot(uboot)) = args.command {
+        return run_uboot(axvisor, uboot).await;
+    }
     anyhow::ensure!(
         args.matrix.is_none() || (args.rtos.is_none() && args.app_guest.is_none()),
         "--matrix all cannot be combined with --rtos or --app-guest"
@@ -307,6 +347,92 @@ pub(super) async fn run(axvisor: &mut Axvisor, args: Task123Args) -> anyhow::Res
         write_matrix_report(&output, &args)?;
     }
     Ok(())
+}
+
+async fn run_uboot(axvisor: &mut Axvisor, args: Task123UbootArgs) -> anyhow::Result<()> {
+    anyhow::ensure!(
+        args.realtime_suite || args.rtbench_samples.is_none(),
+        "--rtbench-samples requires --realtime-suite"
+    );
+    anyhow::ensure!(
+        args.rtbench_samples
+            .is_none_or(|samples| (1..=100_000).contains(&samples)),
+        "--rtbench-samples must be an integer from 1 to 100000"
+    );
+    let workspace_root = axvisor.app.workspace_root().to_path_buf();
+    let config = resolve_workspace_path(&workspace_root, &args.config);
+    let source_uboot = resolve_workspace_path(&workspace_root, &args.uboot_config);
+    anyhow::ensure!(
+        config.is_file(),
+        "AxVisor config does not exist: {}",
+        config.display()
+    );
+    anyhow::ensure!(
+        source_uboot.is_file(),
+        "U-Boot config does not exist: {}",
+        source_uboot.display()
+    );
+
+    let generated_uboot = workspace_root.join(format!(
+        "tmp/task123-uboot-{}-{}-{}.toml",
+        args.rtos.as_str(),
+        args.app_guest.as_str(),
+        std::process::id()
+    ));
+    if let Some(parent) = generated_uboot.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    let guest_helper = workspace_root.join("os/axvisor/scripts/prepare_task123_uboot_guest.sh");
+    let guest_status = Command::new(&guest_helper)
+        .arg("--app-guest")
+        .arg(args.app_guest.as_str())
+        .status()
+        .with_context(|| format!("failed to execute {}", guest_helper.display()))?;
+    anyhow::ensure!(
+        guest_status.success(),
+        "Task123 guest artifact preparation failed: {guest_status}"
+    );
+    let helper = workspace_root.join("os/axvisor/scripts/prepare_task123_uboot_config.py");
+    let status = Command::new("python3")
+        .arg(&helper)
+        .arg("--rtos")
+        .arg(args.rtos.as_str())
+        .arg("--app-guest")
+        .arg(args.app_guest.as_str())
+        .args(
+            args.rtbench_samples
+                .map(|samples| ["--rtbench-samples".to_string(), samples.to_string()])
+                .unwrap_or_default(),
+        )
+        .arg(&source_uboot)
+        .arg(&generated_uboot)
+        .status()
+        .with_context(|| format!("failed to execute {}", helper.display()))?;
+    anyhow::ensure!(
+        status.success(),
+        "Task123 U-Boot config preparation failed: {status}"
+    );
+
+    println!(
+        "TASK123_UBOOT combination={}+/{} config={} uboot_config={}",
+        args.rtos.as_str(),
+        args.app_guest.as_str(),
+        config.display(),
+        generated_uboot.display()
+    );
+    let result = axvisor
+        .run_task123_uboot(config, generated_uboot.clone())
+        .await;
+    let _ = fs::remove_file(&generated_uboot);
+    result
+}
+
+fn resolve_workspace_path(workspace_root: &Path, path: &Path) -> PathBuf {
+    if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        workspace_root.join(path)
+    }
 }
 
 fn default_output_path(workspace_root: &Path) -> PathBuf {

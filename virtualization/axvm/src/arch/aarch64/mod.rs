@@ -269,6 +269,11 @@ impl ArchOps for Aarch64Arch {
         if !vm.running() {
             return;
         }
+        // Device polling is owned by vCPU0. Keep the VM-level request from
+        // being consumed by a secondary vCPU that cannot perform the poll.
+        if vcpu.id() == 0 && runtime.take_device_poll_request() {
+            return;
+        }
         match vcpu.get_arch_vcpu().has_pending_interrupt() {
             Ok(true) => return,
             Ok(false) => {}

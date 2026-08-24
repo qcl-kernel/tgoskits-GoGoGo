@@ -140,6 +140,8 @@ grep -Fq '/usr/bin/rtbench-net-probe' "$GUEST_INIT" ||
     fail "StarryOS init must launch the RTBench network probe"
 grep -Fq 'usr/bin/rtbench-net-probe' "$ROOTFS_BUILDER" ||
     fail "StarryOS rootfs must include the RTBench network probe"
+grep -Fq 'finish_success_keepalive' "$GUEST_INIT" ||
+    fail "StarryOS init must keep the final marker alive for U-Boot evidence"
 grep -Fq 'STARRY_EMBEDDED_ROOTFS=' "$GUEST_BUILDER" ||
     fail "StarryOS build must pass the generated CPIO explicitly"
 grep -Fq -- '--reproducible' "$ROOTFS_BUILDER" ||

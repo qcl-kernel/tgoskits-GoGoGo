@@ -7,13 +7,27 @@ LINUX_CONFIG="$ROOT/os/axvisor/configs/vms/qemu/aarch64/linux-net.toml"
 STARRYOS_CONFIG="$ROOT/os/axvisor/configs/vms/qemu/aarch64/starryos-task123.toml"
 RTTHREAD_CONFIG="$ROOT/os/axvisor/configs/vms/qemu/aarch64/rtthread-net.toml"
 ZEPHYR_CONFIG="$ROOT/os/axvisor/configs/vms/qemu/aarch64/zephyr-task123.toml"
+ROCK4D_RTTHREAD_CONFIG="$ROOT/os/axvisor/configs/vms/rock-4d/rtthread-auto.toml"
+ROCK4D_ZEPHYR_CONFIG="$ROOT/os/axvisor/configs/vms/rock-4d/zephyr-task123.toml"
+
+if grep -Eq '^kernel_path[[:space:]]*=[[:space:]]*"/home/|rt-thread-5\.2\.2-native' \
+    "$ROCK4D_RTTHREAD_CONFIG"; then
+    echo "FAIL: ROCK 4D RT-Thread VM config contains a stale developer-local image path" >&2
+    exit 1
+fi
 
 cargo run -q -p axvmconfig -- check --config-path "$LINUX_CONFIG"
 cargo run -q -p axvmconfig -- check --config-path "$STARRYOS_CONFIG"
 cargo run -q -p axvmconfig -- check --config-path "$RTTHREAD_CONFIG"
-cargo run -q -p axvmconfig -- check --config-path "$ZEPHYR_CONFIG"
 
-python3 - "$LINUX_CONFIG" "$STARRYOS_CONFIG" "$RTTHREAD_CONFIG" "$ZEPHYR_CONFIG" <<'PY'
+if grep -q '^disabled[[:space:]]*=' "$RTTHREAD_CONFIG"; then
+    echo "FAIL: RT-Thread virtual network template must not disable host MMIO nodes" >&2
+    exit 1
+fi
+cargo run -q -p axvmconfig -- check --config-path "$ZEPHYR_CONFIG"
+cargo run -q -p axvmconfig -- check --config-path "$ROCK4D_ZEPHYR_CONFIG"
+
+python3 - "$LINUX_CONFIG" "$STARRYOS_CONFIG" "$RTTHREAD_CONFIG" "$ZEPHYR_CONFIG" "$ROCK4D_ZEPHYR_CONFIG" <<'PY'
 import sys
 import tomllib
 from pathlib import Path
@@ -40,6 +54,7 @@ linux = load(sys.argv[1])
 starryos = load(sys.argv[2])
 rtthread = load(sys.argv[3])
 zephyr = load(sys.argv[4])
+rock4d_zephyr = load(sys.argv[5])
 
 linux_base = linux["base"]
 starryos_base = starryos["base"]
@@ -73,6 +88,13 @@ require(rtthread_base.get("phys_cpu_ids"), [2], "RT-Thread initial pCPU placemen
 require(rtthread_base.get("phys_cpu_sets"), [0b0100], "RT-Thread allowed pCPU mask")
 require(rtthread_base.get("host_vcpu_idle_policy"), "busy", "RT-Thread idle policy")
 require(zephyr_base.get("host_vcpu_idle_policy"), "halt", "Zephyr idle policy")
+rock4d_zephyr_base = rock4d_zephyr["base"]
+require(rock4d_zephyr_base.get("host_timer_policy"), "periodic", "ROCK 4D Zephyr timer policy")
+require(
+    rock4d_zephyr_base.get("host_vcpu_idle_policy"),
+    "busy",
+    "ROCK 4D Zephyr idle policy",
+)
 require(
     rtthread["kernel"].get("memory_regions"),
     [[0x40000000, 0x40000000, 0x7, 0]],

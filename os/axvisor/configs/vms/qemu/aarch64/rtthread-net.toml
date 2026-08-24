@@ -22,44 +22,6 @@ memory_regions = [
 
 [devices]
 passthrough = []
-disabled = [
-  { path = "/virtio_mmio@a000000" },
-  { path = "/virtio_mmio@a000200" },
-  { path = "/virtio_mmio@a000400" },
-  { path = "/virtio_mmio@a000600" },
-  { path = "/virtio_mmio@a000800" },
-  { path = "/virtio_mmio@a000a00" },
-  { path = "/virtio_mmio@a000c00" },
-  { path = "/virtio_mmio@a000e00" },
-  { path = "/virtio_mmio@a001000" },
-  { path = "/virtio_mmio@a001200" },
-  { path = "/virtio_mmio@a001400" },
-  { path = "/virtio_mmio@a001600" },
-  { path = "/virtio_mmio@a001800" },
-  { path = "/virtio_mmio@a001a00" },
-  { path = "/virtio_mmio@a001c00" },
-  { path = "/virtio_mmio@a001e00" },
-  { path = "/virtio_mmio@a002000" },
-  { path = "/virtio_mmio@a002200" },
-  { path = "/virtio_mmio@a002400" },
-  { path = "/virtio_mmio@a002600" },
-  { path = "/virtio_mmio@a002800" },
-  { path = "/virtio_mmio@a002a00" },
-  { path = "/virtio_mmio@a002c00" },
-  { path = "/virtio_mmio@a002e00" },
-  { path = "/virtio_mmio@a003000" },
-  { path = "/virtio_mmio@a003200" },
-  { path = "/virtio_mmio@a003400" },
-  { path = "/virtio_mmio@a003600" },
-  { path = "/virtio_mmio@a003800" },
-  { path = "/virtio_mmio@a003a00" },
-  { path = "/virtio_mmio@a003c00" },
-  { path = "/virtio_mmio@a003e00" },
-  { path = "/pcie@10000000" },
-  { path = "/pl061@9030000" },
-  { path = "/pl031@9010000" },
-  { path = "/gpio-key-poweroff" },
-]
 
 [[devices.virtual]]
 id = "net0"

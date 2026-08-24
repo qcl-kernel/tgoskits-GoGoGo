@@ -39,6 +39,8 @@ def write(args: argparse.Namespace) -> None:
         "virtio_net": True,
         "real_spi_interrupt": True,
     }
+    if isinstance(source.get("board_target"), str):
+        record["board_target"] = source["board_target"]
     metadata.write_text(json.dumps(record, indent=2) + "\n", encoding="utf-8")
     print(f"ZEPHYR_IMAGE_METADATA_WRITTEN {metadata}")
 
@@ -66,6 +68,11 @@ def check(args: argparse.Namespace) -> None:
     for key in ("zephyr_version", "zephyr_commit", "zephyr_sdk_version", "board"):
         if not isinstance(record.get(key), str) or not record[key]:
             raise SystemExit(f"Zephyr metadata field is invalid: {key}")
+    if args.board_target is not None and record.get("board_target") != args.board_target:
+        raise SystemExit(
+            "Zephyr image board target mismatch: "
+            f"expected {args.board_target}, got {record.get('board_target')}"
+        )
     if record.get("virtio_net") is not True or record.get("real_spi_interrupt") is not True:
         raise SystemExit("Zephyr image does not record the required real virtio IRQ build")
     print(f"ZEPHYR_IMAGE_METADATA_OK {image}")
@@ -82,6 +89,7 @@ def parser() -> argparse.ArgumentParser:
     checker = subcommands.add_parser("check")
     checker.add_argument("--image", required=True)
     checker.add_argument("--metadata", required=True)
+    checker.add_argument("--board-target")
     checker.set_defaults(function=check)
     return command
 
@@ -93,4 +101,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

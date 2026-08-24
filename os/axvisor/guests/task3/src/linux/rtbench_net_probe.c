@@ -15,8 +15,34 @@
 #define RTBENCH_NET_MAGIC UINT32_C(0x5254424e)
 #define RTBENCH_NET_READY UINT32_C(0xffffffff)
 #define RTBENCH_NET_PROBE_READY UINT32_C(0xfffffffe)
+#define RTBENCH_NET_DONE UINT32_C(0xfffffffd)
 #define RTBENCH_NET_PROBE_TIMEOUT_USEC 500000U
 #define RTBENCH_NET_PROBE_ATTEMPTS 8U
+
+static int wait_for_completion(int socket_fd)
+{
+    for (unsigned int attempt = 0; attempt < 12U; ++attempt) {
+        uint32_t completion[2];
+        ssize_t received;
+
+        do {
+            received = recv(socket_fd, completion, sizeof(completion), 0);
+        } while (received < 0 && errno == EINTR);
+        if (received == (ssize_t)sizeof(completion) &&
+            ntohl(completion[0]) == RTBENCH_NET_MAGIC &&
+            ntohl(completion[1]) == RTBENCH_NET_DONE) {
+            return 0;
+        }
+        if (received < 0 &&
+            (errno == EAGAIN || errno == EWOULDBLOCK || errno == ETIMEDOUT)) {
+            continue;
+        }
+        if (received < 0) {
+            return -1;
+        }
+    }
+    return -1;
+}
 
 static void usage(const char *program)
 {
@@ -249,7 +275,13 @@ int main(int argc, char **argv)
             }
         }
     }
-    printf("RTBENCH_NET_PROBE_END sent=%lu retries=%lu\n", count, retries);
+    if (wait_for_completion(socket_fd) != 0) {
+        fprintf(stderr, "RTBENCH_NET_PROBE_ERROR completion_timeout\n");
+        close(socket_fd);
+        return 1;
+    }
+    printf("RTBENCH_NET_PROBE_END sent=%lu retries=%lu completion=done\n",
+           count, retries);
     fflush(stdout);
     close(socket_fd);
     return 0;

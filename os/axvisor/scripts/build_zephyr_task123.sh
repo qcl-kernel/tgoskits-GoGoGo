@@ -17,10 +17,24 @@ PYTHON_VENV="$VERSION_ROOT/zephyr-venv-312"
 SDK="$TGOS_SOURCE_CACHE/zephyr-sdk/zephyr-sdk-$ZEPHYR_SDK_VERSION"
 SDK_CURRENT="$TGOS_SOURCE_CACHE/zephyr-sdk/current"
 APP="${ZEPHYR_TASK123_APP:-$ROOT/os/axvisor/guests/zephyr-task123}"
-OUTPUT="${1:-$TGOS_SOURCE_CACHE/zephyr/$ZEPHYR_COMMIT/current-image}"
-BUILD="${ZEPHYR_TASK123_BUILD:-$VERSION_ROOT/build-task123}"
+OUTPUT=""
 JOBS="${ZEPHYR_TASK123_JOBS:-$(getconf _NPROCESSORS_ONLN)}"
 die() { echo "build-zephyr-task123: $*" >&2; exit 1; }
+BOARD="${ZEPHYR_TASK123_BOARD:-qemu}"
+case "$BOARD" in
+    qemu)
+        BOARD_NAME=qemu_cortex_a53
+        BOARD_TARGET=qemu_cortex_a53/qemu_cortex_a53
+        OVERLAY="$APP/virtnet.overlay"
+        ;;
+    rock-4d)
+        BOARD_NAME=axvisor_rock4d
+        BOARD_TARGET=axvisor_rock4d/qemu_cortex_a53
+        OVERLAY="$APP/virtnet.overlay"
+        ;;
+    *) die "unsupported board: $BOARD" ;;
+esac
+BUILD=""
 
 zephyr_generation_is_current() {
     local output=$1
@@ -37,7 +51,20 @@ zephyr_generation_is_current() {
     [[ "$(wc -l < "$digest_file")" -eq 1 ]] || return 1
     "$SCRIPT_DIR/zephyr_image_metadata.py" check \
         --image "$current/zephyr.bin" \
-        --metadata "$current/zephyr.bin.meta.json" >/dev/null
+        --metadata "$current/zephyr.bin.meta.json" \
+        --board-target "$BOARD_TARGET" >/dev/null
+}
+
+build_cache_matches_board() {
+    local config="$BUILD/zephyr/.config"
+    local configured_board
+    local configured_target
+
+    [[ -s "$config" ]] || return 1
+    configured_board="$(sed -n 's/^CONFIG_BOARD="\([^"]*\)"$/\1/p' "$config")"
+    configured_target="$(sed -n 's/^CONFIG_BOARD_TARGET="\([^"]*\)"$/\1/p' "$config")"
+    [[ "$configured_board" == "$BOARD_NAME" &&
+       "$configured_target" == "$BOARD_TARGET" ]]
 }
 
 publish_zephyr_generation() {
@@ -109,6 +136,9 @@ input_digest() {
         input_digest_material_tree rt-ipc-common "$ROOT/os/axvisor/guests/rt-ipc/common"
         input_digest_material_tree task3-common "$ROOT/os/axvisor/guests/task3/src/common"
         printf 'builder-script\n'
+        printf 'board=%s\n' "$BOARD"
+        printf 'overlay=%s\n' "$OVERLAY"
+        sha256sum -- "$OVERLAY"
         builder_digest="$(sha256sum -- "$SCRIPT_DIR/build_zephyr_task123.sh")"
         builder_digest=${builder_digest%% *}
         printf '%s  builder-script\n' "$builder_digest"
@@ -121,10 +151,33 @@ main() {
     local entry
     local build_lock_fd
 
+    if [[ "${1:-}" == "--board" ]]; then
+        [[ "$#" -ge 2 ]] || die "--board requires qemu or rock-4d"
+        BOARD="$2"
+        case "$BOARD" in
+            qemu)
+                BOARD_NAME=qemu_cortex_a53
+                BOARD_TARGET=qemu_cortex_a53/qemu_cortex_a53
+                OVERLAY="$APP/virtnet.overlay"
+                ;;
+            rock-4d)
+                BOARD_NAME=axvisor_rock4d
+                BOARD_TARGET=axvisor_rock4d/qemu_cortex_a53
+                OVERLAY="$APP/virtnet.overlay"
+                ;;
+            *) die "unsupported board: $BOARD" ;;
+        esac
+        shift 2
+    fi
     if [[ "${1:-}" == "--input-digest" ]]; then
         [[ "$#" -eq 1 ]] || die "--input-digest does not accept additional arguments"
         input_digest
         return 0
+    fi
+    BUILD="${ZEPHYR_TASK123_BUILD:-$VERSION_ROOT/build-task123-$BOARD}"
+    OUTPUT="${ZEPHYR_TASK123_OUTPUT:-$TGOS_SOURCE_CACHE/zephyr/$ZEPHYR_COMMIT/current-image}"
+    if [[ "$#" -gt 0 ]]; then
+        OUTPUT="$1"
     fi
     [[ "$#" -le 1 ]] || die "expected at most one output directory"
 
@@ -135,7 +188,14 @@ main() {
     exec {build_lock_fd}>"$VERSION_ROOT/.task123-image-build.lock"
     flock "$build_lock_fd"
     expected_input_digest="$(input_digest)"
-    if zephyr_generation_is_current "$OUTPUT" "$expected_input_digest"; then
+    local force_rebuild=0
+    if [[ -d "$BUILD" ]] && ! build_cache_matches_board; then
+        echo "Zephyr Task123 build cache board mismatch; rebuilding $BUILD"
+        rm -rf -- "$BUILD"
+        force_rebuild=1
+    fi
+    if [[ "$force_rebuild" -eq 0 ]] &&
+       zephyr_generation_is_current "$OUTPUT" "$expected_input_digest"; then
         echo "Zephyr Task123 image cache is current: $OUTPUT/current/zephyr.bin"
         return 0
     fi
@@ -173,9 +233,10 @@ main() {
         -DTOOLCHAIN_ROOT="$SOURCE" \
         -DSYSROOT_DIR="$SDK/aarch64-zephyr-elf" \
         -DTOOLCHAIN_HOME="$SDK/bin" \
-        -DBOARD=qemu_cortex_a53 \
+        -DBOARD="$BOARD_NAME" \
+        -DBOARD_ROOT="$APP" \
         -DBUILD_VERSION="$ZEPHYR_VERSION" \
-        -DDTC_OVERLAY_FILE="$APP/virtnet.overlay" \
+        -DDTC_OVERLAY_FILE="$OVERLAY" \
         -DEXTRA_CFLAGS='-Did_aa64isar2_el1=S3_0_C0_C6_2' \
         -DPython3_EXECUTABLE="$PYTHON_VENV/bin/python" \
         -DPYTHON_EXECUTABLE="$PYTHON_VENV/bin/python" \
@@ -191,14 +252,15 @@ main() {
     [[ "$entry" =~ ^0x[0-9a-fA-F]+$ ]] || die "unable to read Zephyr entry point"
     python3 - \
         "$artifact_staging/zephyr.bin" "$artifact_staging/zephyr.bin.build-meta.json" "$entry" \
-        "$ZEPHYR_VERSION" "$ZEPHYR_COMMIT" "$ZEPHYR_SDK_VERSION" \
+        "$ZEPHYR_VERSION" "$ZEPHYR_COMMIT" "$ZEPHYR_SDK_VERSION" "$BOARD" \
+        "$BOARD_TARGET" \
         "$BUILD/zephyr/zephyr.elf" <<'PY'
 import hashlib
 import json
 import pathlib
 import sys
 
-image, metadata, entry, zephyr, commit, sdk, elf = sys.argv[1:]
+image, metadata, entry, zephyr, commit, sdk, board, board_target, elf = sys.argv[1:]
 payload = pathlib.Path(image).read_bytes()
 record = {
     "schema": 1,
@@ -209,7 +271,8 @@ record = {
     "zephyr_version": zephyr,
     "zephyr_commit": commit,
     "zephyr_sdk_version": sdk,
-    "board": "qemu_cortex_a53",
+    "board": board,
+    "board_target": board_target,
     "virtio_net": True,
     "real_spi_interrupt": True,
 }

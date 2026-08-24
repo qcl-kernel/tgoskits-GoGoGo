@@ -2,7 +2,9 @@ mod config;
 mod features;
 mod load;
 mod metadata;
+mod rtthread;
 mod vm_config;
+mod zephyr;
 
 #[cfg(test)]
 mod tests;
@@ -71,6 +73,16 @@ fn patch_axvisor_cargo_config(
         request.vmconfigs.clone()
     };
     let vmconfigs = vm_config::resolve_vmconfigs(request, &configured_vmconfigs)?;
+    rtthread::inject_prebuild(cargo, request, &vmconfigs)?;
+    let rock4d = request
+        .build_info_path
+        .components()
+        .any(|component| component.as_os_str() == "rock-4d")
+        || config_vmconfigs.iter().any(|path| {
+            path.components()
+                .any(|component| component.as_os_str() == "rock-4d")
+        });
+    zephyr::inject_prebuild(cargo, request, &vmconfigs, rock4d)?;
     if !vmconfigs.is_empty() {
         let joined = std::env::join_paths(&vmconfigs)
             .map_err(|e| anyhow!("failed to join vmconfig paths: {e}"))?;

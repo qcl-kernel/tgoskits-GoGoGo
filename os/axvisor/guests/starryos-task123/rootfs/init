@@ -13,6 +13,15 @@ finish() {
     exit "$status"
 }
 
+finish_success_keepalive() {
+    /bin/busybox sync || true
+    console 'TASK123_STARRY_EXIT status=0'
+    while :; do
+        /bin/busybox sleep 1
+        console 'TASK123_STARRY_EXIT status=0'
+    done
+}
+
 invalid_control() {
     console "TASK123_STARRY_INVALID $1"
     console 'TASK123_STARRY_END status=FAIL'
@@ -154,9 +163,14 @@ main() {
     if [ "$task2_status" -eq 0 ] && [ "$task3_status" -eq 0 ]; then
         console 'TASK123_STARRY_END status=PASS'
         if [ -n "$net_probe_pid" ]; then
-            wait "$net_probe_pid" || true
+            if wait "$net_probe_pid"; then
+                console 'TASK123_STARRY_RTBENCH_END status=PASS'
+            else
+                console 'TASK123_STARRY_RTBENCH_END status=FAIL'
+                finish 1
+            fi
         fi
-        finish 0
+        finish_success_keepalive
     fi
     console 'TASK123_STARRY_END status=FAIL'
     [ "$task2_status" -eq 0 ] || finish "$task2_status"

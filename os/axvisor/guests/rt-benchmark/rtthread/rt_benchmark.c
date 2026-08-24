@@ -37,6 +37,7 @@
 #define RTBENCH_NET_MAGIC UINT32_C(0x5254424e)
 #define RTBENCH_NET_READY UINT32_C(0xffffffff)
 #define RTBENCH_NET_PROBE_READY UINT32_C(0xfffffffe)
+#define RTBENCH_NET_DONE UINT32_C(0xfffffffd)
 #define RTBENCH_NET_TIMEOUT_PER_SAMPLE_MS 15U
 #define RTBENCH_NET_TIMEOUT_MARGIN_MS 30000U
 #define RTBENCH_PMU_INST_RETIRED UINT64_C(0x08)
@@ -85,6 +86,7 @@ struct rtbench_result
 
 static uint64_t rtbench_frequency;
 static rt_bool_t rtbench_pmu_ready;
+static rt_bool_t rtbench_compact_output;
 static inline uint64_t rtbench_read_counter(void);
 static inline uint64_t rtbench_read_cycles(void);
 static inline uint64_t rtbench_read_instructions(void);
@@ -161,7 +163,8 @@ static rt_bool_t rtbench_net_event_probe_sequence(const void *payload,
     memcpy(&wire_sequence, udp + 12U, sizeof(wire_sequence));
     *sequence = ntohl(wire_sequence);
     return *sequence != RTBENCH_NET_READY &&
-           *sequence != RTBENCH_NET_PROBE_READY;
+           *sequence != RTBENCH_NET_PROBE_READY &&
+           *sequence != RTBENCH_NET_DONE;
 }
 
 /* Called by the patched virtio-net ISR. Store the timestamp by sequence so
@@ -476,6 +479,28 @@ static void rtbench_print_result(const char *metric,
                                  unsigned int run,
                                  const struct rtbench_result *result)
 {
+    if (rtbench_compact_output)
+    {
+        for (unsigned int copy = 0; copy < 3; ++copy)
+        {
+            rt_kprintf("RTBENCH_NS metric=%s run=%u expected=%llu collected=%llu "
+                       "missing=%llu p50_ns=%llu p95_ns=%llu p99_ns=%llu "
+                       "p99_9_ns=%llu max_ns=%llu mean_ns=%llu\n",
+                       metric,
+                       run,
+                       (unsigned long long)result->expected,
+                       (unsigned long long)result->collected,
+                       (unsigned long long)result->missing,
+                       (unsigned long long)result->p50_ns,
+                       (unsigned long long)result->p95_ns,
+                       (unsigned long long)result->p99_ns,
+                       (unsigned long long)result->p99_9_ns,
+                       (unsigned long long)result->max_ns,
+                       (unsigned long long)result->mean_ns);
+            rt_thread_mdelay(20);
+        }
+        return;
+    }
     rt_kprintf("RTBENCH metric=%s run=%u expected=%llu collected=%llu missing=%llu p50_ns=%llu p95_ns=%llu p99_ns=%llu p99_9_ns=%llu max_ns=%llu miss_100us=%llu miss_500us=%llu miss_1ms=%llu mean_ns=%llu p50_cycles=%llu p95_cycles=%llu p99_cycles=%llu p99_9_cycles=%llu max_cycles=%llu mean_cycles=%llu p50_instructions=%llu p95_instructions=%llu p99_instructions=%llu p99_9_instructions=%llu max_instructions=%llu mean_instructions=%llu\n",
                metric,
                run,
@@ -503,6 +528,21 @@ static void rtbench_print_result(const char *metric,
                (unsigned long long)result->p99_9_instructions,
                (unsigned long long)result->max_instructions,
                (unsigned long long)result->mean_instructions);
+    rt_thread_mdelay(20);
+    rt_kprintf("RTBENCH_NS metric=%s expected=%llu collected=%llu missing=%llu "
+               "p50_ns=%llu p95_ns=%llu p99_ns=%llu p99_9_ns=%llu "
+               "max_ns=%llu mean_ns=%llu\n",
+               metric,
+               (unsigned long long)result->expected,
+               (unsigned long long)result->collected,
+               (unsigned long long)result->missing,
+               (unsigned long long)result->p50_ns,
+               (unsigned long long)result->p95_ns,
+               (unsigned long long)result->p99_ns,
+               (unsigned long long)result->p99_9_ns,
+               (unsigned long long)result->max_ns,
+               (unsigned long long)result->mean_ns);
+    rt_thread_mdelay(20);
 }
 
 static uint64_t rtbench_parse_bounded(const char *text,
@@ -644,6 +684,28 @@ static void rtbench_net_event_trigger_linux(uint64_t expected)
     {
         context->trigger_send_failures++;
     }
+    closesocket(socket_fd);
+}
+
+static void rtbench_net_event_notify_linux(void)
+{
+    struct sockaddr_in peer;
+    uint32_t payload[2];
+    int socket_fd;
+
+    socket_fd = socket(AF_INET, SOCK_DGRAM, 0);
+    if (socket_fd < 0)
+    {
+        return;
+    }
+    memset(&peer, 0, sizeof(peer));
+    peer.sin_family = AF_INET;
+    peer.sin_port = htons(RTBENCH_NET_TRIGGER_PORT);
+    inet_aton("192.168.77.11", &peer.sin_addr);
+    payload[0] = htonl(RTBENCH_NET_MAGIC);
+    payload[1] = htonl(RTBENCH_NET_DONE);
+    (void)sendto(socket_fd, payload, sizeof(payload), 0,
+                 (struct sockaddr *)&peer, sizeof(peer));
     closesocket(socket_fd);
 }
 
@@ -831,6 +893,8 @@ static int rtbench_run_net_event_latency(uint64_t expected)
                context->trigger_attempts,
                context->trigger_socket_failures,
                context->trigger_send_failures);
+    /* Linux must keep its VM alive until this result has been emitted. */
+    rtbench_net_event_notify_linux();
     rt_free(seen_sequences);
     rt_free(samples);
     rt_free(irq_valid);
@@ -2456,6 +2520,7 @@ static int rtbench_run_suite_metrics(uint64_t samples, rt_bool_t include_network
         return -RT_ERROR;
     }
 
+    rtbench_compact_output = RT_TRUE;
     rt_kprintf("RTBENCH_BEGIN samples=%llu frequency=%llu pmu_event=0x%llx\n",
                (unsigned long long)samples,
                (unsigned long long)rtbench_frequency,
@@ -2525,6 +2590,7 @@ static int rtbench_run_suite_metrics(uint64_t samples, rt_bool_t include_network
         status = -RT_ERROR;
     }
     rt_kprintf("RTBENCH_END status=%s\n", status == RT_EOK ? "PASS" : "FAIL");
+    rtbench_compact_output = RT_FALSE;
     return status;
 }
 
