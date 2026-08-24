@@ -15,6 +15,34 @@
 #define RTBENCH_NET_MAGIC UINT32_C(0x5254424e)
 #define RTBENCH_NET_READY UINT32_C(0xffffffff)
 #define RTBENCH_NET_PROBE_READY UINT32_C(0xfffffffe)
+#define RTBENCH_NET_DONE UINT32_C(0xfffffffd)
+#define RTBENCH_NET_PROBE_TIMEOUT_USEC 500000U
+#define RTBENCH_NET_PROBE_ATTEMPTS 8U
+
+static int wait_for_completion(int socket_fd)
+{
+    for (unsigned int attempt = 0; attempt < 12U; ++attempt) {
+        uint32_t completion[2];
+        ssize_t received;
+
+        do {
+            received = recv(socket_fd, completion, sizeof(completion), 0);
+        } while (received < 0 && errno == EINTR);
+        if (received == (ssize_t)sizeof(completion) &&
+            ntohl(completion[0]) == RTBENCH_NET_MAGIC &&
+            ntohl(completion[1]) == RTBENCH_NET_DONE) {
+            return 0;
+        }
+        if (received < 0 &&
+            (errno == EAGAIN || errno == EWOULDBLOCK || errno == ETIMEDOUT)) {
+            continue;
+        }
+        if (received < 0) {
+            return -1;
+        }
+    }
+    return -1;
+}
 
 static void usage(const char *program)
 {
@@ -52,7 +80,8 @@ static int wait_for_trigger(int socket_fd,
         }
         if (received < 0 &&
             (errno == EAGAIN || errno == EWOULDBLOCK ||
-             errno == ETIMEDOUT)) {
+             errno == ETIMEDOUT || errno == ECONNREFUSED ||
+             errno == ENETUNREACH || errno == EHOSTUNREACH)) {
             uint32_t probe_ready[2] = {
                 htonl(RTBENCH_NET_MAGIC),
                 htonl(RTBENCH_NET_PROBE_READY),
@@ -82,7 +111,7 @@ int main(int argc, char **argv)
     struct sockaddr_in target_address;
     struct timeval trigger_timeout = {
         .tv_sec = 0,
-        .tv_usec = 100000,
+        .tv_usec = RTBENCH_NET_PROBE_TIMEOUT_USEC,
     };
     int socket_fd;
     int index;
@@ -178,7 +207,7 @@ int main(int argc, char **argv)
     {
         struct timeval timeout = {
             .tv_sec = 0,
-            .tv_usec = 100000,
+            .tv_usec = RTBENCH_NET_PROBE_TIMEOUT_USEC,
         };
         if (setsockopt(socket_fd, SOL_SOCKET, SO_RCVTIMEO, &timeout,
                        sizeof(timeout)) != 0) {
@@ -194,11 +223,9 @@ int main(int argc, char **argv)
         };
         int acknowledged = 0;
 
-        for (unsigned int attempt = 0; attempt < 4 && !acknowledged;
+        for (unsigned int attempt = 0;
+             attempt < RTBENCH_NET_PROBE_ATTEMPTS && !acknowledged;
              ++attempt) {
-            uint32_t ack[2];
-            ssize_t received;
-
             if (sendto(socket_fd, payload, sizeof(payload), 0,
                        (struct sockaddr *)&target_address,
                        sizeof(target_address)) != (ssize_t)sizeof(payload)) {
@@ -206,17 +233,31 @@ int main(int argc, char **argv)
                 close(socket_fd);
                 return 1;
             }
-            do {
-                received = recv(socket_fd, ack, sizeof(ack), 0);
-            } while (received < 0 && errno == EINTR);
-            if (received == (ssize_t)sizeof(ack) &&
-                ntohl(ack[0]) == RTBENCH_NET_MAGIC &&
-                ntohl(ack[1]) == (uint32_t)sequence) {
-                acknowledged = 1;
-            } else if (received < 0 &&
-                       (errno == EAGAIN || errno == EWOULDBLOCK ||
-                        errno == ETIMEDOUT)) {
-                retries++;
+
+            for (;;) {
+                uint32_t ack[2];
+                ssize_t received;
+
+                do {
+                    received = recv(socket_fd, ack, sizeof(ack), 0);
+                } while (received < 0 && errno == EINTR);
+                if (received == (ssize_t)sizeof(ack) &&
+                    ntohl(ack[0]) == RTBENCH_NET_MAGIC &&
+                    ntohl(ack[1]) == (uint32_t)sequence) {
+                    acknowledged = 1;
+                    break;
+                }
+                if (received < 0 &&
+                    (errno == EAGAIN || errno == EWOULDBLOCK ||
+                     errno == ETIMEDOUT)) {
+                    retries++;
+                    break;
+                }
+                if (received < 0) {
+                    break;
+                }
+                /* Ignore stale trigger/ready packets left in the shared
+                 * control socket and keep waiting for this sequence ACK. */
             }
         }
         if (!acknowledged) {
@@ -234,7 +275,13 @@ int main(int argc, char **argv)
             }
         }
     }
-    printf("RTBENCH_NET_PROBE_END sent=%lu retries=%lu\n", count, retries);
+    if (wait_for_completion(socket_fd) != 0) {
+        fprintf(stderr, "RTBENCH_NET_PROBE_ERROR completion_timeout\n");
+        close(socket_fd);
+        return 1;
+    }
+    printf("RTBENCH_NET_PROBE_END sent=%lu retries=%lu completion=done\n",
+           count, retries);
     fflush(stdout);
     close(socket_fd);
     return 0;

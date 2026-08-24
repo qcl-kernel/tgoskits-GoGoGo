@@ -73,3 +73,6 @@ loongarch64-axvisor-guest-tests.md
 /logs/offline-monitor/
 /images/linux-qemu/
 offline-monitor-analysis*.html
+
+# Task123 local run logs, raw serial captures, plots, and build artifacts
+/@logs/

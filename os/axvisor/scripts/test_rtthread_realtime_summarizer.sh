@@ -9,14 +9,18 @@ trap 'rm -rf -- "$WORK"' EXIT
 
 metric_line() {
     local value=$1
-    printf 'RTBENCH metric=%s run=1 expected=10 collected=10 missing=0 p50_ns=%s p95_ns=%s p99_ns=%s p99_9_ns=%s max_ns=%s miss_100us=0 miss_500us=0 miss_1ms=0 mean_ns=%s\n' \
-        "$2" "$value" "$value" "$value" "$value" "$value" "$value"
+    printf 'RTBENCH metric=%s run=1 expected=10 collected=10 missing=0 p50_ns=%s p95_ns=%s p99_ns=%s p99_9_ns=%s max_ns=%s miss_100us=0 miss_500us=0 miss_1ms=0 mean_ns=%s p50_cycles=%s p95_cycles=%s p99_cycles=%s p99_9_cycles=%s max_cycles=%s mean_cycles=%s p50_instructions=%s p95_instructions=%s p99_instructions=%s p99_9_instructions=%s max_instructions=%s mean_instructions=%s\n' \
+        "$2" "$value" "$value" "$value" "$value" "$value" "$value" \
+        "$value" "$value" "$value" "$value" "$value" "$value" \
+        "$value" "$value" "$value" "$value" "$value" "$value"
 }
 
 write_complete_log() {
     local output=$1 p50=$2
     : > "$output"
-    for metric in timer_jitter callback_exec preemption irq irq_to_task irq_disabled_duration mutex_inversion wake_under_load net_event_latency; do
+    for metric in timer_jitter callback_exec preemption irq irq_to_task irq_disabled_duration mutex_inversion wake_under_load \
+        context_switch scheduler_decision sync_sem sync_mutex sync_mailbox irq_handler_exec \
+        deadline_miss_under_load net_event_latency; do
         metric_line "$p50" "$metric" >> "$output"
     done
 }
@@ -28,17 +32,55 @@ write_complete_log "$WORK/c.log" 40
 python3 "$SUMMARIZER" \
     --native "$WORK/a.log" --axvisor-only "$WORK/b.log" --axvisor-linux "$WORK/c.log" \
     --suite-samples 10 --json-output "$WORK/result.json" --csv-output "$WORK/result.csv" \
+    --joint-csv-output "$WORK/joint.csv" \
     --markdown-output "$WORK/result.md" \
     > "$WORK/stdout.json"
 
 grep -Fq '"schema": 1' "$WORK/result.json"
 grep -Fq '"B_axvisor_rtthread"' "$WORK/result.json"
 grep -Fq '"C_over_B"' "$WORK/result.json"
-grep -Fq 'timer_jitter,A_native,10,10,10,10,10,10,0,0,0' "$WORK/result.csv"
+grep -Fq 'timer_jitter,A_native,10,10,10,10,10,10,10,10,10' "$WORK/result.csv"
 grep -Fq '# RT-Thread realtime comparison' "$WORK/result.md"
 grep -Fq '| timer_jitter |' "$WORK/result.md"
 grep -Fq '| A_native |' "$WORK/result.md"
 grep -Fq 'Strict tail pass' "$WORK/result.md"
+grep -Fq '"joint_analysis"' "$WORK/result.json"
+grep -Fq 'path_expansion' "$WORK/result.json"
+grep -Fq '联合三指标分析' "$WORK/result.md"
+grep -Fq 'Mean cycles/instruction ratio' "$WORK/result.md"
+grep -Fq 'Mean ns/cycle ratio' "$WORK/result.md"
+grep -Fq 'metric,baseline,candidate,classification' "$WORK/joint.csv"
+grep -Fq 'timer_jitter,A_native,B_axvisor_rtthread,path_expansion' "$WORK/joint.csv"
+
+python3 - <<'PY'
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path.cwd() / "os/axvisor/scripts"))
+from summarize_rtthread_realtime import compare_joint
+
+
+def record(ns, cycles, instructions):
+    return {
+        "p99_ns": ns, "p99_cycles": cycles, "p99_instructions": instructions,
+        "max_ns": ns, "max_cycles": cycles, "max_instructions": instructions,
+        "mean_ns": ns, "mean_cycles": cycles, "mean_instructions": instructions,
+    }
+
+
+baseline = record(100, 100, 100)
+if compare_joint(baseline, record(250, 100, 100))["classification"] != "latency_only":
+    raise SystemExit("latency-only joint classification failed")
+if compare_joint(baseline, record(250, 250, 250))["classification"] != "path_expansion":
+    raise SystemExit("path-expansion joint classification failed")
+if compare_joint(record(0, 100, 100), record(250, 100, 100))["classification"] != "insufficient_baseline":
+    raise SystemExit("zero-baseline joint classification failed")
+zero_candidate = compare_joint(baseline, record(250, 0, 0))
+if zero_candidate["classification"] != "latency_only":
+    raise SystemExit("zero-candidate joint classification failed")
+if zero_candidate["aggregate_efficiency_ratio"]["mean_ns_per_instruction"] is not None:
+    raise SystemExit("zero-candidate efficiency should be unavailable")
+PY
 
 cp "$WORK/c.log" "$WORK/host-log-interleaved.log"
 python3 - "$WORK/host-log-interleaved.log" <<'PY'
@@ -47,12 +89,12 @@ from pathlib import Path
 
 path = Path(sys.argv[1])
 data = path.read_bytes()
-needle = b"mean_ns=40\n"
+needle = b"mean_ns=40 "
 replacement = (
     b"mean_ns=\x1b[37m[ 1.000000 0:2 axvm::vm:1] \x1b[33mstop\x1b[m\r\n"
-    b"40\x1b[37m[ 1.000001 0:2 axvm::vm:2] \x1b[32mdone\x1b[m\r\n\r\n"
+    b"40 \x1b[37m[ 1.000001 0:2 axvm::vm:2] \x1b[32mdone\x1b[m\r\n\r\n"
 )
-if data.count(needle) != 9:
+if data.count(needle) != 16:
     raise SystemExit("host-log summarizer fixture marker not found")
 path.write_bytes(data.replace(needle, replacement, 1))
 PY
@@ -76,6 +118,46 @@ PY
 python3 "$SUMMARIZER" \
     --native "$WORK/a.log" --axvisor-only "$WORK/b.log" \
     --axvisor-linux "$WORK/nul-interleaved.log" --suite-samples 10 >/dev/null
+
+cp "$WORK/c.log" "$WORK/numeric-field-interleaved.log"
+python3 - "$WORK/numeric-field-interleaved.log" <<'PY'
+import sys
+from pathlib import Path
+
+path = Path(sys.argv[1])
+data = path.read_bytes()
+needle = b"mean_ns=40 p50_cycles=40"
+replacement = (
+    b"mean_ns=40\x1b[32m[I/rtipic.srv] client connected\x1b[0m\r\n"
+    b"p50_cycles=40"
+)
+if data.count(needle) != 16:
+    raise SystemExit("numeric-field interleave fixture marker not found")
+path.write_bytes(data.replace(needle, replacement, 1))
+PY
+python3 "$SUMMARIZER" \
+    --native "$WORK/a.log" --axvisor-only "$WORK/b.log" \
+    --axvisor-linux "$WORK/numeric-field-interleaved.log" --suite-samples 10 >/dev/null
+
+cp "$WORK/c.log" "$WORK/task3-status-interleaved.log"
+python3 - "$WORK/task3-status-interleaved.log" <<'PY'
+import sys
+from pathlib import Path
+
+path = Path(sys.argv[1])
+data = path.read_bytes()
+needle = b"p99_cycles=40"
+replacement = (
+    b"pTASK3_RTOS_FINAL requests=9 errors=0 duplicates=0 applied_steps=3 "
+    b"retries=0\r\n99_cycles=40"
+)
+if data.count(needle) != 16:
+    raise SystemExit("Task3 status interleave fixture marker not found")
+path.write_bytes(data.replace(needle, replacement, 1))
+PY
+python3 "$SUMMARIZER" \
+    --native "$WORK/a.log" --axvisor-only "$WORK/b.log" \
+    --axvisor-linux "$WORK/task3-status-interleaved.log" --suite-samples 10 >/dev/null
 
 sed '/metric=net_event_latency /d' "$WORK/b.log" > "$WORK/b-core.log"
 python3 "$SUMMARIZER" \

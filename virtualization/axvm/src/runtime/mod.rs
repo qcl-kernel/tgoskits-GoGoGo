@@ -178,6 +178,14 @@ pub fn notify_vm(vm_id: usize) -> AxVmResult {
     Ok(())
 }
 
+pub fn request_vm_device_poll(vm_id: usize) -> AxVmResult {
+    let vm = vm_by_id(vm_id)?;
+    vm.with_runtime(|runtime| {
+        runtime.request_device_poll();
+        Ok(())
+    })
+}
+
 fn notify_vm_with_wake(wake_vcpu: impl FnOnce()) {
     wake_vcpu();
 }

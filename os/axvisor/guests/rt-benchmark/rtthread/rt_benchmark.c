@@ -37,8 +37,24 @@
 #define RTBENCH_NET_MAGIC UINT32_C(0x5254424e)
 #define RTBENCH_NET_READY UINT32_C(0xffffffff)
 #define RTBENCH_NET_PROBE_READY UINT32_C(0xfffffffe)
+#define RTBENCH_NET_DONE UINT32_C(0xfffffffd)
 #define RTBENCH_NET_TIMEOUT_PER_SAMPLE_MS 15U
 #define RTBENCH_NET_TIMEOUT_MARGIN_MS 30000U
+#define RTBENCH_PMU_INST_RETIRED UINT64_C(0x08)
+
+struct rtbench_counter_snapshot
+{
+    uint64_t time_ticks;
+    uint64_t cycles;
+    uint64_t instructions;
+};
+
+struct rtbench_sample
+{
+    uint64_t ns;
+    uint64_t cycles;
+    uint64_t instructions;
+};
 
 struct rtbench_result
 {
@@ -54,10 +70,27 @@ struct rtbench_result
     uint64_t miss_500us;
     uint64_t miss_1ms;
     uint64_t mean_ns;
+    uint64_t p50_cycles;
+    uint64_t p95_cycles;
+    uint64_t p99_cycles;
+    uint64_t p99_9_cycles;
+    uint64_t max_cycles;
+    uint64_t mean_cycles;
+    uint64_t p50_instructions;
+    uint64_t p95_instructions;
+    uint64_t p99_instructions;
+    uint64_t p99_9_instructions;
+    uint64_t max_instructions;
+    uint64_t mean_instructions;
 };
 
 static uint64_t rtbench_frequency;
+static rt_bool_t rtbench_pmu_ready;
+static rt_bool_t rtbench_compact_output;
 static inline uint64_t rtbench_read_counter(void);
+static inline uint64_t rtbench_read_cycles(void);
+static inline uint64_t rtbench_read_instructions(void);
+static uint64_t rtbench_ticks_to_ns(uint64_t ticks, uint64_t frequency);
 
 struct rtbench_net_event_context
 {
@@ -71,7 +104,7 @@ struct rtbench_net_event_context
     volatile uint32_t trigger_attempts;
     volatile uint32_t trigger_socket_failures;
     volatile uint32_t trigger_send_failures;
-    uint64_t *irq_ticks;
+    struct rtbench_counter_snapshot *irq_samples;
     volatile uint8_t *irq_valid;
     uint32_t irq_capacity;
 };
@@ -129,7 +162,9 @@ static rt_bool_t rtbench_net_event_probe_sequence(const void *payload,
 
     memcpy(&wire_sequence, udp + 12U, sizeof(wire_sequence));
     *sequence = ntohl(wire_sequence);
-    return *sequence != RTBENCH_NET_READY;
+    return *sequence != RTBENCH_NET_READY &&
+           *sequence != RTBENCH_NET_PROBE_READY &&
+           *sequence != RTBENCH_NET_DONE;
 }
 
 /* Called by the patched virtio-net ISR. Store the timestamp by sequence so
@@ -149,7 +184,7 @@ void rt_virtio_net_rx_irq_hook(rt_uint16_t used_idx,
         return;
     }
 
-    if (sequence >= context->irq_capacity || context->irq_ticks == RT_NULL ||
+    if (sequence >= context->irq_capacity || context->irq_samples == RT_NULL ||
         context->irq_valid == RT_NULL)
     {
         context->irq_dropped++;
@@ -162,7 +197,9 @@ void rt_virtio_net_rx_irq_hook(rt_uint16_t used_idx,
         return;
     }
 
-    context->irq_ticks[sequence] = rtbench_read_counter();
+    context->irq_samples[sequence].time_ticks = rtbench_read_counter();
+    context->irq_samples[sequence].cycles = rtbench_read_cycles();
+    context->irq_samples[sequence].instructions = rtbench_read_instructions();
     __asm__ volatile("dmb ish" ::: "memory");
     context->irq_valid[sequence] = 1;
 }
@@ -173,6 +210,98 @@ static inline uint64_t rtbench_read_counter(void)
 
     __asm__ volatile("mrs %0, cntvct_el0" : "=r"(value));
     return value;
+}
+
+static inline uint64_t rtbench_read_cycles(void)
+{
+    uint64_t value;
+
+    __asm__ volatile("mrs %0, pmccntr_el0" : "=r"(value));
+    return value;
+}
+
+static inline uint64_t rtbench_read_instructions(void)
+{
+    uint64_t value;
+
+    __asm__ volatile("mrs %0, pmevcntr0_el0" : "=r"(value));
+    return value & UINT64_C(0xffffffff);
+}
+
+static inline struct rtbench_counter_snapshot rtbench_read_snapshot(void)
+{
+    struct rtbench_counter_snapshot snapshot;
+
+    __asm__ volatile("isb" ::: "memory");
+    snapshot.time_ticks = rtbench_read_counter();
+    snapshot.cycles = rtbench_read_cycles();
+    snapshot.instructions = rtbench_read_instructions();
+    __asm__ volatile("isb" ::: "memory");
+    return snapshot;
+}
+
+static inline void rtbench_store_delta(struct rtbench_sample *sample,
+                                       struct rtbench_counter_snapshot start,
+                                       struct rtbench_counter_snapshot end)
+{
+    sample->ns = rtbench_ticks_to_ns(end.time_ticks - start.time_ticks,
+                                     rtbench_frequency);
+    sample->cycles = end.cycles - start.cycles;
+    sample->instructions = (uint32_t)(end.instructions - start.instructions);
+}
+
+static rt_bool_t rtbench_init_pmu(void)
+{
+    uint64_t pmcr;
+    struct rtbench_counter_snapshot before;
+    struct rtbench_counter_snapshot after;
+    volatile uint64_t work = 0;
+    uint64_t i;
+
+    __asm__ volatile("mrs %0, pmcr_el0" : "=r"(pmcr));
+    if (((pmcr >> 11) & 0x1fU) == 0)
+    {
+        rt_kprintf("RTBENCH_PMU status=unavailable reason=no_event_counter\n");
+        return RT_FALSE;
+    }
+
+    /* Enable PMUv3, reset both counters, and clear the cycle divider. */
+    pmcr &= ~(UINT64_C(1) << 3);
+    pmcr |= (UINT64_C(1) << 0) | (UINT64_C(1) << 1) | (UINT64_C(1) << 2);
+    __asm__ volatile("msr pmcr_el0, %0" : : "r"(pmcr));
+    __asm__ volatile("isb" ::: "memory");
+    __asm__ volatile("msr pmselr_el0, %0" : : "r"((uint64_t)0));
+    __asm__ volatile("msr pmevtyper0_el0, %0" : : "r"(RTBENCH_PMU_INST_RETIRED));
+    __asm__ volatile("msr pmccntr_el0, %0" : : "r"((uint64_t)0));
+    __asm__ volatile("msr pmevcntr0_el0, %0" : : "r"((uint64_t)0));
+    __asm__ volatile("msr pmcntenset_el0, %0" : : "r"((UINT64_C(1) << 31) | 1));
+    __asm__ volatile("isb" ::: "memory");
+
+    before = rtbench_read_snapshot();
+    for (i = 0; i < 256; ++i)
+    {
+        work += i;
+    }
+    after = rtbench_read_snapshot();
+    (void)work;
+
+    rtbench_pmu_ready = (after.cycles != before.cycles &&
+                         after.instructions != before.instructions);
+    if (!rtbench_pmu_ready)
+    {
+        rt_kprintf("RTBENCH_PMU status=unavailable cycles_delta=%llu "
+                   "instructions_delta=%llu\n",
+                   (unsigned long long)(after.cycles - before.cycles),
+                   (unsigned long long)(after.instructions - before.instructions));
+        return RT_FALSE;
+    }
+
+    rt_kprintf("RTBENCH_PMU status=ready event=0x%llx cycles_delta=%llu "
+               "instructions_delta=%llu\n",
+               (unsigned long long)RTBENCH_PMU_INST_RETIRED,
+               (unsigned long long)(after.cycles - before.cycles),
+               (unsigned long long)(after.instructions - before.instructions));
+    return RT_TRUE;
 }
 
 static inline uint64_t rtbench_read_frequency(void)
@@ -231,12 +360,66 @@ static uint64_t rtbench_percentile(const uint64_t *samples,
     return samples[rank - 1];
 }
 
-static void rtbench_summarize(uint64_t *samples,
+enum rtbench_sample_unit
+{
+    RTBENCH_UNIT_NS,
+    RTBENCH_UNIT_CYCLES,
+    RTBENCH_UNIT_INSTRUCTIONS,
+};
+
+static uint64_t rtbench_sample_value(const struct rtbench_sample *sample,
+                                     enum rtbench_sample_unit unit)
+{
+    switch (unit)
+    {
+    case RTBENCH_UNIT_NS:
+        return sample->ns;
+    case RTBENCH_UNIT_CYCLES:
+        return sample->cycles;
+    case RTBENCH_UNIT_INSTRUCTIONS:
+        return sample->instructions;
+    default:
+        return 0;
+    }
+}
+
+static void rtbench_summarize_unit(const struct rtbench_sample *samples,
+                                   uint64_t collected,
+                                   uint64_t *scratch,
+                                   enum rtbench_sample_unit unit,
+                                   uint64_t *p50,
+                                   uint64_t *p95,
+                                   uint64_t *p99,
+                                   uint64_t *p99_9,
+                                   uint64_t *max,
+                                   uint64_t *mean)
+{
+    uint64_t sum = 0;
+    uint64_t i;
+
+    for (i = 0; i < collected; ++i)
+    {
+        scratch[i] = rtbench_sample_value(&samples[i], unit);
+    }
+    qsort(scratch, collected, sizeof(*scratch), rtbench_compare_u64);
+    for (i = 0; i < collected; ++i)
+    {
+        sum += scratch[i];
+    }
+    *p50 = rtbench_percentile(scratch, collected, 50, 100);
+    *p95 = rtbench_percentile(scratch, collected, 95, 100);
+    *p99 = rtbench_percentile(scratch, collected, 99, 100);
+    *p99_9 = rtbench_percentile(scratch, collected, 999, 1000);
+    *max = collected == 0 ? 0 : scratch[collected - 1];
+    *mean = collected == 0 ? 0 : sum / collected;
+}
+
+static void rtbench_summarize(struct rtbench_sample *samples,
                               uint64_t expected,
                               uint64_t collected,
                               struct rtbench_result *result)
 {
-    uint64_t sum = 0;
+    uint64_t *scratch;
     uint64_t i;
 
     memset(result, 0, sizeof(*result));
@@ -248,13 +431,22 @@ static void rtbench_summarize(uint64_t *samples,
     result->expected = expected;
     result->collected = collected;
     result->missing = result->expected - result->collected;
+    scratch = rt_calloc((rt_size_t)(expected == 0 ? 1 : expected),
+                        sizeof(*scratch));
+    if (scratch == RT_NULL)
+    {
+        rt_kprintf("RTBENCH_ERROR metric=summary reason=allocation\n");
+        return;
+    }
 
-    qsort(samples, collected, sizeof(*samples), rtbench_compare_u64);
+    rtbench_summarize_unit(samples, collected, scratch, RTBENCH_UNIT_NS,
+                           &result->p50_ns, &result->p95_ns,
+                           &result->p99_ns, &result->p99_9_ns,
+                           &result->max_ns, &result->mean_ns);
     for (i = 0; i < collected; ++i)
     {
-        uint64_t value = samples[i];
+        uint64_t value = samples[i].ns;
 
-        sum += value;
         if (value > 100000ULL)
         {
             result->miss_100us++;
@@ -268,20 +460,48 @@ static void rtbench_summarize(uint64_t *samples,
             result->miss_1ms++;
         }
     }
-
-    result->p50_ns = rtbench_percentile(samples, collected, 50, 100);
-    result->p95_ns = rtbench_percentile(samples, collected, 95, 100);
-    result->p99_ns = rtbench_percentile(samples, collected, 99, 100);
-    result->p99_9_ns = rtbench_percentile(samples, collected, 999, 1000);
-    result->max_ns = collected == 0 ? 0 : samples[collected - 1];
-    result->mean_ns = collected == 0 ? 0 : sum / collected;
+    rtbench_summarize_unit(samples, collected, scratch, RTBENCH_UNIT_CYCLES,
+                           &result->p50_cycles, &result->p95_cycles,
+                           &result->p99_cycles, &result->p99_9_cycles,
+                           &result->max_cycles, &result->mean_cycles);
+    rtbench_summarize_unit(samples, collected, scratch,
+                           RTBENCH_UNIT_INSTRUCTIONS,
+                           &result->p50_instructions,
+                           &result->p95_instructions,
+                           &result->p99_instructions,
+                           &result->p99_9_instructions,
+                           &result->max_instructions,
+                           &result->mean_instructions);
+    rt_free(scratch);
 }
 
 static void rtbench_print_result(const char *metric,
                                  unsigned int run,
                                  const struct rtbench_result *result)
 {
-    rt_kprintf("RTBENCH metric=%s run=%u expected=%llu collected=%llu missing=%llu p50_ns=%llu p95_ns=%llu p99_ns=%llu p99_9_ns=%llu max_ns=%llu miss_100us=%llu miss_500us=%llu miss_1ms=%llu mean_ns=%llu\n",
+    if (rtbench_compact_output)
+    {
+        for (unsigned int copy = 0; copy < 3; ++copy)
+        {
+            rt_kprintf("RTBENCH_NS metric=%s run=%u expected=%llu collected=%llu "
+                       "missing=%llu p50_ns=%llu p95_ns=%llu p99_ns=%llu "
+                       "p99_9_ns=%llu max_ns=%llu mean_ns=%llu\n",
+                       metric,
+                       run,
+                       (unsigned long long)result->expected,
+                       (unsigned long long)result->collected,
+                       (unsigned long long)result->missing,
+                       (unsigned long long)result->p50_ns,
+                       (unsigned long long)result->p95_ns,
+                       (unsigned long long)result->p99_ns,
+                       (unsigned long long)result->p99_9_ns,
+                       (unsigned long long)result->max_ns,
+                       (unsigned long long)result->mean_ns);
+            rt_thread_mdelay(20);
+        }
+        return;
+    }
+    rt_kprintf("RTBENCH metric=%s run=%u expected=%llu collected=%llu missing=%llu p50_ns=%llu p95_ns=%llu p99_ns=%llu p99_9_ns=%llu max_ns=%llu miss_100us=%llu miss_500us=%llu miss_1ms=%llu mean_ns=%llu p50_cycles=%llu p95_cycles=%llu p99_cycles=%llu p99_9_cycles=%llu max_cycles=%llu mean_cycles=%llu p50_instructions=%llu p95_instructions=%llu p99_instructions=%llu p99_9_instructions=%llu max_instructions=%llu mean_instructions=%llu\n",
                metric,
                run,
                (unsigned long long)result->expected,
@@ -295,7 +515,34 @@ static void rtbench_print_result(const char *metric,
                (unsigned long long)result->miss_100us,
                (unsigned long long)result->miss_500us,
                (unsigned long long)result->miss_1ms,
+               (unsigned long long)result->mean_ns,
+               (unsigned long long)result->p50_cycles,
+               (unsigned long long)result->p95_cycles,
+               (unsigned long long)result->p99_cycles,
+               (unsigned long long)result->p99_9_cycles,
+               (unsigned long long)result->max_cycles,
+               (unsigned long long)result->mean_cycles,
+               (unsigned long long)result->p50_instructions,
+               (unsigned long long)result->p95_instructions,
+               (unsigned long long)result->p99_instructions,
+               (unsigned long long)result->p99_9_instructions,
+               (unsigned long long)result->max_instructions,
+               (unsigned long long)result->mean_instructions);
+    rt_thread_mdelay(20);
+    rt_kprintf("RTBENCH_NS metric=%s expected=%llu collected=%llu missing=%llu "
+               "p50_ns=%llu p95_ns=%llu p99_ns=%llu p99_9_ns=%llu "
+               "max_ns=%llu mean_ns=%llu\n",
+               metric,
+               (unsigned long long)result->expected,
+               (unsigned long long)result->collected,
+               (unsigned long long)result->missing,
+               (unsigned long long)result->p50_ns,
+               (unsigned long long)result->p95_ns,
+               (unsigned long long)result->p99_ns,
+               (unsigned long long)result->p99_9_ns,
+               (unsigned long long)result->max_ns,
                (unsigned long long)result->mean_ns);
+    rt_thread_mdelay(20);
 }
 
 static uint64_t rtbench_parse_bounded(const char *text,
@@ -344,12 +591,12 @@ static void rtbench_net_event_reset(void)
     rtbench_net_event.trigger_attempts = 0;
     rtbench_net_event.trigger_socket_failures = 0;
     rtbench_net_event.trigger_send_failures = 0;
-    if (rtbench_net_event.irq_ticks != RT_NULL &&
+    if (rtbench_net_event.irq_samples != RT_NULL &&
         rtbench_net_event.irq_capacity != 0)
     {
-        memset(rtbench_net_event.irq_ticks,
+        memset(rtbench_net_event.irq_samples,
                0,
-               rtbench_net_event.irq_capacity * sizeof(*rtbench_net_event.irq_ticks));
+               rtbench_net_event.irq_capacity * sizeof(*rtbench_net_event.irq_samples));
     }
     if (rtbench_net_event.irq_valid != RT_NULL &&
         rtbench_net_event.irq_capacity != 0)
@@ -361,18 +608,18 @@ static void rtbench_net_event_reset(void)
 }
 
 static rt_bool_t rtbench_net_event_take_irq(uint32_t sequence,
-                                            uint64_t *ticks)
+                                            struct rtbench_counter_snapshot *sample)
 {
     struct rtbench_net_event_context *context = &rtbench_net_event;
 
-    if (sequence >= context->irq_capacity || context->irq_ticks == RT_NULL ||
+    if (sequence >= context->irq_capacity || context->irq_samples == RT_NULL ||
         context->irq_valid == RT_NULL || !context->irq_valid[sequence])
     {
         return RT_FALSE;
     }
 
     __asm__ volatile("dmb ish" ::: "memory");
-    *ticks = context->irq_ticks[sequence];
+    *sample = context->irq_samples[sequence];
     __asm__ volatile("dmb ish" ::: "memory");
     context->irq_valid[sequence] = 0;
     return RT_TRUE;
@@ -440,13 +687,35 @@ static void rtbench_net_event_trigger_linux(uint64_t expected)
     closesocket(socket_fd);
 }
 
+static void rtbench_net_event_notify_linux(void)
+{
+    struct sockaddr_in peer;
+    uint32_t payload[2];
+    int socket_fd;
+
+    socket_fd = socket(AF_INET, SOCK_DGRAM, 0);
+    if (socket_fd < 0)
+    {
+        return;
+    }
+    memset(&peer, 0, sizeof(peer));
+    peer.sin_family = AF_INET;
+    peer.sin_port = htons(RTBENCH_NET_TRIGGER_PORT);
+    inet_aton("192.168.77.11", &peer.sin_addr);
+    payload[0] = htonl(RTBENCH_NET_MAGIC);
+    payload[1] = htonl(RTBENCH_NET_DONE);
+    (void)sendto(socket_fd, payload, sizeof(payload), 0,
+                 (struct sockaddr *)&peer, sizeof(peer));
+    closesocket(socket_fd);
+}
+
 static int rtbench_run_net_event_latency(uint64_t expected)
 {
     struct rtbench_result result;
     struct rtbench_net_event_context *context = &rtbench_net_event;
-    uint64_t *samples;
+    struct rtbench_sample *samples;
     uint8_t *seen_sequences;
-    uint64_t *irq_ticks;
+    struct rtbench_counter_snapshot *irq_samples;
     uint8_t *irq_valid;
     uint64_t collected = 0;
     uint64_t deadline_ms;
@@ -467,8 +736,8 @@ static int rtbench_run_net_event_latency(uint64_t expected)
         rt_free(samples);
         return -RT_ENOMEM;
     }
-    irq_ticks = rt_calloc((rt_size_t)expected, sizeof(*irq_ticks));
-    if (irq_ticks == RT_NULL)
+    irq_samples = rt_calloc((rt_size_t)expected, sizeof(*irq_samples));
+    if (irq_samples == RT_NULL)
     {
         rt_kprintf("RTBENCH_ERROR metric=net_event_latency reason=allocation\n");
         rt_free(seen_sequences);
@@ -479,7 +748,7 @@ static int rtbench_run_net_event_latency(uint64_t expected)
     if (irq_valid == RT_NULL)
     {
         rt_kprintf("RTBENCH_ERROR metric=net_event_latency reason=allocation\n");
-        rt_free(irq_ticks);
+        rt_free(irq_samples);
         rt_free(seen_sequences);
         rt_free(samples);
         return -RT_ENOMEM;
@@ -489,13 +758,13 @@ static int rtbench_run_net_event_latency(uint64_t expected)
     {
         rt_kprintf("RTBENCH_ERROR metric=net_event_latency reason=socket\n");
         rt_free(irq_valid);
-        rt_free(irq_ticks);
+        rt_free(irq_samples);
         rt_free(seen_sequences);
         rt_free(samples);
         return -RT_ERROR;
     }
 
-    context->irq_ticks = irq_ticks;
+    context->irq_samples = irq_samples;
     context->irq_valid = irq_valid;
     context->irq_capacity = (uint32_t)expected;
     rtbench_net_event_reset();
@@ -519,7 +788,7 @@ static int rtbench_run_net_event_latency(uint64_t expected)
         uint32_t magic;
         uint32_t sequence;
         uint32_t wire_sequence;
-        uint64_t irq_ticks;
+        struct rtbench_counter_snapshot irq_sample;
         struct sockaddr_in peer;
         socklen_t peer_length = sizeof(peer);
         ssize_t received;
@@ -593,14 +862,14 @@ static int rtbench_run_net_event_latency(uint64_t expected)
             continue;
         }
         if (!context->capturing ||
-            !rtbench_net_event_take_irq(sequence, &irq_ticks))
+            !rtbench_net_event_take_irq(sequence, &irq_sample))
         {
             context->probe_no_irq++;
             continue;
         }
-        samples[collected++] = rtbench_ticks_to_ns(
-            rtbench_read_counter() - irq_ticks,
-            rtbench_frequency);
+        rtbench_store_delta(&samples[collected++],
+                            irq_sample,
+                            rtbench_read_snapshot());
         seen_sequences[sequence] = 1;
         (void)sendto(socket_fd, payload, sizeof(magic) + sizeof(sequence),
                      0, (struct sockaddr *)&peer, peer_length);
@@ -624,12 +893,14 @@ static int rtbench_run_net_event_latency(uint64_t expected)
                context->trigger_attempts,
                context->trigger_socket_failures,
                context->trigger_send_failures);
+    /* Linux must keep its VM alive until this result has been emitted. */
+    rtbench_net_event_notify_linux();
     rt_free(seen_sequences);
     rt_free(samples);
     rt_free(irq_valid);
-    rt_free(irq_ticks);
+    rt_free(irq_samples);
     context->irq_valid = RT_NULL;
-    context->irq_ticks = RT_NULL;
+    context->irq_samples = RT_NULL;
     context->irq_capacity = 0;
     return result.missing == 0 && context->irq_dropped == 0 ? RT_EOK
                                                             : -RT_ETIMEOUT;
@@ -638,11 +909,11 @@ static int rtbench_run_net_event_latency(uint64_t expected)
 struct rtbench_periodic_context
 {
     struct rt_timer timer;
-    uint64_t *jitter_samples;
-    uint64_t *callback_samples;
+    struct rtbench_sample *jitter_samples;
+    struct rtbench_sample *callback_samples;
     uint64_t capacity;
     volatile uint64_t collected;
-    uint64_t last_ticks;
+    struct rtbench_counter_snapshot last_sample;
     rt_bool_t warmed_up;
 };
 
@@ -651,7 +922,8 @@ static struct rtbench_periodic_context rtbench_periodic;
 static void rtbench_periodic_callback(void *parameter)
 {
     struct rtbench_periodic_context *context = parameter;
-    uint64_t callback_start = rtbench_read_counter();
+    struct rtbench_counter_snapshot callback_start = rtbench_read_snapshot();
+    struct rtbench_counter_snapshot callback_end;
     uint64_t index = context->collected;
     uint64_t interval_ns;
     volatile unsigned int work = 0;
@@ -664,16 +936,18 @@ static void rtbench_periodic_callback(void *parameter)
 
     if (!context->warmed_up)
     {
-        context->last_ticks = callback_start;
+        context->last_sample = callback_start;
         context->warmed_up = RT_TRUE;
         return;
     }
 
-    interval_ns = rtbench_ticks_to_ns(callback_start - context->last_ticks,
-                                      rtbench_frequency);
-    context->last_ticks = callback_start;
-    context->jitter_samples[index] =
+    rtbench_store_delta(&context->jitter_samples[index],
+                        context->last_sample,
+                        callback_start);
+    interval_ns = context->jitter_samples[index].ns;
+    context->jitter_samples[index].ns =
         rtbench_abs_delta(interval_ns, RTBENCH_PERIOD_NS);
+    context->last_sample = callback_start;
 
     for (i = 0; i < 10; ++i)
     {
@@ -681,8 +955,10 @@ static void rtbench_periodic_callback(void *parameter)
     }
     (void)work;
 
-    context->callback_samples[index] = rtbench_ticks_to_ns(
-        rtbench_read_counter() - callback_start, rtbench_frequency);
+    callback_end = rtbench_read_snapshot();
+    rtbench_store_delta(&context->callback_samples[index],
+                        callback_start,
+                        callback_end);
     context->collected = index + 1;
 }
 
@@ -695,8 +971,8 @@ static int rtbench_run_periodic(uint64_t expected,
 {
     struct rtbench_result jitter_result;
     struct rtbench_result callback_result;
-    uint64_t *jitter_samples;
-    uint64_t *callback_samples;
+    struct rtbench_sample *jitter_samples;
+    struct rtbench_sample *callback_samples;
     rt_err_t error;
 
     memset(&rtbench_periodic, 0, sizeof(rtbench_periodic));
@@ -777,10 +1053,10 @@ struct rtbench_preempt_context
     struct rt_semaphore low_finished;
     rt_thread_t high_thread;
     rt_thread_t low_thread;
-    uint64_t *samples;
+    struct rtbench_sample *samples;
     uint64_t expected;
     volatile uint64_t collected;
-    volatile uint64_t release_ticks;
+    volatile struct rtbench_counter_snapshot release_sample;
 };
 
 static struct rtbench_preempt_context rtbench_preempt;
@@ -797,9 +1073,9 @@ static void rtbench_preempt_high(void *parameter)
         {
             break;
         }
-        context->samples[context->collected++] = rtbench_ticks_to_ns(
-            rtbench_read_counter() - context->release_ticks,
-            rtbench_frequency);
+        rtbench_store_delta(&context->samples[context->collected++],
+                            context->release_sample,
+                            rtbench_read_snapshot());
         rt_sem_release(&context->done);
     }
     rt_sem_release(&context->high_finished);
@@ -817,7 +1093,7 @@ static void rtbench_preempt_low(void *parameter)
             break;
         }
         rt_thread_mdelay(1);
-        context->release_ticks = rtbench_read_counter();
+        context->release_sample = rtbench_read_snapshot();
         rt_sem_release(&context->wake);
         if (rt_sem_take(&context->done, RT_WAITING_FOREVER) != RT_EOK)
         {
@@ -912,10 +1188,10 @@ cleanup:
 struct rtbench_irq_context
 {
     struct rt_semaphore completed;
-    uint64_t *samples;
+    struct rtbench_sample *samples;
     uint64_t expected;
     volatile uint64_t collected;
-    volatile uint64_t trigger_ticks;
+    volatile struct rtbench_counter_snapshot trigger_sample;
     volatile rt_bool_t armed;
 };
 
@@ -930,9 +1206,9 @@ static void rtbench_irq_handler(int vector, void *parameter)
     if (vector == RTBENCH_SGI_INTID && context->armed &&
         index < context->expected)
     {
-        context->samples[index] = rtbench_ticks_to_ns(
-            rtbench_read_counter() - context->trigger_ticks,
-            rtbench_frequency);
+        rtbench_store_delta(&context->samples[index],
+                            context->trigger_sample,
+                            rtbench_read_snapshot());
         context->collected = index + 1;
         context->armed = RT_FALSE;
         rt_sem_release(&context->completed);
@@ -973,7 +1249,7 @@ static int rtbench_run_irq(uint64_t expected)
 
     for (i = 0; i < expected; ++i)
     {
-        context->trigger_ticks = rtbench_read_counter();
+        context->trigger_sample = rtbench_read_snapshot();
         context->armed = RT_TRUE;
         __asm__ volatile("dmb ish" ::: "memory");
         rt_hw_interrupt_set_pending(RTBENCH_SGI_INTID);
@@ -1011,10 +1287,10 @@ struct rtbench_irq_task_context
 {
     struct rt_semaphore completed;
     struct rt_semaphore wake;
-    uint64_t *samples;
+    struct rtbench_sample *samples;
     uint64_t expected;
     volatile uint64_t collected;
-    volatile uint64_t trigger_ticks;
+    volatile struct rtbench_counter_snapshot trigger_sample;
     volatile rt_bool_t armed;
 };
 
@@ -1042,9 +1318,9 @@ static void rtbench_irq_task_high(void *parameter)
         {
             break;
         }
-        context->samples[context->collected++] = rtbench_ticks_to_ns(
-            rtbench_read_counter() - context->trigger_ticks,
-            rtbench_frequency);
+        rtbench_store_delta(&context->samples[context->collected++],
+                            context->trigger_sample,
+                            rtbench_read_snapshot());
         rt_sem_release(&context->completed);
     }
 }
@@ -1105,7 +1381,7 @@ static int rtbench_run_irq_to_task(uint64_t expected)
         (rt_int32_t)(expected * 10 + RTBENCH_TIMEOUT_MARGIN_MS));
     for (i = 0; i < expected; ++i)
     {
-        context->trigger_ticks = rtbench_read_counter();
+        context->trigger_sample = rtbench_read_snapshot();
         context->armed = RT_TRUE;
         __asm__ volatile("dmb ish" ::: "memory");
         rt_hw_interrupt_set_pending(RTBENCH_SGI_INTID);
@@ -1152,8 +1428,8 @@ static int rtbench_run_irq_to_task(uint64_t expected)
 static int rtbench_run_irq_disabled_duration(uint64_t expected)
 {
     struct rtbench_result result;
-    uint64_t *samples;
-    uint64_t start;
+    struct rtbench_sample *samples;
+    struct rtbench_counter_snapshot start;
     uint64_t i;
     volatile uint64_t work = 0;
     rt_base_t level;
@@ -1169,15 +1445,14 @@ static int rtbench_run_irq_disabled_duration(uint64_t expected)
     {
         unsigned int spin;
 
-        start = rtbench_read_counter();
+        start = rtbench_read_snapshot();
         level = rt_hw_local_irq_disable();
         for (spin = 0; spin < 64; ++spin)
         {
             work += spin;
         }
         rt_hw_local_irq_enable(level);
-        samples[i] = rtbench_ticks_to_ns(rtbench_read_counter() - start,
-                                         rtbench_frequency);
+        rtbench_store_delta(&samples[i], start, rtbench_read_snapshot());
     }
     (void)work;
 
@@ -1187,10 +1462,379 @@ static int rtbench_run_irq_disabled_duration(uint64_t expected)
     return result.missing == 0 ? RT_EOK : -RT_ETIMEOUT;
 }
 
+struct rtbench_context_switch_context
+{
+    struct rt_semaphore done;
+    struct rt_thread *first;
+    struct rt_thread *second;
+    struct rtbench_sample *samples;
+    uint64_t expected;
+    volatile uint64_t collected;
+    volatile uint32_t turn;
+    volatile rt_bool_t released;
+    volatile rt_bool_t stopping;
+    volatile struct rtbench_counter_snapshot handoff;
+};
+
+static struct rtbench_context_switch_context rtbench_context_switch;
+
+static void rtbench_context_switch_first(void *parameter)
+{
+    struct rtbench_context_switch_context *context = parameter;
+    uint64_t i;
+
+    while (!context->released && !context->stopping)
+    {
+        rt_thread_yield();
+    }
+    for (i = 0; i < context->expected && !context->stopping; ++i)
+    {
+        while (context->turn != 0U && !context->stopping)
+        {
+            rt_thread_yield();
+        }
+        if (context->stopping)
+        {
+            break;
+        }
+        context->handoff = rtbench_read_snapshot();
+        __asm__ volatile("dmb ish" ::: "memory");
+        context->turn = 1U;
+        rt_thread_yield();
+    }
+    rt_sem_release(&context->done);
+}
+
+static void rtbench_context_switch_second(void *parameter)
+{
+    struct rtbench_context_switch_context *context = parameter;
+    uint64_t i;
+
+    while (!context->released && !context->stopping)
+    {
+        rt_thread_yield();
+    }
+    for (i = 0; i < context->expected && !context->stopping; ++i)
+    {
+        while (context->turn != 1U && !context->stopping)
+        {
+            rt_thread_yield();
+        }
+        if (context->stopping)
+        {
+            break;
+        }
+        rtbench_store_delta(&context->samples[context->collected++],
+                            context->handoff,
+                            rtbench_read_snapshot());
+        __asm__ volatile("dmb ish" ::: "memory");
+        context->turn = 0U;
+        rt_thread_yield();
+    }
+    rt_sem_release(&context->done);
+}
+
+static int rtbench_run_context_switch(uint64_t expected)
+{
+    struct rtbench_context_switch_context *context = &rtbench_context_switch;
+    struct rtbench_result result;
+    rt_tick_t timeout;
+    rt_bool_t first_done;
+    rt_bool_t second_done;
+
+    memset(context, 0, sizeof(*context));
+    context->samples = rt_calloc((rt_size_t)expected,
+                                 sizeof(*context->samples));
+    if (context->samples == RT_NULL)
+    {
+        rt_kprintf("RTBENCH_ERROR metric=context_switch reason=allocation\n");
+        return -RT_ENOMEM;
+    }
+    context->expected = expected;
+    rt_sem_init(&context->done, "rtcsdone", 0, RT_IPC_FLAG_FIFO);
+    context->first = rt_thread_create("rtcsfirst",
+                                      rtbench_context_switch_first,
+                                      context,
+                                      4096,
+                                      RTBENCH_WORKER_PRIORITY,
+                                      5);
+    context->second = rt_thread_create("rtcssecond",
+                                       rtbench_context_switch_second,
+                                       context,
+                                       4096,
+                                       RTBENCH_WORKER_PRIORITY,
+                                       5);
+    if (context->first == RT_NULL || context->second == RT_NULL)
+    {
+        rt_kprintf("RTBENCH_ERROR metric=context_switch reason=thread_create\n");
+        if (context->first != RT_NULL) rt_thread_delete(context->first);
+        if (context->second != RT_NULL) rt_thread_delete(context->second);
+        rt_sem_detach(&context->done);
+        rt_free(context->samples);
+        context->samples = RT_NULL;
+        return -RT_ENOMEM;
+    }
+
+    rt_thread_startup(context->first);
+    rt_thread_startup(context->second);
+    context->released = RT_TRUE;
+    timeout = rt_tick_from_millisecond((rt_int32_t)(expected * 10U +
+                                                     RTBENCH_TIMEOUT_MARGIN_MS));
+    first_done = rt_sem_take(&context->done, timeout) == RT_EOK;
+    second_done = rt_sem_take(&context->done, timeout) == RT_EOK;
+    if (!first_done || !second_done)
+    {
+        context->stopping = RT_TRUE;
+        context->turn = 0U;
+        rt_thread_yield();
+        if (!first_done) rt_thread_delete(context->first);
+        if (!second_done) rt_thread_delete(context->second);
+    }
+
+    rtbench_summarize(context->samples,
+                      expected,
+                      context->collected,
+                      &result);
+    rtbench_print_result("context_switch", 1, &result);
+    rt_sem_detach(&context->done);
+    rt_free(context->samples);
+    context->samples = RT_NULL;
+    return result.missing == 0 ? RT_EOK : -RT_ETIMEOUT;
+}
+
+static int rtbench_run_scheduler_decision(uint64_t expected)
+{
+    struct rtbench_result result;
+    struct rtbench_sample *samples;
+    uint64_t i;
+
+    samples = rt_calloc((rt_size_t)expected, sizeof(*samples));
+    if (samples == RT_NULL)
+    {
+        rt_kprintf("RTBENCH_ERROR metric=scheduler_decision reason=allocation\n");
+        return -RT_ENOMEM;
+    }
+    for (i = 0; i < expected; ++i)
+    {
+        struct rtbench_counter_snapshot start = rtbench_read_snapshot();
+        rt_schedule();
+        rtbench_store_delta(&samples[i], start, rtbench_read_snapshot());
+    }
+    rtbench_summarize(samples, expected, expected, &result);
+    rtbench_print_result("scheduler_decision", 1, &result);
+    rt_free(samples);
+    return result.missing == 0 ? RT_EOK : -RT_ETIMEOUT;
+}
+
+static int rtbench_run_sync_sem(uint64_t expected)
+{
+    struct rt_semaphore semaphore;
+    struct rtbench_result result;
+    struct rtbench_sample *samples;
+    uint64_t i;
+
+    samples = rt_calloc((rt_size_t)expected, sizeof(*samples));
+    if (samples == RT_NULL)
+    {
+        rt_kprintf("RTBENCH_ERROR metric=sync_sem reason=allocation\n");
+        return -RT_ENOMEM;
+    }
+    rt_sem_init(&semaphore, "rtcssm", 1, RT_IPC_FLAG_FIFO);
+    for (i = 0; i < expected; ++i)
+    {
+        struct rtbench_counter_snapshot start = rtbench_read_snapshot();
+        if (rt_sem_take(&semaphore, RT_WAITING_NO) != RT_EOK ||
+            rt_sem_release(&semaphore) != RT_EOK)
+        {
+            rt_kprintf("RTBENCH_ERROR metric=sync_sem reason=operation\n");
+            rt_sem_detach(&semaphore);
+            rt_free(samples);
+            return -RT_ERROR;
+        }
+        rtbench_store_delta(&samples[i], start, rtbench_read_snapshot());
+    }
+    rtbench_summarize(samples, expected, expected, &result);
+    rtbench_print_result("sync_sem", 1, &result);
+    rt_sem_detach(&semaphore);
+    rt_free(samples);
+    return result.missing == 0 ? RT_EOK : -RT_ETIMEOUT;
+}
+
+static int rtbench_run_sync_mutex(uint64_t expected)
+{
+    struct rt_mutex mutex;
+    struct rtbench_result result;
+    struct rtbench_sample *samples;
+    uint64_t i;
+
+    samples = rt_calloc((rt_size_t)expected, sizeof(*samples));
+    if (samples == RT_NULL)
+    {
+        rt_kprintf("RTBENCH_ERROR metric=sync_mutex reason=allocation\n");
+        return -RT_ENOMEM;
+    }
+    rt_mutex_init(&mutex, "rtcssmx", RT_IPC_FLAG_FIFO);
+    for (i = 0; i < expected; ++i)
+    {
+        struct rtbench_counter_snapshot start = rtbench_read_snapshot();
+        if (rt_mutex_take(&mutex, RT_WAITING_NO) != RT_EOK ||
+            rt_mutex_release(&mutex) != RT_EOK)
+        {
+            rt_kprintf("RTBENCH_ERROR metric=sync_mutex reason=operation\n");
+            rt_mutex_detach(&mutex);
+            rt_free(samples);
+            return -RT_ERROR;
+        }
+        rtbench_store_delta(&samples[i], start, rtbench_read_snapshot());
+    }
+    rtbench_summarize(samples, expected, expected, &result);
+    rtbench_print_result("sync_mutex", 1, &result);
+    rt_mutex_detach(&mutex);
+    rt_free(samples);
+    return result.missing == 0 ? RT_EOK : -RT_ETIMEOUT;
+}
+
+static int rtbench_run_sync_mailbox(uint64_t expected)
+{
+    struct rt_mailbox mailbox;
+    rt_ubase_t storage[1];
+    rt_ubase_t received;
+    const rt_ubase_t value = (rt_ubase_t)0x5a5aa5a5U;
+    struct rtbench_result result;
+    struct rtbench_sample *samples;
+    uint64_t i;
+
+    samples = rt_calloc((rt_size_t)expected, sizeof(*samples));
+    if (samples == RT_NULL)
+    {
+        rt_kprintf("RTBENCH_ERROR metric=sync_mailbox reason=allocation\n");
+        return -RT_ENOMEM;
+    }
+    if (rt_mb_init(&mailbox, "rtcssmb", storage, 1, RT_IPC_FLAG_FIFO) != RT_EOK)
+    {
+        rt_kprintf("RTBENCH_ERROR metric=sync_mailbox reason=init\n");
+        rt_free(samples);
+        return -RT_ERROR;
+    }
+    for (i = 0; i < expected; ++i)
+    {
+        struct rtbench_counter_snapshot start = rtbench_read_snapshot();
+        received = 0;
+        if (rt_mb_send(&mailbox, value) != RT_EOK ||
+            rt_mb_recv(&mailbox, &received, RT_WAITING_NO) != RT_EOK ||
+            received != value)
+        {
+            rt_kprintf("RTBENCH_ERROR metric=sync_mailbox reason=operation\n");
+            rt_mb_detach(&mailbox);
+            rt_free(samples);
+            return -RT_ERROR;
+        }
+        rtbench_store_delta(&samples[i], start, rtbench_read_snapshot());
+    }
+    rtbench_summarize(samples, expected, expected, &result);
+    rtbench_print_result("sync_mailbox", 1, &result);
+    rt_mb_detach(&mailbox);
+    rt_free(samples);
+    return result.missing == 0 ? RT_EOK : -RT_ETIMEOUT;
+}
+
+struct rtbench_irq_exec_context
+{
+    struct rt_semaphore completed;
+    struct rtbench_sample *samples;
+    uint64_t expected;
+    volatile uint64_t collected;
+    volatile rt_bool_t armed;
+};
+
+static struct rtbench_irq_exec_context rtbench_irq_exec;
+
+static void rtbench_irq_handler_exec(int vector, void *parameter)
+{
+    struct rtbench_irq_exec_context *context = parameter;
+    uint64_t index = context->collected;
+    struct rtbench_counter_snapshot start;
+
+    start = rtbench_read_snapshot();
+    if (vector == RTBENCH_SGI_INTID && context->armed &&
+        index < context->expected)
+    {
+        rtbench_store_delta(&context->samples[index],
+                            start,
+                            rtbench_read_snapshot());
+        context->collected = index + 1U;
+        context->armed = RT_FALSE;
+        rt_sem_release(&context->completed);
+    }
+}
+
+static int rtbench_run_irq_handler_exec(uint64_t expected)
+{
+    struct rtbench_irq_exec_context *context = &rtbench_irq_exec;
+    struct rtbench_result result;
+    struct rt_irq_desc old_descriptor;
+    rt_base_t irq_level;
+    rt_bool_t was_enabled;
+    uint64_t i;
+
+    memset(context, 0, sizeof(*context));
+    context->samples = rt_calloc((rt_size_t)expected,
+                                 sizeof(*context->samples));
+    if (context->samples == RT_NULL)
+    {
+        rt_kprintf("RTBENCH_ERROR metric=irq_handler_exec reason=allocation\n");
+        return -RT_ENOMEM;
+    }
+    context->expected = expected;
+    rt_sem_init(&context->completed, "rtirexc", 0, RT_IPC_FLAG_FIFO);
+    irq_level = rt_hw_local_irq_disable();
+    was_enabled = rt_hw_interrupt_get_enable(RTBENCH_SGI_INTID);
+    rt_hw_interrupt_mask(RTBENCH_SGI_INTID);
+    rt_hw_interrupt_clear_pending(RTBENCH_SGI_INTID);
+    old_descriptor = isr_table[RTBENCH_SGI_INTID];
+    rt_hw_interrupt_install(RTBENCH_SGI_INTID,
+                            rtbench_irq_handler_exec,
+                            context,
+                            "rtbench_irq_exec");
+    rt_hw_interrupt_umask(RTBENCH_SGI_INTID);
+    rt_hw_local_irq_enable(irq_level);
+
+    for (i = 0; i < expected; ++i)
+    {
+        context->armed = RT_TRUE;
+        rt_hw_interrupt_set_pending(RTBENCH_SGI_INTID);
+        if (rt_sem_take(&context->completed,
+                        rt_tick_from_millisecond(100)) != RT_EOK)
+        {
+            context->armed = RT_FALSE;
+            rt_hw_interrupt_clear_pending(RTBENCH_SGI_INTID);
+        }
+        rt_thread_mdelay(1);
+    }
+
+    irq_level = rt_hw_local_irq_disable();
+    rt_hw_interrupt_mask(RTBENCH_SGI_INTID);
+    rt_hw_interrupt_clear_pending(RTBENCH_SGI_INTID);
+    isr_table[RTBENCH_SGI_INTID] = old_descriptor;
+    if (was_enabled) rt_hw_interrupt_umask(RTBENCH_SGI_INTID);
+    rt_hw_local_irq_enable(irq_level);
+
+    rtbench_summarize(context->samples,
+                      expected,
+                      context->collected,
+                      &result);
+    rtbench_print_result("irq_handler_exec", 1, &result);
+    rt_sem_detach(&context->completed);
+    rt_free(context->samples);
+    context->samples = RT_NULL;
+    return result.missing == 0 ? RT_EOK : -RT_ETIMEOUT;
+}
+
 struct rtbench_mutex_context
 {
     struct rt_mutex mutex;
     struct rt_semaphore low_acquired;
+    struct rt_semaphore low_go;
     struct rt_semaphore high_go;
     struct rt_semaphore high_acquired;
     struct rt_semaphore high_done;
@@ -1198,16 +1842,51 @@ struct rtbench_mutex_context
     struct rt_semaphore medium_done;
     struct rt_semaphore release_now;
     struct rt_semaphore low_done;
+    struct rt_semaphore workers_done;
     rt_thread_t high_thread;
     rt_thread_t medium_thread;
     rt_thread_t low_thread;
-    uint64_t *samples;
+    struct rtbench_sample *samples;
     uint64_t expected;
     volatile uint64_t collected;
-    volatile uint64_t request_ticks;
+    volatile rt_bool_t stopping;
+    volatile struct rtbench_counter_snapshot request_sample;
 };
 
 static struct rtbench_mutex_context rtbench_mutex;
+
+#define RTBENCH_MUTEX_WAIT_MS 1000U
+
+static void rtbench_mutex_worker_done(struct rtbench_mutex_context *context,
+                                      struct rt_semaphore *worker_done)
+{
+    rt_sem_release(worker_done);
+    rt_sem_release(&context->workers_done);
+}
+
+static void rtbench_mutex_abort(struct rtbench_mutex_context *context)
+{
+    context->stopping = RT_TRUE;
+    /* Wake each worker if it is blocked on its gate. A worker that is already
+     * inside the mutex path observes stopping before taking a new sample. */
+    rt_sem_release(&context->low_go);
+    rt_sem_release(&context->high_go);
+    rt_sem_release(&context->medium_go);
+    rt_sem_release(&context->release_now);
+}
+
+static rt_bool_t rtbench_mutex_wait_workers(
+    struct rtbench_mutex_context *context, rt_tick_t timeout)
+{
+    uint32_t completed = 0;
+
+    while (completed < 3U &&
+           rt_sem_take(&context->workers_done, timeout) == RT_EOK)
+    {
+        completed++;
+    }
+    return completed == 3U ? RT_TRUE : RT_FALSE;
+}
 
 static void rtbench_mutex_high(void *parameter)
 {
@@ -1216,22 +1895,30 @@ static void rtbench_mutex_high(void *parameter)
 
     for (i = 0; i < context->expected; ++i)
     {
-        if (rt_sem_take(&context->high_go, RT_WAITING_FOREVER) != RT_EOK)
+        if (rt_sem_take(&context->high_go,
+                        rt_tick_from_millisecond(RTBENCH_MUTEX_WAIT_MS)) != RT_EOK ||
+            context->stopping)
         {
             break;
         }
-        context->request_ticks = rtbench_read_counter();
-        if (rt_mutex_take(&context->mutex, RT_WAITING_FOREVER) != RT_EOK)
+        context->request_sample = rtbench_read_snapshot();
+        if (rt_mutex_take(&context->mutex,
+                          rt_tick_from_millisecond(RTBENCH_MUTEX_WAIT_MS)) != RT_EOK)
         {
             break;
         }
-        context->samples[context->collected++] = rtbench_ticks_to_ns(
-            rtbench_read_counter() - context->request_ticks,
-            rtbench_frequency);
+        if (context->stopping)
+        {
+            rt_mutex_release(&context->mutex);
+            break;
+        }
+        rtbench_store_delta(&context->samples[context->collected++],
+                            context->request_sample,
+                            rtbench_read_snapshot());
         rt_mutex_release(&context->mutex);
         rt_sem_release(&context->high_acquired);
     }
-    rt_sem_release(&context->high_done);
+    rtbench_mutex_worker_done(context, &context->high_done);
 }
 
 static void rtbench_mutex_low(void *parameter)
@@ -1241,8 +1928,20 @@ static void rtbench_mutex_low(void *parameter)
 
     for (i = 0; i < context->expected; ++i)
     {
-        if (rt_mutex_take(&context->mutex, RT_WAITING_FOREVER) != RT_EOK)
+        if (rt_sem_take(&context->low_go,
+                        rt_tick_from_millisecond(RTBENCH_MUTEX_WAIT_MS)) != RT_EOK ||
+            context->stopping)
         {
+            break;
+        }
+        if (rt_mutex_take(&context->mutex,
+                          rt_tick_from_millisecond(RTBENCH_MUTEX_WAIT_MS)) != RT_EOK)
+        {
+            break;
+        }
+        if (context->stopping)
+        {
+            rt_mutex_release(&context->mutex);
             break;
         }
         rt_sem_release(&context->low_acquired);
@@ -1253,9 +1952,14 @@ static void rtbench_mutex_low(void *parameter)
             rt_mutex_release(&context->mutex);
             break;
         }
+        if (context->stopping)
+        {
+            rt_mutex_release(&context->mutex);
+            break;
+        }
         rt_mutex_release(&context->mutex);
     }
-    rt_sem_release(&context->low_done);
+    rtbench_mutex_worker_done(context, &context->low_done);
 }
 
 static void rtbench_mutex_medium(void *parameter)
@@ -1267,7 +1971,9 @@ static void rtbench_mutex_medium(void *parameter)
 
     for (i = 0; i < context->expected; ++i)
     {
-        if (rt_sem_take(&context->medium_go, RT_WAITING_FOREVER) != RT_EOK)
+        if (rt_sem_take(&context->medium_go,
+                        rt_tick_from_millisecond(RTBENCH_MUTEX_WAIT_MS)) != RT_EOK ||
+            context->stopping)
         {
             break;
         }
@@ -1276,7 +1982,7 @@ static void rtbench_mutex_medium(void *parameter)
             work += spin;
         }
     }
-    rt_sem_release(&context->medium_done);
+    rtbench_mutex_worker_done(context, &context->medium_done);
     (void)work;
 }
 
@@ -1297,6 +2003,7 @@ static int rtbench_run_mutex_inversion(uint64_t expected)
     context->expected = expected;
     rt_mutex_init(&context->mutex, "rtbmtx", RT_IPC_FLAG_FIFO);
     rt_sem_init(&context->low_acquired, "rtbmlac", 0, RT_IPC_FLAG_FIFO);
+    rt_sem_init(&context->low_go, "rtbmlgo", 0, RT_IPC_FLAG_FIFO);
     rt_sem_init(&context->high_go, "rtbmhgo", 0, RT_IPC_FLAG_FIFO);
     rt_sem_init(&context->high_acquired, "rtbmha", 0, RT_IPC_FLAG_FIFO);
     rt_sem_init(&context->high_done, "rtbmhd", 0, RT_IPC_FLAG_FIFO);
@@ -1304,6 +2011,7 @@ static int rtbench_run_mutex_inversion(uint64_t expected)
     rt_sem_init(&context->medium_done, "rtbmmd", 0, RT_IPC_FLAG_FIFO);
     rt_sem_init(&context->release_now, "rtbmrel", 0, RT_IPC_FLAG_FIFO);
     rt_sem_init(&context->low_done, "rtbmld", 0, RT_IPC_FLAG_FIFO);
+    rt_sem_init(&context->workers_done, "rtbmwd", 0, RT_IPC_FLAG_FIFO);
 
     context->high_thread = rt_thread_create("rtbmhigh",
                                             rtbench_mutex_high,
@@ -1331,6 +2039,7 @@ static int rtbench_run_mutex_inversion(uint64_t expected)
         if (context->medium_thread != RT_NULL) rt_thread_delete(context->medium_thread);
         if (context->low_thread != RT_NULL) rt_thread_delete(context->low_thread);
         rt_sem_detach(&context->low_acquired);
+        rt_sem_detach(&context->low_go);
         rt_sem_detach(&context->high_go);
         rt_sem_detach(&context->medium_go);
         rt_sem_detach(&context->medium_done);
@@ -1338,6 +2047,7 @@ static int rtbench_run_mutex_inversion(uint64_t expected)
         rt_sem_detach(&context->release_now);
         rt_sem_detach(&context->high_done);
         rt_sem_detach(&context->high_acquired);
+        rt_sem_detach(&context->workers_done);
         rt_mutex_detach(&context->mutex);
         rt_free(context->samples);
         context->samples = RT_NULL;
@@ -1357,7 +2067,7 @@ static int rtbench_run_mutex_inversion(uint64_t expected)
         (rt_int32_t)(expected * 10 + RTBENCH_TIMEOUT_MARGIN_MS));
     while (context->collected < expected)
     {
-        rt_sem_release(&context->high_go);
+        rt_sem_release(&context->low_go);
         if (rt_sem_take(&context->low_acquired, timeout) != RT_EOK)
         {
             break;
@@ -1371,16 +2081,24 @@ static int rtbench_run_mutex_inversion(uint64_t expected)
         }
     }
 
-    rt_sem_release(&context->high_go);
-    rt_sem_release(&context->medium_go);
-    rt_sem_release(&context->release_now);
+    rtbench_mutex_abort(context);
     if (context->collected != expected)
     {
         rt_kprintf("RTBENCH_ERROR metric=mutex_inversion reason=sample_timeout\n");
     }
-    (void)rt_sem_take(&context->high_done, timeout);
-    (void)rt_sem_take(&context->medium_done, timeout);
-    (void)rt_sem_take(&context->low_done, timeout);
+
+    if (!rtbench_mutex_wait_workers(context,
+                                    rt_tick_from_millisecond(
+                                        RTBENCH_MUTEX_WAIT_MS)))
+    {
+        rtbench_mutex_abort(context);
+        if (context->high_thread != RT_NULL)
+            rt_thread_delete(context->high_thread);
+        if (context->medium_thread != RT_NULL)
+            rt_thread_delete(context->medium_thread);
+        if (context->low_thread != RT_NULL)
+            rt_thread_delete(context->low_thread);
+    }
 
     rtbench_summarize(context->samples,
                       expected,
@@ -1388,6 +2106,7 @@ static int rtbench_run_mutex_inversion(uint64_t expected)
                       &result);
     rtbench_print_result("mutex_inversion", 1, &result);
     rt_sem_detach(&context->low_acquired);
+    rt_sem_detach(&context->low_go);
     rt_sem_detach(&context->high_go);
     rt_sem_detach(&context->medium_go);
     rt_sem_detach(&context->medium_done);
@@ -1395,6 +2114,7 @@ static int rtbench_run_mutex_inversion(uint64_t expected)
     rt_sem_detach(&context->release_now);
     rt_sem_detach(&context->high_done);
     rt_sem_detach(&context->high_acquired);
+    rt_sem_detach(&context->workers_done);
     rt_mutex_detach(&context->mutex);
     rt_free(context->samples);
     context->samples = RT_NULL;
@@ -1410,10 +2130,10 @@ struct rtbench_wake_load_context
     struct rt_semaphore load_done;
     rt_thread_t high_thread;
     rt_thread_t load_threads[4];
-    uint64_t *samples;
+    struct rtbench_sample *samples;
     uint64_t expected;
     volatile uint64_t collected;
-    volatile uint64_t release_ticks;
+    volatile struct rtbench_counter_snapshot release_sample;
 };
 
 static struct rtbench_wake_load_context rtbench_wake_context;
@@ -1429,9 +2149,9 @@ static void rtbench_wake_high(void *parameter)
         {
             break;
         }
-        context->samples[context->collected++] = rtbench_ticks_to_ns(
-            rtbench_read_counter() - context->release_ticks,
-            rtbench_frequency);
+        rtbench_store_delta(&context->samples[context->collected++],
+                            context->release_sample,
+                            rtbench_read_snapshot());
         rt_sem_release(&context->completed);
     }
     rt_sem_release(&context->done);
@@ -1547,7 +2267,7 @@ static int rtbench_run_wake_under_load(uint64_t expected)
         {
             rt_sem_release(&context->load_go);
         }
-        context->release_ticks = rtbench_read_counter();
+        context->release_sample = rtbench_read_snapshot();
         rt_sem_release(&context->wake);
         if (rt_sem_take(&context->completed, timeout) != RT_EOK)
         {
@@ -1584,6 +2304,205 @@ static int rtbench_run_wake_under_load(uint64_t expected)
     return result.missing == 0 ? RT_EOK : -RT_ETIMEOUT;
 }
 
+struct rtbench_deadline_context
+{
+    struct rt_timer timer;
+    struct rt_semaphore workers_done;
+    rt_thread_t load_threads[4];
+    struct rtbench_sample *samples;
+    uint64_t expected;
+    volatile uint64_t collected;
+    volatile rt_bool_t stopping;
+    volatile rt_bool_t warmed_up;
+    volatile rt_bool_t worker_finished[4];
+    struct rtbench_counter_snapshot last_sample;
+};
+
+struct rtbench_deadline_worker_arg
+{
+    struct rtbench_deadline_context *context;
+    unsigned int index;
+};
+
+static struct rtbench_deadline_context rtbench_deadline;
+static struct rtbench_deadline_worker_arg rtbench_deadline_workers[4];
+
+static void rtbench_deadline_load(void *parameter)
+{
+    struct rtbench_deadline_worker_arg *worker = parameter;
+    struct rtbench_deadline_context *context = worker->context;
+    volatile uint64_t work = 0;
+    unsigned int spin;
+
+    while (!context->stopping)
+    {
+        for (spin = 0; spin < 256U; ++spin)
+        {
+            work += (uint64_t)spin + worker->index;
+        }
+        /* Keep all four workers runnable without starving the benchmark task. */
+        rt_thread_yield();
+    }
+    (void)work;
+    context->worker_finished[worker->index] = RT_TRUE;
+    rt_sem_release(&context->workers_done);
+}
+
+static void rtbench_deadline_callback(void *parameter)
+{
+    struct rtbench_deadline_context *context = parameter;
+    struct rtbench_counter_snapshot current;
+    uint64_t index;
+    uint64_t interval_ns;
+
+    if (context->stopping)
+    {
+        return;
+    }
+
+    current = rtbench_read_snapshot();
+    index = context->collected;
+    if (index >= context->expected)
+    {
+        return;
+    }
+    if (!context->warmed_up)
+    {
+        context->last_sample = current;
+        context->warmed_up = RT_TRUE;
+        return;
+    }
+
+    rtbench_store_delta(&context->samples[index],
+                        context->last_sample,
+                        current);
+    interval_ns = context->samples[index].ns;
+    context->samples[index].ns = rtbench_abs_delta(interval_ns,
+                                                   RTBENCH_PERIOD_NS);
+    context->last_sample = current;
+    context->collected = index + 1U;
+}
+
+static void rtbench_deadline_stop_workers(struct rtbench_deadline_context *context,
+                                          rt_tick_t timeout)
+{
+    unsigned int i;
+
+    context->stopping = RT_TRUE;
+    for (i = 0; i < 4; ++i)
+    {
+        if (!context->worker_finished[i])
+        {
+            (void)rt_sem_take(&context->workers_done, timeout);
+        }
+    }
+    for (i = 0; i < 4; ++i)
+    {
+        if (context->load_threads[i] != RT_NULL &&
+            !context->worker_finished[i])
+        {
+            rt_thread_delete(context->load_threads[i]);
+        }
+        context->load_threads[i] = RT_NULL;
+    }
+}
+
+static int rtbench_run_deadline_miss_under_load(uint64_t expected)
+{
+    struct rtbench_deadline_context *context = &rtbench_deadline;
+    struct rtbench_result result;
+    unsigned int created = 0;
+    unsigned int i;
+    rt_err_t error;
+
+    memset(context, 0, sizeof(*context));
+    context->samples = rt_calloc((rt_size_t)expected,
+                                 sizeof(*context->samples));
+    if (context->samples == RT_NULL)
+    {
+        rt_kprintf("RTBENCH_ERROR metric=deadline_miss_under_load reason=allocation\n");
+        return -RT_ENOMEM;
+    }
+    context->expected = expected;
+    rt_sem_init(&context->workers_done, "rtbdone", 0, RT_IPC_FLAG_FIFO);
+
+    for (i = 0; i < 4; ++i)
+    {
+        char name[RT_NAME_MAX + 1];
+
+        rt_snprintf(name, sizeof(name), "rtbdl%u", i);
+        rtbench_deadline_workers[i].context = context;
+        rtbench_deadline_workers[i].index = i;
+        context->load_threads[i] = rt_thread_create(
+            name,
+            rtbench_deadline_load,
+            &rtbench_deadline_workers[i],
+            4096,
+            24 + (rt_uint8_t)i,
+            5);
+        if (context->load_threads[i] == RT_NULL)
+        {
+            rt_kprintf("RTBENCH_ERROR metric=deadline_miss_under_load reason=thread_create\n");
+            break;
+        }
+        created++;
+    }
+    if (created != 4)
+    {
+        context->stopping = RT_TRUE;
+        for (i = 0; i < created; ++i)
+        {
+            rt_thread_delete(context->load_threads[i]);
+        }
+        rt_sem_detach(&context->workers_done);
+        rt_free(context->samples);
+        context->samples = RT_NULL;
+        return -RT_ENOMEM;
+    }
+
+    for (i = 0; i < 4; ++i)
+    {
+        rt_thread_startup(context->load_threads[i]);
+    }
+    rt_timer_init(&context->timer,
+                  "rtbdlmr",
+                  rtbench_deadline_callback,
+                  context,
+                  rt_tick_from_millisecond(RTBENCH_PERIOD_MS),
+                  RT_TIMER_FLAG_PERIODIC | RT_TIMER_FLAG_HARD_TIMER);
+    error = rt_timer_start(&context->timer);
+    if (error != RT_EOK)
+    {
+        rt_kprintf("RTBENCH_ERROR metric=deadline_miss_under_load reason=timer_start error=%d\n",
+                   error);
+        rtbench_deadline_stop_workers(
+            context, rt_tick_from_millisecond(RTBENCH_TIMEOUT_MARGIN_MS));
+        rt_timer_detach(&context->timer);
+        rt_sem_detach(&context->workers_done);
+        rt_free(context->samples);
+        context->samples = RT_NULL;
+        return error;
+    }
+
+    rtbench_wait_for_samples(&context->collected,
+                             expected,
+                             expected * RTBENCH_PERIOD_MS);
+    rt_timer_stop(&context->timer);
+    rtbench_deadline_stop_workers(
+        context, rt_tick_from_millisecond(RTBENCH_TIMEOUT_MARGIN_MS));
+    rt_timer_detach(&context->timer);
+
+    rtbench_summarize(context->samples,
+                      expected,
+                      context->collected,
+                      &result);
+    rtbench_print_result("deadline_miss_under_load", 1, &result);
+    rt_sem_detach(&context->workers_done);
+    rt_free(context->samples);
+    context->samples = RT_NULL;
+    return result.missing == 0 ? RT_EOK : -RT_ETIMEOUT;
+}
+
 static int rtbench_run_suite_metrics(uint64_t samples, rt_bool_t include_network)
 {
     unsigned int run;
@@ -1595,10 +2514,17 @@ static int rtbench_run_suite_metrics(uint64_t samples, rt_bool_t include_network
         rt_kprintf("RTBENCH_ERROR metric=suite reason=zero_counter_frequency\n");
         return -RT_ERROR;
     }
+    if (!rtbench_init_pmu())
+    {
+        rt_kprintf("RTBENCH_ERROR metric=suite reason=pmu_unavailable\n");
+        return -RT_ERROR;
+    }
 
-    rt_kprintf("RTBENCH_BEGIN samples=%llu frequency=%llu\n",
+    rtbench_compact_output = RT_TRUE;
+    rt_kprintf("RTBENCH_BEGIN samples=%llu frequency=%llu pmu_event=0x%llx\n",
                (unsigned long long)samples,
-               (unsigned long long)rtbench_frequency);
+               (unsigned long long)rtbench_frequency,
+               (unsigned long long)RTBENCH_PMU_INST_RETIRED);
     for (run = 1; run <= 3; ++run)
     {
         if (rtbench_run_periodic(samples, RT_FALSE, 0, RT_FALSE, run,
@@ -1631,11 +2557,40 @@ static int rtbench_run_suite_metrics(uint64_t samples, rt_bool_t include_network
     {
         status = -RT_ERROR;
     }
+    if (rtbench_run_context_switch(samples) != RT_EOK)
+    {
+        status = -RT_ERROR;
+    }
+    if (rtbench_run_scheduler_decision(samples) != RT_EOK)
+    {
+        status = -RT_ERROR;
+    }
+    if (rtbench_run_sync_sem(samples) != RT_EOK)
+    {
+        status = -RT_ERROR;
+    }
+    if (rtbench_run_sync_mutex(samples) != RT_EOK)
+    {
+        status = -RT_ERROR;
+    }
+    if (rtbench_run_sync_mailbox(samples) != RT_EOK)
+    {
+        status = -RT_ERROR;
+    }
+    if (rtbench_run_irq_handler_exec(samples) != RT_EOK)
+    {
+        status = -RT_ERROR;
+    }
+    if (rtbench_run_deadline_miss_under_load(samples) != RT_EOK)
+    {
+        status = -RT_ERROR;
+    }
     if (include_network && rtbench_run_net_event_latency(samples) != RT_EOK)
     {
         status = -RT_ERROR;
     }
     rt_kprintf("RTBENCH_END status=%s\n", status == RT_EOK ? "PASS" : "FAIL");
+    rtbench_compact_output = RT_FALSE;
     return status;
 }
 
@@ -1663,11 +2618,18 @@ static int rtbench_run_stability(uint64_t seconds)
         rt_kprintf("RTBENCH_ERROR metric=stability reason=zero_counter_frequency\n");
         return -RT_ERROR;
     }
+    if (!rtbench_init_pmu())
+    {
+        rt_kprintf("RTBENCH_ERROR metric=stability reason=pmu_unavailable\n");
+        return -RT_ERROR;
+    }
 
     expected = seconds * (1000U / RTBENCH_PERIOD_MS) - 1U;
-    rt_kprintf("RTBENCH_STABILITY_BEGIN seconds=%llu expected=%llu\n",
+    rt_kprintf("RTBENCH_STABILITY_BEGIN seconds=%llu expected=%llu frequency=%llu pmu_event=0x%llx\n",
                (unsigned long long)seconds,
-               (unsigned long long)expected);
+               (unsigned long long)expected,
+               (unsigned long long)rtbench_frequency,
+               (unsigned long long)RTBENCH_PMU_INST_RETIRED);
     status = rtbench_run_periodic(expected,
                                   RT_FALSE,
                                   seconds * 1000U,

@@ -189,6 +189,7 @@ pub(crate) struct VmRuntimeHandle {
     running_halting_vcpu_count: AtomicUsize,
     lifecycle_error: StdMutex<Option<AxVmError>>,
     deferred_reset_requested: AtomicBool,
+    device_poll_requested: AtomicBool,
 }
 
 /// Per-vCPU wait state used for guest WFI wakeups.
@@ -266,6 +267,7 @@ impl VmRuntimeHandle {
             running_halting_vcpu_count: AtomicUsize::new(0),
             lifecycle_error: StdMutex::new(None),
             deferred_reset_requested: AtomicBool::new(false),
+            device_poll_requested: AtomicBool::new(false),
         }
     }
 
@@ -458,6 +460,16 @@ impl VmRuntimeHandle {
         for state in states {
             notify_vcpu_wait_state(&state);
         }
+    }
+
+    pub(crate) fn request_device_poll(&self) {
+        self.device_poll_requested.store(true, Ordering::Release);
+        self.notify_all();
+    }
+
+    #[cfg(target_arch = "aarch64")]
+    pub(crate) fn take_device_poll_request(&self) -> bool {
+        self.device_poll_requested.swap(false, Ordering::AcqRel)
     }
 
     pub(crate) fn mark_vcpu_running(&self) {

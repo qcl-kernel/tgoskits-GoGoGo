@@ -2,8 +2,8 @@
 
 set -euo pipefail
 
-if [[ $# -lt 4 || $# -gt 5 ]]; then
-    echo "usage: $0 ROOT TEMPLATE RTTHREAD_KERNEL RUNTIME_DIR [GUEST_CMDLINE]" >&2
+if [[ $# -lt 4 || $# -gt 6 ]]; then
+    echo "usage: $0 ROOT TEMPLATE RTTHREAD_KERNEL RUNTIME_DIR [GUEST_CMDLINE] [HOST_VCPU_IDLE_POLICY]" >&2
     exit 2
 fi
 
@@ -46,13 +46,25 @@ if [[ $# -eq 5 ]]; then
     fi
 fi
 
+idle_policy=""
+if [[ $# -eq 6 ]]; then
+    idle_policy="$6"
+    case "$idle_policy" in
+        halt|busy) ;;
+        *)
+            echo "HOST_VCPU_IDLE_POLICY must be halt or busy: $idle_policy" >&2
+            exit 2
+            ;;
+    esac
+fi
+
 runtime_kernel="$runtime_dir/rtthread.bin"
 output="$runtime_dir/rtthread-net.toml"
 output_tmp="$runtime_dir/.rtthread-net.toml.tmp"
 trap 'rm -f -- "$output_tmp"' EXIT
 
 ln -s -- "$kernel" "$runtime_kernel"
-if ! python3 - "$template" "$output_tmp" "$replace_cmdline" "$guest_cmdline" <<'PY'
+if ! python3 - "$template" "$output_tmp" "$replace_cmdline" "$guest_cmdline" "$idle_policy" <<'PY'
 import copy
 import re
 import sys
@@ -64,6 +76,7 @@ template_path = Path(sys.argv[1])
 output_path = Path(sys.argv[2])
 replace_cmdline = sys.argv[3] == "true"
 guest_cmdline = sys.argv[4]
+idle_policy = sys.argv[5]
 text = template_path.read_text(encoding="utf-8")
 lines = text.splitlines(keepends=True)
 
@@ -78,6 +91,12 @@ try:
     expected = copy.deepcopy(original)
     kernel = expected["kernel"]
     kernel["kernel_path"] = "rtthread.bin"
+    if idle_policy:
+        if not isinstance(expected.get("base", {}).get("host_vcpu_idle_policy"), str):
+            raise ValueError(
+                "template must provide one [base].host_vcpu_idle_policy assignment"
+            )
+        expected["base"]["host_vcpu_idle_policy"] = idle_policy
     if replace_cmdline:
         if not isinstance(kernel.get("cmdline"), str):
             raise ValueError("[kernel].cmdline must exist exactly once and be a string")
@@ -87,6 +106,8 @@ try:
     for line in lines:
         if re.match(r"^kernel_path\s*=", line):
             generated.append(assignment("kernel_path", "rtthread.bin", line))
+        elif idle_policy and re.match(r"^host_vcpu_idle_policy\s*=", line):
+            generated.append(assignment("host_vcpu_idle_policy", idle_policy, line))
         else:
             generated.append(line)
 

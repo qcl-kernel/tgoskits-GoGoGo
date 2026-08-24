@@ -15,7 +15,6 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <sys/select.h>
-#include <sys/random.h>
 #include <time.h>
 #include <errno.h>
 
@@ -25,6 +24,7 @@
 #define MAX_PAYLOAD_SIZES 3
 #define REQUEST_TIMEOUT_MARGIN_MS 1000
 #define MAX_SELECT_WAIT_MS 20
+#define HANDSHAKE_TIMEOUT_MS 60000
 
 static int now_ms(uint64_t *current_ms) {
     struct timespec ts;
@@ -37,21 +37,34 @@ static int now_ms(uint64_t *current_ms) {
     return 0;
 }
 
+static uint64_t mix_u64(uint64_t value)
+{
+    value += UINT64_C(0x9e3779b97f4a7c15);
+    value = (value ^ (value >> 30)) * UINT64_C(0xbf58476d1ce4e5b9);
+    value = (value ^ (value >> 27)) * UINT64_C(0x94d049bb133111eb);
+    return value ^ (value >> 31);
+}
+
 static int generate_session_seed(uint64_t *seed)
 {
-    size_t offset = 0;
+    struct timespec monotonic;
+    struct timespec realtime;
 
-    while (offset < sizeof(*seed)) {
-        ssize_t result = getrandom((uint8_t *)seed + offset,
-                                   sizeof(*seed) - offset, 0);
-        if (result < 0 && errno == EINTR)
-            continue;
-        if (result <= 0) {
-            fprintf(stderr, "RTIPC_FAILURE reason=session_seed_error\n");
-            return -1;
-        }
-        offset += (size_t)result;
+    if (clock_gettime(CLOCK_MONOTONIC_RAW, &monotonic) != 0 ||
+        clock_gettime(CLOCK_REALTIME, &realtime) != 0) {
+        fprintf(stderr, "RTIPC_FAILURE reason=session_seed_error\n");
+        return -1;
     }
+
+    /* The seed only needs uniqueness for protocol sessions, not entropy.  A
+     * blocking getrandom() would make boot-time smoke tests depend on Linux
+     * CRNG initialization, which can be delayed indefinitely under QEMU. */
+    uint64_t monotonic_ns = (uint64_t)monotonic.tv_sec * UINT64_C(1000000000) +
+                            (uint64_t)monotonic.tv_nsec;
+    uint64_t realtime_ns = (uint64_t)realtime.tv_sec * UINT64_C(1000000000) +
+                           (uint64_t)realtime.tv_nsec;
+    *seed = mix_u64(monotonic_ns ^ mix_u64(realtime_ns) ^
+                    mix_u64((uint64_t)getpid()));
     return 0;
 }
 
@@ -412,7 +425,6 @@ static int run_test(int sock, struct sockaddr_in *peer,
         return -1;
     uint64_t last_progress = test_start;
     uint64_t last_receive = test_start;
-    int disconnect_done = payload_size != 64;
     int start_index = 0;
 
     if (faults->profile == RTIPC_FAULT_PROFILE_RELIABILITY &&
@@ -428,12 +440,12 @@ static int run_test(int sock, struct sockaddr_in *peer,
 
     for (int i = start_index; i < count; i++) {
         /* Inject one connection failure between requests. */
-        if (!disconnect_done && i == count / 2 && payload_size == 64) {
+        if (rtipc_fault_should_force_disconnect(
+                faults->profile, payload_size, i, count)) {
             if (force_disconnect_and_reconnect(sock, peer, conn, i, result) != 0) {
                 result->protocol_errors++;
                 return -1;
             }
-            disconnect_done = 1;
         }
 
         if (!rtipc_connection_is_connected(conn)) {
@@ -673,11 +685,20 @@ int main(int argc, char *argv[])
         close(sock);
         return 1;
     }
+    uint64_t handshake_deadline_ms = connect_ms + HANDSHAKE_TIMEOUT_MS;
     rtipc_connection_connect(&conn, connect_ms);
 
     uint8_t recv_buf[RTIPC_MAX_PACKET];
-    for (int w = 0; w < 100 && !rtipc_connection_is_connected(&conn); w++) {
+    while (!rtipc_connection_is_connected(&conn)) {
         const rtipc_action_t *act;
+        uint64_t current_ms;
+        if (now_ms(&current_ms) != 0) {
+            close(sock);
+            return 1;
+        }
+        if (current_ms >= handshake_deadline_ms)
+            break;
+
         while ((act = rtipc_action_next(&conn))) {
             if (act->type == RTIPC_ACTION_SEND &&
                 send_datagram(sock, &peer, act->data, act->data_len) != 0) {
@@ -705,7 +726,19 @@ int main(int argc, char *argv[])
         }
         rtipc_action_clear(&conn);
 
-        fd_set rfds; struct timeval tv = {0, 100000};
+        if (now_ms(&current_ms) != 0) {
+            close(sock);
+            return 1;
+        }
+        if (current_ms >= handshake_deadline_ms)
+            break;
+        uint64_t remaining_ms = handshake_deadline_ms - current_ms;
+        uint64_t wait_ms = remaining_ms < 100 ? remaining_ms : 100;
+        fd_set rfds;
+        struct timeval tv = {
+            .tv_sec = (time_t)(wait_ms / 1000),
+            .tv_usec = (suseconds_t)((wait_ms % 1000) * 1000),
+        };
         FD_ZERO(&rfds); FD_SET(sock, &rfds);
         int ready = select(sock + 1, &rfds, NULL, NULL, &tv);
         if (ready < 0 && errno != EINTR) {
@@ -739,6 +772,8 @@ int main(int argc, char *argv[])
     }
 
     if (!rtipc_connection_is_connected(&conn)) {
+        printf("RTIPC_FAILURE reason=connect_timeout timeout_ms=%d\n",
+               HANDSHAKE_TIMEOUT_MS);
         printf("[client] FAILED to connect\n");
         return 1;
     }

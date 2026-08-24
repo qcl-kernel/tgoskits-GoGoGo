@@ -1,8 +1,8 @@
 #include <stdint.h>
 #include <stdio.h>
 
-#include "../rtthread/rtipc_peer.h"
-#include "../rtthread/rtipc_time.h"
+#include "../common/rtipc_peer.h"
+#include "../common/rtipc_time.h"
 
 static int peer_ownership_rejects_takeover(void)
 {

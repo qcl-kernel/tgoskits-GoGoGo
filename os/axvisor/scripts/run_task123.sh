@@ -6,32 +6,43 @@ SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(CDPATH= cd -- "$SCRIPT_DIR/../../.." && pwd)"
 export TGOS_SOURCE_CACHE="${TGOS_SOURCE_CACHE:-$ROOT/tmp/source-cache}"
 export UV_CACHE_DIR="${UV_CACHE_DIR:-$TGOS_SOURCE_CACHE/uv}"
+export TGOS_IMAGE_LOCAL_STORAGE="${TGOS_IMAGE_LOCAL_STORAGE:-$TGOS_SOURCE_CACHE/rootfs}"
 TASK3_ROOT="$ROOT/os/axvisor/guests/task3"
 RUN_UNTIL="${RUN_UNTIL:-$SCRIPT_DIR/run_until_log_marker.sh}"
 QEMU_REALTIME_CONTROL="${QEMU_REALTIME_CONTROL:-$SCRIPT_DIR/apply_qemu_realtime_controls.sh}"
 QEMU_RESOURCE_SAMPLER="${QEMU_RESOURCE_SAMPLER:-$SCRIPT_DIR/sample_qemu_resources.sh}"
+# RTBENCH requires QEMU's precise icount mode so INST_RETIRED (0x08) is
+# available alongside the virtual timer and cycle counters.  A zero shift
+# keeps the TCG clock precise without stretching the Task 2/3 network path
+# enough to trigger protocol timeouts; callers can override it for studies.
+QEMU_ICOUNT="${QEMU_ICOUNT:-shift=0}"
 LINUX_VMCONFIG_GENERATOR="${LINUX_VMCONFIG_GENERATOR:-$SCRIPT_DIR/generate_linux_vmconfig.sh}"
 STARRYOS_VMCONFIG_GENERATOR="${STARRYOS_VMCONFIG_GENERATOR:-$SCRIPT_DIR/generate_starryos_vmconfig.sh}"
 RTTHREAD_VMCONFIG_GENERATOR="${RTTHREAD_VMCONFIG_GENERATOR:-$SCRIPT_DIR/generate_rtthread_vmconfig.sh}"
+ZEPHYR_VMCONFIG_GENERATOR="${ZEPHYR_VMCONFIG_GENERATOR:-$SCRIPT_DIR/generate_zephyr_vmconfig.sh}"
 RESULT_GATE="${RESULT_GATE:-$SCRIPT_DIR/verify_task123_results.sh}"
 TIMED_COMMAND_HELPER="${TIMED_COMMAND_HELPER:-$SCRIPT_DIR/run_timed_foreground.sh}"
 IMAGE_METADATA="${IMAGE_METADATA:-$SCRIPT_DIR/rtthread_image_metadata.py}"
 LINUX_VMCONFIG_TEMPLATE="$ROOT/os/axvisor/configs/vms/qemu/aarch64/linux-net.toml"
 STARRYOS_VMCONFIG_TEMPLATE="$ROOT/os/axvisor/configs/vms/qemu/aarch64/starryos-task123.toml"
 RTTHREAD_VMCONFIG_TEMPLATE="$ROOT/os/axvisor/configs/vms/qemu/aarch64/rtthread-net.toml"
+ZEPHYR_VMCONFIG_TEMPLATE="$ROOT/os/axvisor/configs/vms/qemu/aarch64/zephyr-task123.toml"
+ZEPHYR_IMAGE_BUILDER="${ZEPHYR_IMAGE_BUILDER:-$SCRIPT_DIR/build_zephyr_task123.sh}"
+ZEPHYR_IMAGE_METADATA_TOOL="${ZEPHYR_IMAGE_METADATA_TOOL:-$SCRIPT_DIR/zephyr_image_metadata.py}"
 STARRYOS_BUILDER="$ROOT/os/axvisor/guests/starryos-task123/build.sh"
 PROTOCOL_SOURCE="$ROOT/os/axvisor/guests/rt-ipc/common/rt_ipc.c"
 PROTOCOL_HEADER="$ROOT/os/axvisor/guests/rt-ipc/common/rt_ipc.h"
 RTTHREAD_IMAGE_METADATA=
+RTTHREAD_INPUT_DIGEST=
 
 usage() {
     cat >&2 <<EOF
 usage:
-  $0 [--app-guest linux|starryos] --mode smoke [--task2-count N] [--task3-frames N] --output DIR
-  $0 [--app-guest linux|starryos] --mode realtime-suite [--rtbench-samples N] [--task2-count N] --output DIR
-  $0 [--app-guest linux|starryos] --mode stability [--seconds N] [--task2-count N] --output DIR
-  $0 [--app-guest linux|starryos] --mode task3 [--task3-frames N] --output DIR
-  $0 [--app-guest linux|starryos] --mode task3-fault --task3-fault PROFILE [--task3-frames N] --output DIR
+  $0 [--rtos rtthread|zephyr] [--app-guest linux|starryos] --mode smoke [--task2-count N] [--task3-frames N] --output DIR
+  $0 [--rtos rtthread|zephyr] [--app-guest linux|starryos] --mode realtime-suite [--rtbench-samples N] [--task2-count N] --output DIR
+  $0 [--rtos rtthread|zephyr] [--app-guest linux|starryos] --mode stability [--seconds N] [--task2-count N] --output DIR
+  $0 [--rtos rtthread|zephyr] [--app-guest linux|starryos] --mode task3 [--task3-frames N] --output DIR
+  $0 [--rtos rtthread|zephyr] [--app-guest linux|starryos] --mode task3-fault --task3-fault PROFILE [--task3-frames N] --output DIR
 EOF
     return 2
 }
@@ -48,6 +59,21 @@ require_integer() {
     local label=$4
     [[ "$value" =~ ^[0-9]+$ && "$value" -ge "$minimum" && "$value" -le "$maximum" ]] || {
         echo "$label must be an integer from $minimum to $maximum" >&2
+        return 2
+    }
+}
+
+validate_precise_icount() {
+    local value=${QEMU_ICOUNT:-}
+    local shift
+    [[ "$value" =~ ^shift=[0-9]+(,.*)?$ ]] || {
+        fail "QEMU_ICOUNT must use precise fixed-shift mode for RTBENCH (for example shift=3), got: $value"
+        return 2
+    }
+    shift=${value#shift=}
+    shift=${shift%%,*}
+    [[ "$shift" -le 10 ]] || {
+        fail "QEMU_ICOUNT shift must be between 0 and 10 for RTBENCH, got: $shift"
         return 2
     }
 }
@@ -71,6 +97,7 @@ default_task123_timeout() {
 }
 
 mode=
+rtos=rtthread
 app_guest=linux
 output_candidate=
 task2_count=
@@ -79,6 +106,7 @@ rtbench_samples=
 stability_seconds=
 task3_fault=
 seen_mode=0
+seen_rtos=0
 seen_app_guest=0
 seen_output=0
 seen_task2=0
@@ -93,11 +121,16 @@ parse_arguments() {
     while [[ $# -gt 0 ]]; do
         option=$1
         case "$option" in
-            --app-guest|--mode|--output|--task2-count|--task3-frames|--rtbench-samples|--seconds|--task3-fault)
+            --rtos|--app-guest|--mode|--output|--task2-count|--task3-frames|--rtbench-samples|--seconds|--task3-fault)
                 [[ $# -ge 2 ]] || usage
                 value=$2
                 shift 2
                 case "$option" in
+                    --rtos)
+                        [[ "$seen_rtos" -eq 0 ]] || usage
+                        rtos=$value
+                        seen_rtos=1
+                        ;;
                     --app-guest)
                         [[ "$seen_app_guest" -eq 0 ]] || usage
                         app_guest=$value
@@ -191,12 +224,25 @@ validate_mode_options() {
         *) usage ;;
     esac
 
+    case "$rtos" in
+        rtthread|zephyr) ;;
+        *) usage ;;
+    esac
+
+    case "${TASK123_RTTHREAD_IDLE_POLICY:-busy}" in
+        halt|busy) ;;
+        *) fail "TASK123_RTTHREAD_IDLE_POLICY must be halt or busy"; return 2 ;;
+    esac
+
     require_integer "$task2_count" 1 2147483647 task2-count
     require_integer "$task3_frames" 1 600 task3-frames
     if [[ "$mode" == realtime-suite ]]; then
         require_integer "$rtbench_samples" 1 100000 rtbench-samples
     elif [[ "$mode" == stability ]]; then
         require_integer "$stability_seconds" 1 3600 seconds
+    fi
+    if [[ "$mode" == realtime-suite || "$mode" == stability ]]; then
+        validate_precise_icount || return 2
     fi
 
     # A diagnostic stability run intentionally lets RT-Thread report a FAIL
@@ -215,6 +261,11 @@ validate_mode_options() {
         single|multi) ;;
         *) fail "QEMU_TCG_THREAD must be single or multi"; return 2 ;;
     esac
+    if [[ "$mode" == realtime-suite || "$mode" == stability ]] &&
+        [[ -n "$QEMU_ICOUNT" && "${QEMU_TCG_THREAD:-}" == multi ]]; then
+        fail "QEMU_TCG_THREAD=multi is incompatible with precise QEMU_ICOUNT; use single"
+        return 2
+    fi
     require_integer "${QEMU_RESOURCE_SAMPLE_INTERVAL_MS:-100}" 1 60000 QEMU_RESOURCE_SAMPLE_INTERVAL_MS
     require_integer "${TASK123_ALLOW_QEMU_TIMER_LIMIT:-0}" 0 1 TASK123_ALLOW_QEMU_TIMER_LIMIT
     require_integer "${RTTHREAD_REQUIRE_IMAGE_METADATA:-0}" 0 1 RTTHREAD_REQUIRE_IMAGE_METADATA
@@ -327,6 +378,7 @@ stage_shared_artifact() {
     local label=$1
     local filename=$2
     local source=$3
+    local replace_existing=${4:-0}
     local target
     local temporary
     [[ -n "$SHARED_ARTIFACT_DIR" ]] || {
@@ -336,10 +388,16 @@ stage_shared_artifact() {
     target="$(shared_cache_file "$filename")"
     if [[ -e "$target" ]]; then
         target="$(canonical_existing_file "shared-cache-$label" "$target")"
-        cmp -s -- "$source" "$target" || {
-            fail "shared cache artifact differs from explicit $label: $target"
-            return 1
-        }
+        if ! cmp -s -- "$source" "$target"; then
+            if [[ "$replace_existing" -ne 1 ]]; then
+                fail "shared cache artifact differs from explicit $label: $target"
+                return 1
+            fi
+            temporary="$target.tmp.$$"
+            cp -- "$source" "$temporary"
+            chmod a+r -- "$temporary"
+            mv -- "$temporary" "$target"
+        fi
     else
         temporary="$target.tmp.$$"
         cp -- "$source" "$temporary"
@@ -353,6 +411,7 @@ resolve_input_artifact() {
     local variable=$1
     local label=$2
     local filename=$3
+    local use_shared_cache=${4:-1}
     local current="${!variable:-}"
     local cached
     if [[ -n "$current" ]]; then
@@ -361,7 +420,8 @@ resolve_input_artifact() {
         printf -v "$variable" '%s' "$current"
         return 0
     fi
-    if [[ -n "$SHARED_ARTIFACT_DIR" && -e "$SHARED_ARTIFACT_DIR/$filename" ]]; then
+    if [[ "$use_shared_cache" -eq 1 &&
+          -n "$SHARED_ARTIFACT_DIR" && -e "$SHARED_ARTIFACT_DIR/$filename" ]]; then
         cached="$(canonical_existing_file "shared-cache-$label" "$SHARED_ARTIFACT_DIR/$filename")"
         printf -v "$variable" '%s' "$cached"
     fi
@@ -412,8 +472,9 @@ prepare_output_directory() {
     APP_GUEST_LOG="$OUTPUT/${app_guest}.log"
     local paths=(
         "$CONSOLE_LOG" "$MANIFEST" "$AXVISOR_BIN"
-        "$OUTPUT/${app_guest}.log" "$OUTPUT/rtthread.log" "$OUTPUT/frames.csv"
+        "$OUTPUT/${app_guest}.log" "$OUTPUT/${rtos}.log" "$OUTPUT/frames.csv"
         "$OUTPUT/summary.raw.json" "$OUTPUT/summary.json" "$OUTPUT/host-metrics.txt"
+        "$OUTPUT/vmconfig-${app_guest}.toml" "$OUTPUT/vmconfig-${rtos}.toml"
     )
     local i
     local j
@@ -431,6 +492,7 @@ prepare_output_directory() {
 }
 
 watcher_pid=
+pipeline_pid=
 feeder_pid=
 resource_sampler_pid=
 qemu_pid=
@@ -441,9 +503,14 @@ RUNTIME_DIR=
 LINUX_RUNTIME_DIR=
 STARRYOS_RUNTIME_DIR=
 RTTHREAD_RUNTIME_DIR=
+ZEPHYR_RUNTIME_DIR=
+RTOS_VMCONFIG=
+SELECTED_RTOS_IMAGE=
 APP_GUEST_IMAGE=
 APP_GUEST_VMCONFIG=
+APP_GUEST_VMCONFIG_EVIDENCE=
 APP_GUEST_RUNTIME_DIR=
+RTOS_VMCONFIG_EVIDENCE=
 APP_GUEST_LOG=
 APP_GUEST_SMP_MARKER=
 APP_GUEST_NET_MARKER=
@@ -453,32 +520,81 @@ APP_GUEST_TASK3_END_MARKER=
 APP_GUEST_TASK3_FAILURE_MARKER=
 APP_GUEST_TASK123_END_MARKER=
 APP_GUEST_FAILURE_MARKER=
+RTOS_SERVER_READY_MARKER=
 HOST_METRICS=
 SHARED_ARTIFACT_DIR="${TASK123_SHARED_ARTIFACT_DIR:-}"
 RESULT_GATE_STATUS=PASS
 serial_fd_open=0
 
+pid_is_running() {
+    local pid=$1
+    local state
+    [[ -n "$pid" && -r "/proc/$pid/stat" ]] || return 1
+    state="$(awk '{ print $3 }' "/proc/$pid/stat" 2>/dev/null)" || return 1
+    [[ "$state" != Z ]]
+}
+
 terminate_owned_pid() {
     local pid=$1
+    local deadline_ns
     [[ -n "$pid" ]] || return 0
-    if kill -0 "$pid" 2>/dev/null; then
+    if pid_is_running "$pid"; then
         kill -TERM "$pid" 2>/dev/null || true
+        deadline_ns=$(( $(date +%s%N) + 2000000000 ))
+        while pid_is_running "$pid" &&
+              [[ "$(date +%s%N)" -lt "$deadline_ns" ]]; do
+            sleep 0.01
+        done
     fi
+    if pid_is_running "$pid"; then
+        kill -KILL "$pid" 2>/dev/null || true
+    fi
+    # A watcher launched through a pipeline is not wait-able by this shell.
+    # wait still reaps direct children when applicable; the bounded polling
+    # above handles the non-child case without deleting its runtime early.
     wait "$pid" 2>/dev/null || true
 }
 
+terminate_owned_process_group() {
+    local pid=$1
+    local deadline_ns
+    [[ -n "$pid" ]] || return 0
+    if kill -0 -- "-$pid" 2>/dev/null; then
+        kill -TERM -- "-$pid" 2>/dev/null || true
+        deadline_ns=$(( $(date +%s%N) + 2000000000 ))
+        while kill -0 -- "-$pid" 2>/dev/null &&
+              [[ "$(date +%s%N)" -lt "$deadline_ns" ]]; do
+            sleep 0.01
+        done
+        if kill -0 -- "-$pid" 2>/dev/null; then
+            kill -KILL -- "-$pid" 2>/dev/null || true
+        fi
+    fi
+    terminate_owned_pid "$pid"
+}
+
 cleanup_owned_processes() {
+    if [[ -z "$qemu_pid" && -n "$RUNTIME_DIR" &&
+          -s "$RUNTIME_DIR/qemu.pid" ]]; then
+        local recorded_qemu_pid
+        recorded_qemu_pid="$(<"$RUNTIME_DIR/qemu.pid")"
+        if [[ "$recorded_qemu_pid" =~ ^[0-9]+$ ]]; then
+            qemu_pid=$recorded_qemu_pid
+        fi
+    fi
     terminate_owned_pid "$feeder_pid"
     feeder_pid=
     terminate_owned_pid "$resource_sampler_pid"
     resource_sampler_pid=
-    # The marker watcher owns QEMU through a separate process group. Kill the
-    # recorded child explicitly as well so cleanup remains bounded when the
-    # watcher is interrupted from an error path.
-    terminate_owned_pid "$qemu_pid"
+    # QEMU is the watcher child and may be in its own session/process group.
+    # Stop it first so a watcher still in launch setup can finish its deferred
+    # signal path instead of orphaning the child.
+    terminate_owned_process_group "$qemu_pid"
     qemu_pid=
     terminate_owned_pid "$watcher_pid"
     watcher_pid=
+    terminate_owned_pid "$pipeline_pid"
+    pipeline_pid=
     if [[ "$serial_fd_open" -eq 1 ]]; then
         exec 3>&-
         serial_fd_open=0
@@ -491,10 +607,20 @@ remove_runtime_directory() {
     rm -rf -- "$directory"
 }
 
+atomic_write_file() {
+    local destination=$1
+    local content=$2
+    local temporary="$destination.tmp.$$"
+
+    printf '%s\n' "$content" >"$temporary" &&
+        mv -- "$temporary" "$destination"
+}
+
 cleanup_runtime() {
     remove_runtime_directory "$LINUX_RUNTIME_DIR"
     remove_runtime_directory "$STARRYOS_RUNTIME_DIR"
     remove_runtime_directory "$RTTHREAD_RUNTIME_DIR"
+    remove_runtime_directory "$ZEPHYR_RUNTIME_DIR"
     remove_runtime_directory "$RUNTIME_DIR"
 }
 
@@ -538,6 +664,14 @@ run_timed() {
 }
 
 configure_app_guest_markers() {
+    if [[ "$rtos" == rtthread ]]; then
+        # RT-Thread emits this logger record before the standard printf marker.
+        # The latter can be split by AxVisor's shared VM console multiplexer;
+        # use the complete logger record as the runtime readiness boundary.
+        RTOS_SERVER_READY_MARKER='server starting on 192.168.77.30:9876'
+    else
+        RTOS_SERVER_READY_MARKER='RTIPC_SERVER_READY ip=192.168.77.30 port=9876'
+    fi
     if [[ "$app_guest" == linux ]]; then
         APP_GUEST_SMP_MARKER='LINUX_SMP_READY configured=2'
         APP_GUEST_NET_MARKER='TASK123_LINUX_NET_READY'
@@ -574,7 +708,13 @@ resolve_dependencies() {
         STARRYOS_VMCONFIG_GENERATOR="$(canonical_tool starryos-vmconfig-generator "$STARRYOS_VMCONFIG_GENERATOR")"
         STARRYOS_BUILDER="$(canonical_tool starryos-builder "$STARRYOS_BUILDER")"
     fi
-    RTTHREAD_VMCONFIG_GENERATOR="$(canonical_tool rtthread-vmconfig-generator "$RTTHREAD_VMCONFIG_GENERATOR")"
+    if [[ "$rtos" == rtthread ]]; then
+        RTTHREAD_VMCONFIG_GENERATOR="$(canonical_tool rtthread-vmconfig-generator "$RTTHREAD_VMCONFIG_GENERATOR")"
+    else
+        ZEPHYR_VMCONFIG_GENERATOR="$(canonical_tool zephyr-vmconfig-generator "$ZEPHYR_VMCONFIG_GENERATOR")"
+        ZEPHYR_IMAGE_BUILDER="$(canonical_tool zephyr-image-builder "$ZEPHYR_IMAGE_BUILDER")"
+        ZEPHYR_IMAGE_METADATA_TOOL="$(canonical_tool zephyr-image-metadata "$ZEPHYR_IMAGE_METADATA_TOOL")"
+    fi
     RESULT_GATE="$(canonical_tool result-gate "$RESULT_GATE")"
     IMAGE_METADATA="$(canonical_existing_file rtthread-image-metadata "$IMAGE_METADATA")"
     QEMU="$(canonical_tool qemu "${QEMU:-qemu-system-aarch64}")"
@@ -591,13 +731,16 @@ resolve_rootfs_image() {
         return
     fi
 
-    local rootfs_dir="$RUNTIME_DIR/rootfs"
+    local rootfs_dir="$TGOS_IMAGE_LOCAL_STORAGE/rootfs-aarch64-alpine.img"
     local rootfs_candidates=()
-    run_timed "$TASK123_BUILD_TIMEOUT_S" image-pull \
-        "$CARGO" xtask image pull qemu-aarch64 -o "$rootfs_dir"
-    mapfile -t rootfs_candidates < <(find "$rootfs_dir" -type f -name rootfs.img -print)
+    mapfile -t rootfs_candidates < <(find "$rootfs_dir" -type f -name rootfs-aarch64-alpine.img -print 2>/dev/null || true)
+    if [[ "${#rootfs_candidates[@]}" -eq 0 ]]; then
+        run_timed "$TASK123_BUILD_TIMEOUT_S" image-pull \
+            "$CARGO" xtask image pull --arch aarch64
+        mapfile -t rootfs_candidates < <(find "$rootfs_dir" -type f -name rootfs-aarch64-alpine.img -print)
+    fi
     [[ "${#rootfs_candidates[@]}" -eq 1 ]] || {
-        fail "image pull must produce exactly one rootfs.img (found ${#rootfs_candidates[@]})"
+        fail "managed aarch64 rootfs pull must produce exactly one rootfs-aarch64-alpine.img (found ${#rootfs_candidates[@]})"
         return 1
     }
     ROOTFS_IMAGE="$(canonical_existing_file rootfs "${rootfs_candidates[0]}")"
@@ -619,13 +762,6 @@ build_linux_images_if_needed() {
     local image_cache="${TASK123_LINUX_IMAGE_CACHE:-$TGOS_SOURCE_CACHE/task3-alpine-linux/6.12.21-alpine-3.23.0}"
     local cached_kernel="$image_cache/images/linux/Image"
     local cached_initramfs="$image_cache/images/linux/rootfs.cpio.gz"
-    if [[ -s "$cached_kernel" && -s "$cached_initramfs" ]] &&
-        linux_image_has_task123_probe "$cached_initramfs"; then
-        LINUX_KERNEL_IMAGE="$cached_kernel"
-        LINUX_INITRAMFS_IMAGE="$cached_initramfs"
-        TASK123_MODEL_IMAGE="${TASK123_MODEL_IMAGE:-$TGOS_SOURCE_CACHE/task3-model/model_weights.h}"
-        return
-    fi
     local build_root="$image_cache"
     local model_dir="$TGOS_SOURCE_CACHE/task3-model"
     run_timed "$TASK123_BUILD_TIMEOUT_S" linux-image-build \
@@ -668,6 +804,7 @@ build_rtthread_variant() {
         python3 "$IMAGE_METADATA" write \
             --image "$output" \
             --source "$source_tree" \
+            --input-digest "$RTTHREAD_INPUT_DIGEST" \
             --output "$metadata_output"
 }
 
@@ -688,12 +825,71 @@ build_rtthread_images_if_needed() {
     build_rtthread_variant "$source_tree" "$RTTHREAD_IMAGE" "$RTTHREAD_IMAGE_METADATA"
 }
 
+zephyr_cached_image_is_current() {
+    local image_directory=$1
+    local expected_input_digest=$2
+    local current="$image_directory/current"
+    local input_digest_file="$current/zephyr.bin.inputs.sha256"
+    local cached_input_digest=
+
+    [[ "$expected_input_digest" =~ ^[0-9a-f]{64}$ ]] || return 1
+    [[ -L "$current" && -s "$current/zephyr.bin" &&
+       -s "$current/zephyr.bin.meta.json" && -s "$input_digest_file" ]] || return 1
+    cached_input_digest="$(sed -n '1p' "$input_digest_file")"
+    [[ "$cached_input_digest" == "$expected_input_digest" ]] || return 1
+    [[ "$(wc -l < "$input_digest_file")" -eq 1 ]] || return 1
+    python3 "$ZEPHYR_IMAGE_METADATA_TOOL" check \
+        --image "$current/zephyr.bin" \
+        --metadata "$current/zephyr.bin.meta.json" \
+        --board-target "$(zephyr_board_target)" >/dev/null
+}
+
+zephyr_board_target() {
+    case "${ZEPHYR_TASK123_BOARD:-qemu}" in
+        qemu) echo qemu_cortex_a53/qemu_cortex_a53 ;;
+        rock-4d) echo axvisor_rock4d/qemu_cortex_a53 ;;
+        *) fail "unsupported Zephyr board: ${ZEPHYR_TASK123_BOARD:-qemu}" ;;
+    esac
+}
+
+build_zephyr_image_if_needed() {
+    if [[ -n "${ZEPHYR_IMAGE:-}" ]]; then
+        return
+    fi
+    local image_directory="$TGOS_SOURCE_CACHE/zephyr/dccb09599635bdff17633fa7e9dab014b91dce90/current-image"
+    local expected_input_digest
+    expected_input_digest="$("$ZEPHYR_IMAGE_BUILDER" --input-digest)"
+    if ! zephyr_cached_image_is_current "$image_directory" "$expected_input_digest"; then
+        progress "zephyr-image-cache rebuild reason=missing-stale-or-corrupt"
+        run_timed "$TASK123_BUILD_TIMEOUT_S" zephyr-image-build "$ZEPHYR_IMAGE_BUILDER" "$image_directory"
+    fi
+    zephyr_cached_image_is_current "$image_directory" "$expected_input_digest" ||
+        fail "Zephyr image cache is stale or corrupt after build: $image_directory/current"
+    ZEPHYR_IMAGE="$image_directory/current/zephyr.bin"
+    ZEPHYR_IMAGE_METADATA="$image_directory/current/zephyr.bin.meta.json"
+}
+
 resolve_or_build_images() {
     phase build-select-images
+    if [[ "$rtos" == rtthread ]]; then
+        RTTHREAD_INPUT_DIGEST="$(
+            python3 "$IMAGE_METADATA" input-digest --root "$ROOT"
+        )"
+    fi
     resolve_input_artifact LINUX_KERNEL_IMAGE linux-kernel linux-kernel
     resolve_input_artifact LINUX_INITRAMFS_IMAGE linux-initramfs linux-initramfs.cpio
     resolve_input_artifact STARRYOS_IMAGE starryos-image starryos-task123.bin
     resolve_input_artifact RTTHREAD_IMAGE rtthread rtthread.bin
+    resolve_input_artifact RTTHREAD_IMAGE_METADATA rtthread-metadata rtthread.bin.meta.json
+    # Zephyr's shared artifact is selected only after the pinned source/app
+    # digest has been checked. A generic cache may contain an image from an
+    # older run, and selecting it here would bypass build_zephyr_image_if_needed.
+    if [[ -n "${ZEPHYR_IMAGE:-}" ]]; then
+        resolve_input_artifact ZEPHYR_IMAGE zephyr zephyr.bin
+    fi
+    if [[ -n "${ZEPHYR_IMAGE_METADATA:-}" ]]; then
+        resolve_input_artifact ZEPHYR_IMAGE_METADATA zephyr-metadata zephyr.bin.meta.json
+    fi
     resolve_input_artifact ROOTFS_IMAGE rootfs rootfs.img
     resolve_input_artifact TASK123_MODEL_IMAGE model model_weights.h
     if [[ "$app_guest" == linux ]]; then
@@ -701,7 +897,34 @@ resolve_or_build_images() {
     elif [[ -z "${STARRYOS_IMAGE:-}" ]]; then
         build_linux_images_if_needed
     fi
-    build_rtthread_images_if_needed
+    if [[ "$rtos" == rtthread ]]; then
+        build_rtthread_images_if_needed
+        if [[ -n "${RTTHREAD_IMAGE_METADATA:-}" ]]; then
+            RTTHREAD_IMAGE_METADATA="$(canonical_existing_file rtthread-metadata "$RTTHREAD_IMAGE_METADATA")"
+        else
+            RTTHREAD_IMAGE_METADATA="${RTTHREAD_IMAGE_META:-${RTTHREAD_IMAGE}.meta.json}"
+        fi
+        if [[ "${RTTHREAD_REQUIRE_IMAGE_METADATA:-0}" -eq 1 ]]; then
+            run_timed "$TASK123_PHASE_TIMEOUT_S" rtthread-image-metadata-check \
+                python3 "$IMAGE_METADATA" check \
+                    --image "$RTTHREAD_IMAGE" \
+                    --metadata "$RTTHREAD_IMAGE_METADATA" \
+                    --input-digest "$RTTHREAD_INPUT_DIGEST"
+        fi
+    else
+        build_zephyr_image_if_needed
+        ZEPHYR_IMAGE="$(canonical_existing_file zephyr "$ZEPHYR_IMAGE")"
+        if [[ -n "${ZEPHYR_IMAGE_METADATA:-}" ]]; then
+            ZEPHYR_IMAGE_METADATA="$(canonical_existing_file zephyr-metadata "$ZEPHYR_IMAGE_METADATA")"
+        else
+            ZEPHYR_IMAGE_METADATA="${ZEPHYR_IMAGE_META:-${ZEPHYR_IMAGE}.meta.json}"
+        fi
+        run_timed "$TASK123_PHASE_TIMEOUT_S" zephyr-image-metadata-check \
+            python3 "$ZEPHYR_IMAGE_METADATA_TOOL" check \
+                --image "$ZEPHYR_IMAGE" \
+                --metadata "$ZEPHYR_IMAGE_METADATA" \
+                --board-target "$(zephyr_board_target)"
+    fi
     if [[ "$app_guest" == linux ]]; then
         LINUX_KERNEL_IMAGE="$(canonical_existing_file linux-kernel "$LINUX_KERNEL_IMAGE")"
         LINUX_INITRAMFS_IMAGE="$(canonical_existing_file linux-initramfs "$LINUX_INITRAMFS_IMAGE")"
@@ -710,14 +933,6 @@ resolve_or_build_images() {
         build_starryos_image_if_needed
         STARRYOS_IMAGE="$(canonical_existing_file starryos-image "$STARRYOS_IMAGE")"
         APP_GUEST_IMAGE="$STARRYOS_IMAGE"
-    fi
-    RTTHREAD_IMAGE="$(canonical_existing_file rtthread "$RTTHREAD_IMAGE")"
-    RTTHREAD_IMAGE_METADATA="${RTTHREAD_IMAGE_META:-${RTTHREAD_IMAGE}.meta.json}"
-    if [[ "${RTTHREAD_REQUIRE_IMAGE_METADATA:-0}" -eq 1 ]]; then
-        run_timed "$TASK123_PHASE_TIMEOUT_S" rtthread-image-metadata-check \
-            python3 "$IMAGE_METADATA" check \
-                --image "$RTTHREAD_IMAGE" \
-                --metadata "$RTTHREAD_IMAGE_METADATA"
     fi
     resolve_rootfs_image
 
@@ -742,17 +957,32 @@ resolve_or_build_images() {
     if [[ -n "${STARRYOS_IMAGE:-}" ]]; then
         STARRYOS_IMAGE="$(stage_shared_artifact starryos-image starryos-task123.bin "$STARRYOS_IMAGE")"
     fi
-    RTTHREAD_IMAGE="$(stage_shared_artifact rtthread rtthread.bin "$RTTHREAD_IMAGE")"
+    if [[ -n "${RTTHREAD_IMAGE:-}" ]]; then
+        RTTHREAD_IMAGE="$(stage_shared_artifact rtthread rtthread.bin "$RTTHREAD_IMAGE")"
+        if [[ -n "${RTTHREAD_IMAGE_METADATA:-}" ]]; then
+            RTTHREAD_IMAGE_METADATA="$(stage_shared_artifact rtthread-metadata rtthread.bin.meta.json "$RTTHREAD_IMAGE_METADATA")"
+        fi
+    fi
+    if [[ -n "${ZEPHYR_IMAGE:-}" ]]; then
+        ZEPHYR_IMAGE="$(stage_shared_artifact zephyr zephyr.bin "$ZEPHYR_IMAGE" 1)"
+        if [[ -n "${ZEPHYR_IMAGE_METADATA:-}" ]]; then
+            ZEPHYR_IMAGE_METADATA="$(stage_shared_artifact zephyr-metadata zephyr.bin.meta.json "$ZEPHYR_IMAGE_METADATA" 1)"
+        fi
+    fi
     ROOTFS_IMAGE="$(stage_shared_artifact rootfs rootfs.img "$ROOTFS_IMAGE")"
     TASK123_MODEL_IMAGE="$(stage_shared_artifact model model_weights.h "$TASK123_MODEL_IMAGE")"
 
     local source_input
     local source_inputs=(
-        "$RTTHREAD_IMAGE"
         "$ROOTFS_IMAGE"
         "$TASK123_MODEL_IMAGE"
         "$APP_GUEST_IMAGE"
     )
+    if [[ "$rtos" == rtthread ]]; then
+        source_inputs+=("$RTTHREAD_IMAGE")
+    else
+        source_inputs+=("$ZEPHYR_IMAGE")
+    fi
     if [[ "$app_guest" == linux ]]; then
         source_inputs+=("$LINUX_KERNEL_IMAGE" "$LINUX_INITRAMFS_IMAGE")
     elif [[ -n "${LINUX_INITRAMFS_IMAGE:-}" ]]; then
@@ -762,7 +992,11 @@ resolve_or_build_images() {
         validate_output_against_source "$source_input"
     done
 
-    SELECTED_RTTHREAD_IMAGE=$RTTHREAD_IMAGE
+    if [[ "$rtos" == rtthread ]]; then
+        SELECTED_RTOS_IMAGE=$RTTHREAD_IMAGE
+    else
+        SELECTED_RTOS_IMAGE=$ZEPHYR_IMAGE
+    fi
 }
 
 generate_vmconfigs() {
@@ -775,7 +1009,6 @@ generate_vmconfigs() {
         STARRYOS_RUNTIME_DIR="$(mktemp -d "$ROOT/tmp/starryos-runtime.XXXXXX")"
         APP_GUEST_RUNTIME_DIR="$STARRYOS_RUNTIME_DIR"
     fi
-    RTTHREAD_RUNTIME_DIR="$(mktemp -d "$ROOT/tmp/rtthread-runtime.XXXXXX")"
     local guest_fault=${task3_fault:-normal}
     local guest_cmdline
     if [[ "$app_guest" == linux ]]; then
@@ -794,6 +1027,9 @@ generate_vmconfigs() {
         APP_GUEST_VMCONFIG="$LINUX_VMCONFIG"
     else
         guest_cmdline="task2.count=$task2_count task2.fault=none task3.frames=$task3_frames task3.fault=$guest_fault"
+        if [[ "$mode" == realtime-suite ]]; then
+            guest_cmdline+=" rtbench.net.count=$rtbench_samples"
+        fi
         phase starryos-vmconfig
         STARRYOS_VMCONFIG="$(
             timeout --foreground --signal TERM --kill-after 5s \
@@ -803,14 +1039,32 @@ generate_vmconfigs() {
         )"
         APP_GUEST_VMCONFIG="$STARRYOS_VMCONFIG"
     fi
-    phase rtthread-vmconfig
-    RTTHREAD_VMCONFIG="$(
-        timeout --foreground --signal TERM --kill-after 5s \
-            "$TASK123_PHASE_TIMEOUT_S" \
-            "$RTTHREAD_VMCONFIG_GENERATOR" "$ROOT" "$RTTHREAD_VMCONFIG_TEMPLATE" \
-            "$SELECTED_RTTHREAD_IMAGE" "$RTTHREAD_RUNTIME_DIR" "task3.fault=$guest_fault"
-    )"
-    chmod a-w -- "$APP_GUEST_VMCONFIG" "$RTTHREAD_VMCONFIG"
+    if [[ "$rtos" == rtthread ]]; then
+        phase rtthread-vmconfig
+        RTTHREAD_RUNTIME_DIR="$(mktemp -d "$ROOT/tmp/rtthread-runtime.XXXXXX")"
+        RTTHREAD_VMCONFIG="$(
+            timeout --foreground --signal TERM --kill-after 5s \
+                "$TASK123_PHASE_TIMEOUT_S" \
+                "$RTTHREAD_VMCONFIG_GENERATOR" "$ROOT" "$RTTHREAD_VMCONFIG_TEMPLATE" \
+                "$RTTHREAD_IMAGE" "$RTTHREAD_RUNTIME_DIR" "task3.fault=$guest_fault" \
+                "${TASK123_RTTHREAD_IDLE_POLICY:-busy}"
+        )"
+        chmod a-w -- "$APP_GUEST_VMCONFIG" "$RTTHREAD_VMCONFIG"
+        RTOS_VMCONFIG="$RTTHREAD_VMCONFIG"
+        SELECTED_RTOS_IMAGE="$RTTHREAD_IMAGE"
+    else
+        phase zephyr-vmconfig
+        ZEPHYR_RUNTIME_DIR="$(mktemp -d "$ROOT/tmp/zephyr-runtime.XXXXXX")"
+        ZEPHYR_VMCONFIG="$(
+            timeout --foreground --signal TERM --kill-after 5s \
+                "$TASK123_PHASE_TIMEOUT_S" \
+                "$ZEPHYR_VMCONFIG_GENERATOR" "$ROOT" "$ZEPHYR_VMCONFIG_TEMPLATE" \
+                "$ZEPHYR_IMAGE" "$ZEPHYR_IMAGE_METADATA" "$ZEPHYR_RUNTIME_DIR" "task3.fault=$guest_fault"
+        )"
+        chmod a-w -- "$APP_GUEST_VMCONFIG" "$ZEPHYR_VMCONFIG"
+        RTOS_VMCONFIG="$ZEPHYR_VMCONFIG"
+        SELECTED_RTOS_IMAGE="$ZEPHYR_IMAGE"
+    fi
 }
 
 build_axvisor() {
@@ -821,8 +1075,8 @@ build_axvisor() {
     if ! run_timed "$TASK123_BUILD_TIMEOUT_S" cargo-xtask-axvisor-build \
         "$CARGO" xtask axvisor build --config qemu-aarch64-two-guest-net \
         --smp 4 \
-        --vmconfigs "$APP_GUEST_VMCONFIG" \
-        --vmconfigs "$RTTHREAD_VMCONFIG" 2>&1 | tee "$build_log"; then
+       --vmconfigs "$APP_GUEST_VMCONFIG" \
+        --vmconfigs "${RTOS_VMCONFIG:?}" 2>&1 | tee "$build_log"; then
         fail "AxVisor build failed"
         return 1
     fi
@@ -860,20 +1114,34 @@ record_artifact() {
     printf 'ARTIFACT name=%s path=%s sha256=%s\n' "$label" "$resolved" "$digest" >> "$MANIFEST_TMP"
 }
 
+preserve_vmconfig_evidence() {
+    local app_destination="$OUTPUT/vmconfig-${app_guest}.toml"
+    local rtos_destination="$OUTPUT/vmconfig-${rtos}.toml"
+    local app_temporary="$app_destination.tmp.$$"
+    local rtos_temporary="$rtos_destination.tmp.$$"
+
+    cp -- "$APP_GUEST_VMCONFIG" "$app_temporary"
+    cp -- "$RTOS_VMCONFIG" "$rtos_temporary"
+    mv -- "$app_temporary" "$app_destination"
+    mv -- "$rtos_temporary" "$rtos_destination"
+    APP_GUEST_VMCONFIG_EVIDENCE="$app_destination"
+    RTOS_VMCONFIG_EVIDENCE="$rtos_destination"
+}
+
 prepare_manifest() {
     MANIFEST_TMP="$OUTPUT/.manifest.txt.tmp"
     : > "$MANIFEST_TMP"
-    printf 'schema=1\napp_guest=%s\nmode=%s\ntask2_count=%s\ntask3_frames=%s\ntask3_fault=%s\nqemu_timer_slack_ns=%s\nqemu_cpu_affinity=%s\nqemu_sched_policy=%s\nqemu_sched_priority=%s\nqemu_tcg_thread=%s\n' \
-        "$app_guest" "$mode" "$task2_count" "$task3_frames" "${task3_fault:-normal}" \
+    printf 'schema=1\nrtos=%s\napp_guest=%s\nmode=%s\ntask2_count=%s\ntask3_frames=%s\ntask3_fault=%s\nqemu_cpu=cortex-a72\nqemu_timer_slack_ns=%s\nqemu_cpu_affinity=%s\nqemu_sched_policy=%s\nqemu_sched_priority=%s\nqemu_tcg_thread=%s\nqemu_icount=%s\nqemu_pmu=on\nrtbench_pmu_event=0x8\nrtbench_units=ns,cycles,instructions\n' \
+        "$rtos" "$app_guest" "$mode" "$task2_count" "$task3_frames" "${task3_fault:-normal}" \
         "$QEMU_TIMER_SLACK_NS" "${QEMU_CPU_AFFINITY:-}" "${QEMU_SCHED_POLICY:-}" \
-        "${QEMU_SCHED_PRIORITY:-0}" "${QEMU_TCG_THREAD:-multi}" >> "$MANIFEST_TMP"
+        "${QEMU_SCHED_PRIORITY:-0}" "${QEMU_TCG_THREAD:-multi}" "$QEMU_ICOUNT" >> "$MANIFEST_TMP"
     printf 'qemu_vcpu_affinity=%s\n' "${QEMU_VCPU_AFFINITY:-}" >> "$MANIFEST_TMP"
     record_artifact qemu "$QEMU"
     record_artifact axvisor "$AXVISOR_BIN"
     if [[ "$app_guest" == linux ]]; then
         record_artifact linux-kernel "$LINUX_KERNEL_IMAGE"
         record_artifact linux-initramfs "$LINUX_INITRAMFS_IMAGE"
-        record_artifact linux-vmconfig "$APP_GUEST_VMCONFIG"
+        record_artifact linux-vmconfig "$APP_GUEST_VMCONFIG_EVIDENCE"
     else
         if [[ -n "${LINUX_KERNEL_IMAGE:-}" ]]; then
             record_artifact linux-kernel "$LINUX_KERNEL_IMAGE"
@@ -882,17 +1150,53 @@ prepare_manifest() {
             record_artifact linux-initramfs "$LINUX_INITRAMFS_IMAGE"
         fi
         record_artifact starryos "$STARRYOS_IMAGE"
-        record_artifact starryos-vmconfig "$APP_GUEST_VMCONFIG"
+        record_artifact starryos-vmconfig "$APP_GUEST_VMCONFIG_EVIDENCE"
     fi
-    record_artifact rtthread "$SELECTED_RTTHREAD_IMAGE"
-    if [[ "${RTTHREAD_REQUIRE_IMAGE_METADATA:-0}" -eq 1 ]]; then
-        record_artifact rtthread-metadata "$RTTHREAD_IMAGE_METADATA"
+    if [[ "$rtos" == rtthread ]]; then
+        record_artifact rtthread "$SELECTED_RTOS_IMAGE"
+        if [[ "${RTTHREAD_REQUIRE_IMAGE_METADATA:-0}" -eq 1 ]]; then
+            record_artifact rtthread-metadata "$RTTHREAD_IMAGE_METADATA"
+        fi
+        record_artifact rtthread-vmconfig "$RTOS_VMCONFIG_EVIDENCE"
+    else
+        record_artifact zephyr "$SELECTED_RTOS_IMAGE"
+        record_artifact zephyr-metadata "$ZEPHYR_IMAGE_METADATA"
+        record_artifact zephyr-vmconfig "$RTOS_VMCONFIG_EVIDENCE"
     fi
-    record_artifact rtthread-vmconfig "$RTTHREAD_VMCONFIG"
     record_artifact model "$TASK123_MODEL_IMAGE"
     record_artifact protocol-source "$PROTOCOL_SOURCE"
     record_artifact protocol-header "$PROTOCOL_HEADER"
     record_artifact rootfs "$ROOTFS_IMAGE"
+}
+
+normalized_console_marker_present() {
+    local marker=$1
+
+    # Guest UART bytes and AxVisor host records share one stream. A host
+    # record can be inserted between bytes of any guest completion marker.
+    python3 - "$CONSOLE_LOG" "$marker" <<'PY'
+import re
+import sys
+from pathlib import Path
+
+data = Path(sys.argv[1]).read_bytes()
+data = re.sub(
+    rb"(?:\[VM [0-9]+\] )?(?:\x1b\[m)?\x1b\[37m\[[^\r\n]*?\x1b\[m\r?\n?",
+    b"",
+    data,
+)
+data = re.sub(rb"\x1b\[[0-?]*[ -/]*[@-~]", b"", data)
+marker = sys.argv[2].encode()
+if marker == b"RTBENCH_STABILITY_END status=":
+    found = re.search(
+        rb"RTBENCH_STABILITY_END status=(PASS|FAIL) expected=[0-9]+ "
+        rb"collected=[0-9]+ missing=0(?:\s|$)",
+        data,
+    )
+else:
+    found = marker in data
+sys.exit(0 if found else 1)
+PY
 }
 
 wait_for_console_marker() {
@@ -900,39 +1204,156 @@ wait_for_console_marker() {
     local deadline=$(( $(date +%s) + TASK123_TIMEOUT_S ))
 
     while :; do
-        grep -aFq -- "$marker" "$CONSOLE_LOG" && return 0
+        if [[ "$marker" == 'RTBENCH_STABILITY_END status=' ]]; then
+            grep -aEq -- \
+                'RTBENCH_STABILITY_END status=(PASS|FAIL) expected=[0-9]+ collected=[0-9]+ missing=0([[:space:]]|$)' \
+                "$CONSOLE_LOG" && return 0
+        else
+            grep -aFq -- "$marker" "$CONSOLE_LOG" && return 0
+        fi
+        normalized_console_marker_present "$marker" && return 0
         kill -0 "$watcher_pid" 2>/dev/null || return 1
         [[ "$(date +%s)" -lt "$deadline" ]] || return 124
         sleep 0.05
     done
 }
 
+wait_for_console_marker_logged() {
+    local marker=$1
+    local deadline=$(( $(date +%s) + TASK123_PHASE_TIMEOUT_S ))
+
+    while :; do
+        wait_for_console_marker "$marker" && return 0
+        kill -0 "$watcher_pid" 2>/dev/null || return 1
+        [[ "$(date +%s)" -lt "$deadline" ]] || return 124
+        sleep 0.05
+    done
+}
+
+rtos_final_record_present() {
+    python3 - "$CONSOLE_LOG" <<'PY'
+import re
+import sys
+from pathlib import Path
+
+data = Path(sys.argv[1]).read_bytes()
+data = re.sub(
+    rb"(?:\[VM [0-9]+\] )?(?:\x1b\[m)?\x1b\[37m\[[^\r\n]*?\x1b\[m\r?\n?",
+    b"",
+    data,
+)
+data = re.sub(rb"\x1b\[[0-?]*[ -/]*[@-~]", b"", data)
+data = data.replace(b"\r\n", b"\n").replace(b"\r", b"\n")
+record = re.compile(
+    rb"TASK3_RTOS_FINAL requests=[0-9]+ errors=[0-9]+ duplicates=[0-9]+ "
+    rb"applied_steps=[0-9]+ retries=[0-9]+\n"
+)
+sys.exit(0 if record.search(data) else 1)
+PY
+}
+
+wait_for_rtos_final_record() {
+    local deadline=$(( $(date +%s) + TASK123_TIMEOUT_S ))
+
+    while :; do
+        rtos_final_record_present && return 0
+        kill -0 "$watcher_pid" 2>/dev/null || return 1
+        [[ "$(date +%s)" -lt "$deadline" ]] || return 124
+        sleep 0.05
+    done
+}
+
+console_marker_after_offset() {
+    local marker=$1
+    local offset=$2
+    local size
+    size="$(wc -c < "$CONSOLE_LOG" 2>/dev/null || printf '0')"
+    [[ "$size" -gt "$offset" ]] || return 1
+    tail -c +$((offset + 1)) -- "$CONSOLE_LOG" | grep -aFq -- "$marker"
+}
+
 feed_benchmark_command() {
-    local ready='[VM 3] msh />'
+    local ready
+    local started='pmu_event=0x8'
+    if [[ "$rtos" == zephyr ]]; then
+        # Zephyr's UART shell prompt is not a reliable marker through the
+        # AxVisor console multiplexer. The application ready marker is emitted
+        # after the shell and network stack are initialized, so use it as the
+        # command-readiness boundary.
+        ready='[VM 3] TASK3_RTOS_READY ip=192.168.77.30 port=9877'
+    else
+        ready='[VM 3] msh />'
+    fi
     local command=
     wait_for_console_marker "$ready"
-    printf '\030]' >&3
-    sleep 0.1
+    # Keep the application guest visible until its final evidence is emitted.
+    # The console mux discards buffered output when a background guest stops,
+    # so switching to the RTOS before this boundary can lose every app marker.
+    if ! wait_for_console_marker "$APP_GUEST_TASK123_END_MARKER"; then
+        return 1
+    fi
+    switch_console_to_next_guest || return 1
+    # Task 3 can finish its network/control worker shortly after Linux emits
+    # its completion marker. Start the RT benchmark only after the RTOS final
+    # record is complete, otherwise both UART streams can corrupt metric rows.
+    if ! wait_for_rtos_final_record; then
+        return 1
+    fi
     if [[ "$mode" == realtime-suite ]]; then
         command="benchmark $rtbench_samples"
         ready='RTBENCH_END status=PASS'
     else
-        command="rtbench_stability $stability_seconds"
-        ready='RTBENCH_STABILITY_DONE'
+        command="${TASK123_ZEPHYR_SMOKE_COMMAND:-rtbench_stability $stability_seconds}"
+        local benchmark_seconds=${command##* }
+        local stability_expected=$((benchmark_seconds * 1000 - 1))
+        ready="RTBENCH_STABILITY_END status=PASS expected=${stability_expected} collected=${stability_expected} missing=0"
+        if [[ "${TASK123_ALLOW_QEMU_TIMER_LIMIT:-0}" -eq 1 ]]; then
+            ready='RTBENCH_STABILITY_END status='
+        fi
     fi
     printf '%s\r' "$command" >&3
-    # Keep Linux in the foreground until it emits its final evidence. Stopped
-    # guests are removed from the mux together with any buffered output.
-    printf '\030[' >&3
-    if ! wait_for_console_marker "$APP_GUEST_TASK123_END_MARKER"; then
+    if ! wait_for_console_marker "$started"; then
         return 1
     fi
-    # Replay VM 3's benchmark output and final counters.
-    printf '\030]' >&3
     if ! wait_for_console_marker "$ready"; then
         return 1
     fi
-    wait_for_console_marker 'TASK3_RTOS_FINAL requests='
+    wait_for_rtos_final_record
+}
+
+collect_rtos_final_command() {
+    wait_for_console_marker 'TASK3_RTOS_READY ip=192.168.77.30 port=9877' || return 1
+    wait_for_console_marker "$APP_GUEST_TASK123_END_MARKER" || return 1
+    switch_console_to_next_guest || return 1
+    wait_for_rtos_final_record || return 1
+}
+
+switch_console_to_next_guest() {
+    local confirmation='[Axvisor] attached VM[3] console'
+    local deadline=$(( $(date +%s) + TASK123_PHASE_TIMEOUT_S ))
+    local attempt=0
+    local switch_prefix=$'\030]'
+    local switch_delay=0.25
+    local switch_start_offset
+
+    while :; do
+        switch_start_offset="$(wc -c < "$CONSOLE_LOG" 2>/dev/null || printf '0')"
+        printf '%s' "$switch_prefix" >&3
+        sleep "$switch_delay"
+        attempt=$((attempt + 1))
+        console_marker_after_offset "$confirmation" "$switch_start_offset" && return 0
+        if (( attempt % 10 == 0 )); then
+            echo "TASK123_CONSOLE_SWITCH_WAIT attempt=$attempt interval_s=$switch_delay" >&3
+        fi
+        if ! kill -0 "$watcher_pid" 2>/dev/null; then
+            # The watcher may have observed the same final marker and stopped
+            # the pipeline while this foreground helper was polling its log.
+            grep -aFq -- "$confirmation" "$CONSOLE_LOG" && return 0
+            kill -0 "$pipeline_pid" 2>/dev/null || return 0
+            return 1
+        fi
+        (( $(date +%s) < deadline )) || return 1
+    done
 }
 
 wait_for_qemu_pid() {
@@ -946,6 +1367,32 @@ wait_for_qemu_pid() {
     qemu_pid="$(<"$pid_file")"
     require_integer "$qemu_pid" 1 2147483647 qemu-pid
     kill -0 "$qemu_pid" 2>/dev/null || fail "recorded QEMU PID is not running: $qemu_pid"
+}
+
+wait_for_watcher_pid() {
+    local pid_file=$1
+    local deadline=$(( $(date +%s) + 5 ))
+
+    while [[ ! -s "$pid_file" ]]; do
+        [[ "$(date +%s)" -lt "$deadline" ]] || return 1
+        sleep 0.01
+    done
+    local helper_pid
+    helper_pid="$(<"$pid_file")"
+    require_integer "$helper_pid" 1 2147483647 watcher-pid
+    kill -0 "$helper_pid" 2>/dev/null || return 1
+    watcher_pid="$helper_pid"
+}
+
+wait_for_qemu_launch_ready() {
+    local path=$1
+    local attempts=0
+    while [[ ! -s "$path" && "$attempts" -lt 500 ]]; do
+        kill -0 "$watcher_pid" 2>/dev/null || return 1
+        sleep 0.01
+        attempts=$((attempts + 1))
+    done
+    [[ -s "$path" ]]
 }
 
 read_qemu_completion() {
@@ -996,6 +1443,8 @@ launch_one_qemu() {
     local qemu_pid_file="$RUNTIME_DIR/qemu.pid"
     local qemu_status_file="$RUNTIME_DIR/qemu.raw-status"
     local qemu_reason_file="$RUNTIME_DIR/qemu.termination-reason"
+    local qemu_launch_ready_file="$RUNTIME_DIR/qemu.launch-ready"
+    local qemu_launch_release_file="$RUNTIME_DIR/qemu.launch-release"
     mkfifo -- "$serial_fifo"
     exec 3<> "$serial_fifo"
     serial_fd_open=1
@@ -1003,12 +1452,12 @@ launch_one_qemu() {
     local markers=(
         "$APP_GUEST_SMP_MARKER"
         "$APP_GUEST_NET_MARKER"
-        'RTIPC_SERVER_READY ip=192.168.77.30 port=9876'
+        "$RTOS_SERVER_READY_MARKER"
         'TASK3_RTOS_READY ip=192.168.77.30 port=9877'
         "$APP_GUEST_TASK2_END_MARKER"
         "$APP_GUEST_TASK3_END_MARKER"
         "$APP_GUEST_TASK123_END_MARKER"
-        'TASK3_RTOS_FINAL requests='
+        'TASK3_RTOS_FINAL_COMPLETE'
     )
     local failure_markers=(
         "$APP_GUEST_FAILURE_MARKER"
@@ -1019,10 +1468,11 @@ launch_one_qemu() {
         markers+=('RTBENCH_END status=PASS')
         failure_markers+=('RTBENCH_END status=FAIL')
     elif [[ "$mode" == stability ]]; then
+        local stability_expected=$((stability_seconds * 1000 - 1))
         if [[ "${TASK123_ALLOW_QEMU_TIMER_LIMIT:-0}" -eq 1 ]]; then
-            markers+=('RTBENCH_STABILITY_DONE')
+            markers+=('RTBENCH_STABILITY_END status=')
         else
-            markers+=('RTBENCH_STABILITY_END status=PASS')
+            markers+=("RTBENCH_STABILITY_END status=PASS expected=${stability_expected} collected=${stability_expected} missing=0")
             failure_markers+=('RTBENCH_STABILITY_END status=FAIL')
         fi
     fi
@@ -1032,13 +1482,21 @@ launch_one_qemu() {
         failure_marker_args+=(--failure-marker "$failure_marker")
     done
 
+    local qemu_pmu_args=()
+    local qemu_tcg_thread="${QEMU_TCG_THREAD:-multi}"
+    if [[ "$mode" == realtime-suite || "$mode" == stability ]]; then
+        qemu_pmu_args=(-icount "$QEMU_ICOUNT")
+        if [[ -z "${QEMU_TCG_THREAD+x}" ]]; then
+            qemu_tcg_thread=single
+        fi
+    fi
     local qemu_args=(
         -display none
         -monitor none
         -snapshot
-        -name "tgoskits,debug-threads=on"
-        -cpu cortex-a72
-        -accel "tcg,thread=${QEMU_TCG_THREAD:-multi}"
+        -cpu cortex-a72,pmu=on
+        "${qemu_pmu_args[@]}"
+        -accel "tcg,thread=$qemu_tcg_thread"
         -machine virt,virtualization=on,gic-version=3
         -global virtio-mmio.force-legacy=false
         -smp 4
@@ -1057,14 +1515,19 @@ launch_one_qemu() {
     )
 
     RUN_UNTIL_CHILD_PID_FILE="$qemu_pid_file" \
+    RUN_UNTIL_HELPER_PID_FILE="$RUNTIME_DIR/watcher.pid" \
     RUN_UNTIL_CHILD_STATUS_FILE="$qemu_status_file" \
     RUN_UNTIL_TERMINATION_REASON_FILE="$qemu_reason_file" \
+    RUN_UNTIL_LAUNCH_READY_FILE="$qemu_launch_ready_file" \
+    RUN_UNTIL_LAUNCH_RELEASE_FILE="$qemu_launch_release_file" \
     RUN_UNTIL_CHILD_TIMERSLACK_NS="$QEMU_TIMER_SLACK_NS" \
         "$RUN_UNTIL" "$TASK123_TIMEOUT_S" "$CONSOLE_LOG" "${markers[@]}" \
         "${failure_marker_args[@]}" -- \
         "$QEMU" "${qemu_args[@]}" <&3 2>&1 | tee -a -- "$CONSOLE_LOG" &
-    watcher_pid=$!
+    pipeline_pid=$!
+    wait_for_watcher_pid "$RUNTIME_DIR/watcher.pid"
     wait_for_qemu_pid "$qemu_pid_file"
+    wait_for_qemu_launch_ready "$qemu_launch_ready_file"
 
     HOST_METRICS="$OUTPUT/host-metrics.txt"
     "$QEMU_RESOURCE_SAMPLER" "$qemu_pid" "$HOST_METRICS" \
@@ -1078,19 +1541,32 @@ launch_one_qemu() {
         fail "QEMU realtime controls failed"
         return 1
     fi
-    if [[ "$mode" == realtime-suite || "$mode" == stability ]]; then
+   atomic_write_file "$qemu_launch_release_file" ready
+    phase marker-collection
+   if [[ "$rtos" == zephyr && "$mode" == smoke ]]; then
+        if [[ -n "${TASK123_ZEPHYR_SMOKE_COMMAND:-}" ]]; then
+            feed_benchmark_command
+        else
+            collect_rtos_final_command
+        fi
+    elif [[ "$mode" == realtime-suite || "$mode" == stability ]]; then
         feed_benchmark_command &
         feeder_pid=$!
     fi
 
-    phase marker-collection
     local watcher_rc=0
-    if wait "$watcher_pid"; then
+    if wait "$pipeline_pid"; then
         watcher_rc=0
     else
         watcher_rc=$?
     fi
-    watcher_pid=
+    pipeline_pid=
+    # The marker helper removes watcher.pid on exit. Preserve the recorded pid
+    # only while it is alive; cleanup_owned_processes() must not signal a
+    # recycled unrelated process.
+    if [[ -n "$watcher_pid" ]] && ! kill -0 "$watcher_pid" 2>/dev/null; then
+        watcher_pid=
+    fi
     local resource_sampler_rc=0
     if wait "$resource_sampler_pid"; then
         resource_sampler_rc=0
@@ -1128,6 +1604,7 @@ run_result_gate() {
     phase result-gate
     local arguments=(
         --mode "$mode"
+        --rtos "$rtos"
         --app-guest "$app_guest"
         --log "$CONSOLE_LOG"
         --output "$OUTPUT"
@@ -1155,6 +1632,101 @@ publish_manifest() {
     phase manifest
     printf 'raw_qemu_exit=%s\ntermination_reason=%s\nqemu_exit=%s\nresult_gate=%s\n' \
         "$raw_qemu_exit" "$termination_reason" "$normalized_qemu_exit" "$RESULT_GATE_STATUS" >> "$MANIFEST_TMP"
+    if [[ "$mode" == realtime-suite || "$mode" == stability ]]; then
+        local pmu_status
+        local counter_frequency
+        # The RTOS logger and AxVisor shell can interleave bytes inside the
+        # PMU label. Keep the authenticated RTBENCH-to-status boundary while
+        # allowing presentation text between them; do not infer status from
+        # an unrelated line.
+        pmu_status="$(python3 - "$CONSOLE_LOG" <<'PY'
+import re
+import sys
+from pathlib import Path
+
+data = Path(sys.argv[1]).read_bytes()
+data = re.sub(
+    rb"(?:\[VM [0-9]+\] )?(?:\x1b\[m)?\x1b\[37m\[[^\r\n]*?\x1b\[m\r?\n?",
+    b"",
+    data,
+)
+data = re.sub(rb"\x1b\[[0-?]*[ -/]*[@-~]", b"", data)
+pmu_unavailable = False
+pmu_ready = False
+def has_ordered_label(prefix):
+    # Console multiplexing can insert bytes into RTBENCH_PMU. Require the
+    # original label characters in order and keep the complete evidence on
+    # one bounded UART record.
+    cursor = 0
+    for character in b"RTBENCH_PMU":
+        cursor = prefix.find(bytes((character,)), cursor)
+        if cursor < 0 or cursor > 96:
+            return False
+        cursor += 1
+    return True
+
+for line in data.splitlines():
+    status = re.search(rb"status=(ready|unavailable)", line)
+    if status is None or not re.search(rb"event=0x8", line[status.end():]):
+        continue
+    if status.group(1) == b"unavailable":
+        pmu_unavailable = True
+        break
+    if has_ordered_label(line[:status.start()]):
+        pmu_ready = True
+        break
+if pmu_unavailable:
+    print("unavailable")
+elif pmu_ready:
+    print("ready")
+else:
+    # A concurrent UART writer can insert bytes into the short PMU label.
+    # Accept the authenticated benchmark records instead: the begin record
+    # selects event 0x8 and the metric record proves both PMU dimensions were
+    # sampled. This cannot pass when PMU setup returned unavailable, because
+    # that path emits no begin or metric records.
+    begin = re.search(
+        rb"RTBENCH_(?:BEGIN|STABILITY_BEGIN)[^\r\n]*pmu_event=0x8",
+        data,
+    )
+    metric = re.search(
+        rb"RTBENCH metric=[^\r\n]*p50_cycles=[0-9]+[^\r\n]*"
+        rb"p50_instructions=[0-9]+",
+        data,
+    )
+    if begin is not None and metric is not None:
+        print("ready")
+PY
+        )"
+        case "${pmu_status}:${rtos}" in
+            ready:*|unavailable:zephyr) ;;
+            *) fail "manifest PMU status is not usable: ${pmu_status:-missing}" ;;
+        esac
+        counter_frequency="$(python3 - "$CONSOLE_LOG" <<'PY'
+import re
+import sys
+from pathlib import Path
+
+data = Path(sys.argv[1]).read_bytes()
+data = re.sub(
+    rb"(?:\[VM [0-9]+\] )?\x1b\[37m\[[^\r\n]*?\x1b\[m\r?\n?",
+    b"",
+    data,
+)
+data = re.sub(rb"\x1b\[[0-?]*[ -/]*[@-~]", b"", data)
+match = re.search(
+    rb"RTBENCH_(?:BEGIN|STABILITY_BEGIN)[^\r\n]*frequency=([1-9][0-9]*)",
+    data,
+)
+if match is not None:
+    print(match.group(1).decode("ascii"))
+PY
+        )"
+        [[ "$counter_frequency" =~ ^[1-9][0-9]*$ ]] ||
+            fail "manifest counter frequency is missing"
+        printf 'rtbench_pmu_status=%s\nrtbench_counter_frequency=%s\n' \
+            "$pmu_status" "$counter_frequency" >> "$MANIFEST_TMP"
+    fi
     mv -- "$MANIFEST_TMP" "$MANIFEST"
 }
 
@@ -1169,7 +1741,11 @@ main() {
     TASK123_PHASE_TIMEOUT_S=${TASK123_PHASE_TIMEOUT_S:-600}
     QEMU_UCLAMP_MIN=${QEMU_UCLAMP_MIN:-1024}
     QEMU_TIMER_SLACK_NS=${QEMU_TIMER_SLACK_NS:-1}
-    QEMU_TCG_THREAD=${QEMU_TCG_THREAD:-multi}
+    if [[ "$mode" == realtime-suite || "$mode" == stability ]]; then
+        QEMU_TCG_THREAD=${QEMU_TCG_THREAD:-single}
+    else
+        QEMU_TCG_THREAD=${QEMU_TCG_THREAD:-multi}
+    fi
     configure_app_guest_markers
     mkdir -p -- "$ROOT/tmp"
     RUNTIME_DIR="$(mktemp -d "$ROOT/tmp/task123-runtime.XXXXXX")"
@@ -1182,6 +1758,7 @@ main() {
     resolve_or_build_images
     generate_vmconfigs
     build_axvisor
+    preserve_vmconfig_evidence
     prepare_manifest
     launch_one_qemu
     phase scoped-cleanup

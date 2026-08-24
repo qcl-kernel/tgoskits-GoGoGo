@@ -2,7 +2,7 @@
 #include <string.h>
 
 #include "../common/rt_ipc.h"
-#include "../rtthread/rtipc_echo_responder.h"
+#include "../common/rtipc_echo_responder.h"
 #include "../rtthread/rtipc_server_status.h"
 
 #define CAPTURE_CAPACITY (RTIPC_SEND_WINDOW + 1)
@@ -12,6 +12,11 @@ typedef struct {
     size_t lengths[CAPTURE_CAPACITY];
     size_t count;
 } capture_t;
+
+typedef struct {
+    capture_t capture;
+    bool fail_status_once;
+} flaky_capture_t;
 
 static int capture_packet(const uint8_t *data, size_t len, void *context)
 {
@@ -23,6 +28,21 @@ static int capture_packet(const uint8_t *data, size_t len, void *context)
     capture->lengths[capture->count] = len;
     capture->count++;
     return 0;
+}
+
+static int flaky_capture_packet(const uint8_t *data, size_t len,
+                                void *context)
+{
+    flaky_capture_t *capture = context;
+    rtipc_header_t header;
+
+    if (rtipc_header_parse(data, len, &header) == 0 &&
+        header.msg_type == RTIPC_MSG_STATUS_REP &&
+        capture->fail_status_once) {
+        capture->fail_status_once = false;
+        return -1;
+    }
+    return capture_packet(data, len, &capture->capture);
 }
 
 static void receive_command(rtipc_connection_t *connection, uint32_t sequence,
@@ -255,6 +275,33 @@ int main(void)
                 "deferred request was not answered: delivered=%u errors=%u status=%zu\n",
                 result.delivered_messages, result.response_errors,
                 count_status_packets(&capture));
+        return 1;
+    }
+
+    static rtipc_connection_t send_retry_connection;
+    flaky_capture_t flaky_capture = {0};
+    rtipc_connection_init(&send_retry_connection, &config);
+    send_retry_connection.state = RTIPC_STATE_CONNECTED;
+    receive_command(&send_retry_connection, 0, deferred_payload,
+                    sizeof(deferred_payload));
+    flaky_capture.fail_status_once = true;
+    result = rtipc_echo_process_actions(&send_retry_connection, 1,
+                                        flaky_capture_packet, &flaky_capture);
+    if (result.send_errors != 1 || result.delivered_messages != 1) {
+        fprintf(stderr,
+                "expected one transient response send failure: errors=%u delivered=%u\n",
+                result.send_errors, result.delivered_messages);
+        return 1;
+    }
+    memset(&flaky_capture.capture, 0, sizeof(flaky_capture.capture));
+    result = rtipc_echo_process_actions(&send_retry_connection, 2,
+                                        flaky_capture_packet, &flaky_capture);
+    if (result.send_errors != 0 || result.delivered_messages != 0 ||
+        count_status_packets(&flaky_capture.capture) != 1) {
+        fprintf(stderr,
+                "transient response send failure was not retried: errors=%u delivered=%u status=%zu\n",
+                result.send_errors, result.delivered_messages,
+                count_status_packets(&flaky_capture.capture));
         return 1;
     }
 

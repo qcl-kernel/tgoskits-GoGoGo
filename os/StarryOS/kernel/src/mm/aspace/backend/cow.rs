@@ -9,6 +9,7 @@ use ax_errno::{AxError, AxResult};
 use ax_fs_ng::vfs::FileBackend;
 use ax_memory_addr::{MemoryAddr, PAGE_SIZE_4K, PhysAddr, VirtAddr, VirtAddrRange, align_down_4k};
 use ax_runtime::hal::{
+    cache,
     mem::phys_to_virt,
     paging::{MappingFlags, PageTable, PagingError},
 };
@@ -24,6 +25,24 @@ use crate::{
 
 struct FrameRefCnt {
     count: u8,
+}
+
+/// Synchronizes freshly written frame data with the instruction stream.
+///
+/// On cores without `CTR_EL0.IDC`/`DIC` (e.g. Cortex-A72), file data written
+/// through the direct map can stay dirty in the L1 data cache while user
+/// execution fetches the same page through the I-cache, whose misses read
+/// L2/DRAM and observe stale bytes (random encodings that decode as UNDEF).
+/// Clean the data cache to the PoU, then invalidate the I-cache, so the
+/// first instruction fetch observes the new bytes.
+fn sync_frames_for_execution(paddr: PhysAddr, size: usize) {
+    // The D-cache clean to PoU is the essential part for freshly filled
+    // frames (verified on RK3576 A72: clean-only boots, ic-only still
+    // SIGILLs). The I-cache invalidate defends reused frames whose stale
+    // lines may still live in the I-cache (architecture requires both for
+    // CTR_EL0.IDC=0/DIC=0 cores such as A53/A57/A72).
+    cache::clean_dcache_to_pou(phys_to_virt(paddr), size);
+    cache::flush_icache_all();
 }
 
 impl FrameRefCnt {
@@ -333,6 +352,9 @@ impl CowBackend {
             let frame = self.alloc_new_frame(false)?;
             let dst = unsafe { slice::from_raw_parts_mut(phys_to_virt(frame).as_mut_ptr(), ps) };
             dst.copy_from_slice(&buf[k * ps..(k + 1) * ps]);
+            if flags.contains(MappingFlags::EXECUTE) {
+                sync_frames_for_execution(frame, ps);
+            }
             let pte_flags = self.pte_flags_for_fault_in(flags, access_flags);
             if let Err(err) = pt.map_page(addr, frame, self.size, pte_flags) {
                 self.deinit_frame(frame);
@@ -381,6 +403,9 @@ impl CowBackend {
                         phys_to_virt(new_frame).as_mut_ptr(),
                         self.size as _,
                     );
+                }
+                if vma_flags.contains(MappingFlags::EXECUTE) {
+                    sync_frames_for_execution(new_frame, self.size);
                 }
                 if let Err(err) = pt.remap_page(vaddr, new_frame, vma_flags) {
                     self.deinit_frame(new_frame);

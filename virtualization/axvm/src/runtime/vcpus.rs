@@ -400,9 +400,11 @@ pub(crate) fn build_vcpu_task(vm: &VMRef, vcpu: VCpuRef) -> crate::TaskInner {
     );
 
     if let Some(phys_cpu_set) = vcpu.phys_cpu_set() {
-        vcpu_task.set_cpumask(crate::host::task::cpu_mask_from_raw_bits(
-            vcpu_task_cpu_mask(vm.id(), vcpu.id(), phys_cpu_set),
-        ));
+        let task_cpu_mask = vcpu_task_cpu_mask(vm.id(), vcpu.id(), phys_cpu_set);
+        vcpu_task.set_cpumask(crate::host::task::cpu_mask_from_raw_bits(task_cpu_mask));
+        if let Some(initial_cpu) = vcpu_initial_cpu(vcpu.id(), task_cpu_mask) {
+            vcpu_task.set_initial_cpu(initial_cpu);
+        }
     }
 
     // Use Weak reference in TaskExt to avoid keeping VM alive
@@ -444,6 +446,19 @@ fn vcpu_task_cpu_mask(vm_id: usize, vcpu_id: usize, requested_mask: usize) -> us
          those CPUs initialized AxVM; using initialized host CPU mask {fallback_mask:#x}"
     );
     fallback_mask
+}
+
+fn vcpu_initial_cpu(vcpu_id: usize, cpu_mask: usize) -> Option<usize> {
+    let eligible_cpu_count = cpu_mask.count_ones() as usize;
+    if eligible_cpu_count == 0 {
+        return None;
+    }
+
+    let mut remaining_cpus = cpu_mask;
+    for _ in 0..vcpu_id % eligible_cpu_count {
+        remaining_cpus &= remaining_cpus - 1;
+    }
+    Some(remaining_cpus.trailing_zeros() as usize)
 }
 
 /// The main routine for VCpu task.
@@ -766,6 +781,17 @@ mod tests {
         assert!(!vcpu_start_is_ready(true, false));
         assert!(vcpu_start_is_ready(true, true));
         assert!(!vcpu_start_is_ready(false, true));
+    }
+
+    #[test]
+    fn shared_affinity_spreads_initial_vcpu_placement() {
+        let shared_linux_mask = 0b1011;
+
+        assert_eq!(vcpu_initial_cpu(0, shared_linux_mask), Some(0));
+        assert_eq!(vcpu_initial_cpu(1, shared_linux_mask), Some(1));
+        assert_eq!(vcpu_initial_cpu(2, shared_linux_mask), Some(3));
+        assert_eq!(vcpu_initial_cpu(3, shared_linux_mask), Some(0));
+        assert_eq!(vcpu_initial_cpu(0, 0), None);
     }
 
     #[test]

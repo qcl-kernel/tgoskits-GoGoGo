@@ -24,15 +24,12 @@ typedef struct {
 
 static int print_calls;
 
-int test_rt_kprintf(const char *format, ...)
+void task3_server_print_status(const task3_status_t *status,
+                               const task3_control_t *control)
 {
-    va_list arguments;
-
-    (void)format;
-    va_start(arguments, format);
-    va_end(arguments);
+    (void)status;
+    (void)control;
     print_calls++;
-    return 0;
 }
 
 static int capture_response(void *context, uint8_t message_type,
@@ -93,6 +90,8 @@ int main(void)
     ASSERT_TRUE(task3_decode_status(capture.payload, capture.length, &first) ==
                 TASK3_CODEC_OK);
     ASSERT_TRUE(first.actuator_q15 == 0);
+    ASSERT_TRUE(app.requests == 0);
+    ASSERT_TRUE(app.applied_steps == 0);
 
     ASSERT_TRUE(send_control(&app, &capture, TASK3_CMD_STEP, TASK3_MODE_AI,
                              TASK3_CLASS_RIGHT, 7, UINT64_C(200)) == 0);
@@ -100,6 +99,8 @@ int main(void)
                 TASK3_CODEC_OK);
     applied = app.controller.applied_steps;
     ASSERT_TRUE(applied == 1 && first.frame_id == 7);
+    ASSERT_TRUE(app.requests == 1);
+    ASSERT_TRUE(app.applied_steps == 1);
 
     ASSERT_TRUE(send_control(&app, &capture, TASK3_CMD_STEP, TASK3_MODE_AI,
                              TASK3_CLASS_RIGHT, 7, UINT64_C(300)) == 0);
@@ -112,6 +113,8 @@ int main(void)
     ASSERT_TRUE(duplicate.processing_us == first.processing_us);
     ASSERT_TRUE(first.echoed_tx_monotonic_ns == UINT64_C(200));
     ASSERT_TRUE(duplicate.echoed_tx_monotonic_ns == UINT64_C(300));
+    ASSERT_TRUE(app.requests == 1);
+    ASSERT_TRUE(app.applied_steps == 1);
     ASSERT_TRUE(print_calls == 0);
 
     app.verbose = 1;
@@ -119,6 +122,16 @@ int main(void)
                              TASK3_CLASS_RIGHT, 7, UINT64_C(400)) == 0);
     ASSERT_TRUE(print_calls == 1);
     app.verbose = 0;
+
+    ASSERT_TRUE(send_control(&app, &capture, TASK3_CMD_RESET, TASK3_MODE_FIXED,
+                             TASK3_CLASS_CENTER, 0, UINT64_C(450)) == 0);
+    ASSERT_TRUE(app.controller.applied_steps == 0);
+    ASSERT_TRUE(app.applied_steps == 1);
+    ASSERT_TRUE(send_control(&app, &capture, TASK3_CMD_STEP, TASK3_MODE_FIXED,
+                             TASK3_CLASS_RIGHT, 0, UINT64_C(475)) == 0);
+    ASSERT_TRUE(app.controller.applied_steps == 1);
+    ASSERT_TRUE(app.requests == 2);
+    ASSERT_TRUE(app.applied_steps == 2);
 
     malformed[0] = 2;
     malformed[1] = 99;
@@ -131,6 +144,8 @@ int main(void)
                 TASK3_CODEC_OK);
     ASSERT_TRUE(error.category == TASK3_ERROR_CATEGORY_PROTOCOL);
     ASSERT_TRUE(app.controller.applied_steps == applied);
+    ASSERT_TRUE(app.requests == 2);
+    ASSERT_TRUE(app.applied_steps == 2);
 
     ASSERT_TRUE(send_control(&app, &capture, TASK3_CMD_STOP, TASK3_MODE_AI,
                              TASK3_CLASS_CENTER, 8, UINT64_C(500)) == 0);
@@ -138,6 +153,8 @@ int main(void)
                 TASK3_CODEC_OK);
     ASSERT_TRUE(first.status == TASK3_STATUS_STOPPED);
     ASSERT_TRUE(app.stop_requested);
+    ASSERT_TRUE(app.requests == 2);
+    ASSERT_TRUE(app.applied_steps == 2);
     ASSERT_TRUE(print_calls == 1);
     puts("test_rtthread_server: PASS");
     return 0;

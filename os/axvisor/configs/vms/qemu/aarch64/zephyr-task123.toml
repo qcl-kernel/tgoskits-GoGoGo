@@ -1,0 +1,68 @@
+[base]
+id = 3
+name = "zephyr-task123"
+guest_type = "virtualized"
+cpu_num = 1
+host_timer_policy = "tickless"
+# Zephyr spends most idle time in WFI.  Halt the AxVisor vCPU task on WFI so
+# single-threaded QEMU TCG can continue scheduling the two-vCPU Linux guest.
+host_vcpu_idle_policy = "halt"
+phys_cpu_ids = [2]
+phys_cpu_sets = [4]
+
+[kernel]
+entry_point = 0x4000_1104
+image_location = "memory"
+kernel_path = "zephyr.bin"
+kernel_load_addr = 0x4000_0000
+load_policy = "keep_configured"
+dtb_load_addr = 0x47e0_0000
+cmdline = "task3.fault=normal"
+memory_regions = [
+  [0x4000_0000, 0x0800_0000, 0x7, 0], # System RAM 128M MAP_ALLOC
+]
+
+[devices]
+passthrough = []
+disabled = [
+  { path = "/virtio_mmio@a000000" },
+  { path = "/virtio_mmio@a000200" },
+  { path = "/virtio_mmio@a000600" },
+  { path = "/virtio_mmio@a000800" },
+  { path = "/virtio_mmio@a000a00" },
+  { path = "/virtio_mmio@a000c00" },
+  { path = "/virtio_mmio@a000e00" },
+  { path = "/virtio_mmio@a001000" },
+  { path = "/virtio_mmio@a001200" },
+  { path = "/virtio_mmio@a001400" },
+  { path = "/virtio_mmio@a001600" },
+  { path = "/virtio_mmio@a001800" },
+  { path = "/virtio_mmio@a001a00" },
+  { path = "/virtio_mmio@a001c00" },
+  { path = "/virtio_mmio@a001e00" },
+  { path = "/virtio_mmio@a002000" },
+  { path = "/virtio_mmio@a002200" },
+  { path = "/virtio_mmio@a002400" },
+  { path = "/virtio_mmio@a002600" },
+  { path = "/virtio_mmio@a002800" },
+  { path = "/virtio_mmio@a002a00" },
+  { path = "/virtio_mmio@a002c00" },
+  { path = "/virtio_mmio@a002e00" },
+  { path = "/virtio_mmio@a003000" },
+  { path = "/virtio_mmio@a003200" },
+  { path = "/virtio_mmio@a003400" },
+  { path = "/virtio_mmio@a003600" },
+  { path = "/virtio_mmio@a003800" },
+  { path = "/virtio_mmio@a003a00" },
+  { path = "/virtio_mmio@a003c00" },
+  { path = "/virtio_mmio@a003e00" },
+  { path = "/pcie@10000000" },
+  { path = "/pl061@9030000" },
+  { path = "/pl031@9010000" },
+  { path = "/gpio-key-poweroff" },
+]
+
+[[devices.virtual]]
+id = "net0"
+model = "virtio-net"
+guest_mac = [0x52, 0x54, 0x00, 0x77, 0x00, 0x03]

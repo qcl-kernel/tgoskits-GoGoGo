@@ -131,9 +131,19 @@ def parse_frames(path: Path, frames_per_mode: int) -> list[dict[str, int | str]]
     return rows
 
 
-def summarize(run_dir: Path, frames_per_mode: int, smoke: bool) -> dict[str, object]:
+def summarize(
+    run_dir: Path,
+    frames_per_mode: int,
+    smoke: bool,
+    app_guest: str = "linux",
+    rtos: str = "rtthread",
+) -> dict[str, object]:
+    if app_guest not in {"linux", "starryos"}:
+        raise ValueError(f"unsupported application guest: {app_guest}")
+    if rtos not in {"rtthread", "zephyr"}:
+        raise ValueError(f"unsupported RTOS: {rtos}")
     rows = parse_frames(run_dir / "frames.csv", frames_per_mode)
-    rtos_final = parse_rtos_final(run_dir / "rtthread.log")
+    rtos_final = parse_rtos_final(run_dir / f"{rtos}.log")
     raw_summary = parse_raw_summary(run_dir / "summary.raw.json", frames_per_mode)
     fixed = [row for row in rows if row["mode"] == "FIXED"]
     ai = [row for row in rows if row["mode"] == "AI"]
@@ -151,7 +161,7 @@ def summarize(run_dir: Path, frames_per_mode: int, smoke: bool) -> dict[str, obj
     elapsed_us = int(raw_summary["elapsed_us"])
     success_rate = len(successful) / len(rows)
     accuracy = correct / len(ai)
-    linux_retries = sum(int(row["transport_retries"]) for row in rows)
+    app_retries = sum(int(row["transport_retries"]) for row in rows)
     summary: dict[str, object] = {
         "schema": 1,
         "frames_per_mode": frames_per_mode,
@@ -163,10 +173,10 @@ def summarize(run_dir: Path, frames_per_mode: int, smoke: bool) -> dict[str, obj
         "reconnects": int(raw_summary["reconnects"]),
         "injected_drops": int(raw_summary["injected_drops"]),
         "elapsed_us": elapsed_us,
-        "transport_retries": linux_retries + rtos_final["retries"],
+        "transport_retries": app_retries + rtos_final["retries"],
         "transport_retries_by_side": {
-            "linux": linux_retries,
-            "rtthread": rtos_final["retries"],
+            app_guest: app_retries,
+            rtos: rtos_final["retries"],
         },
         "duplicates": sum(int(row["duplicate"]) for row in rows),
         "recoveries": sum(int(row["recovered"]) for row in rows),
@@ -191,8 +201,10 @@ def summarize(run_dir: Path, frames_per_mode: int, smoke: bool) -> dict[str, obj
         ),
         "sources": {
             "frames_csv": str((run_dir / "frames.csv").resolve()),
-            "linux_log": str((run_dir / "linux.log").resolve()),
-            "rtthread_log": str((run_dir / "rtthread.log").resolve()),
+            "app_guest": app_guest,
+            "app_log": str((run_dir / f"{app_guest}.log").resolve()),
+            "rtos": rtos,
+            "rtos_log": str((run_dir / f"{rtos}.log").resolve()),
         },
         "gates_enforced": frames_per_mode == 600 and not smoke,
     }
@@ -228,9 +240,17 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--run-dir", type=Path, required=True)
     parser.add_argument("--frames-per-mode", type=int, required=True)
+    parser.add_argument("--app-guest", choices=("linux", "starryos"), default="linux")
+    parser.add_argument("--rtos", choices=("rtthread", "zephyr"), default="rtthread")
     parser.add_argument("--smoke", action="store_true")
     args = parser.parse_args()
-    summary = summarize(args.run_dir, args.frames_per_mode, args.smoke)
+    summary = summarize(
+        args.run_dir,
+        args.frames_per_mode,
+        args.smoke,
+        app_guest=args.app_guest,
+        rtos=args.rtos,
+    )
     write_json_atomic(args.run_dir / "summary.json", summary)
     print(f"summary={args.run_dir / 'summary.json'}")
     return 0

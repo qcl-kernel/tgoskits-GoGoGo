@@ -321,7 +321,12 @@ impl AppContext {
             }
         });
         let (arch, target) = resolve_axvisor_arch_and_target(effective_arch, effective_target)?;
-        let smp = cli.smp.or(snapshot.smp);
+        // An explicit build config owns its CPU limit. Reusing a previous
+        // command's snapshot override can silently lower the host topology
+        // below the VM `phys_cpu_ids` declared by that config.
+        let smp = cli
+            .smp
+            .or_else(|| cli.config.is_none().then_some(snapshot.smp).flatten());
         let build_info_path = resolve_build_info_path(&axvisor_dir, &target, explicit_config)?;
         let inherit_snapshot_runtime = cli.arch.is_none()
             && cli.target.is_none()

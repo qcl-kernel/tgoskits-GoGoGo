@@ -269,6 +269,11 @@ impl ArchOps for Aarch64Arch {
         if !vm.running() {
             return;
         }
+        // Device polling is owned by vCPU0. Keep the VM-level request from
+        // being consumed by a secondary vCPU that cannot perform the poll.
+        if vcpu.id() == 0 && runtime.take_device_poll_request() {
+            return;
+        }
         match vcpu.get_arch_vcpu().has_pending_interrupt() {
             Ok(true) => return,
             Ok(false) => {}
@@ -455,13 +460,23 @@ impl AxvmArmVcpu {
 
     fn prepare_timer_run(&self) -> AxVmResult {
         self.invalidate_virtual_timer_wait();
-        self.timer_binding
-            .as_ref()
-            .ok_or_else(|| {
-                crate::AxVmError::resource_unavailable("AArch64 timer binding", "missing")
-            })?
+        let binding = self.timer_binding.as_ref().ok_or_else(|| {
+            crate::AxVmError::resource_unavailable("AArch64 timer binding", "missing")
+        })?;
+        binding
             .prepare_run()
-            .map_err(|error| crate::AxVmError::interrupt("prepare timer PPI route", error))
+            .map_err(|error| crate::AxVmError::interrupt("prepare timer PPI route", error))?;
+        // Re-publish the guest timer PPI input levels before the world switch
+        // loads the vGIC state. On hardware GICv2 nothing else asserts the
+        // virtual PPI: the physical CNTV expiry is claimed as a host
+        // activation and deactivated, so without this publication the guest
+        // never observes its own scheduler tick and boot-time sleeps hang.
+        let snapshot = self.inner.timer_snapshot().map_err(|error| {
+            crate::AxVmError::vcpu("snapshot AArch64 timers", format!("{error:?}"))
+        })?;
+        binding
+            .synchronize(snapshot)
+            .map_err(|error| crate::AxVmError::interrupt("publish timer PPI levels", error))
     }
 
     fn accept_host_timer_irq(&self, token: usize) -> bool {

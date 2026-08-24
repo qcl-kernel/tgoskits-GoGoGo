@@ -8,6 +8,7 @@
 
 .img
 *.bin
+*.bin.meta.json
 *.elf
 *.tmp_its
 *guest.S

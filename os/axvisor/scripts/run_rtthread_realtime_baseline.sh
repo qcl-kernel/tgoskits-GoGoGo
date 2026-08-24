@@ -8,6 +8,7 @@ NATIVE_RUNNER="$SCRIPT_DIR/run_rtthread_native_baseline.sh"
 TASK123_RUNNER="$SCRIPT_DIR/run_task123.sh"
 SUMMARIZER="$SCRIPT_DIR/summarize_rtthread_realtime.py"
 IMAGE_METADATA="$SCRIPT_DIR/rtthread_image_metadata.py"
+RTTHREAD_INPUT_DIGEST="$(python3 "$IMAGE_METADATA" input-digest --root "$ROOT")"
 STATUS_FILE=
 QEMU="${QEMU:-$(command -v qemu-system-aarch64 || true)}"
 
@@ -86,6 +87,7 @@ validate_rtthread_image() {
     python3 "$IMAGE_METADATA" check \
         --image "$rtthread_image" \
         --metadata "$rtthread_metadata" \
+        --input-digest "$RTTHREAD_INPUT_DIGEST" \
         --source "$native_src"
 }
 
@@ -146,6 +148,7 @@ run_suite() {
         --suite-samples "$suite_samples" \
         --json-output "$output/realtime-suite.json" \
         --csv-output "$output/realtime-suite.csv" \
+        --joint-csv-output "$output/realtime-suite-joint.csv" \
         --markdown-output "$output/realtime-suite.md" | tee "$output/realtime-suite.summary.log"
 }
 
@@ -205,6 +208,7 @@ run_stability() {
         --axvisor-linux "$output/axvisor-linux-stability/console.log" \
         --json-output "$output/realtime-stability.json" \
         --csv-output "$output/realtime-stability.csv" \
+        --joint-csv-output "$output/realtime-stability-joint.csv" \
         --markdown-output "$output/realtime-stability.md" | tee "$output/realtime-stability.summary.log"
 }
 

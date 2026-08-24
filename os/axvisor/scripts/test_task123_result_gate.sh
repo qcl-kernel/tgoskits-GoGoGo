@@ -33,12 +33,10 @@ emit_task2() {
 [VM 1] TASK123_LINUX_NET_READY ip=192.168.77.11 peer=192.168.77.30
 [VM 3] RTIPC_SERVER_READY ip=192.168.77.30 port=9876
 [VM 3] TASK3_RTOS_READY ip=192.168.77.30 port=9877
-[VM 1] [client] fault injection: force disconnect at request=1
-[VM 1] [client] reconnect complete recovery_ms=1 attempts=1
 [VM 1] --- Payload 64B ---
 [VM 1] sent=2 recv=2
-[VM 1] request_timeouts=0 protocol_errors=0 reconnects=1
-[VM 1] transport: retrans=1 timeouts=0 dup=0 reorder=0 errors=0
+[VM 1] request_timeouts=0 protocol_errors=0 reconnects=0
+[VM 1] transport: retrans=0 timeouts=0 dup=0 reorder=0 errors=0
 [VM 1] --- Payload 256B ---
 [VM 1] sent=2 recv=2
 [VM 1] request_timeouts=0 protocol_errors=0 reconnects=0
@@ -88,6 +86,7 @@ emit_task3() {
         "$injected_drops"
     printf '[VM 3] TASK3_RTOS_FINAL requests=6 errors=%s duplicates=%s applied_steps=6 retries=%s\n' \
         "$rtos_errors" "$rtos_duplicates" "$rtos_retries"
+    echo '[VM 3] TASK3_RTOS_FINAL_DONE'
     case "$fault" in
         drop-status)
             echo '[VM 3] TASK3_FAULT_DROP_STATUS dropped=1'
@@ -110,16 +109,19 @@ EOF
 
 emit_suite() {
     local samples=$1
-    printf '[VM 3] RTBENCH_BEGIN samples=%s frequency=1000000\n' "$samples"
+    local counters='p50_cycles=1 p95_cycles=2 p99_cycles=3 p99_9_cycles=4 max_cycles=5 mean_cycles=2 p50_instructions=1 p95_instructions=2 p99_instructions=3 p99_9_instructions=4 max_instructions=5 mean_instructions=2'
+    printf '[VM 3] RTBENCH_BEGIN samples=%s frequency=1000000 pmu_event=0x8\n' "$samples"
     for run in 1 2 3; do
-        printf '[VM 3] RTBENCH metric=timer_jitter run=%s expected=%s collected=%s missing=0 p50_ns=1 p95_ns=2 p99_ns=3 p99_9_ns=4 max_ns=5 miss_100us=0 miss_500us=0 miss_1ms=0 mean_ns=2\n' \
-            "$run" "$samples" "$samples"
-        printf '[VM 3] RTBENCH metric=callback_exec run=%s expected=%s collected=%s missing=0 p50_ns=1 p95_ns=2 p99_ns=3 p99_9_ns=4 max_ns=5 miss_100us=0 miss_500us=0 miss_1ms=0 mean_ns=2\n' \
-            "$run" "$samples" "$samples"
+        printf '[VM 3] RTBENCH metric=timer_jitter run=%s expected=%s collected=%s missing=0 p50_ns=1 p95_ns=2 p99_ns=3 p99_9_ns=4 max_ns=5 miss_100us=0 miss_500us=0 miss_1ms=0 mean_ns=2 %s\n' \
+            "$run" "$samples" "$samples" "$counters"
+        printf '[VM 3] RTBENCH metric=callback_exec run=%s expected=%s collected=%s missing=0 p50_ns=1 p95_ns=2 p99_ns=3 p99_9_ns=4 max_ns=5 miss_100us=0 miss_500us=0 miss_1ms=0 mean_ns=2 %s\n' \
+            "$run" "$samples" "$samples" "$counters"
     done
-    for metric in preemption irq irq_to_task irq_disabled_duration mutex_inversion wake_under_load net_event_latency; do
-        printf '[VM 3] RTBENCH metric=%s run=1 expected=%s collected=%s missing=0 p50_ns=1 p95_ns=2 p99_ns=3 p99_9_ns=4 max_ns=5 miss_100us=0 miss_500us=0 miss_1ms=0 mean_ns=2\n' \
-            "$metric" "$samples" "$samples"
+    for metric in preemption irq irq_to_task irq_disabled_duration mutex_inversion wake_under_load \
+        context_switch scheduler_decision sync_sem sync_mutex sync_mailbox irq_handler_exec \
+        deadline_miss_under_load net_event_latency; do
+        printf '[VM 3] RTBENCH metric=%s run=1 expected=%s collected=%s missing=0 p50_ns=1 p95_ns=2 p99_ns=3 p99_9_ns=4 max_ns=5 miss_100us=0 miss_500us=0 miss_1ms=0 mean_ns=2 %s\n' \
+            "$metric" "$samples" "$samples" "$counters"
     done
     echo '[VM 3] RTBENCH_END status=PASS'
 }
@@ -127,11 +129,12 @@ emit_suite() {
 emit_stability() {
     local seconds=$1
     local expected=$((seconds * 1000 - 1))
-    printf '[VM 3] RTBENCH_STABILITY_BEGIN seconds=%s expected=%s\n' \
+    local counters='p50_cycles=1 p95_cycles=2 p99_cycles=3 p99_9_cycles=4 max_cycles=5 mean_cycles=2 p50_instructions=1 p95_instructions=2 p99_instructions=3 p99_9_instructions=4 max_instructions=5 mean_instructions=2'
+    printf '[VM 3] RTBENCH_STABILITY_BEGIN seconds=%s expected=%s frequency=1000000 pmu_event=0x8\n' \
         "$seconds" "$expected"
     for metric in stability_jitter callback_exec; do
-        printf '[VM 3] RTBENCH metric=%s run=1 expected=%s collected=%s missing=0 p50_ns=1 p95_ns=2 p99_ns=3 p99_9_ns=4 max_ns=5 miss_100us=0 miss_500us=0 miss_1ms=0 mean_ns=2\n' \
-            "$metric" "$expected" "$expected"
+        printf '[VM 3] RTBENCH metric=%s run=1 expected=%s collected=%s missing=0 p50_ns=1 p95_ns=2 p99_ns=3 p99_9_ns=4 max_ns=5 miss_100us=0 miss_500us=0 miss_1ms=0 mean_ns=2 %s\n' \
+            "$metric" "$expected" "$expected" "$counters"
     done
     printf '[VM 3] RTBENCH_STABILITY_END status=PASS expected=%s collected=%s missing=0\n' \
         "$expected" "$expected"
@@ -156,12 +159,97 @@ expect_failure() {
     fi
 }
 
+assert_summary_sources() {
+    local run_dir=$1
+    local app_guest=$2
+    local rtos=$3
+    python3 - "$run_dir/summary.json" "$app_guest" "$rtos" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+summary = json.loads(Path(sys.argv[1]).read_text(encoding="ascii"))
+app_guest = sys.argv[2]
+rtos = sys.argv[3]
+sources = summary.get("sources", {})
+if sources.get("app_guest") != app_guest:
+    raise SystemExit(f"wrong summary app guest: {sources!r}")
+if sources.get("rtos") != rtos:
+    raise SystemExit(f"wrong summary RTOS: {sources!r}")
+if Path(sources.get("app_log", "")).name != f"{app_guest}.log":
+    raise SystemExit(f"wrong summary application log: {sources!r}")
+if Path(sources.get("rtos_log", "")).name != f"{rtos}.log":
+    raise SystemExit(f"wrong summary RTOS log: {sources!r}")
+retries = summary.get("transport_retries_by_side", {})
+if set(retries) != {app_guest, rtos}:
+    raise SystemExit(f"wrong retry-side identities: {retries!r}")
+PY
+}
+
 [[ -x "$GATE" ]] || fail "verify_task123_results.sh is missing or not executable"
 
 make_fixture "$tmp/smoke"
 run_gate "$tmp/smoke" smoke >/dev/null || fail "smoke fixture was rejected"
 [[ -s "$tmp/smoke/frames.csv" && -s "$tmp/smoke/summary.json" ]] ||
     fail "smoke gate did not preserve structured Task 3 results"
+assert_summary_sources "$tmp/smoke" linux rtthread
+
+make_fixture "$tmp/normal-rtos-errors"
+sed -i 's/TASK3_RTOS_FINAL requests=6 errors=0/TASK3_RTOS_FINAL requests=6 errors=1/' \
+    "$tmp/normal-rtos-errors/console.log"
+expect_failure "normal Task 3 accepted RTOS application errors" \
+    run_gate "$tmp/normal-rtos-errors" smoke
+
+make_fixture "$tmp/normal-applied-steps"
+sed -i 's/applied_steps=6/applied_steps=5/' \
+    "$tmp/normal-applied-steps/console.log"
+expect_failure "normal Task 3 accepted a missing RTOS control action" \
+    run_gate "$tmp/normal-applied-steps" smoke
+
+cp -a "$tmp/smoke" "$tmp/rtos-final-interleaved"
+python3 - "$tmp/rtos-final-interleaved/console.log" <<'PY'
+import sys
+from pathlib import Path
+
+path = Path(sys.argv[1])
+data = path.read_bytes()
+marker = b"[VM 3] TASK3_RTOS_FINAL_DONE\n"
+interleaved = (
+    b"[VM 3] TASK3_RTOS_FINAL_DON"
+    b"\x1b[37m[ 52.430151 0:30 axvm::runtime::vcpus:667] "
+    b"\x1b[32mVM[1] VCpu[1] exiting...\x1b[m\r\n"
+    b"E\r\n"
+)
+if data.count(marker) != 1:
+    raise SystemExit("RTOS final marker fixture not found")
+path.write_bytes(data.replace(marker, interleaved, 1))
+PY
+rm -f -- "$tmp/rtos-final-interleaved/linux.log" \
+    "$tmp/rtos-final-interleaved/summary.json" \
+    "$tmp/rtos-final-interleaved/frames.csv" \
+    "$tmp/rtos-final-interleaved/summary.raw.json"
+run_gate "$tmp/rtos-final-interleaved" smoke >/dev/null ||
+    fail "interleaved RTOS final marker was rejected"
+
+cp -a "$tmp/smoke" "$tmp/rtthread-ready-alias"
+python3 - "$tmp/rtthread-ready-alias/console.log" <<'PY'
+import sys
+from pathlib import Path
+
+path = Path(sys.argv[1])
+data = path.read_text(encoding="utf-8")
+canonical = "[VM 3] RTIPC_SERVER_READY ip=192.168.77.30 port=9876\n"
+alias = "[VM 3] [32m[I/rtipic.srv] server starting on 192.168.77.30:9876[0m\n"
+if data.count(canonical) != 1:
+    raise SystemExit("RT-Thread ready marker fixture not found")
+path.write_text(data.replace(canonical, alias, 1), encoding="utf-8")
+PY
+rm -f -- "$tmp/rtthread-ready-alias/linux.log" \
+    "$tmp/rtthread-ready-alias/summary.json" \
+    "$tmp/rtthread-ready-alias/frames.csv" \
+    "$tmp/rtthread-ready-alias/summary.raw.json"
+run_gate "$tmp/rtthread-ready-alias" smoke >/dev/null ||
+    fail "RT-Thread stable ready-log alias was rejected"
 
 cp -a "$tmp/smoke" "$tmp/starryos"
 sed -i \
@@ -176,6 +264,14 @@ rm -f -- "$tmp/starryos/linux.log" "$tmp/starryos/summary.json" \
 run_starry_gate "$tmp/starryos" >/dev/null || fail "StarryOS smoke fixture was rejected"
 [[ -s "$tmp/starryos/starryos.log" ]] ||
     fail "StarryOS gate did not publish the authenticated application log"
+assert_summary_sources "$tmp/starryos" starryos rtthread
+
+make_fixture "$tmp/zephyr"
+run_gate "$tmp/zephyr" smoke --rtos zephyr >/dev/null ||
+    fail "Zephyr smoke fixture was rejected"
+[[ -s "$tmp/zephyr/zephyr.log" ]] ||
+    fail "Zephyr gate did not publish the authenticated RTOS log"
+assert_summary_sources "$tmp/zephyr" linux zephyr
 
 cp -a "$tmp/smoke" "$tmp/ansi-console"
 python3 - "$tmp/ansi-console/console.log" <<'PY'
@@ -248,7 +344,7 @@ path = Path(sys.argv[1])
 text = path.read_text(encoding="utf-8")
 needle = "p99_9_ns=4 max_ns=5"
 replacement = "p99_9_n\x1b[32m[I/rtipic.srv] client connected\x1b[0ms=4 max_ns=5"
-if text.count(needle) != 13:
+if text.count(needle) != 20:
     raise SystemExit("field-name interleaving fixture marker count changed")
 path.write_text(text.replace(needle, replacement, 1), encoding="utf-8")
 PY
@@ -269,7 +365,9 @@ data = path.read_bytes()
 metric = (
     b"[VM 3] RTBENCH metric=net_event_latency run=1 expected=2 collected=2 "
     b"missing=0 p50_ns=1 p95_ns=2 p99_ns=3 p99_9_ns=4 max_ns=5 "
-    b"miss_100us=0 miss_500us=0 miss_1ms=0 mean_ns=2\n"
+    b"miss_100us=0 miss_500us=0 miss_1ms=0 mean_ns=2 "
+    b"p50_cycles=1 p95_cycles=2 p99_cycles=3 p99_9_cycles=4 max_cycles=5 mean_cycles=2 "
+    b"p50_instructions=1 p95_instructions=2 p99_instructions=3 p99_9_instructions=4 max_instructions=5 mean_instructions=2\n"
 )
 fragmented_metric = metric.replace(
     b"mean_ns=2\n",
@@ -292,10 +390,69 @@ rm -f -- "$tmp/realtime-suite-host-log-interleaved/linux.log" \
 run_gate "$tmp/realtime-suite-host-log-interleaved" realtime-suite --rtbench-samples 2 >/dev/null ||
     fail "host-log interleaved RTBENCH records were rejected"
 
+cp -a "$tmp/realtime-suite" "$tmp/realtime-suite-qemu-exit-after-cr"
+python3 - "$tmp/realtime-suite-qemu-exit-after-cr/console.log" <<'PY'
+import sys
+from pathlib import Path
+
+path = Path(sys.argv[1])
+data = path.read_bytes()
+marker = b"[VM 3] RTBENCH_END status=PASS\n"
+replacement = marker[:-1] + b"\rqemu-system-aarch64: terminating on signal 15\n"
+if data.count(marker) != 1:
+    raise SystemExit("QEMU exit-after-CR fixture marker not found")
+path.write_bytes(data.replace(marker, replacement, 1))
+PY
+rm -f -- "$tmp/realtime-suite-qemu-exit-after-cr/linux.log" \
+    "$tmp/realtime-suite-qemu-exit-after-cr/summary.json" \
+    "$tmp/realtime-suite-qemu-exit-after-cr/frames.csv" \
+    "$tmp/realtime-suite-qemu-exit-after-cr/summary.raw.json"
+run_gate "$tmp/realtime-suite-qemu-exit-after-cr" realtime-suite --rtbench-samples 2 >/dev/null ||
+    fail "QEMU exit text after a carriage-return benchmark marker was rejected"
+
 make_fixture "$tmp/stability"
 emit_stability 1 >> "$tmp/stability/console.log"
 run_gate "$tmp/stability" stability --seconds 1 >/dev/null ||
     fail "stability fixture was rejected"
+
+cp -a "$tmp/stability" "$tmp/stability-fragmented-metric"
+python3 - "$tmp/stability-fragmented-metric/console.log" <<'PY'
+import sys
+from pathlib import Path
+
+path = Path(sys.argv[1])
+data = path.read_bytes()
+task3 = (
+    b"[VM 3] TASK3_RTOS_FINAL requests=6 errors=0 duplicates=0 "
+    b"applied_steps=6 retries=0\n[VM 3] TASK3_RTOS_FINAL_DONE\n"
+)
+fragmented = (
+    b"[VM 3] R\nT0m\n\x00 connected\x00v] \x00ity_jitter r\n"
+    b"un=1 expected=999 collected=999 p50_ns=1\n2 "
+    b"missing=0 "
+    b"pTASK3_RTOS_FINAL requests=6 errors=0 duplicates=0 applied_steps=6 retries=0\n"
+    b"TASK3_RTOS_FINAL_DONE\n"
+    b"95_ns=1 p99_ns=1 p99_9_ns=1 max_ns=1 miss_100us=0 miss_500us=0 "
+    b"miss_1ms=0 mean_ns=1 p50_cycles=1 p95_cycles=1 p99_cycles=1 "
+    b"p99_9_cycles=1 max_cycles=1 mean_cycles=1 p50_instructions=1 "
+    b"p95_instructions=1 p99_instructions=1 p99_9_instructions=1 "
+    b"max_instructions=1 mean_instructions=1\n"
+)
+metric_lines = [
+    line for line in data.splitlines(keepends=True)
+    if b"RTBENCH metric=stability_jitter run=1" in line
+]
+if data.count(task3) != 1 or len(metric_lines) != 1:
+    raise SystemExit("fragmented stability fixture markers not found")
+data = data.replace(task3, b"", 1).replace(metric_lines[0], fragmented, 1)
+path.write_bytes(data)
+PY
+rm -f -- "$tmp/stability-fragmented-metric/linux.log" \
+    "$tmp/stability-fragmented-metric/summary.json" \
+    "$tmp/stability-fragmented-metric/frames.csv" \
+    "$tmp/stability-fragmented-metric/summary.raw.json"
+run_gate "$tmp/stability-fragmented-metric" stability --seconds 1 >/dev/null ||
+    fail "fragmented stability metric was rejected"
 
 make_fixture "$tmp/stability-qemu-timer-limit"
 emit_stability 1 >> "$tmp/stability-qemu-timer-limit/console.log"
@@ -310,6 +467,50 @@ if find "$tmp/stability-qemu-timer-limit" -maxdepth 1 -name '.console.*' -print 
    grep -q .; then
     fail "diagnostic gate leaked an internal console normalization file"
 fi
+
+# The marker watcher terminates QEMU after RTBENCH_STABILITY_DONE when the
+# benchmark reports QEMU-induced deadline misses. In that diagnostic mode the
+# controlled nonzero QEMU exit is not an infrastructure error. The same exit
+# must still be rejected without --allow-qemu-timer-limit and in other modes.
+cp -a "$tmp/stability-qemu-timer-limit" "$tmp/stability-watched-qemu-exit"
+run_gate "$tmp/stability-watched-qemu-exit" stability --seconds 1 \
+    --allow-qemu-timer-limit > /dev/null || \
+    fail "diagnostic stability gate rejected a watched QEMU termination"
+expect_failure "diagnostic stability gate accepted nonzero QEMU exit without opt-in" \
+    env "$GATE" --mode stability --log "$tmp/stability-watched-qemu-exit/console.log" \
+        --output "$tmp/stability-watched-qemu-exit" --task2-count 2 --task3-frames 3 \
+        --qemu-exit 1 --seconds 1
+expect_failure "smoke gate accepted nonzero QEMU exit under timer-limit opt-in" \
+    env "$GATE" --mode smoke --log "$tmp/smoke/console.log" \
+        --output "$tmp/smoke" --task2-count 2 --task3-frames 3 \
+        --qemu-exit 1 --allow-qemu-timer-limit
+
+cp -a "$tmp/starryos" "$tmp/starryos-kernel-before-rtos-final"
+python3 - "$tmp/starryos-kernel-before-rtos-final/console.log" <<'PY'
+import sys
+from pathlib import Path
+
+path = Path(sys.argv[1])
+data = path.read_bytes()
+needle = b"[VM 3] TASK3_RTOS_FINAL requests="
+replacement = (
+    b"[VM 1] \x1b[m\x1b[37m[ 74.433424 0:24 starry_kernel::task::ops:398] "
+    b"\x1b[32mTask(24, \"task3-linux\") exit with code: 0\x1b[m\r\n"
+    + needle
+)
+if data.count(needle) != 1:
+    raise SystemExit("StarryOS/RTOS interleaving marker not found")
+path.write_bytes(data.replace(needle, replacement, 1))
+PY
+rm -f -- "$tmp/starryos-kernel-before-rtos-final/starryos.log" \
+    "$tmp/starryos-kernel-before-rtos-final/summary.json" \
+    "$tmp/starryos-kernel-before-rtos-final/frames.csv" \
+    "$tmp/starryos-kernel-before-rtos-final/summary.raw.json"
+run_starry_gate "$tmp/starryos-kernel-before-rtos-final" >/dev/null ||
+    fail "StarryOS kernel record before RTOS final marker was rejected"
+grep -Fq "TASK3_RTOS_FINAL requests=6 errors=0 duplicates=0 applied_steps=6 retries=0" \
+    "$tmp/starryos-kernel-before-rtos-final/rtthread.log" ||
+    fail "StarryOS interleaving moved TASK3_RTOS_FINAL into the application log"
 
 make_fixture "$tmp/task3"
 run_gate "$tmp/task3" task3 >/dev/null || fail "task3 fixture was rejected"

@@ -6,6 +6,7 @@ TASK3_ROOT=${TASK3_ROOT:-$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd)}
 TASK123_INIT="$TASK3_ROOT/../linux-net/init-task123"
 TASK3_SERVICE="$TASK3_ROOT/buildroot/rootfs-overlay/etc/init.d/S99task3"
 TASK2_MAKEFILE="$TASK3_ROOT/../rt-ipc/linux/Makefile"
+TASK3_TEST_MAKEFILE="$TASK3_ROOT/tests/Makefile"
 . "$TASK3_ROOT/configs/dependencies.lock"
 
 required_files='
@@ -77,6 +78,14 @@ if grep -F 'rtconfig.h' "$TASK3_ROOT/scripts/build_rtthread.sh" >/dev/null; then
 fi
 
 test -x "$TASK123_INIT"
+grep -F 'SOURCE_CACHE_ROOT := $(if $(strip $(TGOS_SOURCE_CACHE)),$(TGOS_SOURCE_CACHE),../../../../../tmp/source-cache)' \
+    "$TASK3_TEST_MAKEFILE" >/dev/null
+grep -F 'MODEL_DIR ?= $(SOURCE_CACHE_ROOT)/task3-model' \
+    "$TASK3_TEST_MAKEFILE" >/dev/null
+if grep -F 'MODEL_DIR ?= ../build/model' "$TASK3_TEST_MAKEFILE" >/dev/null; then
+    echo 'Task3 tests must use the persistent model cache by default' >&2
+    exit 1
+fi
 for marker in TASK2_LINUX_BEGIN TASK2_LINUX_END TASK3_LINUX_READY \
     TASK3_LINUX_END TASK123_LINUX_END; do
     grep -F "$marker" "$TASK123_INIT" >/dev/null
@@ -134,6 +143,7 @@ for setting in \
     'CONFIG_RT_LWIP_TCPTHREAD_STACKSIZE=8192' \
     'CONFIG_RT_USING_NETDEV=y' \
     'CONFIG_RT_USING_SAL=y' \
+    'CONFIG_RT_USING_TASK123_SERVER=y' \
     'CONFIG_SAL_USING_LWIP=y' \
     'CONFIG_RT_USING_VIRTIO=y' \
     'CONFIG_BSP_USING_VIRTIO_NET=y' \
@@ -167,10 +177,12 @@ exec 8>&-
 grep -F 'another Linux image build owns' "$lock_build/output" >/dev/null
 
 checksum_build="$tmp_dir/checksum"
-mkdir -p "$checksum_build/downloads"
+checksum_cache="$checksum_build/source-cache"
+checksum_archive="$checksum_cache/arm-gnu-toolchain/$ARM_TOOLCHAIN_VERSION/archive.tar.xz"
+mkdir -p "$(dirname "$checksum_archive")"
 printf '%s\n' corrupt > \
-    "$checksum_build/downloads/arm-gnu-toolchain-$ARM_TOOLCHAIN_VERSION.tar.xz"
-if BUILD_DIR="$checksum_build" \
+    "$checksum_archive"
+if BUILD_DIR="$checksum_build" TGOS_SOURCE_CACHE="$checksum_cache" \
     "$TASK3_ROOT/scripts/fetch_sources.sh" --toolchain-only \
     >"$checksum_build/output" 2>&1; then
     echo 'fetch_sources accepted a corrupt toolchain archive' >&2
@@ -187,7 +199,8 @@ git -C "$fixture_repository" -c user.name=Task3 \
 fixture_commit=$(git -C "$fixture_repository" rev-parse HEAD)
 fixture_root="$tmp_dir/fetch-root"
 mkdir -p "$fixture_root/scripts" "$fixture_root/configs"
-cp "$TASK3_ROOT/scripts/common.sh" "$TASK3_ROOT/scripts/fetch_sources.sh" \
+cp "$TASK3_ROOT/scripts/common.sh" "$TASK3_ROOT/scripts/source_cache.sh" \
+    "$TASK3_ROOT/scripts/fetch_sources.sh" \
     "$fixture_root/scripts/"
 sed \
     -e "s/^RTTHREAD_COMMIT=.*/RTTHREAD_COMMIT=$fixture_commit/" \
@@ -208,6 +221,7 @@ expect_fetch_failure() {
     build_dir=$1
     message=$2
     if TASK3_ROOT="$fixture_root" BUILD_DIR="$build_dir" \
+        TGOS_SOURCE_CACHE="$build_dir/cache" \
         "$fixture_root/scripts/fetch_sources.sh" --sources-only \
         >"$build_dir/output" 2>&1; then
         echo "fetch_sources unexpectedly accepted: $message" >&2
@@ -217,46 +231,48 @@ expect_fetch_failure() {
 }
 
 case_dir="$tmp_dir/rt-origin"
-mkdir -p "$case_dir/sources"
+mkdir -p "$case_dir/cache/rt-thread/$fixture_commit"
 git -c advice.detachedHead=false clone --quiet --shared \
     "$fixture_repository" \
-    "$case_dir/sources/rt-thread"
-expect_fetch_failure "$case_dir" 'rt-thread origin mismatch'
+    "$case_dir/cache/rt-thread/$fixture_commit/source"
+expect_fetch_failure "$case_dir" 'rt-thread cache origin mismatch'
 
 case_dir="$tmp_dir/rt-head"
-mkdir -p "$case_dir/sources"
-make_valid_rt_checkout "$case_dir/sources/rt-thread"
-git -C "$case_dir/sources/rt-thread" -c user.name=Task3 \
+mkdir -p "$case_dir/cache/rt-thread/$fixture_commit"
+make_valid_rt_checkout "$case_dir/cache/rt-thread/$fixture_commit/source"
+git -C "$case_dir/cache/rt-thread/$fixture_commit/source" -c user.name=Task3 \
     -c user.email=task3@example.invalid commit --quiet --allow-empty \
     -m 'mismatched head'
-expect_fetch_failure "$case_dir" 'rt-thread commit mismatch'
+expect_fetch_failure "$case_dir" 'rt-thread cache commit mismatch'
 
 case_dir="$tmp_dir/rt-attached"
-mkdir -p "$case_dir/sources"
-make_valid_rt_checkout "$case_dir/sources/rt-thread"
-git -C "$case_dir/sources/rt-thread" switch --quiet -c attached-test
-expect_fetch_failure "$case_dir" 'rt-thread checkout is not detached'
+mkdir -p "$case_dir/cache/rt-thread/$fixture_commit"
+make_valid_rt_checkout "$case_dir/cache/rt-thread/$fixture_commit/source"
+git -C "$case_dir/cache/rt-thread/$fixture_commit/source" switch --quiet -c attached-test
+expect_fetch_failure "$case_dir" 'rt-thread cached checkout is not detached'
 
 case_dir="$tmp_dir/buildroot-origin"
-mkdir -p "$case_dir/sources"
-make_valid_rt_checkout "$case_dir/sources/rt-thread"
+mkdir -p "$case_dir/cache/rt-thread/$fixture_commit" \
+    "$case_dir/cache/buildroot/$fixture_commit"
+make_valid_rt_checkout "$case_dir/cache/rt-thread/$fixture_commit/source"
 git -c advice.detachedHead=false clone --quiet --shared \
     "$fixture_repository" \
-    "$case_dir/sources/buildroot"
-expect_fetch_failure "$case_dir" 'buildroot origin mismatch'
+    "$case_dir/cache/buildroot/$fixture_commit/source"
+expect_fetch_failure "$case_dir" 'buildroot cache origin mismatch'
 
 case_dir="$tmp_dir/buildroot-head"
-mkdir -p "$case_dir/sources"
-make_valid_rt_checkout "$case_dir/sources/rt-thread"
+mkdir -p "$case_dir/cache/rt-thread/$fixture_commit" \
+    "$case_dir/cache/buildroot/$fixture_commit"
+make_valid_rt_checkout "$case_dir/cache/rt-thread/$fixture_commit/source"
 git -c advice.detachedHead=false clone --quiet --shared \
     "$fixture_repository" \
-    "$case_dir/sources/buildroot"
-git -C "$case_dir/sources/buildroot" remote set-url origin \
+    "$case_dir/cache/buildroot/$fixture_commit/source"
+git -C "$case_dir/cache/buildroot/$fixture_commit/source" remote set-url origin \
     https://gitlab.com/buildroot.org/buildroot.git
-git -C "$case_dir/sources/buildroot" -c user.name=Task3 \
+git -C "$case_dir/cache/buildroot/$fixture_commit/source" -c user.name=Task3 \
     -c user.email=task3@example.invalid commit --quiet --allow-empty \
     -m 'mismatched buildroot head'
-expect_fetch_failure "$case_dir" 'buildroot commit mismatch'
+expect_fetch_failure "$case_dir" 'buildroot cache commit mismatch'
 
 printf '%s\n' 'CONFIG_KEEP=y' '# CONFIG_CHANGE is not set' >"$tmp_dir/.config"
 python3 "$TASK3_ROOT/scripts/set_kconfig.py" "$tmp_dir/.config" \

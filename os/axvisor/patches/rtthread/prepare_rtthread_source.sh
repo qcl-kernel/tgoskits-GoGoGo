@@ -9,6 +9,10 @@ RTTHREAD_COMMIT="ddf52e2cdd977f14fc04035c88672ac204aec713"
 RTTHREAD_REF="${RTTHREAD_REF:-v5.2.2}"
 SOURCE_CACHE="${TGOS_SOURCE_CACHE:-$ROOT/tmp/source-cache}"
 RTTHREAD_CACHE="$SOURCE_CACHE/rt-thread/$RTTHREAD_COMMIT"
+SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd -P)"
+if [[ -f "$SCRIPT_DIR/../../scripts/network_env.sh" ]]; then
+    source "$SCRIPT_DIR/../../scripts/network_env.sh"
+fi
 
 validate_existing_source() {
     if [[ ! -d "$DESTINATION/.git" ]]; then

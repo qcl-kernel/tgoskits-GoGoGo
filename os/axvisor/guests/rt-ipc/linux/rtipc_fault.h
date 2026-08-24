@@ -30,6 +30,10 @@ typedef struct {
 int rtipc_fault_profile_parse(const char *text,
                               rtipc_fault_profile_t *profile);
 const char *rtipc_fault_profile_name(rtipc_fault_profile_t profile);
+bool rtipc_fault_should_force_disconnect(rtipc_fault_profile_t profile,
+                                         int payload_size,
+                                         int request_index,
+                                         int request_count);
 void rtipc_fault_init(rtipc_fault_context_t *context,
                       rtipc_fault_profile_t profile);
 rtipc_fault_action_t rtipc_fault_on_tx(rtipc_fault_context_t *context,

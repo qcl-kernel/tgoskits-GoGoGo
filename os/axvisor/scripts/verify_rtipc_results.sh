@@ -85,14 +85,21 @@ if [ "$(grep -c 'ALL TESTS COMPLETE[[:space:]]*$' "$log")" -ne 1 ]; then
     exit 1
 fi
 
-fault_request=$((expected_count / 2))
-if [ "$(grep -Ec "\[client\] fault injection: force disconnect at request=${fault_request}[[:space:]]*$" "$log")" -ne 1 ]; then
-    echo "missing or duplicate forced-disconnect marker at request $fault_request" >&2
-    exit 1
-fi
-if [ "$(grep -Ec '\[client\] reconnect complete recovery_ms=[1-9][0-9]* attempts=1[[:space:]]*$' "$log")" -ne 1 ]; then
-    echo "missing, duplicate, or invalid reconnect-completion marker" >&2
-    exit 1
+if [ "$fault_profile" = reliability ]; then
+    fault_request=$((expected_count / 2))
+    if [ "$(grep -Ec "\[client\] fault injection: force disconnect at request=${fault_request}[[:space:]]*$" "$log")" -ne 1 ]; then
+        echo "missing or duplicate forced-disconnect marker at request $fault_request" >&2
+        exit 1
+    fi
+    if [ "$(grep -Ec '\[client\] reconnect complete recovery_ms=[1-9][0-9]* attempts=1[[:space:]]*$' "$log")" -ne 1 ]; then
+        echo "missing, duplicate, or invalid reconnect-completion marker" >&2
+        exit 1
+    fi
+else
+    if grep -Eq '\[client\] (fault injection: force disconnect|reconnect complete)' "$log"; then
+        echo "unexpected fault-injection or reconnect marker for fault profile none" >&2
+        exit 1
+    fi
 fi
 
 for payload_size in 64 256 1024; do
@@ -103,12 +110,12 @@ for payload_size in 64 256 1024; do
         waiting { print }
     ' "$log")
 
+    # Serial output from multiple guests may splice the final summary onto a
+    # progress line. Keep the last sent/recv record in the payload section;
+    # the final record is the authenticated per-payload result.
     summary=$(printf '%s\n' "$section" | awk '
-        $0 !~ /\[progress\]/ &&
-        $0 ~ /sent=[0-9]+[[:space:]]+recv=[0-9]+/ {
-            print
-            exit
-        }
+        $0 ~ /sent=[0-9]+[[:space:]]+recv=[0-9]+/ { last = $0 }
+        END { print last }
     ')
 
     if [ -z "$summary" ]; then
@@ -128,7 +135,7 @@ for payload_size in 64 256 1024; do
     fi
 
     reconnects=0
-    if [ "$payload_size" -eq 64 ]; then
+    if [ "$fault_profile" = reliability ] && [ "$payload_size" -eq 64 ]; then
         reconnects=1
     fi
     if ! printf '%s\n' "$section" | grep -Eq \
