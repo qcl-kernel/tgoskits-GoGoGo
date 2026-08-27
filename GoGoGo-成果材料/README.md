@@ -4,6 +4,10 @@
 Task 2 客户机通信与 Task 3 AI 控制闭环，在 QEMU 与 ROCK 4D（RK3576）真机上
 各验证 2 种 RTOS × 2 种应用客户机共 8 个组合。
 
+> **分支说明**：当前分支（`upstream/pr-new`，即 origin 的 `dev`）为**成果归档
+> 分支**，源码与材料文档合在一起提交。后续会切换到独立工作分支，将源码按
+> 子系统拆分成多个 PR 分别提交；本材料目录不属于源码 PR 的一部分。
+
 ## 我们做了什么（概览）
 
 - 在 Axvisor（Type-1 hypervisor）上构建了混合关键性系统：GPOS（Linux/StarryOS）
