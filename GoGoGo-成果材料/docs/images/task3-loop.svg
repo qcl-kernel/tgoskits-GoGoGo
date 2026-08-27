@@ -1,0 +1,72 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 860 300" role="img" aria-label="Task 3 AI 控制闭环：应用客户机读帧推理，经 RT-IPC v2 发分类结果到 RTOS 客户机，RTOS 更新 PWM 与转向位置后回传状态">
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#0d7a3f"/>
+    </marker>
+  </defs>
+  <style>
+    .box { fill: none; stroke: currentColor; stroke-width: 1.4; }
+    .lbl { font: 12px sans-serif; fill: currentColor; }
+    .sm  { font: 11px sans-serif; fill: currentColor; }
+    .dim { font: 10.5px sans-serif; fill: currentColor; opacity: 0.7; }
+    .n   { font: bold 13px sans-serif; fill: #0d7a3f; }
+    .ln  { stroke: #0d7a3f; stroke-width: 1.6; fill: none; }
+    .rt  { stroke: #b45309; stroke-width: 1.6; fill: none; }
+  </style>
+
+  <!-- 五个阶段横排 -->
+  <!-- 1 读帧 -->
+  <rect class="box" x="30" y="60" width="130" height="80" rx="5"/>
+  <text class="n" x="42" y="46">①</text>
+  <text class="lbl" x="62" y="90" font-weight="bold">读帧</text>
+  <text class="sm" x="44" y="112">Y4M 视频</text>
+  <text class="sm" x="44" y="128">32×32 灰度</text>
+
+  <!-- 2 推理 -->
+  <rect class="box" x="200" y="60" width="150" height="80" rx="5"/>
+  <text class="n" x="212" y="46">②</text>
+  <text class="lbl" x="238" y="90" font-weight="bold">TinyCNN 推理</text>
+  <text class="sm" x="214" y="112">int8 · p50 0.95 ms</text>
+  <text class="sm" x="214" y="128">（真机）</text>
+
+  <!-- 3 跨机传输 -->
+  <rect class="box" x="390" y="60" width="150" height="80" rx="5"/>
+  <text class="n" x="402" y="46">③</text>
+  <text class="lbl" x="418" y="90" font-weight="bold">跨客户机传输</text>
+  <text class="sm" x="404" y="112">RT-IPC v2 / UDP</text>
+  <text class="sm" x="404" y="128">:9877</text>
+
+  <!-- 4 RTOS 控制 -->
+  <rect class="box" x="580" y="60" width="150" height="80" rx="5"/>
+  <text class="n" x="592" y="46">④</text>
+  <text class="lbl" x="606" y="90" font-weight="bold">实时控制</text>
+  <text class="sm" x="594" y="112">PWM + 转向位置</text>
+  <text class="sm" x="594" y="128">处理 45–102 µs</text>
+
+  <!-- 5 状态回传 -->
+  <rect class="box" x="770" y="60" width="60" height="80" rx="5"/>
+  <text class="n" x="748" y="46">⑤</text>
+  <text class="lbl" x="778" y="90" font-weight="bold" writing-mode="tb" text-orientation="upright">状态</text>
+  <text class="lbl" x="796" y="104" font-weight="bold" writing-mode="tb" text-orientation="upright">回传</text>
+
+  <!-- 正向流 -->
+  <path class="ln" d="M 160 100 L 200 100" marker-end="url(#a)"/>
+  <path class="ln" d="M 350 100 L 390 100" marker-end="url(#a)"/>
+  <path class="ln" d="M 540 100 L 580 100" marker-end="url(#a)"/>
+  <path class="ln" d="M 730 100 L 770 100" marker-end="url(#a)"/>
+
+  <!-- 回传环（虚线，从⑤绕回②/①下沿） -->
+  <path class="rt" stroke-dasharray="6 4" d="M 800 140 C 800 210 655 220 465 214 C 300 209 165 210 95 190 C 75 184 65 160 65 140" marker-end="url(#a)"/>
+  <text class="dim" x="330" y="240">⑤→① 状态回传：帧级 CSV 记录 actuator/pwm/round_trip（闭环证据）</text>
+
+  <!-- 双侧标注 -->
+  <text class="dim" x="200" y="180">── 应用客户机侧（Linux / StarryOS，非关键）──</text>
+  <line x1="378" y1="52" x2="378" y2="286" stroke="currentColor" stroke-width="1" stroke-dasharray="3 5" opacity="0.4"/>
+  <text class="dim" x="580" y="180">── RTOS 客户机侧（RT-Thread / Zephyr，实时）──</text>
+
+  <!-- 端到端延迟标注 -->
+  <path class="ln" opacity="0.35" d="M 65 40 L 770 40"/>
+  <line x1="65" y1="34" x2="65" y2="46" stroke="#0d7a3f" stroke-width="1.2" opacity="0.6"/>
+  <line x1="770" y1="34" x2="770" y2="46" stroke="#0d7a3f" stroke-width="1.2" opacity="0.6"/>
+  <text class="dim" x="280" y="32">端到端往返（同侧测量）p50 ≈ 3.4–3.8 ms（真机）</text>
+</svg>

@@ -1,0 +1,81 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 860 470" role="img" aria-label="Axvisor 混合关键性系统架构：EL2 hypervisor 在 ROCK 4D 上承载 Linux/StarryOS 应用客户机与 RT-Thread/Zephyr RTOS 客户机，二者经内部 VirtualSwitch 的 virtio-net 互联">
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="currentColor"/>
+    </marker>
+  </defs>
+  <style>
+    .box { fill: none; stroke: currentColor; stroke-width: 1.4; }
+    .solid { fill: none; stroke: currentColor; stroke-width: 1.4; }
+    .dash  { fill: none; stroke: currentColor; stroke-width: 1.2; stroke-dasharray: 5 4; }
+    .lbl   { font: 12px sans-serif; fill: currentColor; }
+    .sm    { font: 11px sans-serif; fill: currentColor; }
+    .dim   { font: 10.5px sans-serif; fill: currentColor; opacity: 0.72; }
+    .flow  { font: 11px sans-serif; fill: #0d7a3f; }
+    .flowln { stroke: #0d7a3f; stroke-width: 1.6; fill: none; }
+  </style>
+
+  <!-- ══ 硬件层 ══ -->
+  <rect class="box" x="30" y="390" width="800" height="56" rx="4"/>
+  <text class="lbl" x="46" y="413">ROCK 4D 硬件（RK3576：4×A72 + 4×A53 · GIC-400 · NS16550 UART）</text>
+  <text class="dim" x="46" y="431">QEMU 等价平台：virt 4 vCPU · GICv3 · PL011</text>
+
+  <!-- ══ Axvisor ══ -->
+  <rect class="box" x="30" y="288" width="800" height="82" rx="4"/>
+  <text class="lbl" x="46" y="310">Axvisor · Type-1 hypervisor @ EL2</text>
+  <text class="dim" x="46" y="328">Stage-2 地址空间隔离 · vGIC · vtimer PPI 发布 · host-SPI 风暴熔断</text>
+  <text class="dim" x="46" y="345">串口 mux（多路 guest 输出 + explicit_attach 守卫）</text>
+
+  <!-- VirtualSwitch -->
+  <rect class="box" x="560" y="296" width="252" height="40" rx="4"/>
+  <text class="lbl" x="612" y="314">Internal VirtualSwitch</text>
+  <text class="dim" x="600" y="330">guest-to-guest · 无需物理网卡</text>
+
+  <!-- ══ VM[1] 应用客户机 ══ -->
+  <rect class="box" x="60" y="60" width="360" height="200" rx="6"/>
+  <text class="lbl" x="80" y="86" font-weight="bold">VM[1] 应用客户机（GPOS，非关键侧）</text>
+  <text class="sm"  x="80" y="106">Linux 或 StarryOS · 2 vCPU · 独占物理核 0x100/0x101</text>
+  <rect class="solid" x="80" y="120" width="320" height="56" rx="3"/>
+  <text class="sm" x="92" y="140">Task 3 AI 应用：Y4M 帧 → TinyCNN int8 推理</text>
+  <text class="sm" x="92" y="158">→ LEFT / CENTER / RIGHT 三分类</text>
+  <rect class="solid" x="80" y="186" width="320" height="56" rx="3"/>
+  <text class="sm" x="92" y="206">Task 2 客户端：RT-IPC v2 请求/响应</text>
+  <text class="sm" x="92" y="224">UDP :9876 · ACK/超时/重传/去重</text>
+  <rect class="solid" x="230" y="256" width="120" height="26" rx="3"/>
+  <text class="sm" x="246" y="273">virtio-net 驱动</text>
+
+  <!-- ══ VM[3] RTOS 客户机 ══ -->
+  <rect class="box" x="440" y="60" width="360" height="200" rx="6"/>
+  <text class="lbl" x="460" y="86" font-weight="bold">VM[3] RTOS 客户机（实时侧）</text>
+  <text class="sm"  x="460" y="106">RT-Thread 或 Zephyr · 1 vCPU · 独占物理核 0x102</text>
+  <rect class="solid" x="460" y="120" width="320" height="56" rx="3"/>
+  <text class="sm" x="472" y="140">Task 3 实时控制：PWM + 转向位置更新</text>
+  <text class="sm" x="472" y="158">状态回传 · 虚拟外设可观察</text>
+  <rect class="solid" x="460" y="186" width="320" height="56" rx="3"/>
+  <text class="sm" x="472" y="206">Task 2 echo 服务器 + RTBench 16 指标</text>
+  <text class="sm" x="472" y="224">timer jitter 真机 p99 ≈ 28 µs</text>
+  <rect class="solid" x="510" y="256" width="120" height="26" rx="3"/>
+  <text class="sm" x="526" y="273">virtio-net 驱动</text>
+
+  <!-- ══ 数据流：AI 推理结果 ══ -->
+  <path class="flowln" d="M 350 148 C 400 148 420 148 460 148" marker-end="url(#a)"/>
+  <text class="flow" x="368" y="140">分类结果 :9877</text>
+  <path class="flowln" d="M 460 205 C 420 205 400 205 380 205" stroke-dasharray="none" marker-end="url(#a)" opacity="0.55"/>
+  <text class="flow" x="386" y="197" opacity="0.75">状态回传</text>
+
+  <!-- ══ Task2 流 ══ -->
+  <path class="flowln" d="M 350 210 C 400 210 425 212 458 214" opacity="0.8" marker-end="url(#a)"/>
+  <text class="flow" x="366" y="236" opacity="0.85">请求 :9876</text>
+  <path class="flowln" d="M 458 228 C 425 232 400 232 350 236" opacity="0.55" marker-end="url(#a)"/>
+  <text class="flow" x="392" y="252" opacity="0.7">响应</text>
+
+  <!-- ══ virtio-net 到 switch 的连线 ══ -->
+  <path class="solid" d="M 290 282 L 290 296" marker-end="url(#a)"/>
+  <path class="solid" d="M 570 282 L 570 296" marker-end="url(#a)"/>
+  <text class="dim" x="298" y="294">MMIO 0x0a00_0000 · SPI 16</text>
+  <text class="dim" x="578" y="294">MMIO 0x0a00_0000 · SPI 16</text>
+
+  <!-- ══ Axvisor 到硬件 ══ -->
+  <path class="dash" d="M 430 370 L 430 390" marker-end="url(#a)"/>
+  <text class="dim" x="438" y="385">EL2 直控</text>
+</svg>
