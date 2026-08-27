@@ -4,6 +4,26 @@
 Task 2 客户机通信与 Task 3 AI 控制闭环，在 QEMU 与 ROCK 4D（RK3576）真机上
 各验证 2 种 RTOS × 2 种应用客户机共 8 个组合。
 
+## 我们做了什么（概览）
+
+- 在 Axvisor（Type-1 hypervisor）上构建了混合关键性系统：GPOS（Linux/StarryOS）
+  与 RTOS（RT-Thread/Zephyr）同板共存，空间/时间隔离 + 受控网络通信
+- 将 RT-Thread v5.2.2 移植为 Axvisor guest（12 个补丁：virtio-net、lwIP、GIC、
+  定时器、ROCK 4D 板级），并移植 Zephyr v4.4.2（overlay 路线）
+- 实现两个客户机间的 IP 通信：内部 VirtualSwitch + virtio-net + 自研 RT-IPC v2
+  协议（UDP 之上的 ACK/重传/去重/会话管理，20 字节头含版本/序号/校验）
+- 部署 AI 应用闭环：应用侧 TinyCNN int8 推理（三分类）→ 跨客户机发送 → RTOS
+  侧实时控制（PWM/转向）→ 状态回传，全链可观测
+- 实时性改造与验证：16 项纳秒级 RTBench 指标，真机 RT-Thread timer jitter
+  p99 达 8.9–28 µs（亚毫秒共存）
+- 排查并修复了 7 个板级 bring-up 深层问题（timer PPI 电平发布、SPI 中断风暴、
+  nested-vCPU 冲突、virtio vendor 身份等，见工程实录）
+- 修复上游工具链 bug：ostool 的 serde-flatten 字段遮蔽导致板级复位命令永不
+  执行，提交上游 PR [drivercraft/ostool#172](https://github.com/drivercraft/ostool/pull/172)
+  （已获评审批准）
+- 完成整体验证矩阵：QEMU × 4 + ROCK 4D 真机 × 4 共 8 个组合全部门禁通过，
+  指标 16/16 完整，正式数据与全部日志归档于本材料
+
 ## 目录结构
 
 ```text
