@@ -1,5 +1,36 @@
 # 系统设计
 
+## 0. 系统定位
+
+本项目是一个**基于 Type-1 hypervisor 的混合关键性（mixed-criticality）系统
+验证平台**：在单块物理板上，用 hypervisor 的空间与时间隔离，让无实时保证的
+通用操作系统（GPOS）与实时操作系统（RTOS）安全共存，并在二者之间跑通
+感知→决策→实时控制的完整闭环。
+
+对照混合关键性系统的定义要素，本平台的实现方式是**隔离式混合关键**
+（static partitioning / AMP 路线，与 PikeOS、LynxSecure、seL4 等工业
+hypervisor 同类）：
+
+| 定义要素 | 本平台实现 |
+|---|---|
+| 不同关键性负载共存 | GPOS（Linux/StarryOS：AI 推理、网络客户端）+ RTOS（RT-Thread/Zephyr：实时控制）同板 |
+| 空间隔离 | Stage-2 页表独立地址空间，`memory_regions` 互不可见 |
+| 时间隔离 | 独占物理核 pinning + 每 VM 定时器策略（`host_timer_policy`） |
+| 故障传播控制 | hypervisor 拦截所有 MMIO/IRQ；host-SPI 风暴熔断防非关键中断饿死关键侧 |
+| 关键/非关键受控通信 | 仅 virtio-net + RT-IPC v2 协议，无共享内存、无裸 MMIO |
+
+**边界说明**（如实标注，避免过度宣称）：
+
+- 本平台**没有**显式的关键性等级标注与运行时关键性模式切换（无
+  criticality 字段、无 overload 时低关键任务降级机制），不属于证书化
+  混合关键（CAMA/HELTA 风格）路线。
+- 时间隔离是工程隔离而非形式化保证：GIC distributor、VirtualSwitch、host
+  console 仍是共享点（实测遇到并修复了 host SPI 风暴饿死 guest 时间的
+  问题）。真机 RT-Thread timer jitter p99 28 µs 表明干扰被压到很小，但没有
+  WCET 形式化论证。
+- 本平台**未通过**任何安全认证标准（DO-178C / IEC 61508 等），定位是验证
+  平台而非认证系统。
+
 ## 1. 总体架构
 
 Axvisor（Type-1 虚拟化管理器，运行于 EL2）在一块物理板上同时承载两个客户机：

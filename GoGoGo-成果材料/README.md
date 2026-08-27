@@ -47,9 +47,16 @@ GoGoGo-成果材料/
 | 基线 | upstream/dev `ba252ca67` |
 | 集成提交 | `87eb3fcc5` + 适配 `621a063a9` |
 
+## 系统定位
+
+基于 Type-1 hypervisor 的**混合关键性系统验证平台**：用空间与时间隔离让
+GPOS（AI 推理）与 RTOS（实时控制）安全共存于单板并跑通感知→决策→控制
+闭环。采用隔离式（static partitioning）路线，未做安全认证（详见
+[docs/design.md](docs/design.md) 的定位与边界说明）。
+
 ## 一句话结论
 
 8 个组合（QEMU × 4 + ROCK 4D × 4）全部通过 Task 2 通信、Task 3 AI 闭环
 （分类准确率 3/3）与 Task123 门禁；ROCK 4D 上 RT-Thread 的 timer jitter
-p99 为 28–29 µs（16 项纳秒指标全部 10/10 完整），证明 Axvisor 可在真实
-硬件上以可接受的隔离开销承载混合关键性负载。
+p99 为 28–29 µs（16 项纳秒指标全部 10/10 完整），证明隔离式混合关键性
+负载可在此平台上以可接受的开销运行。
