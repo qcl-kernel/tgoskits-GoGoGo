@@ -17,7 +17,8 @@ GoGoGo-成果材料/
 │   ├── 更改说明.md                    ← 相对 upstream/dev 的全部更改
 │   ├── 性能数据.md                    ← 性能数据与分析
 │   ├── 验证报告.md                    ← 最终验证报告（8 组合门禁与 RTBench 表）
-│   └── 复现指南.md                    ← 复现指南（命令与判定）
+│   ├── 复现指南.md                    ← 复现指南（命令与判定）
+│   └── 协议对比分析.md                ← RT-IPC(UDP) vs HRPC(TCP) 基准对比
 ├── logs/                              ← 本批次完整运行日志（按组合命名）
 │   ├── log-qemu-<rtos>-<guest>.log        （4 份 QEMU 主跑）
 │   └── log-rock4d-<rtos>-<guest>.log      （4 份板级主跑 + 6 份 retry）
@@ -43,6 +44,7 @@ GoGoGo-成果材料/
 | 基于 upstream 哪个 commit、提交链与时间 | [docs/提交基线.md](docs/提交基线.md) |
 | 工程怎么做：工作流、关键问题定位实录 | [docs/工程实录.md](docs/工程实录.md) |
 | 如何复现这些结果 | [docs/复现指南.md](docs/复现指南.md) |
+| RT-IPC(UDP) 与 HRPC(TCP) 的延迟/吞吐/内存对比 | [docs/协议对比分析.md](docs/协议对比分析.md) |
 
 ## 基线信息
 
