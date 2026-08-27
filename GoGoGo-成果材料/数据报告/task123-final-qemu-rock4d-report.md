@@ -73,6 +73,8 @@ p95=2900, p99=2900, max=2900`。这组 3 帧数据用于闭环和协议门禁，
 - 纳秒明细：[图标数据/rtbench-metrics.csv](../图标数据/rtbench-metrics.csv)
 - 完整解析数据：[图标数据/parsed-data.json](../图标数据/parsed-data.json)
 - QEMU 与 ROCK 4D 原始串口日志：分别位于 `图标数据/qemu/` 和 `图标数据/rock4d/`
+- 本批次完整运行日志（含构建输出与串口全流）：`数据报告/log-<平台>-<RTOS>-<客户机>.log`；
+  ROCK 4D 的补充采集带 `-retryN` 后缀，与 `图标数据/rock4d/retry-*.log` 一一对应
 
 重新生成图表：
 

@@ -1,0 +1,877 @@
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.20s
+     Running `target/debug/tg-xtask axvisor task123 uboot --rtos zephyr --app-guest starryos --realtime-suite --rtbench-samples 10 --config os/axvisor/configs/board/rock-4d-task123-zephyr-starryos.toml --uboot-config os/StarryOS/configs/board/rock-4d-uboot-local.toml`
+[2026-08-27T10:01:45Z INFO  axbuild::context] Workspace root: /home/yfblock/Code/tgoskits-GoGoGo
+TASK123_GUEST_ARTIFACTS app_guest=starryos linux_kernel=/home/yfblock/Code/tgoskits-GoGoGo/tmp/source-cache/task3-alpine-linux/6.12.21-alpine-3.23.0/images/linux/Image linux_initramfs=/home/yfblock/Code/tgoskits-GoGoGo/tmp/source-cache/task3-alpine-linux/6.12.21-alpine-3.23.0/images/linux/rootfs.cpio.gz
+TASK123_UBOOT_CONFIG_WRITTEN /home/yfblock/Code/tgoskits-GoGoGo/tmp/task123-uboot-zephyr-starryos-3168812.toml
+TASK123_UBOOT combination=zephyr+/starryos config=/home/yfblock/Code/tgoskits-GoGoGo/os/axvisor/configs/board/rock-4d-task123-zephyr-starryos.toml uboot_config=/home/yfblock/Code/tgoskits-GoGoGo/tmp/task123-uboot-zephyr-starryos-3168812.toml
+[2026-08-27T10:01:45Z INFO  axbuild::context] Workspace member dir for axvisor: /home/yfblock/Code/tgoskits-GoGoGo/os/axvisor
+Using build config: /home/yfblock/Code/tgoskits-GoGoGo/os/axvisor/configs/board/rock-4d-task123-zephyr-starryos.toml
+[2026-08-27T10:01:45Z INFO  axbuild::axvisor::build::zephyr] AxVisor pre-build will prepare Zephyr image /home/yfblock/Code/tgoskits-GoGoGo/tmp/source-cache/zephyr/dccb09599635bdff17633fa7e9dab014b91dce90/current-image/current/zephyr.bin for VM config /home/yfblock/Code/tgoskits-GoGoGo/tmp/axbuild/axvisor/resolved-vm-configs/a1e383995c17e04bdd60d6a3d1a92b0557200f9f4a76a6df5f84e06de724a8fb.toml
+[axbuild] uboot build+run package=axvisor target=scripts/targets/std/pie/aarch64-unknown-linux-musl.json config=/home/yfblock/Code/tgoskits-GoGoGo/os/axvisor/configs/board/rock-4d-task123-zephyr-starryos.toml ...
+sh -c /home/yfblock/Code/tgoskits-GoGoGo/tmp/axbuild/std/prebuild/prebuild-aarch64-unknown-linux-musl-fa6da7fc3844f321.sh
+sh -c bash '/home/yfblock/Code/tgoskits-GoGoGo/os/axvisor/scripts/build_zephyr_task123.sh' --board rock-4d '/home/yfblock/Code/tgoskits-GoGoGo/tmp/source-cache/zephyr/dccb09599635bdff17633fa7e9dab014b91dce90/current-image'
+Zephyr Task123 image cache is current: /home/yfblock/Code/tgoskits-GoGoGo/tmp/source-cache/zephyr/dccb09599635bdff17633fa7e9dab014b91dce90/current-image/current/zephyr.bin
+AR_aarch64_unknown_linux_musl=aarch64-linux-musl-ar
+AXVISOR_VM_CONFIGS=/home/yfblock/Code/tgoskits-GoGoGo/os/axvisor/configs/vms/rock-4d/starryos-task123-10.toml:/home/yfblock/Code/tgoskits-GoGoGo/tmp/axbuild/axvisor/resolved-vm-configs/a1e383995c17e04bdd60d6a3d1a92b0557200f9f4a76a6df5f84e06de724a8fb.toml
+AX_ARCH=aarch64
+AX_LOG=info
+AX_TARGET=aarch64-unknown-none-softfloat
+BINDGEN_EXTRA_CLANG_ARGS_aarch64_unknown_linux_musl=--target=aarch64-linux-musl --sysroot=/home/yfblock/Env/aarch64-linux-musl-cross/bin/../aarch64-linux-musl --gcc-toolchain=/home/yfblock/Env/aarch64-linux-musl-cross -isystem /home/yfblock/Env/aarch64-linux-musl-cross/bin/../aarch64-linux-musl/include -isystem /home/yfblock/Env/aarch64-linux-musl-cross/lib/gcc/aarch64-linux-musl/11.2.1/include -mgeneral-regs-only
+CARGO_UNSTABLE_JSON_TARGET_SPEC=true
+CC_aarch64_unknown_linux_musl=aarch64-linux-musl-cc
+CFLAGS_aarch64_unknown_linux_musl=-mgeneral-regs-only -fno-stack-protector
+CXXFLAGS_aarch64_unknown_linux_musl=-mgeneral-regs-only -fno-stack-protector
+SMP=8
+cargo build --config /home/yfblock/Code/tgoskits-GoGoGo/tmp/axbuild/std/config-aarch64-unknown-linux-musl-dynamic.toml -p axvisor --target scripts/targets/std/pie/aarch64-unknown-linux-musl.json -Z unstable-options --target-dir /home/yfblock/Code/tgoskits-GoGoGo/target --features ax-std/smp,log/release_max_level_info -Z json-target-spec --bin axvisor --release --message-format json-render-diagnostics
+warning: associated function `defer_irq_deactivation` is never used
+  --> platforms/somehal/src/common.rs:26:8
+   |
+ 7 | pub trait PlatOp {
+   |           ------ associated function in this trait
+...
+26 |     fn defer_irq_deactivation(_active: &mut Self::ActiveIrq) -> Result<(), IrqError> {
+   |        ^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: `somehal` (lib) generated 1 warning
+   Compiling axvisor v0.6.1 (/home/yfblock/Code/tgoskits-GoGoGo/os/axvisor)
+warning: function `aarch64_guest_wfi_action` is never used
+   --> virtualization/axvm/src/arch/aarch64/mod.rs:633:4
+    |
+633 | fn aarch64_guest_wfi_action(policy: HostVcpuIdlePolicy) -> VcpuRunAction {
+    |    ^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: associated function `for_guest_wfi` is never used
+  --> virtualization/axvm/src/architecture/types.rs:19:25
+   |
+16 | impl VcpuRunAction {
+   | ------------------ associated function in this implementation
+...
+19 |     pub(crate) const fn for_guest_wfi(policy: axvmconfig::HostVcpuIdlePolicy) -> Self {
+   |                         ^^^^^^^^^^^^^
+
+warning: function `with_vm` is never used
+  --> virtualization/axvm/src/manager.rs:59:15
+   |
+59 | pub(crate) fn with_vm<F, R>(vm_id: VMId, f: F) -> Option<R>
+   |               ^^^^^^^
+
+warning: function `active_vcpu_mask` is never used
+  --> virtualization/axvm/src/manager.rs:68:15
+   |
+68 | pub(crate) fn active_vcpu_mask(vm_id: VMId) -> Option<usize> {
+   |               ^^^^^^^^^^^^^^^^
+
+warning: function `inject_interrupt` is never used
+  --> virtualization/axvm/src/manager.rs:80:15
+   |
+80 | pub(crate) fn inject_interrupt(vm_id: VMId, vcpu_id: usize, vector: usize) -> AxVmResult {
+   |               ^^^^^^^^^^^^^^^^
+
+warning: variant `Generic` is never constructed
+  --> virtualization/axvm/src/runtime/hvc.rs:26:5
+   |
+25 | pub(crate) enum HyperCallAbi {
+   |                 ------------ variant in this enum
+26 |     Generic,
+   |     ^^^^^^^
+   |
+   = note: `HyperCallAbi` has derived impls for the traits `Debug` and `Clone`, but these are intentionally ignored during dead code analysis
+
+warning: fields `host_timer_policy` and `host_vcpu_idle_policy` are never read
+    --> virtualization/axvm/src/vm/mod.rs:1269:5
+     |
+1261 | pub struct AxVM {
+     |            ---- fields in this struct
+...
+1269 |     host_timer_policy: crate::config::HostTimerPolicy,
+     |     ^^^^^^^^^^^^^^^^^
+1270 |     host_vcpu_idle_policy: crate::config::HostVcpuIdlePolicy,
+     |     ^^^^^^^^^^^^^^^^^^^^^
+
+warning: associated items `host_timer_policy`, `host_vcpu_idle_policy`, `with_planned_device_graph`, `handle_nested_page_fault`, and `debug_nested_page_fault` are never used
+    --> virtualization/axvm/src/vm/mod.rs:1322:25
+     |
+1274 | impl AxVM {
+     | --------- associated items in this implementation
+...
+1322 |     pub(crate) const fn host_timer_policy(&self) -> crate::config::HostTimerPolicy {
+     |                         ^^^^^^^^^^^^^^^^^
+...
+1327 |     pub(crate) const fn host_vcpu_idle_policy(&self) -> crate::config::HostVcpuIdlePolicy {
+     |                         ^^^^^^^^^^^^^^^^^^^^^
+...
+1551 |     pub(crate) fn with_planned_device_graph<F, R>(&self, f: F) -> AxVmResult<R>
+     |                   ^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+1860 |     pub(crate) fn handle_nested_page_fault(
+     |                   ^^^^^^^^^^^^^^^^^^^^^^^^
+...
+1875 |     fn debug_nested_page_fault(
+     |        ^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: struct `SimpleVmPlan` is never constructed
+  --> virtualization/axvm/src/vm/prepare/device_plan/mod.rs:65:19
+   |
+65 | pub(crate) struct SimpleVmPlan(VmDevicePlan);
+   |                   ^^^^^^^^^^^^
+
+warning: associated function `new` is never used
+  --> virtualization/axvm/src/vm/prepare/device_plan/mod.rs:68:25
+   |
+67 | impl SimpleVmPlan {
+   | ----------------- associated function in this implementation
+68 |     pub(crate) const fn new(devices: VmDevicePlan) -> Self {
+   |                         ^^^
+
+warning: `axvm` (lib) generated 10 warnings
+warning: associated functions `create_vm_from_toml`, `start_vm`, and `pause_vm` are never used
+  --> os/axvisor/src/manager.rs:64:12
+   |
+24 | impl AxvmManager {
+   | ---------------- associated functions in this implementation
+...
+64 |     pub fn create_vm_from_toml(raw_cfg: &str) -> Result<VMId> {
+   |            ^^^^^^^^^^^^^^^^^^^
+...
+69 |     pub fn start_vm(vm_id: VMId) -> Result<()> {
+   |            ^^^^^^^^
+...
+79 |     pub fn pause_vm(vm_id: VMId) -> Result<()> {
+   |            ^^^^^^^^
+   |
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: function `can_start_vm` is never used
+  --> os/axvisor/src/shell/command/vm.rs:31:4
+   |
+31 | fn can_start_vm(status: VmStatus) -> Result<(), &'static str> {
+   |    ^^^^^^^^^^^^
+
+warning: function `start_single_vm` is never used
+   --> os/axvisor/src/shell/command/vm.rs:242:4
+    |
+242 | fn start_single_vm(vm: axvm::AxVMRef) -> anyhow::Result<()> {
+    |    ^^^^^^^^^^^^^^^
+
+warning: function `start_vm_by_id` is never used
+   --> os/axvisor/src/shell/command/vm.rs:253:4
+    |
+253 | fn start_vm_by_id(vm_id: usize, attach_console: bool) {
+    |    ^^^^^^^^^^^^^^
+
+warning: `axvisor` (bin "axvisor") generated 4 warnings
+    Finished `release` profile [optimized] target(s) in 1.53s
+warning: the following packages contain code that will be rejected by a future version of Rust: core v0.0.0 (/home/yfblock/.rustup/toolchains/nightly-2026-07-15-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core), memchr v2.8.3
+note: to see what the problems were, use the option `--future-incompat-report`, or run `cargo report future-incompatibilities --id 1`
+Converting ELF to BIN format...
+  elf: /home/yfblock/Code/tgoskits-GoGoGo/target/aarch64-unknown-linux-musl/release/axvisor
+  bin: /home/yfblock/Code/tgoskits-GoGoGo/target/aarch64-unknown-linux-musl/release/axvisor.bin
+/home/yfblock/.rustup/toolchains/nightly-2026-07-15-x86_64-unknown-linux-gnu/lib/rustlib/x86_64-unknown-linux-gnu/bin/llvm-objcopy --strip-all -O binary /home/yfblock/Code/tgoskits-GoGoGo/target/aarch64-unknown-linux-musl/release/axvisor /home/yfblock/Code/tgoskits-GoGoGo/target/aarch64-unknown-linux-musl/release/axvisor.bin
+[2026-08-27T10:01:47Z INFO  ostool::run::uboot] Starting U-Boot runner...
+[2026-08-27T10:01:47Z INFO  ostool::run::uboot] kernel from: /home/yfblock/Code/tgoskits-GoGoGo/target/aarch64-unknown-linux-musl/release/axvisor.bin
+[2026-08-27T10:01:47Z INFO  ostool::run::uboot] TFTP : 192.168.1.17
+[2026-08-27T10:01:47Z INFO  ostool::run::uboot] Linux detected: using net.tftp_dir=/srv/tftp and skipping all tftpd-hpa checks
+[2026-08-27T10:01:47Z INFO  ostool::run::uboot] Using network interface hint: wlan0
+[2026-08-27T10:01:47Z INFO  ostool::run::uboot] Opening serial port: /dev/ttyUSB0 @ 1500000
+Waiting for board on power or reset...
+sh -c sg2002-ctl 1; sleep 3; rk3576-rst
+sg2002 (2031971012) 的 on 值已设置为 1
+sg2002 (2031971012) 的 on 值已设置为 0
+sg2002 (2031971012) 的 on 值已设置为 1
+[2026-08-27T10:01:58Z INFO  uboot_shell] cmd: setenv autoload yes
+[2026-08-27T10:01:59Z INFO  uboot_shell] cmd: setenv gatewayip 192.168.1.1
+[2026-08-27T10:01:59Z INFO  uboot_shell] cmd: setenv netmask 255.255.255.0
+[2026-08-27T10:01:59Z INFO  uboot_shell] cmd: setenv ipaddr 192.168.1.213
+[2026-08-27T10:02:00Z INFO  uboot_shell] cmd: net list
+[2026-08-27T10:02:00Z INFO  ostool::run::uboot] Board network ok
+[2026-08-27T10:02:00Z INFO  uboot_shell] cmd: setenv serverip 192.168.1.17
+[2026-08-27T10:02:01Z INFO  uboot_shell] cmd: echo $fdt_addr_r
+[2026-08-27T10:02:01Z INFO  uboot_shell] cmd: echo $ramdisk_addr_r
+[2026-08-27T10:02:01Z INFO  uboot_shell] cmd: echo $kernel_addr_r
+[2026-08-27T10:02:02Z INFO  ostool::run::uboot] Using $kernel_addr_r as kernel entry: 0x42000000
+[2026-08-27T10:02:02Z INFO  uboot_shell] cmd: echo $kernel_comp_addr_r
+[2026-08-27T10:02:02Z INFO  ostool::run::uboot] image load to kernel_comp_addr_r: 0x4a000000
+[2026-08-27T10:02:02Z INFO  uboot_shell] cmd: setenv loadaddr 0x4a000000
+[2026-08-27T10:02:03Z INFO  ostool::run::uboot] fitimage loadaddr: 0x4a000000
+[2026-08-27T10:02:03Z INFO  ostool::run::uboot] kernel entry: 0x42000000
+[2026-08-27T10:02:03Z INFO  ostool::run::uboot] Using DTB from: os/StarryOS/configs/board/rock-4d.dtb
+[2026-08-27T10:02:03Z INFO  ostool::boot::fit] Making FIT image...
+[2026-08-27T10:02:03Z INFO  ostool::boot::fit] kernel: /home/yfblock/Code/tgoskits-GoGoGo/target/aarch64-unknown-linux-musl/release/axvisor.bin (size: 41418816)
+[2026-08-27T10:02:03Z INFO  ostool::boot::fit] 已读取 DTB 文件: os/StarryOS/configs/board/rock-4d.dtb (大小: 267009)
+[2026-08-27T10:02:03Z INFO  ostool::boot::fit] FIT image ok: /home/yfblock/Code/tgoskits-GoGoGo/target/aarch64-unknown-linux-musl/release/image.fit
+[2026-08-27T10:02:03Z INFO  ostool::run::uboot] Staged FIT image to: /srv/tftp/ostool/3168812-18cfa14b9e61888b-0/image.fit
+[2026-08-27T10:02:03Z INFO  uboot_shell] cmd: setenv bootfile ostool/3168812-18cfa14b9e61888b-0/image.fit
+[2026-08-27T10:02:03Z INFO  ostool::run::uboot] Booting kernel with command: tftp ostool/3168812-18cfa14b9e61888b-0/image.fit && bootm
+Interacting with U-Boot shell...
+tftp ostool/3168812-18cfa14b9e61888b-0/image.fit && bootm
+ethernet@2a220000 Waiting for PHY auto negotiation to complete....... done
+Using ethernet@2a220000 device
+TFTP from server 192.168.1.17; our IP address is 192.168.1.213
+Filename 'ostool/3168812-18cfa14b9e61888b-0/image.fit'.
+Load address: 0x4a000000
+Loading: *#################################################################
+	 #################################################################
+	 #################################################################
+	 #################################################################
+	 #################################################################
+	 #################################################################
+	 #################################################################
+	 #################################################################
+	 #################################################################
+	 #################################################################
+	 #################################################################
+	 #################################################################
+	 #################################################################
+	 #################################################################
+	 #################################################################
+	 #################################################################
+	 #################################################################
+	 #################################################################
+	 #################################################################
+	 #################################################################
+	 #################################################################
+	 #################################################################
+	 #################################################################
+	 #################################################################
+	 #################################################################
+	 #################################################################
+	 #################################################################
+	 #################################################################
+	 #################################################################
+	 #################################################################
+	 #################################################################
+	 #################################################################
+	 #################################################################
+	 #################################################################
+	 #################################################################
+	 #################################################################
+	 #################################################################
+	 #################################################################
+	 #################################################################
+	 #################################################################
+	 #################################################################
+	 #################################################################
+	 #################################################################
+	 #############################################
+	 1.5 MiB/s
+done
+Bytes transferred = 41686608 (27c1650 hex)
+## Loading kernel (any) from FIT Image at 4a000000 ...
+   Using 'config-ostool' configuration
+   Verifying Hash Integrity ... OK
+   Trying 'kernel' kernel subimage
+     Description:  This kernel
+     Type:         Kernel Image
+     Compression:  uncompressed
+     Data Start:   0x4a000168
+     Data Size:    41418816 Bytes = 39.5 MiB
+     Architecture: AArch64
+     OS:           Linux
+     Load Address: 0x42000000
+     Entry Point:  0x42000000
+   Verifying Hash Integrity ... OK
+## Loading fdt (any) from FIT Image at 4a000000 ...
+   Using 'config-ostool' configuration
+   Verifying Hash Integrity ... OK
+   Trying 'fdt' fdt subimage
+     Description:  This fdt
+     Type:         Flat Device Tree
+     Compression:  uncompressed
+     Data Start:   0x4c780228
+     Data Size:    267009 Bytes = 260.8 KiB
+     Architecture: AArch64
+     Load Address: 0x52000000
+   Verifying Hash Integrity ... OK
+   Loading fdt from 0x4c780228 to 0x52000000
+   Booting using the fdt blob at 0x52000000
+Working FDT set to 52000000
+   Loading Kernel Image to 42000000
+   Loading Device Tree to 00000000fce8f000, end 00000000fced3300 ... OK
+Working FDT set to fce8f000
+
+Starting kernel ...
+
+root=/dev/mmcblk0p3 rootfstype=ext4 rootwait rw console=ttyS0,1500000n8 earlycon=uart8250,mmio32,0x2ad40000
+VM Load @PA:0x42000000
+VM Load Offset: 0xffff0000c2000000
+Memory Map:
+  Rsv    0x00000040110000 - 0x000000401f0000 (896 KiB)
+  Free   0x00000040200000 - 0x00000042000000 (30 MiB)
+  KImg   0x00000042000000 - 0x00000044800000 (40 MiB)
+  Free   0x00000044800000 - 0x00000140000000 (3.93 GiB)
+Initialize RAM allocator: 0x40200000..0x42000000
+Reserving CPU-local areas
+CPU-local area stride: 0x44000 bytes
+Total CPU-local allocation: 0x220000 bytes (8 CPUs)
+Flushed RAM used range to memory map: 0x40200000..0x40242000, current: 0x40242000
+Flushed RAM used range to memory map: 0x40242000..0x40462000, current: 0x40462000
+CPU-local areas allocated at 0x40242000 - 0x40462000
+EL: 2
+Mapping early memory regions...
+Ram                 : [0x0000000040200000, 0x0000000140000000) -> [0x0000000040200000, 0x0000000140000000) (4 GiB)
+KImage              : [0x0000ffff80000000, 0x0000ffff82800000) -> [0x0000000042000000, 0x0000000044800000) (40 MiB)
+PerCpu              : [0x0000ff0040242000, 0x0000ff0040462000) -> [0x0000000040242000, 0x0000000040462000) (2.12 MiB)
+Debug serial        : [0x000000002ad40000, 0x000000002ad41000) -> [0x000000002ad40000, 0x000000002ad41000) (4 KiB)
+Boot page table at physical address: PA:0x40462000
+Setting up table registers...
+MMU Entry point at physical address: 0x421e43ec
+Trap vector at 0xffff801e6000
+Memory Map:
+  MMIO   0x0000002ad40000 - 0x0000002ad41000 (4 KiB)
+  Rsv    0x00000040110000 - 0x000000401f0000 (896 KiB)
+  Rsv    0x00000040200000 - 0x00000040242000 (264 KiB)
+  PerCPU 0x00000040242000 - 0x00000040462000 (2.12 MiB)
+  Rsv    0x00000040462000 - 0x0000004046d000 (44 KiB)
+  Free   0x0000004046d000 - 0x00000042000000 (27.57 MiB)
+  KImg   0x00000042000000 - 0x00000044800000 (40 MiB)
+  Free   0x00000044800000 - 0x00000140000000 (3.93 GiB)
+Jumping to main entry point at 0xffff801c4178 with SP 0x0000ff0040286000
+
+       d8888                            .d88888b.   .d8888b.
+      d88888                           d88P" "Y88b d88P  Y88b
+     d88P888                           888     888 Y88b.
+    d88P 888 888d888  .d8888b  .d88b.  888     888  "Y888b.
+   d88P  888 888P"   d88P"    d8P  Y8b 888     888     "Y88b.
+  d88P   888 888     888      88888888 888     888       "888
+ d8888888888 888     Y88b.    Y8b.     Y88b. .d88P Y88b  d88P
+d88P     888 888      "Y8888P  "Y8888   "Y88888P"   "Y8888P"
+
+arch = aarch64
+platform = ROCK 4D
+target = aarch64-unknown-none-softfloat
+build_mode = 
+log_level = info
+backtrace = false
+smp = 8
+
+[37max_runtime:236] [32mLogging is enabled.[m
+[m[37max_runtime:237] [32mPrimary CPU 0 started, arg = 0x40200000.[m
+[m[37max_runtime:239] [32mFound physcial memory regions:[m
+[m[37max_runtime:241] [32m  [PA:0x2ad40000, PA:0x2ad41000) mmio (READ | WRITE | DEVICE | RESERVED)[m
+[m[37max_runtime:241] [32m  [PA:0x40110000, PA:0x401f0000) reserved (READ | WRITE | EXECUTE | RESERVED)[m
+[m[37max_runtime:241] [32m  [PA:0x40200000, PA:0x40242000) reserved (READ | WRITE | EXECUTE | RESERVED)[m
+[m[37max_runtime:241] [32m  [PA:0x40242000, PA:0x40462000) reserved (READ | WRITE | EXECUTE | RESERVED)[m
+[m[37max_runtime:241] [32m  [PA:0x40462000, PA:0x4046d000) reserved (READ | WRITE | EXECUTE | RESERVED)[m
+[m[37max_runtime:241] [32m  [PA:0x4046d000, PA:0x42000000) free memory (READ | WRITE | FREE)[m
+[m[37max_runtime:241] [32m  [PA:0x42000000, PA:0x44800000) reserved (READ | WRITE | EXECUTE | RESERVED)[m
+[m[37max_runtime:241] [32m  [PA:0x44800000, PA:0x140000000) free memory (READ | WRITE | FREE)[m
+[m[37max_runtime:385] [32mInitialize global memory allocator...[m
+[m[37max_runtime:386] [32m  use buddy-slab-allocator allocator.[m
+[m[37max_alloc::buddy_slab:158] [32mInitialize global memory allocator, start_vaddr: 0x44800000, size: 0xfb800000[m
+[m[37max_alloc::buddy_slab:424] [32mglobal allocator initialized[m
+[m[37max_alloc::buddy_slab:168] [32mAdd memory region, start_vaddr: 0x4046d000, size: 0x1b93000[m
+[m[37max_runtime:276] [32mkernel aspace: [VA:0x0, VA:0xffffffffffffffff)[m
+[m[37max_mm:107] [32mInitialize virtual memory management...[m
+[m[37max_runtime:288] [32mInitialize platform devices...[m
+[m[37msomeboot::arch::power:23] [32mPower management method : SMC[m
+[m[37msomehal::driver:5] [32mInitializing rdrive with FDT at 0x40200000[m
+[m[37max_task::api:175] [32mInitialize scheduling...[m
+[m[37max_task::api:183] [32m  use FIFO scheduler.[m
+[m[37max_run[37max_driver::serial::rockchip_fiq:35] [32mRockchip FIQ debugger takes disabled UART alias serial0 at /serial@2ad40000[m
+�[37max_driver::serial::rockchip_fiq:44] [32mRockchip FIQ debugger UART@0x2ad40000 registered successfully, serial-id=0, baudrate=1500000, irq-mode=true[m
+[m[37max_runtime::serial:895] [32mserial runtime Rockchip FIQ Debugger UART ready: cpu=0, irq=Some(Source(FdtInterrupt(FdtIrqSpec { controller: 577, cells: [0, 76, 4] }))), polling=false[m
+[m
+       d8888            888     888  d8b
+      d88888            888     888  Y8P
+     d88P888            888     888
+    d88P  d88P   888  88K       d88""88b  888P"
+  d88P   888    X88K      Y88o88P    888  "Y8888b.  888  888  888
+ d8888888888  .d8""8b.     Y888P     888       X88  Y88..88P  888
+d88P     888  888  888      Y8P      888   88888P'   "Y88P"   888
+
+by AxVisor Team
+
+[ 42.951343 0:2 [37max_runtime:327] [32mruntime console active: serial0, ttyS0[m
+[m
+[ 42.957233 1 [37max_runtime::mp:82] [32mSecondary CPU 1 started.[m
+[m
+[ 42.963082 2 [37max_runtime::mp:82] [32mSecondary CPU 2 started.[m
+[m
+[ 42.968947 3 [37max_runtime::mp:82] [32mSecondary CPU 3 started.[m
+[m
+[ 42.974782 4 [37max_runtime::mp:82] [32mSecondary CPU 4 started.[m
+[m
+[ 42.980650 5 [37max_runtime::mp:82] [32mSecondary CPU 5 started.[m
+[m
+[ 42.986496 6 [37max_runtime::mp:82] [32mSecondary CPU 6 started.[m
+[m
+[ 42.992363 7 [37max_runtime::mp:82] [32mSecondary CPU 7 started.[m
+[m
+[ 42.992364 0:2 [37max_runtime:358] [32mPrimary CPU 0 init OK.[m
+[m
+[ 42.957371 1:6 [37max_runtime::mp:115] [32mSecondary CPU 1 init OK.[m
+[m
+[ 42.963222 2:9 [37max_runtime::mp:115] [32mSecondary CPU 2 init OK.[m
+[m
+[ 42.969084 3:12 [37max_runtime::mp:115] [32mSecondary CPU 3 init OK.[m
+[m
+[ 42.974892 4:15 [37max_runtime::mp:115] [32mSecondary CPU 4 init OK.[m
+[m
+[ 42.980758 5:18 [37max_runtime::mp:115] [32mSecondary CPU 5 init OK.[m
+[m
+[ 42.986601 6:21 [37max_runtime::mp:115] [32mSecondary CPU 6 init OK.[m
+[m
+[ 42.992468 7:24 [37max_runtime::mp:115] [32mSecondary CPU 7 init OK.[m
+[m
+[ 42.992598 0:2 [37maxvisor:100] [32mStarting virtualization...[m
+[m
+[ 43.116291 1:28 [37maxvm::host::arceos:458] [32mCore 1 is initializing hardware virtualization support...[m
+[m
+[ 43.116313 2:29 [37maxvm::host::arceos:458] [32mCore 2 is initializing hardware virtualization support...[m
+[m
+[ 43.116332 3:30 [37maxvm::host::arceos:458] [32mCore 3 is initializing hardware virtualization support...[m
+[m
+[ 43.116358 4:31 [37maxvm::host::arceos:458] [32mCore 4 is initializing hardware virtualization support...[m
+[m
+[ 43.116379 5:32 [37maxvm::host::arceos:458] [32mCore 5 is initializing hardware virtualization support...[m
+[m
+[ 43.116401 6:33 [37maxvm::host::arceos:458] [32mCore 6 is initializing hardware virtualization support...[m
+[m
+[ 43.116434 7:34 [37maxvm::host::arceos:458] [32mCore 7 is initializing hardware virtualization support...[m
+[m
+[ 42.992621 0:2 [37maxvm::host::arceos:440] [32mEnabling hardware virtualization support on all cores...[m
+[m
+[ 43.116319 1:28 [37maxvm::host::arceos:461] [32mHardware virtualization support enabled on core 1[m
+[m
+[ 43.116340 2:29 [37maxvm::host::arceos:461] [32mHardware virtualization support enabled on core 2[m
+[m
+[ 43.116359 3:30 [37maxvm::host::arceos:461] [32mHardware virtualization support enabled on core 3[m
+[m
+[ 43.116382 4:31 [37maxvm::host::arceos:461] [32mHardware virtualization support enabled on core 4[m
+[m
+[ 43.116401 5:32 [37maxvm::host::arceos:461] [32mHardware virtualization support enabled on core 5[m
+[m
+[ 43.116423 6:33 [37maxvm::host::arceos:461] [32mHardware virtualization support enabled on core 6[m
+[m
+[ 43.116456 7:34 [37maxvm::host::arceos:461] [32mHardware virtualization support enabled on core 7[m
+[m
+[ 42.992642 0:2 [37maxvm::host::arceos:446] [32mCore 0 is initializing hardware virtualization support...[m
+[m
+[ 43.116220 0:2 [37maxvm::host::arceos:448] [32mHardware virtualization support enabled on core 0[m
+[m
+[ 43.116423 0:2 [37maxvm::host::arceos:474] [32mWaiting for all cores to enable hardware virtualization...[m
+[m
+[ 44.849246 4:35 [37maxvm::runtime::vcpus:435] [32mVM[1] VCpu[0] waiting for running[m
+[m
+[ 44.849476 6:37 [37maxvm::runtime::vcpus:435] [32mVM[3] VCpu[0] waiting for running[m
+[m
+[ 43.117350 0:2 [37maxvm::host::arceos:490] [32mAll cores have enabled hardware virtualization support.[m
+[m
+[ 44.849267 4:35 [37maxvm::runtime::vcpus:473] [32mVM[1] VCpu[0] running on CPU4...[m
+[m
+[ 44.849496 6:37 [37maxvm::runtime::vcpus:473] [32mVM[3] VCpu[0] running on CPU6...[m
+[m
+[ 43.117374 0:2 [37maxvisor::config:90] [32mUsing static VM configs.[m
+[m
+[ 43.213970 0:2 [37maxvm::boot::fdt::core:69] [32mVM[1] virtual UART follows the host-selected UART: GuestSerialProfile { model: Uart16550, transport: Mmio { base: 718536704, length: 256, register_shift: 2, register_width: Dword }, irq: 108, clock_hz: 24000000 }[m
+[m
+[ 43.214995 0:2 [37maxvm::boot::fdt::core:79] [32mVM[1] virtual GIC follows host firmware resources: GuestGicProfile { compatible: "arm,gic-400", node_path: "/interrupt-controller@2a701000", node_phandle: Some(1), distributor: GuestMmioRegion { base: 711987200, length: 65536 }, cpu_region: CpuInterface(GuestMmioRegion { base: 711991296, length: 65536 }), its: [] }[m
+[m
+[ 43.215444 0:2 [37maxvm::boot::fdt::core:93] [32mVM[1] architectural timer follows host firmware PPIs[m
+[m
+[ 43.341658 0:2 [37maxvm::boot::fdt::core::parser:484] [32mCPU node: /cpus/cpu@0, node_id: 0x0, hardware_cpu_id: 0x0[m
+[m
+[ 43.341714 0:2 [37maxvm::boot::fdt::core::parser:484] [32mCPU node: /cpus/cpu@1, node_id: 0x1, hardware_cpu_id: 0x1[m
+[m
+[ 43.341762 0:2 [37maxvm::boot::fdt::core::parser:484] [32mCPU node: /cpus/cpu@2, node_id: 0x2, hardware_cpu_id: 0x2[m
+[m
+[VM 3] *** Booting Zephyr OS build v4.4.2 ***
+[ 43.341808 0:2 [37maxvm::boot::fdt::core::parser:484] [32mCPU node: /cpus/cpu@3, node_id: 0x3, hardware_cpu_id: 0x3[m
+[m
+[ 43.341854 0:2 [37maxvm::boot::fdt::core::parser:484] [32mCPU node: /cpus/cpu@100, node_id: 0x100, hardware_cpu_id: 0x100[m
+[m
+[ 43.341904 0:2 [37maxvm::boot::fdt::core::parser:484] [32mCPU node: /cpus/cpu@101, node_id: 0x101, hardware_cpu_id: 0x101[m
+[m
+[ 43.341950 0:2 [37maxvm::boot::fdt::core::parser:484] [32mCPU node: /cpus/cpu@102, node_id: 0x102, hardware_cpu_id: 0x102[m
+[m
+[ 43.341995 0:2 [37maxvm::boot::fdt::core::parser:484] [32mCPU node: /cpus/cpu@103, node_id: 0x103, hardware_cpu_id: 0x103[m
+[m
+[VM 3] RTIPC_SERVER_READY ip=192.168.77.30 port=9876
+[ 43.357190 0:2 [37maxvm::boot::fdt::core::parser:491] [32mFound 8 host CPU nodes[m
+[m
+[ 43.357233 0:2 [37maxvm::boot::fdt::core:144] [32mVM[1] DTB not found, generating from the VM configuration[m
+[m
+[ 43.694758 0:2 [37maxvm::boot::fdt::core::device:107] [32mFound excluded devices: ["/interrupt-controller@2a701000", "/serial@27310000", "/serial@2ad40000", "/serial@2ad50000", "/serial@2ad60000", "/serial@2ad70000", "/serial@2ad80000", "/serial@2ad90000", "/serial@2ada0000", "/serial@2adb0000", "/serial@2adc0000", "/serial@2afc0000", "/serial@2afd0000", "/timer", "/timer@2acc0000"][m
+[m
+[ 43.779580 0:2 [37maxvm::boot::fdt::core::device:107] [32mFound excluded devices: ["/interrupt-controller@2a701000", "/serial@27310000", "/serial@2ad40000", "/serial@2ad50000", "/serial@2ad60000", "/serial@2ad70000", "/serial@2ad80000", "/serial@2ad90000", "/serial@2ada0000", "/serial@2adb0000", "/serial@2adc0000", "/serial@2afc0000", "/serial@2afd0000", "/timer", "/timer@2acc0000"][m
+[m
+[VM 3] TASK3_RTOS_READY ip=192.168.77.30 port=9877
+[ 43.780085 0:2 [37maxvisor::config:137] [32mCreating VM[1] "starryos-task123-rock4d"[m
+[m
+[VM 3] [m
+[ 43.780123 0:2 [37maxvm::arch::aarch64::vgic::plan:214] [32massigned_spis: 0 passthrough interrupts configured[m
+[m
+[ 43.781213 0:2 [37maxvm::vm:1305] [32mVM created: id=1[m
+[m
+[ 43.781409 0:2 [37maxvisor::config:149] [32mVM[1] created success, loading images...[m
+[m
+[ 43.938285 0:2 [37maxvm::boot::fdt::core::create:467] [32mAdding resolved virtual-device FDT node /virtio_mmio@a000000 for net0[m
+[m
+[VM 1] task2.count=10 task3.frames=3 task3.fault=normal rtbench.net.count=10
+[ 43.940897 0:2 [37maxdevice::device:993] [32mDeviceRuntime: registered device id=0[m
+[m
+[ 43.940923 0:2 [37maxdevice::device:993] [32mDeviceRuntime: registered device id=1[m
+[m
+[VM 1] VM Load @PA:0x80000000
+[ 43.941030 0:2 [37maxdevice::device:993] [32mDeviceRuntime: registered device id=2[m
+[m
+[ 43.941135 0:2 [37maxdevice::device:993] [32mDeviceRuntime: registered device id=3[m
+[m
+[VM 1] VM Load Offset: 0x100000000
+[ 43.941280 0:2 [37maxvm::vm::prepare:86] [32mVM setup: id=1[m
+[m
+[ 44.036288 0:2 [37maxvm::boot::fdt::core:69] [32mVM[3] virtual UART follows the host-selected UART: GuestSerialProfile { model: Uart16550, transport: Mmio { base: 718536704, length: 256, register_shift: 2, register_width: Dword }, irq: 108, clock_hz: 24000000 }[m
+[m
+[ 44.037325 0:2 [37maxvm::boot::fdt::core:79] [32mVM[3] virtual GIC follows host firmware resources: GuestGicProfile { compatible: "arm,gic-400", node_path: "/interrupt-controller@2a701000", node_phandle: Some(1), distributor: GuestMmioRegion { base: 711987200, length: 65536 }, cpu_region: CpuInterface(GuestMmioRegion { base: 711991296, length: 65536 }), its: [] }[m
+[m
+[ 44.037780 0:2 [37maxvm::boot::fdt::core:93] [32mVM[3] architectural timer follows host firmware PPIs[m
+[m
+[ 44.163904 0:2 [37maxvm::boot::fdt::core::parser:484] [32mCPU node: /cpus/cpu@0, node_id: 0x0, hardware_cpu_id: 0x0[m
+[m
+[ 44.163960 0:2 [37maxvm::boot::fdt::core::parser:484] [32mCPU node: /cpus/cpu@1, node_id: 0x1, hardware_cpu_id: 0x1[m
+[m
+[ 44.164007 0:2 [37maxvm::boot::fdt::core::parser:484] [32mCPU node: /cpus/cpu@2, node_id: 0x2, hardware_cpu_id: 0x2[m
+[m
+[VM 1] Memory Map:
+[ 44.164053 0:2 [37maxvm::boot::fdt::core::parser:484] [32mCPU node: /cpus/cpu@3, node_id: 0x3, hardware_cpu_id: 0x3[m
+[m
+[ 44.164099 0:2 [37maxvm::boot::fdt::core::parser:484] [32mCPU node: /cpus/cpu@100, node_id: 0x100, hardware_cpu_id: 0x100[m
+[m
+[ 44.164148 0:2 [37maxvm::boot::fdt::core::parser:484] [32mCPU node: /cpus/cpu@101, node_id: 0x101, hardware_cpu_id: 0x101[m
+[m
+[VM 1]   KImg   0x00000080000000 - 0x00000082600000 (38 MiB)
+[ 44.164195 0:2 [37maxvm::boot::fdt::core::parser:484] [32mCPU node: /cpus/cpu@102, node_id: 0x102, hardware_cpu_id: 0x102[m
+[m
+[ 44.164241 0:2 [37maxvm::boot::fdt::core::parser:484] [32mCPU node: /cpus/cpu@103, node_id: 0x103, hardware_cpu_id: 0x103[m
+[m
+[ 44.179437 0:2 [37maxvm::boot::fdt::core::parser:491] [32mFound 8 host CPU nodes[m
+[m
+[ 44.179470 0:2 [37maxvm::boot::fdt::core:144] [32mVM[3] DTB not found, generating from the VM configuration[m
+[m
+[VM 1]   Free   0x00000082600000 - 0x000000a0000000 (474 MiB)
+[ 44.511133 0:2 [37maxvm::boot::fdt::core::device:107] [32mFound excluded devices: ["/interrupt-controller@2a701000", "/serial@27310000", "/serial@2ad40000", "/serial@2ad50000", "/serial@2ad60000", "/serial@2ad70000", "/serial@2ad80000", "/serial@2ad90000", "/serial@2ada0000", "/serial@2adb0000", "/serial@2adc0000", "/serial@2afc0000", "/serial@2afd0000", "/timer", "/timer@2acc0000"][m
+[m
+[ 44.595598 0:2 [37maxvm::boot::fdt::core::device:107] [32mFound excluded devices: ["/interrupt-controller@2a701000", "/serial@27310000", "/serial@2ad40000", "/serial@2ad50000", "/serial@2ad60000", "/serial@2ad70000", "/serial@2ad80000", "/serial@2ad90000", "/serial@2ada0000", "/serial@2adb0000", "/serial@2adc0000", "/serial@2afc0000", "/serial@2afd0000", "/timer", "/timer@2acc0000"][m
+[m
+[ 44.596059 0:2 [37maxvisor::config:137] [32mCreating VM[3] "zephyr-task123-rock4d"[m
+[m
+[ 44.596096 0:2 [37maxvm::arch::aarch64::vgic::plan:214] [32massigned_spis: 0 passthrough interrupts configured[m
+[m
+[ 44.597186 0:2 [37maxvm::vm:1305] [32mVM created: id=3[m
+[m
+[VM 1] Initialize RAM allocator: 0x82600000..0xa0000000
+[ 44.844343 0:2 [37maxvisor::config:149] [32mVM[3] created success, loading images...[m
+[m
+[ 44.846235 0:2 [37maxvm::boot::fdt::core::create:467] [32mAdding resolved virtual-device FDT node /virtio_mmio@a000000 for net0[m
+[m
+[VM 1] Reserving CPU-local areas
+[ 44.848460 0:2 [37maxdevice::device:993] [32mDeviceRuntime: registered device id=0[m
+[m
+[ 44.848486 0:2 [37maxdevice::device:993] [32mDeviceRuntime: registered device id=1[m
+[m
+[ 44.848592 0:2 [37maxdevice::device:993] [32mDeviceRuntime: registered device id=2[m
+[m
+[ 44.848698 0:2 [37maxdevice::device:993] [32mDeviceRuntime: registered device id=3[m
+[m
+[ 44.848828 0:2 [37maxvm::vm::prepare:86] [32mVM setup: id=3[m
+[m
+[ 44.848858 0:2 [37maxvm::runtime:43] [32mInitializing VMM...[m
+[m
+[ 44.848878 0:2 [37maxvm::runtime:54] [32mVMM starting, booting VMs...[m
+[m
+[VM 1] CPU-local area stride: 0x41000 bytes
+[ 44.848901 0:2 [37maxvm::vm:1614] [32mStarting VM[1][m
+[m
+[ 44.848926 0:2 [37maxvm::runtime::vcpus:364] [32mSpawning task for VM[1] VCpu[0][m
+[m
+[ 44.848968 0:2 [37maxvm::runtime::vcpus:381] [32mVCpu task Task(35, "VM[1]-VCpu[0]") created cpumask: [4, ][m
+[m
+[ 44.849240 0:2 [37maxvm::runtime:62] [32mVM[1] boot success[m
+[m
+[VM 1] Total CPU-local allocation: 0x82000 bytes (2 CPUs)
+[ 44.849262 0:2 [37maxvm::vm:1614] [32mStarting VM[3][m
+[m
+[ 44.849284 0:2 [37maxvm::runtime::vcpus:364] [32mSpawning task for VM[3] VCpu[0][m
+[m
+[ 44.849330 0:2 [37maxvm::runtime::vcpus:381] [32mVCpu task Task(37, "VM[3]-VCpu[0]") created cpumask: [6, ][m
+[m
+[ 44.849468 0:2 [37maxvm::runtime:62] [32mVM[3] boot success[m
+[m
+[ 44.849539 0:2 [37maxvisor:139] [32m[OK] Default guest initialized[m
+[m
+[VM 1] Flushed RAM used range to memory map: 0x82600000..0x82601000, current: 0x82601000
+[ 44.849560 0:2 [37maxvisor:144] [32mshell task on CPU0[m
+[m
+[VM 1] Flushed RAM used range to memory map: 0x82601000..0x82683000, current: 0x82683000
+[VM 1] CPU-local areas allocated at 0x82601000 - 0x82683000
+[VM 1] EL: 1
+[VM 1] Mapping early memory regions...
+[VM 1] Ram                 : [0xffff000080000000, 0xffff0000a0000000) -> [0x0000000080000000, 0x00000000a0000000) (512 MiB)
+[VM 1] KImage              : [0xffffffff80000000, 0xffffffff82600000) -> [0x0000000080000000, 0x0000000082600000) (38 MiB)
+[VM 1] PerCpu              : [0xffffff0082601000, 0xffffff0082683000) -> [0x0000000082601000, 0x0000000082683000) (520 KiB)
+[VM 1] Debug serial        : [0xffff00002ad40000, 0xffff00002ad41000) -> [0x000000002ad40000, 0x000000002ad41000) (4 KiB)
+[VM 1] Boot page table at physical address: PA:0x82683000
+[VM 1] Setting up table registers...
+[VM 1] MMU Entry point at physical address: 0x80359b3c
+[VM 1] Trap vector at 0xffffffff80362000
+[VM 1] Memory Map:
+[VM 1]   MMIO   0x0000002ad40000 - 0x0000002ad41000 (4 KiB)
+[VM 1]   KImg   0x00000080000000 - 0x00000082600000 (38 MiB)
+[VM 1]   Rsv    0x00000082600000 - 0x00000082601000 (4 KiB)
+[VM 1]   PerCPU 0x00000082601000 - 0x00000082683000 (520 KiB)
+[VM 1]   Rsv    0x00000082683000 - 0x0000008268d000 (40 KiB)
+[VM 1]   Free   0x0000008268d000 - 0x000000a0000000 (473.45 MiB)
+[VM 1] Jumping to main entry point at 0xffffffff803428d4 with SP 0xffffff0082642000
+[VM 1] 
+[VM 1]        d8888                            .d88888b.   .d8888b.
+[VM 1]       d88888                           d88P" "Y88b d88P  Y88b
+[VM 1]      d88P888                           888     888 Y88b.
+[VM 1]     d88P 888 888d888  .d8888b  .d88b.  888     888  "Y888b.
+[VM 1]    d88P  888 888P"   d88P"    d8P  Y8b 888     888     "Y88b.
+[VM 1]   d88P   888 888     888      88888888 888     888       "888
+[VM 1]  d8888888888 888     Y88b.    Y8b.     Y88b. .d88P Y88b  d88P
+[VM 1] d88P     888 888      "Y8888P  "Y8888   "Y88888P"   "Y8888P"
+[VM 1] 
+[VM 1] arch = aarch64
+[VM 1] platform = ROCK 4D
+[VM 1] target = aarch64-unknown-none-softfloat
+[VM 1] build_mode = 
+[VM 1] log_level = info
+[VM 1] backtrace = false
+[VM 1] smp = 2
+[VM 1] 
+[VM 1] [37max_runtime:236] [32mLogging is enabled.[m
+[VM 1] [m[37max_runtime:237] [32mPrimary CPU 0 started, arg = 0x82600000.[m
+[VM 1] [m[37max_runtime:239] [32mFound physcial memory regions:[m
+[VM 1] [m[37max_runtime:241] [32m  [PA:0x2ad40000, PA:0x2ad41000) mmio (READ | WRITE | DEVICE | RESERVED)[m
+[VM 1] [m[37max_runtime:241] [32m  [PA:0x80000000, PA:0x82600000) reserved (READ | WRITE | EXECUTE | RESERVED)[m
+[VM 1] [m[37max_runtime:241] [32m  [PA:0x82600000, PA:0x82601000) reserved (READ | WRITE | EXECUTE | RESERVED)[m
+[VM 1] [m[37max_runtime:241] [32m  [PA:0x82601000, PA:0x82683000) reserved (READ | WRITE | EXECUTE | RESERVED)[m
+[VM 1] [m[37max_runtime:241] [32m  [PA:0x82683000, PA:0x8268d000) reserved (READ | WRITE | EXECUTE | RESERVED)[m
+[VM 1] [m[37max_runtime:241] [32m  [PA:0x8268d000, PA:0xa0000000) free memory (READ | WRITE | FREE)[m
+[VM 1] [m[37max_runtime:385] [32mInitialize global memory allocator...[m
+[VM 1] [m[37max_runtime:386] [32m  use buddy-slab-allocator allocator.[m
+[VM 1] [m[37max_alloc::buddy_slab:158] [32mInitialize global memory allocator, start_vaddr: 0xffff00008268d000, size: 0x1d973000[m
+[VM 1] [m[37max_alloc::buddy_slab:424] [32mglobal allocator initialized[m
+[VM 1] [m[37max_runtime:276] [32mkernel aspace: [VA:0xffff000000000000, VA:0xffffffffffffffff)[m
+[VM 1] [m[37max_mm:107] [32mInitialize virtual memory management...[m
+[VM 1] [m[37max_runtime:288] [32mInitialize platform devices...[m
+[VM 1] [m[37msomeboot::arch::power:23] [32mPower management method : SMC[m
+[VM 1] [m[37msomehal::driver:5] [32mInitializing rdrive with FDT at 0xffff000082600000[m
+[VM 1] [m[37max_task::api:175] [32mInitialize scheduling...[m
+[VM 1] [m[37max_task::api:183] [32m  use Round-robin scheduler.[m
+[VM 1] [m[37max_runtime:307] [32mInitialize interrupt handlers...[m
+[VM 1] [m[37max_runtime::devices:2] [32mProbe platform devices...[m
+[VM 1] [m[37max_driver::serial::ns16550:49] [32mProbing NS16550 serial device: serial@2ad40000[m
+[VM 1] [m[37max_driver::serial::ns16550:92] [32mNS16550 serial@0xffff00002ad40000 registered successfully[m
+[VM 1] [m[37max_driver::virtio:177] [32mprobing virtio-mmio node virtio_mmio@a000000 at PA 0xa000000, size 0x200[m
+[VM 1] [m[37max_driver::virtio:184] [32mmapped virtio-mmio at VA 0xffff00000a000000[m
+[VM 1] [m[37mvirtio_drivers::device::net::dev_raw:33] [32mnegotiated_features Features(MAC | STATUS | VERSION_1)[m
+[VM 1] [m[37max_driver::virtio::net:441] [32mregistered virtio network device irq=None[m
+[VM 1] [m[37max_runtime::serial:895] [32mserial runtime NS16550 UART ready: cpu=0, irq=Some(Source(FdtInterrupt(FdtIrqSpec { controller: 16, cells: [0, 76, 4] }))), polling=false[m
+[ 45.411982 4:35 [37maxvm::runtime::hvc:272] [32mVM[1] PSCI_CPU_ON target=0x101 entry=0x80358ba0 context=0x82642ec0[m
+[m
+[ 45.412025 4:35 [37maxvm::runtime::vcpus:364] [32mSpawning task for VM[1] VCpu[1][m
+[m
+[ 45.412064 4:35 [37maxvm::runtime::vcpus:381] [32mVCpu task Task(40, "VM[1]-VCpu[1]") created cpumask: [5, ][m
+[m
+[ 45.412107 5:40 [37maxvm::runtime::vcpus:435] [32mVM[1] VCpu[1] waiting for running[m
+[m
+[ 45.412135 5:40 [37maxvm::runtime::vcpus:473] [32mVM[1] VCpu[1] running on CPU5...[m
+[m
+[VM 1] [m[  1.445693 0:2 [37max_runtime:327] [32mruntime console active: serial0, ttyS0[m
+[VM 1] [m[  1.474560 1 [37max_runtime::mp:82] [32mSecondary CPU 1 started.[m
+[VM 1] [mBoot at 1970-01-01 00:00:01.445707 UTC
+[VM 1] 
+[VM 1] [  1.475114 1:6 [37max_runtime::mp:115] [32mSecondary CPU 1 init OK.[m
+[VM 1] [m[  1.464749 0:2 [37max_fs_ng:111] [32m  filesystem type: "embedded-cpio"[m
+[VM 1] [m[  1.474561 0:2 [37max_runtime:358] [32mPrimary CPU 0 init OK.[m
+[VM 1] [m[  1.486990 0:2 [37max_runtime::irq:193] [32mregistered virtio-net-g0-s0 IRQ IrqId { domain: IrqDomainId(7), hwirq: HwIrq(48) } on fixed CPU 0[m
+[VM 1] [m[  1.495707 0:2 [37max_net:248] [32mInitialize network subsystem...[m
+[VM 1] [m[  1.496032 0:2 [37max_net:270] [32m  use NIC 0: "virtio-net"[m
+[VM 1] [m[  1.496343 0:2 [37max_net:321] [32meth0:[m
+[VM 1] [m[  1.496354 0:2 [37max_net:322] [32m  id:   2[m
+[VM 1] [m[  1.496364 0:2 [37max_net:323] [32m  mac:  52-54-00-77-00-01[m
+[VM 1] [m[  1.496384 0:2 [37max_net:340] [32m  mode: dhcp[m
+[VM 1] [m[  1.496406 0:2 [37max_net:389] [32mDevice: lo[m
+[VM 1] [m[  1.496419 0:2 [37max_net:389] [32mDevice: eth0[m
+[VM 1] [m[  1.496451 0:2 [37max_net::service:529] [32meth0: DHCP enabled[m
+[VM 1] [m[  3.580298 0:2 [37max_net:879] [33mDHCP bootstrap timed out[m
+[VM 1] [m[  3.580379 0:2 [37max_tracepoint:327] [32mtracepoint_data_start: 0xffffffff81bff8d8, tracepoint_data_end: 0xffffffff81bff968[m
+[VM 1] [m[  3.580410 0:2 [37max_tracepoint:370] [32mtracepoint_data_len: 6[m
+[VM 1] [m[  3.580429 0:2 [37max_tracepoint:389] [32mtracepoint registered: sched:sched_process_exit[m
+[VM 1] [m[  3.580448 0:2 [37max_tracepoint:389] [32mtracepoint registered: sched:sched_process_fork[m
+[VM 1] [m[  3.580462 0:2 [37max_tracepoint:389] [32mtracepoint registered: sched:sched_switch[m
+[VM 1] [m[  3.580476 0:2 [37max_tracepoint:389] [32mtracepoint registered: syscalls:sys_clone[m
+[VM 1] [m[  3.580491 0:2 [37max_tracepoint:389] [32mtracepoint registered: syscalls:sys_enter_openat[m
+[VM 1] [m[  3.580505 0:2 [37max_tracepoint:389] [32mtracepoint registered: syscalls:sys_mkdirat[m
+[VM 1] [mInitialized 6 tracepoints
+[VM 1] kmod subsystem initialized
+[VM 1] [  3.580660 0:2 [37mstarry_kernel::pseudofs:86] [32mInitialize pseudofs...[m
+[VM 1] [m[  3.581026 0:2 [37mstarry_kernel::pseudofs::dev::tty::serial:244] [32mttyS0 registered: path=/serial@2ad40000, alias=Some(0), paddr=0x2ad40000, irq=Some(Source(FdtInterrupt(FdtIrqSpec { controller: 16, cells: [0, 76, 4] })))[m
+[VM 1] [mSTARRY_SMP_READY configured=2 online=0-1 nproc=2
+[VM 1] [  3.581067 0:2 [37mstarry_kernel::pseudofs::dev::tty::serial:188] [32m/dev/console bound to runtime console ttyS0[m
+[VM 1] [m[  3.581664 0:2 [37mstarry_kernel::pseudofs:80] [32mMounted devfs at /dev[m
+[VM 1] [m[  3.581677 0:2 [37mstarry_kernel::pseudofs::usbfs:55] [32musbfs: initializing manager[m
+[VM 1] [m[  4.109446 1:24 [37mstarry_kernel::task::ops:348] [32mTask(24, "busybox") exit with code: 0[m
+[VM 1] [mSTARRY_NET_READY ip=192.168.77.11 peer=192.168.77.30
+[VM 1] [  3.581692 0:2 [37mstarry_kernel::pseudofs::usbfs::manager:1486] [32musbfs: discovered 0 USB host(s)[m
+[VM 1] [mTASK3_STARRY_NET_PROBE_READY count=10
+[VM 1] [  4.118369 1:24 [37mstarry_kernel::task::signal:647] [32mSend signal SIGCHLD to process 1[m
+[VM 1] [mTASK2_STARRY_BEGIN port=9876
+[VM 1] [  3.581705 0:2 [37mstarry_kernel::pseudofs::usbfs:58] [32musbfs: no USB host found, skip mounting usbfs[m
+[VM 1] [m[  4.118881 1:16 [37mstarry_kernel::syscall::task::wait:360] [32msys_waitpid <= pid: -1, options: WaitPidOptions(0x0[VM 1] [m[  3.581859 0:2 [37mstarry_kernel::pseudofs:80] [32mMounted tmpfs at /dev/shm[m
+[VM 1] [mRTBENCH_NET_PROBE_READY listen=9879 count=10
+[VM 1] [  4.119091 1:16 [37mstarry_kernel::syscall::task::wait:360] [32msys_waitpid <= pid: -1, options: WaitPidOptions(WNOHANG)[m
+[VM 1] [m[  3.581973 0:2 [37mstarry_kernel::pseudofs:80] [32mMounted tmpfs at /tmp[m
+[VM 1] [m[  4.165713 1:25 [37mstarry_kernel::task::user:71] [32mEnter user space: ip=0x6014839c, sp=0x3ffffffd400[m
+[VM 1] [m=== RT-IPC Benchmark Client ===
+[VM 1] [  3.582109 0:2 [37mstarry_kernel::pseudofs:80] [32mMounted mqueue at /dev/mqueue[m
+[VM 1] [mTarget: 192.168.77.30:9[VM 1] [  4.197044 1:25 [37max_net::udp:287] [32mUDP socket #0: bound on *:9879[m
+[VM 1] [m[client] fault profile: none
+[VM 1] [  3.582905 0:2 [37mstarry_kernel::dyn_debug:65] [32mdebug_init: initializing dynamic debug sites[m
+[VM 1] [m[client] connecting...
+[VM 1] [  4.209359 1:16 [37mstarry_kernel::syscall::task::wait:360] [32msys_waitpid <= pid: -1, options: WaitPidOptions(0x0)[[VM 1] [  3.583605 0:2 [37mstarry_kernel::dyn_debug:68] [32mdebug_init: found 189 dynamic debug sites[m
+[VM 1] [m
+[VM 1] [  4.209824 1:26 [37mstarry_kernel::task::user:71] [32mEnter user space: ip=0x6014839c, sp=0x3ffffffdb30[m
+[VM 1] [m--- Payload 64B ---
+[VM 1] [  3.583645 0:2 [37mstarry_kernel::pseudofs::proc:74] [32mRead kallsyms, size: 1295KB[m
+[VM 1] [m[  4.242391 1:26 [37max_net::udp:287] [32mUDP socket #1: bound on *:49152[m
+[VM 1] [m[  3.599020 0:2 [37mstarry_[VM 1] [m[  4.249050 1:10 [37max_net::device::ethernet:252] [32meth0: requesting ARP for 192.168.77.30[m
+[VM 1] [m[  3.599262 0:2 [37mstarry_kernel::pseudofs:80] [32mMounted sysfs at /sys[m
+[VM 1] [m[  4.264172 1:10 [37max_net::device::ethernet:331] [32meth0: ARP 192.168.77.30 -> 52-54-00-77-00-03[m
+[VM 1] [m[  3.600058 0:2 [37mstarry_kernel::pseudofs:80] [32mMounted debug at /sys/kernel/debug[m
+[VM 1] [m[  4.264206 1:10 [37max_net::device::ethernet:404] [32meth0: sending pending IPv4 packet to 192.168.77.30 via 52-54-[VM 1] [m[  3.600208 0:2 [37mstarry_kernel::task::timer:394] [32mInitialize alarm...[m
+[VM 1] [m[  3.608849 0:16 [37mstarry_kernel::task::user:71] [32mEnter user space: ip=0x60169604, sp=0x3fffffffeb0[m
+[VM 1] [m[  3.653047 0:17 [37mstarry_kernel::task::user:71] [32mEnter user space: ip=0x6014839c, sp=0x3ffffffc390[m
+[VM 1] [m[  3.676315 0:17 [37mstarry_kernel::task::ops:348] [32mTask(17, "busybox") exit with code: 0[m
+[VM 1] [m[  3.688327 0:17 [37mstarry_kernel::task::signal:647] [32mSend signal SIGCHLD to process 1[m
+[VM 1] [m[  3.694051 0:16 [37mstarry_kernel::syscall::task::wait:360] [32msys_waitpid <= pid: -1, options: WaitPidOptions(0x0[VM 1] [m[  3.694329 0:16 [37mstarry_kernel::syscall::task::wait:360] [32msys_waitpid <= pid: -1, options: WaitPidOptions(WNOHANG)[m
+[VM 1] [m[  3.722359 0:18 [37mstarry_kernel::task::user:71] [32mEnter user space: ip=0x6014839c, sp=0x3ffffffca70[m
+[VM 1] [m  sent=10  recv=10  loss=0%
+[VM 1] [  3.740775 0:18 [37mstarry_kernel::syscall::task::wait:360] [32msys_waitpid <= pid: -1, options: WaitPidOptions(0x0)[m
+[VM 1] [m  RTT: min=11ms avg=17ms max=21ms P50=19ms P95=19ms P99=19ms P99.9=19ms
+[VM 1] [  3.746590 0:19 [37mstarry_kernel::task::user:71] [32mEnter user space: ip=0x6014839c, sp=0x3ffffffc610[m
+[VM 1] [m  throughput=3.42KiB/s
+[VM 1] [  3.770137 0:19 [37mstarry_kernel::task::ops:348] [32mTask(19, "busybox") exit with code: 0[m
+[VM 1] [m  request_timeouts=0 protocol_errors=0 reconnects=0
+[VM 1] [  3.782729 0:19 [37mstarry_kernel::task::signal:647] [32mSend signal SIGCHLD to process 2[m
+[VM 1] [m  transport: retrans=0 timeouts=0 dup=0 reorder=0 errors=0
+[VM 1] [  3.788620 0:18 [37mstarry_kernel::syscall::task::wait:360] [32msys_waitpid <= pid: -1, options: WaitPidOptions(0x0)[m
+[VM 1] [m
+[VM 1] [  3.788839 0:18 [37mstarry_kernel::syscall::task::wait:360] [32msys_waitpid <= pid: -1, options: WaitPidOptions(WNOHAN[VM 1] [m[  3.803753 0:18 [37mstarry_kernel::task::signal:647] [32mSend signal SIGCHLD to process 1[m
+[VM 1] [m[  3.809362 0:16 [37mstarry_kernel::syscall::task::wait:360] [32msys_waitpid <= pid: -1, options: WaitPidOptions(0x0)[m
+[VM 1] [m[  3.809563 0:16 [37mstarry_kernel::syscall::task::wait:360] [32msys_waitpid <= pid: -1, options: WaitPidOptions(WNOHANG)[m
+[VM 1] [m[  3.832311 0:20 [37mstarry_kernel::task::user:71] [32mEnter user space: ip=0x6014839c, sp=0x3ffffffcc10[m
+[VM 1] [m[  3.850817 0:20 [37mstarry_kernel::syscall::task::wait:360] [32msys_waitpid <= pid: -1, options: WaitPidOptions(0x0)[m
+[VM 1] [m[  3.856582 0:21 [37mstarry_kernel::task::user:71] [32mEnter user space: ip=0x6014839c, sp=0x3ffffffc7b0[m
+[VM 1] [m[  3.879036 0:21 [37mstarry_kernel::task::ops:348] [32mTask(21, "busybox") exit with code: 0[m
+[VM 1] [m[  3.891309 0:21 [37mstarry_kernel::task::signal:647] [32mSend signal SIGCHLD to process 2[m
+[VM 1] [m[  3.897082 0:20 [37mstarry_kernel::syscall::task::wait:360] [32msys_waitpid <= pid: -1, options: WaitPidOptions(0x0)[m
+[VM 1] [m[  3.897302 0:20 [37mstarry_kernel::syscall::task::wait:360] [32msys_waitpid <= pid: -1, options: WaitPidOptions(WNO[VM 1] [m[  3.898089 0:20 [37mstarry_kernel::task::ops:348] [32mTask(20, "init") exit with code: 0[m
+[VM 1] [m  sent=10  recv=10  loss=0%
+[VM 1] [  3.912241 0:20 [37mstarry_kernel::task::signal:647] [32mSend signal SIGCHLD to process 1[m
+[VM 1] [m  RTT: min=11ms avg=19ms max=29ms P50=18ms P95=29ms P99=29ms P99.9=29ms
+[VM 1] [  3.918180 0:16 [37mstarry_kernel::syscall::task::wait:360] [32msys_waitpid <= pid: -1, options: WaitPidOptions(0x0)[[VM 1] [  3.918383 0:16 [37mstarry_kernel::syscall::task::wait:360] [32msys_waitpid <= pid: -1, options: WaitPidOptions(WNOHAN[VM 1] [m  request_timeouts=0 protocol_errors=0 reconnects=0
+[VM 1] [  3.939212 0:16 [37mstarry_kernel::syscall::task::wait:360] [32msys_waitpid <= pid: -1, options: WaitPidOptions(0x0)[[VM 1] [m  transport: retrans=0 timeouts=0 dup=0 reorder=0 errors=0
+[VM 1] [  3.945108 0:22 [37mstarry_kernel::task::user:71] [32mEnter user space: ip=0x6014839c, sp=0x3ffffffcc90[m
+[VM 1] [m[VM 1] [  3.970880 0:22 [37mstarry_kernel::task::ops:348] [32mTask(22, "busybox") exit with code: 0[m
+[VM 1] [m--- Payload 1024B ---
+[VM 1] [  3.984039 0:22 [37mstarry_kernel::task::signal:647] [32mSend signal SIGCHLD to process 1[m
+[VM 1] [m[  3.989531 0:16 [37mstarry_kernel::syscall::task::wait:360] [32msys_waitpid <= pid: -1, options: WaitPidOptions(0x0[VM 1] [m[  3.989741 0:16 [37mstarry_kernel::syscall::task::wait:360] [32msys_waitpid <= pid: -1, options: WaitPidOptions(WNOHANG)[m
+[VM 1] [m[  4.008110 0:16 [37mstarry_kernel::syscall::task::wait:360] [32msys_waitpid <= pid: -1, options: WaitPidOptions(0x0[VM 1] [m[  4.013580 0:23 [37mstarry_kernel::task::user:71] [32mEnter user space: ip=0x6014839c, sp=0x3ffffffcc90[m
+[VM 1] [m[  4.040168 0:23 [37mstarry_kernel::task::ops:348] [32mTask(23, "busybox") exit with code: 0[m
+[VM 1] [m[  4.053149 0:23 [37mstarry_kernel::task::signal:647] [32mSend signal SIGCHLD to process 1[m
+[VM 1] [m[  4.059344 0:16 [37mstarry_kernel::syscall::task::wait:360] [32msys_waitpid <= pid: -1, options: WaitPidOptions(0x0[VM 1] [m[  4.059554 0:16 [37mstarry_kernel::syscall::task::wait:360] [32msys_waitpid <= pid: -1, options: WaitPidOptions(WNO[VM 1] [  4.077407 0:16 [37mstarry_kernel::syscall::task::wait:360] [32msys_waitpid <= pid: -1, options: WaitPidOptions(0x0)[[VM 1] [  4.082864 0:24 [37mstarry_kernel::task::user:71] [32mEnter user space: ip=0x6014839c, sp=0x3ffffffce30[m
+[VM 1] [m  throughput=54.05KiB/s
+[VM 1] [  4.885900 1:26 [37mstarry_kernel::task::ops:348] [32mTask(26, "rtipic-client") exit with code: 0[m
+[VM 1] [m  request_timeouts=0 protocol_errors=0 reconnects=0
+[VM 1] [  4.899934 1:26 [37mstarry_kernel::task::signal:647] [32mSend signal SIGCHLD to process 1[m
+[VM 1] [m  transport: retrans=0 timeouts=0 dup=0 reorder=0 errors=0
+[VM 1] [  4.900487 1:16 [37mstarry_kernel::syscall::task::wait:360] [32msys_waitpid <= pid: -1, options: WaitPidOptions(0x0)[m
+[VM 1] [m
+[VM 1] [  4.900734 1:16 [37mstarry_kernel::syscall::task::wait:360] [32msys_waitpid <= pid: -1, options: WaitPidOptions(WNOHANG)[m
+[VM 1] [m========================================
+[VM 1] [  4.931871 1:16 [37mstarry_kernel::syscall::task::wait:360] [32msys_waitpid <= pid: -1, options: WaitPidOptions(0x0)[m
+[VM 1] [mALL TESTS COMPLETE
+[VM 1] [  4.932558 1:27 [37mstarry_kernel::task::user:71] [32mEnter user space: ip=0x6014839c, sp=0x3ffffffe690[m
+[VM 1] [m========================================
+[VM 1] [  4.975457 1:27 [37max_net::udp:287] [32mUDP socket #1: bound on *:49153[m
+[VM 1] [mRT-IPC client exited with rc=0
+[VM 1] TASK2_STARRY_END status=PASS
+[VM 1] TASK3_STARRY_READY ip=192.168.77.11 peer=192.168.77.30:9877
+[VM 1] TASK3_FRAME_CSV=FIXED,0,0,2,2,21649,1098,0,0,0,0,48,10036,0,0,0
+[VM 1] TASK3_FRAME_CSV=FIXED,1,1461,2,2,16624,978,0,0,0,0,61,3588,0,0,0
+[VM 1] TASK3_FRAME_CSV=FIXED,2,2900,2,2,32767,979,0,0,0,0,56,5648,0,0,0
+[VM 1] TASK3_FRAME_CSV=AI,0,0,2,2,21649,967,0,0,0,0,57,8335,0,0,0
+[VM 1] TASK3_FRAME_CSV=AI,1,1461,2,2,16624,970,0,0,0,0,57,3473,0,0,0
+[VM 1] TASK3_FRAME_CSV=AI,2,2900,2,2,32767,971,0,0,0,0,57,4769,0,0,0
+[VM 1] [  5.448045 1:27 [37mstarry_kernel::task::ops:348] [32mTask(27, "task3-linux") exit with code: 0[m
+[VM 1] [mTASK3_SUMMARY_JSON={"schema":1,"frames_per_mode":3,"records":6,"elapsed_us":449977,"requests":6,"successes":6,"successretries":0,"duplicates":0,"recovered":0,"reconnects":0,"injecte[  5.463678 1:27 [37mstarry_kernel::task::signal:647] [32mSend signal SIGCHLD to process 1[m
+[VM 1] [md_drops":0,"classification":{"correct":3,"total":3,"accuracy":1.000000,"confusion_matrix":[[0,0,0],[0,3,0],[0,0,0]]},"0":971,"p95":1098,"p99":1098,"max":1098},"round_trip_us":{"min":3473,"mean":5974,"p50":4769,"p95":1[  5.464182 1:16 [37mstarry_kernel::syscall::task::wait:360] [32msys_waitpid <= pid: -1, options: WaitPidOptions(0x0)[m
+[VM 1] [m0036,"p99":10036,"max":10036},"tracking_error_q15":{"fixed":{"min":0,"mean":1453,"p50":1461,"p95":2900,"p99":2900,"max":2900},"ai":{"min":0,"mean":1453,"p50":1461,"p95":2900,"p99":2900,"max":2900}},"settling":{"fixed":{"direction_changes":0,"successes":0,"[  5.464430 1:16 [37mstarry_kernel::syscall::task::wait:360] [32msys_waitpid <= pid: -1, options: WaitPidOptions(WNOHANG)[m
+[VM 1] [mmean_frames":0,"max_frames":0},"ai":{"direction_changes":0,"successes":0,"mean_frames":0,"max_frames":0}},"effective_payload_bytes_per_second":320}
+[VM 1] [  5.468091 1:16 [37mstarry_kernel::syscall::task::wait:360] [32msys_waitpid <= pid: -1, options: WaitPidOptions(WNOHANG)[m
+[VM 1] [mTASK3_STARRY_END status=PASS
+[VM 1] TASK123_STARRY_END status=PASS
+[VM 3] [1;32muart:~$ [mTASK3_RTOS_FINAL requests=6 errors=0 duplicates=0 applied_steps=6 retries=0
+[VM 3] TASK3_RTOS_FINAL_DONE
+[VM 3] RTBENCH_AUTO samples=10
+[VM 1] RTBENCH_NET_PROBE_TRIGGERED count=10
+[VM 3] RTBENCH_PMU status=unavailable event=0x8 reason=guest_pmu_unavailable units=ns
+[VM 3] RTBENCH_BEGIN samples=10 expected=[VM 3] RTBENCH_NS metric=timer_jitter run=1 expected=10 collected=10 missing=0 p50_ns=1040166 p95_ns=2081500 p99_ns=2081500 p99_ean_ns=1172024
+[VM 3] RTBENCH_NS metric=timer_jitter run=1 expected=10 collected=10 missing=0 p50_ns=1040166 p95_ns=2081500 p99_ns=2081500 p99_9_ns=2081500 max_ns=2343291 mean_ns=1172024
+[VM 3] RTBENCH_NS metric=timer_jitter run=1 expected=10 collected=10 missing=0 p50_ns=1040166 p95_ns=2081500 p99_ns=2081500 p99_[VM 3] RTBENCH_NS metric=callback_exec run=1 expected=10 collected=10 missing=0 p50_ns=0 p95_ns=291 p99_ns=291 p99_9_ns=291 max_ns=291 mean_ns=116
+[VM 3] RTBENCH_NS metric=callback_exec run=1 expected=10 collected=10 missing=0 p50_ns=0 p95_ns=291 p99_ns=291 p99_9_ns=291 max_ns=291 mean_ns=116
+[VM 3] RTBENCH_NS metric=callback_exec run=1 expected=10 collected=10 missing=0 p50_ns=0 p95_ns=291 p99_ns=291 p99_9_ns=291 max_ns=291 mean_ns=116
+[VM 3] RTBENCH_NS metric=preemption run=1 expected=10 collected=10 missing=0 p50_ns=291 p95_ns=291 p99_ns=291 p99_9_ns=291 max_ns=583 mean_ns=320
+[VM 3] RTBENCH_NS metric=preemption run=1 expected=10 collected=10 missing=0 p50_ns=291 p95_ns=291 p99_ns=291 p99_9_ns=291 max_ns=583 mean_ns=320
+[VM 3] RTBENCH_NS metric=preemption run=1 expected=10 collected=10 missing=0 p50_ns=291 p95_ns=291 p99_ns=291 p99_9_ns=291 max_n[VM 3] RTBENCH_NS metric=irq run=1 expected=10 collected=10 missing=0 p50_ns=291 p95_ns=291 p99_ns=291 p99_9_ns=291 max_ns=583 mean_ns=232
+[VM 3] RTBENCH_NS metric=irq run=1 expected=10 collected=10 missing=0 p50_ns=291 p95_ns=291 p99_ns=291 p99_9_ns=291 max_ns=583 m[VM 3] RTBENCH_NS metric=irq run=1 expected=10 collected=10 missing=0 p50_ns=291 p95_ns=291 p99_ns=291 p99_9_ns=291 max_ns=583 m[VM 3] RTBENCH_NS metric=irq_to_task run=1 expected=10 collected=10 missing=0 p50_ns=583 p95_ns=583 p99_ns=583 p99_9_ns=583 max_ns=875 mean_ns=583
+[VM 3] RTBENCH_NS metric=irq_to_task run=1 expected=10 collected=10 missing=0 p50_ns=583 p95_ns=583 p99_ns=583 p99_9_ns=583 max_ns=583
+[VM 3] RTBENCH_NS metric=irq_to_task run=1 expected=10 collected=10 missing=0 p50_ns=583 p95_ns=583 p99_ns=583 p99_9_ns=583 max_[VM 3] RTBENCH_NS metric=irq_disabled_duration run=1 expected=10 collected=10 missing=0 p50_ns=291 p95_ns=291 p99_ns=291 p99_9_ns=291 max_ns=291 mean_ns=203
+[VM 3] RTBENCH_NS metric=irq_disabled_duration run=1 expected=10 collected=10 missing=0 p50_ns=291 p95_ns=291 p99_ns=291 p99_9_ns=291 max_ns=291 mean_ns=203
+[VM 3] RTBENCH_NS metric=irq_disabled_duration run=1 expected=10 collected=10 missing=0 p50_ns=291 p95_ns=291 p99_ns=291 p99_9_ns=291 max_ns=291 mean_ns=203
+[VM 3] RTBENCH_NS metric=mutex_inversion run=1 expected=10 collected=10 missing=0 p50_ns=583 p95_ns=583 p99_ns=583 p99_9_ns=583 max_ns=1166 mean_ns=641
+[VM 3] RTBENCH_NS metric=mutex_inversion run=1 expected=10 collected=10 missing=0 p50_ns=583 p95_ns=583 p99_ns=583 p99_9_ns=583 max_ns=1166 mean_ns=641
+[VM 3] RTBENCH_NS metric=mutex_inversion run=1 expected=10 collected=10 missing=0 p50_ns=583 p95_ns=583 p99_ns=583 p99_9_ns=583 max_ns=1166 mean_ns=641
+[VM 3] RTBENCH_NS metric=wake_under_load run=1 expected=10 collected=10 missing=0 p50_ns=583 p95_ns=583 p99_ns=583 p99_9_ns=583 [VM 3] RTBENCH_NS metric=wake_under_load run=1 expected=10 collected=10 missing=0 p50_ns=583 p95_ns=583 p99_ns=583 p99_9_ns=583 max_ns=875 mean_ns=612
+[VM 3] RTBENCH_NS metric=wake_under_load run=1 expected=10 collected=10 missing=0 p50_ns=583 p95_ns=583 p99_ns=583 p99_9_ns=583 max_ns=875 mean_ns=612
+[VM 3] RTBENCH_NS metric=context_switch run=1 expected=10 collected=10 missing=0 p50_ns=291 p95_ns=583 p99_ns=583 p99_9_ns=583 m[VM 3] RTBENCH_NS metric=context_switch run=1 expected=10 collected=10 missing=0 p50_ns=291 p95_ns=583 p99_ns=583 p99_9_ns=583 max_ns=583 mean_ns=349
+[VM 3] RTBENCH_NS metric=context_switch run=1 expected=10 collected=10 missing=0 p50_ns=291 p95_ns=583 p99_ns=583 p99_9_ns=583 max_ns=583 mean_ns=349
+[VM 3] RTBENCH_NS metric=scheduler_decision run=1 expected=10 collected=10 missing=0 p50_ns=291 p95_ns=291 p99_ns=291 p99_9_ns=291 max_ns=583 mean_ns=320
+[VM 3] RTBENCH_NS metric=scheduler_decision run=1 expected=10 collected=10 missing=0 p50_ns=291 p95_ns=291 p99_ns=291 p99_9_ns=291 max_ns=583 mean_ns=320
+[VM 3] RTBENCH_NS metric=scheduler_decision run=1 expected=10 collected=10 missing=0 p50_ns=291 p95_ns=291 p99_ns=291 p99_9_ns=291 max_ns=583 mean_ns=320
+[VM 3] RTBENCH_NS metric=sync_sem run=1 expected=10 collected=10 missing=0 p50_ns=583 p95_ns=583 p99_ns=583 p99_9_ns=583 max_ns=[VM 3] RTBENCH_NS metric=sync_sem run=1 expected=10 collected=10 missing=0 p50_ns=583 p95_ns=583 p99_ns=583 p99_9_ns=583 max_ns=875 mean_ns=612
+[VM 3] RTBENCH_NS metric=sync_sem run=1 expected=10 collected=10 missing=0 p50_ns=583 p95_ns=583 p99_ns=583 p99_9_ns=583 max_ns=875 mean_ns=612
+[VM 3] RTBENCH_NS metric=sync_mutex run=1 expected=10 collected=10 missing=0 p50_ns=583 p95_ns=583 p99_ns=583 p99_9_ns=583 max_n[VM 3] RTBENCH_NS metric=sync_mutex run=1 expected=10 collected=10 missing=0 p50_ns=583 p95_ns=583 p99_ns=583 p99_9_ns=583 max_ns=583 mean_ns=583
+[VM 3] RTBENCH_NS metric=sync_mutex run=1 expected=10 collected=10 missing=0 p50_ns=583 p95_ns=583 p99_ns=583 p99_9_ns=583 max_ns=583 mean_ns=583
+[VM 3] RTBENCH_NS metric=sync_mailbox run=1 expected=10 collected=10 missing=0 p50_ns=583 p95_ns=875 p99_ns=875 p99_9_ns=875 max[VM 3] RTBENCH_NS metric=sync_mailbox run=1 expected=10 collected=10 missing=0 p50_ns=583 p95_ns=875 p99_ns=875 p99_9_ns=875 max[VM 3] RTBENCH_NS metric=sync_mailbox run=1 expected=10 collected=10 missing=0 p50_ns=583 p95_ns=875 p99_ns=875 p99_9_ns=875 max[VM 3] RTBENCH_NS metric=irq_handler_exec run=1 expected=10 collected=10 missing=0 p50_ns=3208 p95_ns=3208 p99_ns=3208 p99_9_ns=[VM 3] RTBENCH_NS metric=irq_handler_exec run=1 expected=10 collected=10 missing=0 p50_ns=3208 p95_ns=3208 p99_ns=3208 p99_9_ns=[VM 3] RTBENCH_NS metric=irq_handler_exec run=1 expected=10 collected=10 missing=0 p50_ns=3208 p95_ns=3208 p99_ns=3208 p99_9_ns=3208 max_ns=5541 mean_ns=3441
+[VM 3] RTBENCH_NS metric=deadline_miss_under_load run=1 expected=10 collected=10 missing=0 p50_ns=238291 p95_ns=284958 p99_ns=28[VM 3] RTBENCH_NS metric=deadline_miss_under_load run=1 expected=10 collected=10 missing=0 p50_ns=238291 p95_ns=284958 p99_ns=28_ns=284958 max_ns=287291 mean_ns=258299
+[VM 3] RTBENCH_NS metric=deadline_miss_under_load run=1 expected=10 collected=10 missing=0 p50_ns=238291 p95_ns=284958 p99_ns=284958 p99_9_ns=284958 max_ns=287291 mean_ns=258299
+[VM 3] RTBENCH_NS metric=net_event_latency run=1 expected=10 collected=10 missing=0 p50_ns=339208 p95_ns=733833 p99_ns=733833 p99_9_ns=733833 max_ns=1210708 mean_ns=463137
+[VM 3] RTBENCH_NS metric=net_event_latency run=1 expected=10 collected=10 missing=0 p50_ns=339208 p95_ns=733833 p99_ns=733833 p9[VM 3] RTBENCH_NS metric=net_event_latency run=1 expected=10 collected=10 missing=0 p50_ns=339208 p95_ns=733833 p99_ns=733833 p9[VM 3] RTBENCH_END status=PASS expected=10 collected=10 missing=0
+[VM 3] RTBENCH_DONE
+[VM 1] [ 34.702235 1:25 [37mstarry_kernel::task::ops:348] [32mTask(25, "rtbench-net-probe") exit with code: 0[m
+[VM 1] [mRTBENCH_NET_PROBE_END sent=10 retries=0 completion=done
+[VM 1] [ 34.710825 1:25 [37mstarry_kernel::task::signal:647] [32mSend signal SIGCHLD to process 1[m
+[VM 1] [mTASK123_STARRY_RTBENCH_END status=PASS
+
+=== SUCCESS PATTERN MATCHED: (?s:(?:(?:RTBENCH_END|RTBENCH_STABILITY_END) status=PASS.*TASK123_STARRY_RTBENCH_END status=PASS|TASK123_STARRY_RTBENCH_END status=PASS.*(?:RTBENCH_END|RTBENCH_STABILITY_END) status=PASS)) ===
+[VM 1] [ 34.711241 1:16 [37mstarry_kernel::syscall::task::wait:360] [32msys_waitpid <= pid: -1, options: WaitPidOptions(WNOHANG)[m
+[VM 1] [m[ 34.711447 1:16 [37mstarry_kernel::syscall::task::wait:360] [32msys_waitpid <= pid: -1, options: WaitPidOptions(WNOHANG)[m
+[VM 1] [m[ 34.737945 1:16 [37mstarry_kernel::syscall::task::wait:360] [32msys_waitpid <= pid: -1, options: WaitPidOptions(0x0[VM 1] [mTASK123_STARRY_EXIT status=0
+[VM 1] [ 34.738578 1:28 [37mstarry_kernel::task::user:71] [32mEnter user space: ip=0x6014839c, sp=0x3ffffffdee0[m
+[VM 1] [m[ 34.766571 1:28 [37mstarry_kernel::task::ops:348] [32mTask(28, "busybox") exit with code: 0[m
+[VM 1] [m[ 34.774420 1:28 [37mstarry_kernel::task::signal:647] [32mSend signal SIGCHLD to process 1[m
+[VM 1] [m[ 34.775220 1:16 [37mstarry_kernel::syscall::task::wait:360] [32msys_waitpid <= pid: -1, options: WaitPidOptions(0x0)[m
+[VM 1] [m[ 34.775431 1:16 [37mstarry_kernel::syscall::task::wait:360] [32msys_waitpid <= pid: -1, options: WaitPidOptions(WNOHANG)[m
+[VM 1] [m[ 34.802311 1:16 [37mstarry_kernel::syscall::task::wait:360] [32msys_waitpid <= pid: -1, options: WaitPidOptions(0x0)[m
+[VM 1] [m[ 34.802898 1:29 [37mstarry_kernel::task::user:71] [32mEnter user space: ip=0x6014839c, sp=0x3ffffffdeb0[m
+sh -c sg2002-ctl 0
+sg2002 (2031971012) 的 on 值已设置为 0
+[axbuild] uboot build+run package=axvisor target=scripts/targets/std/pie/aarch64-unknown-linux-musl.json config=/home/yfblock/Code/tgoskits-GoGoGo/os/axvisor/configs/board/rock-4d-task123-zephyr-starryos.toml ... done (90.22s)
