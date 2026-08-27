@@ -12,6 +12,7 @@ GoGoGo-成果材料/
 ├── docs/
 │   ├── task-coverage.md               ← 任务要求逐条实现情况与指标对照
 │   ├── commits.md                     ← 提交基线与提交链说明
+│   ├── walkthrough.md                 ← 工程实录（怎么做、做了哪些事）
 │   ├── design.md                      ← 系统设计与架构
 │   ├── changes.md                     ← 相对 upstream/dev 的全部更改
 │   ├── performance.md                 ← 性能数据与分析
@@ -40,6 +41,7 @@ GoGoGo-成果材料/
 | 8 组合验收结论与完整指标表 | [docs/results-report.md](docs/results-report.md) |
 | 任务要求逐条实现情况与指标对照 | [docs/task-coverage.md](docs/task-coverage.md) |
 | 基于 upstream 哪个 commit、提交链与时间 | [docs/commits.md](docs/commits.md) |
+| 工程怎么做：工作流、关键问题定位实录 | [docs/walkthrough.md](docs/walkthrough.md) |
 | 如何复现这些结果 | [docs/reproduce.md](docs/reproduce.md) |
 
 ## 基线信息
