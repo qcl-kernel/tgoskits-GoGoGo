@@ -10,6 +10,7 @@ Task 2 客户机通信与 Task 3 AI 控制闭环，在 QEMU 与 ROCK 4D（RK3576
 GoGoGo-成果材料/
 ├── README.md                          ← 本文件：总览与导航
 ├── docs/
+│   ├── task-coverage.md               ← 任务要求逐条实现情况与指标对照
 │   ├── design.md                      ← 系统设计与架构
 │   ├── changes.md                     ← 相对 upstream/dev 的全部更改
 │   ├── performance.md                 ← 性能数据与分析
@@ -36,6 +37,7 @@ GoGoGo-成果材料/
 | 这个分支相对 upstream/dev 改了什么 | [docs/changes.md](docs/changes.md) |
 | 实测性能如何（timer jitter、网络延迟、推理耗时） | [docs/performance.md](docs/performance.md) |
 | 8 组合验收结论与完整指标表 | [docs/results-report.md](docs/results-report.md) |
+| 任务要求逐条实现情况与指标对照 | [docs/task-coverage.md](docs/task-coverage.md) |
 | 如何复现这些结果 | [docs/reproduce.md](docs/reproduce.md) |
 
 ## 基线信息
