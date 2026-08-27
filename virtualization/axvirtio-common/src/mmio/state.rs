@@ -187,10 +187,7 @@ impl<T: GuestMemoryAccessor + Clone> VirtioMmioState<T> {
         if !transport::is_address_in_range(addr, self.base_ipa, self.length) {
             return Ok(MmioReadOutcome::Standard(0));
         }
-        let offset = transport::calculate_offset(addr, self.base_ipa);
-        if offset < vc::VIRTIO_MMIO_CONFIG_OFFSET {
-            transport::validate_access_width(width)?;
-        }
+        let offset = transport::register_offset(transport::calculate_offset(addr, self.base_ipa));
 
         let value = match offset {
             vc::VIRTIO_MMIO_MAGIC_VALUE => vc::MMIO_MAGIC_VALUE,
@@ -291,17 +288,14 @@ impl<T: GuestMemoryAccessor + Clone> VirtioMmioState<T> {
     fn mmio_write_inner(
         &self,
         addr: GuestPhysAddr,
-        width: AccessWidth,
+        _width: AccessWidth,
         val: usize,
         ready_memory: Option<&mut dyn crate::GuestMemory>,
     ) -> VirtioResult<MmioWriteAction> {
         if !transport::is_address_in_range(addr, self.base_ipa, self.length) {
             return Ok(MmioWriteAction::None);
         }
-        let offset = transport::calculate_offset(addr, self.base_ipa);
-        if offset < vc::VIRTIO_MMIO_CONFIG_OFFSET {
-            transport::validate_access_width(width)?;
-        }
+        let offset = transport::register_offset(transport::calculate_offset(addr, self.base_ipa));
         let val = val as u32;
 
         match offset {
@@ -368,6 +362,12 @@ impl<T: GuestMemoryAccessor + Clone> VirtioMmioState<T> {
             | vc::VIRTIO_MMIO_QUEUE_AVAIL_HIGH
             | vc::VIRTIO_MMIO_QUEUE_USED_LOW
             | vc::VIRTIO_MMIO_QUEUE_USED_HIGH) => self.write_queue_address(reg, val),
+            // virtio-mmio specification offsets (legacy `QUEUE_NUM` 0x028,
+            // `INTERRUPT_ACK` 0x03c, and `STATUS` 0x040) that have no
+            // counterpart in this transport's register map; some guests
+            // (e.g. RT-Thread) still write them after negotiating version 2.
+            // Treat as no-ops.
+            0x028 | 0x03c | 0x040 => {}
             _ => return Err(VirtioError::InvalidRegister),
         }
         Ok(MmioWriteAction::None)

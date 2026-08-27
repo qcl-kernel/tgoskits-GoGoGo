@@ -27,7 +27,10 @@ use super::{
         exception_sysreg_addr, exception_sysreg_direction_write, exception_sysreg_gpr,
     },
 };
-use crate::{ArmAccessWidth, ArmSysRegAddr, ArmVcpuError, ArmVcpuResult, ArmVmExit};
+use crate::{
+    ArmAccessWidth, ArmSysRegAddr, ArmVcpuError, ArmVcpuResult, ArmVmExit, TlbiClassification,
+    classify_tlbi,
+};
 
 numeric_enum_macro::numeric_enum! {
 #[repr(u8)]
@@ -66,6 +69,9 @@ core::arch::global_asm!(
     host_irq_cpu_interface_base_offset =
         const super::vcpu::ARM_VCPU_HOST_IRQ_CPU_INTERFACE_BASE_OFFSET,
     host_pending_irq_ack_offset = const super::vcpu::ARM_VCPU_HOST_PENDING_IRQ_ACK_OFFSET,
+    host_fp_simd_offset = const super::vcpu::ARM_VCPU_HOST_FP_SIMD_OFFSET,
+    guest_fp_simd_offset = const super::vcpu::ARM_VCPU_GUEST_FP_SIMD_OFFSET,
+    fp_control_delta = const super::vcpu::FP_SIMD_CONTROL_DELTA,
     host_irq_interface_gicv2_mmio = const super::host::HOST_IRQ_INTERFACE_GICV2_MMIO,
     host_irq_interface_gicv3_sysreg = const super::host::HOST_IRQ_INTERFACE_GICV3_SYSREG,
     timer_virtual_offset_offset = const super::vcpu::ARM_VCPU_TIMER_VIRTUAL_OFFSET_OFFSET,
@@ -258,6 +264,21 @@ fn handle_system_register(context_frame: &mut TrapFrame) -> ArmVcpuResult<ArmVmE
     let val = elr + exception_next_instruction_step();
     let write = exception_sysreg_direction_write(iss);
     let reg = exception_sysreg_gpr(iss) as usize;
+
+    if write && HCR_EL2.read(HCR_EL2::TTLB) != 0 {
+        match classify_tlbi(addr) {
+            TlbiClassification::Supported => {
+                context_frame.set_exception_pc(val);
+                return Ok(ArmVmExit::TlbInvalidate {
+                    addr: ArmSysRegAddr::new(addr),
+                    value: context_frame.gpr(reg) as u64,
+                });
+            }
+            TlbiClassification::Unsupported => return Err(ArmVcpuError::Unsupported),
+            TlbiClassification::NotTlbi => {}
+        }
+    }
+
     context_frame.set_exception_pc(val);
     if write {
         return Ok(ArmVmExit::SysRegWrite {

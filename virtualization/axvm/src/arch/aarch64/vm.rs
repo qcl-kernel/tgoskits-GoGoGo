@@ -2,7 +2,7 @@
 
 use std::{sync::Arc, vec::Vec};
 
-use arm_vcpu::{ArmTimerVmConfig, ArmVcpuCreateConfig, ArmVcpuSetupConfig};
+use arm_vcpu::{ArmTimerVmConfig, ArmVcpuCreateConfig, ArmVcpuSetupConfig, ArmVcpuTlbiPolicy};
 use axvm_types::NestedPagingConfig;
 
 use super::*;
@@ -38,6 +38,15 @@ impl Aarch64Arch {
                 AxVmError::invalid_config("AArch64 machine profile has no architectural timer")
             })?;
             let timer_config = timer_vm_config(&timer_profile, &vcpu_mappings)?;
+            let guest_tlbi_policy = config.guest_tlbi_policy();
+            if guest_tlbi_policy == GuestTlbiPolicy::VmScoped {
+                super::tlbi::vm_pcpu_mask(&vcpu_mappings).map_err(|error| {
+                    AxVmError::invalid_config(std::format!(
+                        "VM-scoped AArch64 TLBI requires bounded vCPU affinity: {error:?}"
+                    ))
+                })?;
+            }
+            let vcpu_tlbi_policy = arm_tlbi_policy(guest_tlbi_policy);
             let host_irq_config = super::gic::host_irq_config()
                 .map_err(|error| AxVmError::interrupt("discover host IRQ CPU interface", error))?;
             let dtb_addr = config.image_config().dtb_load_gpa.unwrap_or_default();
@@ -67,13 +76,24 @@ impl Aarch64Arch {
 
             resources.prepare_guest_address_space(vm.id(), config, &[])?;
             vcpus.setup(resources, config, move |_config, _memory_regions| {
-                Ok(ArmVcpuSetupConfig::new(timer_config, host_irq_config))
+                Ok(ArmVcpuSetupConfig::with_tlbi_policy(
+                    timer_config,
+                    host_irq_config,
+                    vcpu_tlbi_policy,
+                ))
             })?;
 
             let interrupt_controller: Arc<dyn axdevice_base::VirtualInterruptController> =
                 vgic_runtime.core().clone();
             Ok(PreparedVm::new(vcpus, devices, interrupt_controller))
         })
+    }
+}
+
+const fn arm_tlbi_policy(policy: GuestTlbiPolicy) -> ArmVcpuTlbiPolicy {
+    match policy {
+        GuestTlbiPolicy::Native => ArmVcpuTlbiPolicy::Native,
+        GuestTlbiPolicy::VmScoped => ArmVcpuTlbiPolicy::TrapEl1,
     }
 }
 
@@ -175,4 +195,24 @@ fn timer_vm_config(
             std::format!("{error:?}"),
         )
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use arm_vcpu::ArmVcpuTlbiPolicy;
+    use axvmconfig::GuestTlbiPolicy;
+
+    use super::arm_tlbi_policy;
+
+    #[test]
+    fn vm_scoped_is_the_only_policy_that_traps_el1_tlbi() {
+        assert_eq!(
+            arm_tlbi_policy(GuestTlbiPolicy::Native),
+            ArmVcpuTlbiPolicy::Native
+        );
+        assert_eq!(
+            arm_tlbi_policy(GuestTlbiPolicy::VmScoped),
+            ArmVcpuTlbiPolicy::TrapEl1
+        );
+    }
 }

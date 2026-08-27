@@ -8,10 +8,21 @@ use alloc::{borrow::ToOwned, vec::Vec};
 
 use ax_std as _;
 
-#[cfg(feature = "nixos")]
+#[cfg(feature = "axvisor-guest")]
+struct EmbeddedRootFsIfImpl;
+
+#[cfg(feature = "axvisor-guest")]
+#[ax_crate_interface::impl_interface]
+impl ax_runtime::EmbeddedRootFsIf for EmbeddedRootFsIfImpl {
+    fn archive() -> &'static [u8] {
+        include_bytes!(concat!(env!("OUT_DIR"), "/starryos-rootfs.cpio"))
+    }
+}
+
+#[cfg(feature = "axvisor-guest")]
 pub const CMDLINE: &[&str] = &["/init"];
 
-#[cfg(not(feature = "nixos"))]
+#[cfg(not(feature = "axvisor-guest"))]
 pub const CMDLINE: &[&str] = &["/bin/sh", "-c", include_str!("init.sh")];
 
 #[cfg(feature = "nixos")]
@@ -36,10 +47,10 @@ extern "C" fn main() {
     starry_kernel::entry::init(&args, &envs);
 }
 
-#[cfg(feature = "nixos")]
+#[cfg(any(feature = "nixos", feature = "axvisor-guest"))]
 const _: () = assert!(command_eq(CMDLINE, &["/init"]));
 
-#[cfg(not(feature = "nixos"))]
+#[cfg(not(any(feature = "nixos", feature = "axvisor-guest")))]
 const _: () = assert!(command_eq(
     CMDLINE,
     &["/bin/sh", "-c", include_str!("init.sh")]

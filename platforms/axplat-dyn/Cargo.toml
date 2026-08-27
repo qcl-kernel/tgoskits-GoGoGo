@@ -18,6 +18,7 @@ fp-simd = ["ax-cpu/fp-simd"]
 tls = ["somehal/tls", "ax-cpu/tls", "cpu-local/tls"]
 uspace = ["somehal/uspace"]
 hv = ["somehal/hv"]
+qemu-aarch64-three-guest-net = ["someboot/qemu-aarch64-three-guest-net"]
 thead-mae = ["somehal/thead-mae", "ax-cpu/xuantie-c9xx"]
 
 [dependencies]

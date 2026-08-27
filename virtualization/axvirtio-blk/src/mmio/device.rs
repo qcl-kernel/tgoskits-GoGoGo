@@ -4,7 +4,7 @@ use ax_sync::SpinLock;
 use axaddrspace::GuestMemoryAccessor;
 use axvirtio_common::{
     AddressSpaceMemory, MmioReadOutcome, MmioWriteAction, VirtioDeviceID, VirtioError,
-    VirtioMmioState, VirtioQueue, VirtioResult, mmio::transport, queue::VirtQueueDesc,
+    VirtioMmioState, VirtioQueue, VirtioResult, queue::VirtQueueDesc,
 };
 use axvm_types::{AccessWidth, GuestPhysAddr};
 use log::{trace, warn};
@@ -372,10 +372,7 @@ impl<B: BlockBackend, T: GuestMemoryAccessor + Clone> VirtioMmioBlockDevice<B, T
     }
 
     /// Read from block device configuration space.
-    fn read_config_space(&self, offset: u64, width: AccessWidth) -> VirtioResult<usize> {
-        // Block config space uses 32-bit accesses.
-        transport::validate_access_width(width)?;
-
+    fn read_config_space(&self, offset: u64, _width: AccessWidth) -> VirtioResult<usize> {
         let value = match offset {
             VIRTIO_BLK_CFG_CAPACITY_LOW => self.block_config.capacity as u32,
             VIRTIO_BLK_CFG_CAPACITY_HIGH => (self.block_config.capacity >> 32) as u32,

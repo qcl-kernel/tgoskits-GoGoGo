@@ -124,7 +124,18 @@ impl IrqIf for IrqIfImpl {
     fn resolve_percpu(hwirq: ax_plat::irq::HwIrq) -> Result<IrqId, IrqError> {
         #[cfg(target_arch = "aarch64")]
         {
+            // The AArch64 generic timers are per-CPU PPIs, but the raw INTID
+            // arriving here depends on which timer the platform actually
+            // armed (e.g. the EL2 physical timer, GIC INTID 26), while the
+            // FDT-registered systick may map a different one. Either way the
+            // line belongs to the host tick source; resolve it to the
+            // systick instead of the SPI route table.
+            const AARCH64_EL2_PHYS_TIMER_INTID: u32 = 26;
             let parent = somehal::irq::aarch64_gic_irq_id_checked(hwirq)?;
+            let systick = somehal::irq::systick_irq();
+            if parent == systick || hwirq.0 == AARCH64_EL2_PHYS_TIMER_INTID {
+                return Ok(systick);
+            }
             Ok(somehal::irq::resolve_irq_route(parent))
         }
         #[cfg(any(target_arch = "loongarch64", target_arch = "x86_64"))]

@@ -340,15 +340,18 @@ fn out_of_range_read_returns_zero_not_magic() {
 }
 
 #[test]
-fn non_dword_standard_register_rejected() {
+fn sub_word_register_access_rounds_to_the_register_boundary() {
     let s = state(0);
-    assert!(
-        s.mmio_read(
-            GuestPhysAddr::from(BASE + vc::VIRTIO_MMIO_MAGIC_VALUE),
-            AccessWidth::Byte
+    // A byte access at offset+1 must still read the containing 32-bit
+    // register (QEMU parity: the transport decodes only the register
+    // offset, never the access width).
+    let out = s
+        .mmio_read(
+            GuestPhysAddr::from(BASE + vc::VIRTIO_MMIO_MAGIC_VALUE + 1),
+            AccessWidth::Byte,
         )
-        .is_err()
-    );
+        .unwrap();
+    assert_eq!(out, MmioReadOutcome::Standard(vc::MMIO_MAGIC_VALUE));
 }
 
 #[test]

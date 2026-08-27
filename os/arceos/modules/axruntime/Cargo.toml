@@ -42,6 +42,13 @@ fs = [
   "dep:rdif-block",
   "ax-driver/block",
 ]
+embedded-rootfs = [
+  "paging",
+  "dep:ax-fs-ng",
+  "ax-fs-ng/vfs",
+  "ax-fs-ng/embedded",
+  "dep:axfs-ng-vfs",
+]
 ext4fs = ["fs", "ax-fs-ng/ext4"]
 fatfs = ["fs", "ax-fs-ng/fat"]
 input = ["paging", "dep:ax-input", "ax-driver/input"]

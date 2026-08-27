@@ -66,7 +66,7 @@ mod registers;
 pub mod serial;
 pub mod sync;
 
-#[cfg(all(feature = "net", feature = "fs"))]
+#[cfg(all(feature = "net", any(feature = "fs", feature = "embedded-rootfs")))]
 mod unix_ns;
 
 #[cfg(feature = "aic8800-wifi")]
@@ -95,7 +95,10 @@ pub use self::mp::rust_main_secondary;
 
 extern crate alloc;
 
-#[cfg(feature = "fs")]
+#[cfg(feature = "embedded-rootfs")]
+pub use fs::EmbeddedRootFsIf;
+
+#[cfg(any(feature = "fs", feature = "embedded-rootfs"))]
 pub(crate) fn runtime_default_task_stack_size() -> usize {
     build_info::TASK_STACK_SIZE
 }

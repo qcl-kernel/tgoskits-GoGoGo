@@ -487,23 +487,25 @@ log = "Info"
 }
 
 #[test]
-fn load_cargo_config_rejects_direct_axplat_dyn_feature() {
+fn load_cargo_config_accepts_top_level_three_guest_feature() {
     let root = tempdir().unwrap();
-    let config_path = root.path().join(".build.toml");
+    let config_path = root.path().join("qemu-aarch64-three-guest-net.toml");
     fs::write(
         &config_path,
         r#"
-features = ["axplat-dyn/efi"]
+target = "aarch64-unknown-none-softfloat"
+features = ["qemu-aarch64-three-guest-net"]
 log = "Info"
+vm_configs = []
 "#,
     )
     .unwrap();
 
-    let err = load_cargo_config(&ResolvedAxvisorRequest {
+    let cargo = load_cargo_config(&ResolvedAxvisorRequest {
         package: AXVISOR_PACKAGE.to_string(),
         axvisor_dir: root.path().join("os/axvisor"),
-        arch: "loongarch64".to_string(),
-        target: "loongarch64-unknown-none-softfloat".to_string(),
+        arch: "aarch64".to_string(),
+        target: "aarch64-unknown-none-softfloat".to_string(),
         smp: None,
         debug: false,
         build_info_path: config_path,
@@ -511,10 +513,60 @@ log = "Info"
         uboot_config: None,
         vmconfigs: vec![],
     })
-    .unwrap_err();
+    .unwrap();
 
-    assert!(err.to_string().contains("dynamic platform features"));
-    assert!(err.to_string().contains("axplat-dyn/efi"));
+    assert!(
+        cargo
+            .features
+            .contains(&"qemu-aarch64-three-guest-net".to_string())
+    );
+
+    let metadata = crate::build::workspace_metadata().unwrap();
+    let package = metadata
+        .packages
+        .iter()
+        .find(|package| package.name == AXVISOR_PACKAGE)
+        .unwrap();
+    assert!(
+        package
+            .features
+            .contains_key("qemu-aarch64-three-guest-net")
+    );
+}
+
+#[test]
+fn load_cargo_config_rejects_direct_axplat_dyn_features() {
+    for feature in ["axplat-dyn/efi", "axplat-dyn/qemu-aarch64-three-guest-net"] {
+        let root = tempdir().unwrap();
+        let config_path = root.path().join(".build.toml");
+        fs::write(
+            &config_path,
+            format!(
+                r#"
+features = ["{feature}"]
+log = "Info"
+"#
+            ),
+        )
+        .unwrap();
+
+        let err = load_cargo_config(&ResolvedAxvisorRequest {
+            package: AXVISOR_PACKAGE.to_string(),
+            axvisor_dir: root.path().join("os/axvisor"),
+            arch: "loongarch64".to_string(),
+            target: "loongarch64-unknown-none-softfloat".to_string(),
+            smp: None,
+            debug: false,
+            build_info_path: config_path,
+            qemu_config: None,
+            uboot_config: None,
+            vmconfigs: vec![],
+        })
+        .unwrap_err();
+
+        assert!(err.to_string().contains("dynamic platform features"));
+        assert!(err.to_string().contains(feature));
+    }
 }
 
 #[test]

@@ -15,6 +15,7 @@ use crate::{
     AxVmResult,
     architecture::cpu_up::{self, CpuUpExit, CpuUpOps},
     ax_err,
+    config::GuestTlbiPolicy,
 };
 
 mod capabilities;
@@ -24,6 +25,7 @@ mod gic;
 mod npt;
 mod resource_pools;
 mod shared_provider;
+mod tlbi;
 mod vgic;
 mod vm;
 mod vm_plan;
@@ -122,6 +124,16 @@ impl ArchOps for Aarch64Arch {
                     value,
                 },
             ),
+            ArmVmExit::TlbInvalidate { .. } => {
+                if vm.guest_tlbi_policy() != GuestTlbiPolicy::VmScoped {
+                    return ax_err!(
+                        BadState,
+                        "received trapped EL1 TLBI while VM-scoped policy is disabled"
+                    );
+                }
+                tlbi::invalidate_vm(vm)?;
+                Ok(BoundVcpuExit::Continue)
+            }
             ArmVmExit::GicCpuInterfaceRead {
                 register,
                 destination,
@@ -297,10 +309,17 @@ impl ArmHostOps for AxvmArmHostOps {
     }
 
     fn handle_current_host_irq() {
-        if let Some(token) = gic::acknowledge_host_irq()
-            && let Err(error) = gic::route_acknowledged_host_irq(token)
-        {
-            warn!("{error}");
+        if let Some(token) = gic::acknowledge_host_irq() {
+            let intid = gic::host_irq_intid(token);
+            if intid >= 32 {
+                // Per-interrupt logging on the exit hot path floods the
+                // shared host console when a board device misbehaves; keep it
+                // at debug level.
+                debug!("VM host IRQ: intid={} (SPI {})", intid, intid - 32);
+            }
+            if let Err(error) = gic::route_acknowledged_host_irq(token) {
+                warn!("{error}");
+            }
         }
     }
 }

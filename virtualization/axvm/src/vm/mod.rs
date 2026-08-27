@@ -1266,6 +1266,8 @@ pub struct AxVM {
     /// Lifecycle and runtime state reached from both task and interrupt context.
     machine: IrqSafeMutex<Machine<AxVMResources, Arc<VmRuntimeHandle>>>,
     fw_cfg_payload: Arc<FwCfgPayloadSlot>,
+    #[cfg(target_arch = "aarch64")]
+    guest_tlbi_policy: crate::config::GuestTlbiPolicy,
 }
 
 impl AxVM {
@@ -1285,12 +1287,16 @@ impl AxVM {
             &mut config,
             fw_cfg_payload.clone(),
         )?;
+        #[cfg(target_arch = "aarch64")]
+        let guest_tlbi_policy = config.guest_tlbi_policy();
         let result = Arc::new(Self {
             id,
             name,
             config: SleepMutex::new(config),
             machine: IrqSafeMutex::new(Machine::Ready(resources)),
             fw_cfg_payload,
+            #[cfg(target_arch = "aarch64")]
+            guest_tlbi_policy,
         });
 
         info!("VM created: id={}", result.id());
@@ -1307,6 +1313,14 @@ impl AxVM {
     /// Returns the configured VM name.
     pub fn name(&self) -> String {
         self.name.clone()
+    }
+
+    /// Returns the guest EL1 TLB-maintenance policy. The exit path reads
+    /// this on every trapped TLBI to reject unexpected traps while the
+    /// VM-scoped policy is disabled.
+    #[cfg(target_arch = "aarch64")]
+    pub(crate) const fn guest_tlbi_policy(&self) -> crate::config::GuestTlbiPolicy {
+        self.guest_tlbi_policy
     }
 
     /// Returns the current lifecycle status.

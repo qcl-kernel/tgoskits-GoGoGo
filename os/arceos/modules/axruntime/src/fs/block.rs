@@ -1,13 +1,17 @@
-use alloc::{boxed::Box, string::String, sync::Arc, vec::Vec};
+#[cfg(feature = "fs")]
+use alloc::vec::Vec;
+use alloc::{boxed::Box, string::String, sync::Arc};
 use core::{
     sync::atomic::{AtomicUsize, Ordering},
     time::Duration,
 };
 
 use ax_alloc::UsageKind;
+#[cfg(feature = "fs")]
+use ax_fs_ng::block::runtime::{BlockIrqSource, RdifBlockDevice, RdifBlockGroup};
 use ax_fs_ng::{
     BlockError, BlockResult,
-    block::runtime::{BlockIrqAction, BlockIrqSource, RdifBlockDevice, RdifBlockGroup},
+    block::runtime::BlockIrqAction,
     os::{
         BlockIrqOutcome, BlockIrqRegistrar, BlockIrqRegistration, BlockNotification,
         BlockRuntimeOps, BlockThread, BlockTimeProvider, FsPage, FsPageProvider,
@@ -192,7 +196,17 @@ static PAGE_PROVIDER: RuntimePageProvider = RuntimePageProvider;
 static TASK_OPS: RuntimeTaskOps = RuntimeTaskOps;
 static IRQ_REGISTRAR: RuntimeBlockIrqRegistrar = RuntimeBlockIrqRegistrar;
 
+#[cfg(feature = "fs")]
 pub(super) fn init(bootargs: Option<&str>) {
+    install_runtime();
+    ax_fs_ng::root::init_root_from_rdif_sources(
+        take_rdif_block_devices(),
+        take_rdif_block_groups(),
+        bootargs,
+    );
+}
+
+pub(super) fn install_runtime() {
     ONLINE_BLOCK_CPUS.store(1, Ordering::Release);
     ax_fs_ng::os::install(
         &TIME_PROVIDER,
@@ -200,11 +214,6 @@ pub(super) fn init(bootargs: Option<&str>) {
         &TASK_OPS,
         axklib::dma::op(),
         irq_registrar(),
-    );
-    ax_fs_ng::root::init_root_from_rdif_sources(
-        take_rdif_block_devices(),
-        take_rdif_block_groups(),
-        bootargs,
     );
 }
 
@@ -220,6 +229,7 @@ fn irq_registrar() -> Option<&'static dyn BlockIrqRegistrar> {
     Some(&IRQ_REGISTRAR)
 }
 
+#[cfg(feature = "fs")]
 fn take_rdif_block_devices() -> Vec<RdifBlockDevice> {
     ax_driver::block::take_rdif_block_devices()
         .into_iter()
@@ -231,6 +241,7 @@ fn take_rdif_block_devices() -> Vec<RdifBlockDevice> {
         .collect()
 }
 
+#[cfg(feature = "fs")]
 fn take_rdif_block_groups() -> Vec<RdifBlockGroup> {
     ax_driver::block::take_rdif_block_groups()
         .into_iter()
@@ -242,6 +253,7 @@ fn take_rdif_block_groups() -> Vec<RdifBlockGroup> {
         .collect()
 }
 
+#[cfg(feature = "fs")]
 fn resolve_block_irqs(bindings: Vec<ax_driver::BindingIrqBinding>) -> Vec<BlockIrqSource> {
     bindings
         .into_iter()
@@ -254,6 +266,7 @@ fn resolve_block_irqs(bindings: Vec<ax_driver::BindingIrqBinding>) -> Vec<BlockI
         .collect()
 }
 
+#[cfg(feature = "fs")]
 fn resolve_block_irq(irq: ax_driver::BindingIrq) -> Option<irq_framework::IrqId> {
     match crate::irq::resolve_binding_irq(irq) {
         Ok(id) => Some(id),

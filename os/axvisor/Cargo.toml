@@ -50,6 +50,7 @@ host-xtask = []
 axtest = []
 fs = ["ax-std/ext4fs", "ax-std/fatfs", "axvm/host-fs"]
 sstc = ["axvm/sstc"]
+qemu-aarch64-three-guest-net = ["axplat-dyn/qemu-aarch64-three-guest-net"]
 stack-protector = ["ax-std/stack-protector"]
 backtrace = ["ax-std/backtrace", "dep:axbacktrace"]
 test-backtrace-panic = ["backtrace"]
@@ -106,6 +107,7 @@ axvm = { workspace = true, default-features = false, features = ["tls"] }
 axvmconfig = { workspace = true, default-features = false }
 axvm-types.workspace = true
 ax-driver = { workspace = true, optional = true }
+axplat-dyn = { workspace = true, optional = true }
 axbacktrace = { workspace = true, optional = true }
 
 [dev-dependencies]

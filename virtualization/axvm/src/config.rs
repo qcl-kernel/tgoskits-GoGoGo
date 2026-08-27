@@ -22,6 +22,7 @@ pub use axvm_types::{
     AddressSpacePolicy, GuestPhysAddr, HostAddressAssignment, HostDeviceAssignment,
     HostPortAssignment, ReservedAddressConfig, VMBootProtocol, VmMemConfig, VmMemMappingType,
 };
+pub use axvmconfig::GuestTlbiPolicy;
 use axvmconfig::VirtualDeviceRequest;
 
 use crate::{arch::current::CurrentArch, architecture::MachinePlatform, machine::*};
@@ -95,6 +96,7 @@ pub struct AxVMConfig {
     reserved_address_ranges: Vec<ReservedAddressConfig>,
     pass_through_ports: Vec<HostPortAssignment>,
     address_space_policy: AddressSpacePolicy,
+    guest_tlbi_policy: GuestTlbiPolicy,
     memory_regions: Vec<VmMemConfig>,
     boot_policy: GuestBootPolicy,
     // Physical interrupt sources forwarded to the guest in passthrough mode.
@@ -124,6 +126,7 @@ pub struct AxVMConfigParams {
     pub reserved_address_ranges: Vec<ReservedAddressConfig>,
     pub pass_through_ports: Vec<HostPortAssignment>,
     pub address_space_policy: AddressSpacePolicy,
+    pub guest_tlbi_policy: GuestTlbiPolicy,
     pub memory_regions: Vec<VmMemConfig>,
     pub boot_policy: GuestBootPolicy,
     /// Machine-owned virtual serial resources.
@@ -152,6 +155,7 @@ impl AxVMConfig {
             reserved_address_ranges: params.reserved_address_ranges,
             pass_through_ports: params.pass_through_ports,
             address_space_policy: params.address_space_policy,
+            guest_tlbi_policy: params.guest_tlbi_policy,
             memory_regions: params.memory_regions,
             boot_policy: params.boot_policy,
             passthrough_irq_list: Vec::new(),
@@ -266,6 +270,11 @@ impl AxVMConfig {
     /// Returns the guest physical address space population policy.
     pub fn address_space_policy(&self) -> AddressSpacePolicy {
         self.address_space_policy
+    }
+
+    /// Returns the guest EL1 TLB-maintenance policy.
+    pub const fn guest_tlbi_policy(&self) -> GuestTlbiPolicy {
+        self.guest_tlbi_policy
     }
 
     /// Returns configurations related to VM memory regions.
@@ -570,6 +579,27 @@ mod tests {
         assert_eq!(regions[1].gpa, 0x110000);
         assert_eq!(regions[1].size, 0x10000);
         assert_eq!(regions[1].map_type, VmMemMappingType::MapReserved);
+    }
+
+    #[test]
+    fn guest_tlbi_policy_is_explicit_and_defaults_to_native() {
+        let default_config = AxVMConfig::default_for_test(1, "linux");
+        assert_eq!(
+            default_config.guest_tlbi_policy(),
+            axvmconfig::GuestTlbiPolicy::Native
+        );
+
+        let vm_scoped_config = AxVMConfig::new(AxVMConfigParams {
+            id: 4,
+            name: String::from("linux-vm-scoped-tlbi"),
+            phys_cpu_ls: PhysCpuList::new(2, None, Some(vec![0b11, 0b11])),
+            guest_tlbi_policy: axvmconfig::GuestTlbiPolicy::VmScoped,
+            ..Default::default()
+        });
+        assert_eq!(
+            vm_scoped_config.guest_tlbi_policy(),
+            axvmconfig::GuestTlbiPolicy::VmScoped
+        );
     }
 
     #[cfg(target_arch = "x86_64")]

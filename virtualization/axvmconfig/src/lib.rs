@@ -254,6 +254,18 @@ fn boot_protocol_name(protocol: VMBootProtocol) -> &'static str {
     }
 }
 
+/// Guest EL1 TLB-maintenance behavior.
+#[cfg_attr(all(feature = "std", any(windows, unix)), derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum GuestTlbiPolicy {
+    /// Execute guest TLBI instructions natively.
+    #[default]
+    Native,
+    /// Trap guest EL1 TLBI and synchronize only the VM's configured host CPUs.
+    VmScoped,
+}
+
 /// The configuration structure for the guest VM base info.
 #[cfg_attr(all(feature = "std", any(windows, unix)), derive(schemars::JsonSchema))]
 #[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
@@ -270,6 +282,8 @@ pub struct VMBaseConfig {
     // Resources.
     /// The number of virtual CPUs.
     pub cpu_num: usize,
+    /// Guest EL1 TLB-maintenance behavior.
+    pub guest_tlbi_policy: GuestTlbiPolicy,
     /// The physical CPU ids.
     /// - if `None`, vcpu's physical id will be set as vcpu id.
     /// - if set, each vcpu will be assigned to the specified physical CPU mask.

@@ -20,13 +20,22 @@ macro_rules! convert_value_to_bytes {
     }};
 }
 
-/// Validate MMIO access width
-pub fn validate_access_width(width: AccessWidth) -> VirtioResult<()> {
-    // VirtIO MMIO requires 32-bit accesses for registers
-    if width != AccessWidth::Dword {
-        return Err(VirtioError::InvalidAccessWidth);
+/// Rounds a configuration-region offset down to its 4-byte register boundary.
+///
+/// The VirtIO MMIO specification states that all configuration registers
+/// (offset < 0x100) are 32-bit. However, some guests (notably RT-Thread with
+/// `RT_USING_VIRTIO_MMIO_ALIGN`) emit sub-32-bit loads or stores when the
+/// compiler decides a byte/half-word access is safe. Rather than rejecting
+/// these — which crashes the guest — every register access is treated as a
+/// 32-bit access at the containing register. This matches QEMU's virtio-mmio
+/// implementation, whose transport logic only cares about the register
+/// offset, never the width of a particular load/store.
+pub fn register_offset(offset: usize) -> usize {
+    if offset < VIRTIO_MMIO_CONFIG_OFFSET {
+        offset & !0x3
+    } else {
+        offset
     }
-    Ok(())
 }
 
 /// Calculate register offset from base address
@@ -43,7 +52,7 @@ pub fn is_address_in_range(addr: GuestPhysAddr, base_addr: GuestPhysAddr, size: 
 /// Validate MMIO read access
 pub fn validate_read_access(
     addr: GuestPhysAddr,
-    width: AccessWidth,
+    _width: AccessWidth,
     base_addr: GuestPhysAddr,
     size: usize,
 ) -> VirtioResult<usize> {
@@ -52,12 +61,7 @@ pub fn validate_read_access(
         return Ok(0); // Return 0 for out-of-range reads
     }
 
-    // Validate access width for configuration registers
-    let offset = calculate_offset(addr, base_addr);
-    if offset < VIRTIO_MMIO_CONFIG_OFFSET {
-        // Configuration registers require 32-bit access
-        validate_access_width(width)?;
-    }
+    let offset = register_offset(calculate_offset(addr, base_addr));
 
     Ok(offset)
 }
@@ -65,7 +69,7 @@ pub fn validate_read_access(
 /// Validate MMIO write access
 pub fn validate_write_access(
     addr: GuestPhysAddr,
-    width: AccessWidth,
+    _width: AccessWidth,
     base_addr: GuestPhysAddr,
     size: usize,
 ) -> VirtioResult<usize> {
@@ -74,12 +78,7 @@ pub fn validate_write_access(
         return Ok(0); // Ignore out-of-range writes
     }
 
-    // Validate access width for configuration registers
-    let offset = calculate_offset(addr, base_addr);
-    if offset < VIRTIO_MMIO_CONFIG_OFFSET {
-        // Configuration registers require 32-bit access
-        validate_access_width(width)?;
-    }
+    let offset = register_offset(calculate_offset(addr, base_addr));
 
     Ok(offset)
 }
