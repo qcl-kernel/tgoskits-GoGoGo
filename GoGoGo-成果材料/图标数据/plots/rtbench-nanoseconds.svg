@@ -12,158 +12,158 @@
 <text x="654.9" y="81.0" font-size="9px" text-anchor="middle" font-weight="normal" fill="#111827">R-Z/L</text>
 <text x="730.3" y="81.0" font-size="9px" text-anchor="middle" font-weight="normal" fill="#111827">R-Z/S</text>
 <text x="157.0" y="113.4" font-size="9px" text-anchor="end" font-weight="normal" fill="#111827">timer_jitter</text>
-<rect x="165.0" y="89.0" width="74.4" height="34.9" fill="rgb(199,218,248)"/>
-<text x="202.7" y="113.4" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">2,331,123.333</text>
-<rect x="240.4" y="89.0" width="74.4" height="34.9" fill="rgb(227,237,252)"/>
-<text x="278.1" y="113.4" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">701,282</text>
-<rect x="315.8" y="89.0" width="74.4" height="34.9" fill="rgb(225,236,252)"/>
-<text x="353.4" y="113.4" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">784,104</text>
-<rect x="391.1" y="89.0" width="74.4" height="34.9" fill="rgb(227,237,252)"/>
-<text x="428.8" y="113.4" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">695,427</text>
+<rect x="165.0" y="89.0" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
+<text x="202.7" y="113.4" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">29,882.667</text>
+<rect x="240.4" y="89.0" width="74.4" height="34.9" fill="rgb(237,245,254)"/>
+<text x="278.1" y="113.4" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">63,146.667</text>
+<rect x="315.8" y="89.0" width="74.4" height="34.9" fill="rgb(227,238,253)"/>
+<text x="353.4" y="113.4" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">662,548</text>
+<rect x="391.1" y="89.0" width="74.4" height="34.9" fill="rgb(231,240,253)"/>
+<text x="428.8" y="113.4" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">450,260</text>
 <rect x="466.5" y="89.0" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
-<text x="504.2" y="113.4" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">7,783</text>
+<text x="504.2" y="113.4" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">6,536</text>
 <rect x="541.9" y="89.0" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
-<text x="579.6" y="113.4" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">17,634</text>
-<rect x="617.2" y="89.0" width="74.4" height="34.9" fill="rgb(219,231,251)"/>
-<text x="654.9" y="113.4" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">1,171,841</text>
-<rect x="692.6" y="89.0" width="74.4" height="34.9" fill="rgb(219,231,251)"/>
-<text x="730.3" y="113.4" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">1,171,724</text>
+<text x="579.6" y="113.4" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">3,316.222</text>
+<rect x="617.2" y="89.0" width="74.4" height="34.9" fill="rgb(219,232,251)"/>
+<text x="654.9" y="113.4" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">1,170,374</text>
+<rect x="692.6" y="89.0" width="74.4" height="34.9" fill="rgb(219,232,251)"/>
+<text x="730.3" y="113.4" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">1,171,811.667</text>
 <text x="157.0" y="149.3" font-size="9px" text-anchor="end" font-weight="normal" fill="#111827">callback_exec</text>
 <rect x="165.0" y="124.9" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
-<text x="202.7" y="149.3" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">136</text>
+<text x="202.7" y="149.3" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">132.333</text>
 <rect x="240.4" y="124.9" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
-<text x="278.1" y="149.3" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">171.333</text>
-<rect x="315.8" y="124.9" width="74.4" height="34.9" fill="rgb(239,246,255)"/>
-<text x="353.4" y="149.3" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">16</text>
-<rect x="391.1" y="124.9" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
-<text x="428.8" y="149.3" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">17</text>
+<text x="278.1" y="149.3" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">136.333</text>
+<rect x="315.8" y="124.9" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
+<text x="353.4" y="149.3" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">19</text>
+<rect x="391.1" y="124.9" width="74.4" height="34.9" fill="rgb(239,246,255)"/>
+<text x="428.8" y="149.3" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">16</text>
 <rect x="466.5" y="124.9" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
-<text x="504.2" y="149.3" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">261.333</text>
+<text x="504.2" y="149.3" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">298.25</text>
 <rect x="541.9" y="124.9" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
-<text x="579.6" y="149.3" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">290.5</text>
+<text x="579.6" y="149.3" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">295.667</text>
 <rect x="617.2" y="124.9" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
-<text x="654.9" y="149.3" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">87</text>
+<text x="654.9" y="149.3" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">116</text>
 <rect x="692.6" y="124.9" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
 <text x="730.3" y="149.3" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">87</text>
 <text x="157.0" y="185.1" font-size="9px" text-anchor="end" font-weight="normal" fill="#111827">preemption</text>
 <rect x="165.0" y="160.8" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
 <text x="202.7" y="185.1" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">611</text>
 <rect x="240.4" y="160.8" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
-<text x="278.1" y="185.1" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">697</text>
+<text x="278.1" y="185.1" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">614</text>
 <rect x="315.8" y="160.8" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
 <text x="353.4" y="185.1" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">83</text>
 <rect x="391.1" y="160.8" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
 <text x="428.8" y="185.1" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">86</text>
 <rect x="466.5" y="160.8" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
-<text x="504.2" y="185.1" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">2,274</text>
+<text x="504.2" y="185.1" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">2,288.5</text>
 <rect x="541.9" y="160.8" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
-<text x="579.6" y="185.1" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">2,157</text>
+<text x="579.6" y="185.1" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">2,216</text>
 <rect x="617.2" y="160.8" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
-<text x="654.9" y="185.1" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">320</text>
+<text x="654.9" y="185.1" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">349</text>
 <rect x="692.6" y="160.8" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
-<text x="730.3" y="185.1" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">378</text>
+<text x="730.3" y="185.1" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">329.667</text>
 <text x="157.0" y="221.0" font-size="9px" text-anchor="end" font-weight="normal" fill="#111827">irq</text>
 <rect x="165.0" y="196.6" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
-<text x="202.7" y="221.0" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">56,393</text>
-<rect x="240.4" y="196.6" width="74.4" height="34.9" fill="rgb(233,241,253)"/>
-<text x="278.1" y="221.0" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">350,096</text>
+<text x="202.7" y="221.0" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">25,312</text>
+<rect x="240.4" y="196.6" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
+<text x="278.1" y="221.0" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">26,680</text>
 <rect x="315.8" y="196.6" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
-<text x="353.4" y="221.0" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">32</text>
+<text x="353.4" y="221.0" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">30</text>
 <rect x="391.1" y="196.6" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
 <text x="428.8" y="221.0" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">28</text>
-<rect x="466.5" y="196.6" width="74.4" height="34.9" fill="rgb(236,244,254)"/>
-<text x="504.2" y="221.0" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">165,170</text>
-<rect x="541.9" y="196.6" width="74.4" height="34.9" fill="rgb(236,243,254)"/>
-<text x="579.6" y="221.0" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">168,408</text>
+<rect x="466.5" y="196.6" width="74.4" height="34.9" fill="rgb(237,244,254)"/>
+<text x="504.2" y="221.0" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">102,126.5</text>
+<rect x="541.9" y="196.6" width="74.4" height="34.9" fill="rgb(237,244,254)"/>
+<text x="579.6" y="221.0" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">106,331</text>
 <rect x="617.2" y="196.6" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
-<text x="654.9" y="221.0" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">232</text>
+<text x="654.9" y="221.0" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">271.667</text>
 <rect x="692.6" y="196.6" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
-<text x="730.3" y="221.0" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">291</text>
+<text x="730.3" y="221.0" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">247</text>
 <text x="157.0" y="256.9" font-size="9px" text-anchor="end" font-weight="normal" fill="#111827">irq_to_task</text>
-<rect x="165.0" y="232.5" width="74.4" height="34.9" fill="rgb(234,242,254)"/>
-<text x="202.7" y="256.9" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">277,696</text>
-<rect x="240.4" y="232.5" width="74.4" height="34.9" fill="rgb(219,232,251)"/>
-<text x="278.1" y="256.9" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">1,123,566</text>
+<rect x="165.0" y="232.5" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
+<text x="202.7" y="256.9" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">26,814</text>
+<rect x="240.4" y="232.5" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
+<text x="278.1" y="256.9" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">28,656</text>
 <rect x="315.8" y="232.5" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
 <text x="353.4" y="256.9" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">83</text>
 <rect x="391.1" y="232.5" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
 <text x="428.8" y="256.9" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">83</text>
-<rect x="466.5" y="232.5" width="74.4" height="34.9" fill="rgb(230,240,253)"/>
-<text x="504.2" y="256.9" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">497,174</text>
-<rect x="541.9" y="232.5" width="74.4" height="34.9" fill="rgb(230,240,253)"/>
-<text x="579.6" y="256.9" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">495,249</text>
+<rect x="466.5" y="232.5" width="74.4" height="34.9" fill="rgb(235,243,254)"/>
+<text x="504.2" y="256.9" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">235,549</text>
+<rect x="541.9" y="232.5" width="74.4" height="34.9" fill="rgb(234,243,254)"/>
+<text x="579.6" y="256.9" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">240,274</text>
 <rect x="617.2" y="232.5" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
-<text x="654.9" y="256.9" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">641</text>
+<text x="654.9" y="256.9" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">592.667</text>
 <rect x="692.6" y="232.5" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
-<text x="730.3" y="256.9" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">699</text>
+<text x="730.3" y="256.9" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">597.5</text>
 <text x="157.0" y="292.8" font-size="9px" text-anchor="end" font-weight="normal" fill="#111827">irq_disabled_duration</text>
 <rect x="165.0" y="268.4" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
 <text x="202.7" y="292.8" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">416</text>
 <rect x="240.4" y="268.4" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
-<text x="278.1" y="292.8" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">417</text>
+<text x="278.1" y="292.8" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">416</text>
 <rect x="315.8" y="268.4" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
 <text x="353.4" y="292.8" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">28</text>
 <rect x="391.1" y="268.4" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
 <text x="428.8" y="292.8" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">28</text>
 <rect x="466.5" y="268.4" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
-<text x="504.2" y="292.8" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">1,078</text>
+<text x="504.2" y="292.8" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">1,020</text>
 <rect x="541.9" y="268.4" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
-<text x="579.6" y="292.8" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">1,078</text>
+<text x="579.6" y="292.8" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">1,097.333</text>
 <rect x="617.2" y="268.4" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
-<text x="654.9" y="292.8" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">203</text>
+<text x="654.9" y="292.8" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">291</text>
 <rect x="692.6" y="268.4" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
-<text x="730.3" y="292.8" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">291</text>
+<text x="730.3" y="292.8" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">247</text>
 <text x="157.0" y="328.6" font-size="9px" text-anchor="end" font-weight="normal" fill="#111827">mutex_inversion</text>
 <rect x="165.0" y="304.2" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
-<text x="202.7" y="328.6" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">3,131</text>
-<rect x="240.4" y="304.2" width="74.4" height="34.9" fill="rgb(229,238,253)"/>
-<text x="278.1" y="328.6" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">587,529</text>
+<text x="202.7" y="328.6" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">2,822</text>
+<rect x="240.4" y="304.2" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
+<text x="278.1" y="328.6" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">2,822</text>
 <rect x="315.8" y="304.2" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
 <text x="353.4" y="328.6" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">96</text>
 <rect x="391.1" y="304.2" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
-<text x="428.8" y="328.6" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">96</text>
+<text x="428.8" y="328.6" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">80</text>
 <rect x="466.5" y="304.2" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
-<text x="504.2" y="328.6" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">8,282</text>
+<text x="504.2" y="328.6" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">8,296.5</text>
 <rect x="541.9" y="304.2" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
-<text x="579.6" y="328.6" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">8,253</text>
+<text x="579.6" y="328.6" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">8,209.5</text>
 <rect x="617.2" y="304.2" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
-<text x="654.9" y="328.6" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">612</text>
+<text x="654.9" y="328.6" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">524.5</text>
 <rect x="692.6" y="304.2" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
-<text x="730.3" y="328.6" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">349</text>
+<text x="730.3" y="328.6" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">568</text>
 <text x="157.0" y="364.5" font-size="9px" text-anchor="end" font-weight="normal" fill="#111827">wake_under_load</text>
 <rect x="165.0" y="340.1" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
-<text x="202.7" y="364.5" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">612</text>
+<text x="202.7" y="364.5" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">609</text>
 <rect x="240.4" y="340.1" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
-<text x="278.1" y="364.5" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">611</text>
+<text x="278.1" y="364.5" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">612</text>
 <rect x="315.8" y="340.1" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
 <text x="353.4" y="364.5" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">81</text>
 <rect x="391.1" y="340.1" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
 <text x="428.8" y="364.5" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">81</text>
 <rect x="466.5" y="340.1" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
-<text x="504.2" y="364.5" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">1,633</text>
+<text x="504.2" y="364.5" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">1,604</text>
 <rect x="541.9" y="340.1" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
-<text x="579.6" y="364.5" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">1,604</text>
+<text x="579.6" y="364.5" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">1,618.5</text>
 <rect x="617.2" y="340.1" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
-<text x="654.9" y="364.5" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">612</text>
+<text x="654.9" y="364.5" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">597.5</text>
 <rect x="692.6" y="340.1" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
-<text x="730.3" y="364.5" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">612</text>
+<text x="730.3" y="364.5" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">621.667</text>
 <text x="157.0" y="400.4" font-size="9px" text-anchor="end" font-weight="normal" fill="#111827">context_switch</text>
 <rect x="165.0" y="376.0" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
 <text x="202.7" y="400.4" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">419</text>
 <rect x="240.4" y="376.0" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
 <text x="278.1" y="400.4" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">419</text>
 <rect x="315.8" y="376.0" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
-<text x="353.4" y="400.4" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">86</text>
+<text x="353.4" y="400.4" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">83</text>
 <rect x="391.1" y="376.0" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
-<text x="428.8" y="400.4" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">84</text>
-<rect x="466.5" y="376.0" width="74.4" height="34.9" fill="rgb(84,136,227)"/>
-<text x="504.2" y="400.4" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">9,094,895</text>
+<text x="428.8" y="400.4" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">83</text>
+<rect x="466.5" y="376.0" width="74.4" height="34.9" fill="rgb(69,126,225)"/>
+<text x="504.2" y="400.4" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">10,045,058</text>
 <rect x="541.9" y="376.0" width="74.4" height="34.9" fill="rgb(69,126,225)"/>
-<text x="579.6" y="400.4" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">9,994,424</text>
+<text x="579.6" y="400.4" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">9,994,658</text>
 <rect x="617.2" y="376.0" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
-<text x="654.9" y="400.4" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">349</text>
+<text x="654.9" y="400.4" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">334.5</text>
 <rect x="692.6" y="376.0" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
-<text x="730.3" y="400.4" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">349</text>
+<text x="730.3" y="400.4" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">327.25</text>
 <text x="157.0" y="436.3" font-size="9px" text-anchor="end" font-weight="normal" fill="#111827">scheduler_decision</text>
 <rect x="165.0" y="411.9" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
 <text x="202.7" y="436.3" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">124</text>
@@ -174,33 +174,33 @@
 <rect x="391.1" y="411.9" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
 <text x="428.8" y="436.3" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">86</text>
 <rect x="466.5" y="411.9" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
-<text x="504.2" y="436.3" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">583</text>
+<text x="504.2" y="436.3" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">597.5</text>
 <rect x="541.9" y="411.9" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
-<text x="579.6" y="436.3" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">612</text>
+<text x="579.6" y="436.3" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">602.333</text>
 <rect x="617.2" y="411.9" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
-<text x="654.9" y="436.3" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">320</text>
+<text x="654.9" y="436.3" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">291</text>
 <rect x="692.6" y="411.9" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
-<text x="730.3" y="436.3" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">378</text>
+<text x="730.3" y="436.3" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">296.8</text>
 <text x="157.0" y="472.1" font-size="9px" text-anchor="end" font-weight="normal" fill="#111827">sync_sem</text>
 <rect x="165.0" y="447.8" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
-<text x="202.7" y="472.1" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">5,689</text>
+<text x="202.7" y="472.1" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">337</text>
 <rect x="240.4" y="447.8" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
-<text x="278.1" y="472.1" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">336</text>
+<text x="278.1" y="472.1" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">339</text>
 <rect x="315.8" y="447.8" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
-<text x="353.4" y="472.1" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">81</text>
+<text x="353.4" y="472.1" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">80</text>
 <rect x="391.1" y="447.8" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
 <text x="428.8" y="472.1" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">83</text>
 <rect x="466.5" y="447.8" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
-<text x="504.2" y="472.1" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">1,487</text>
+<text x="504.2" y="472.1" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">1,516</text>
 <rect x="541.9" y="447.8" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
-<text x="579.6" y="472.1" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">1,574</text>
+<text x="579.6" y="472.1" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">1,535.333</text>
 <rect x="617.2" y="447.8" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
 <text x="654.9" y="472.1" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">612</text>
 <rect x="692.6" y="447.8" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
-<text x="730.3" y="472.1" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">583</text>
+<text x="730.3" y="472.1" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">592.667</text>
 <text x="157.0" y="508.0" font-size="9px" text-anchor="end" font-weight="normal" fill="#111827">sync_mutex</text>
 <rect x="165.0" y="483.6" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
-<text x="202.7" y="508.0" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">5,721</text>
+<text x="202.7" y="508.0" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">448</text>
 <rect x="240.4" y="483.6" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
 <text x="278.1" y="508.0" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">448</text>
 <rect x="315.8" y="483.6" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
@@ -208,82 +208,82 @@
 <rect x="391.1" y="483.6" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
 <text x="428.8" y="508.0" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">96</text>
 <rect x="466.5" y="483.6" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
-<text x="504.2" y="508.0" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">2,157</text>
+<text x="504.2" y="508.0" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">2,113.5</text>
 <rect x="541.9" y="483.6" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
-<text x="579.6" y="508.0" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">2,099</text>
+<text x="579.6" y="508.0" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">2,142.5</text>
 <rect x="617.2" y="483.6" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
-<text x="654.9" y="508.0" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">378</text>
+<text x="654.9" y="508.0" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">329.667</text>
 <rect x="692.6" y="483.6" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
-<text x="730.3" y="508.0" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">349</text>
+<text x="730.3" y="508.0" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">553.667</text>
 <text x="157.0" y="543.9" font-size="9px" text-anchor="end" font-weight="normal" fill="#111827">sync_mailbox</text>
 <rect x="165.0" y="519.5" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
 <text x="202.7" y="543.9" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">363</text>
 <rect x="240.4" y="519.5" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
-<text x="278.1" y="543.9" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">361</text>
+<text x="278.1" y="543.9" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">363</text>
 <rect x="315.8" y="519.5" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
 <text x="353.4" y="543.9" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">188</text>
 <rect x="391.1" y="519.5" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
-<text x="428.8" y="543.9" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">182</text>
+<text x="428.8" y="543.9" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">187</text>
 <rect x="466.5" y="519.5" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
-<text x="504.2" y="543.9" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">1,253</text>
+<text x="504.2" y="543.9" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">1,238.5</text>
 <rect x="541.9" y="519.5" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
-<text x="579.6" y="543.9" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">1,195</text>
+<text x="579.6" y="543.9" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">1,253</text>
 <rect x="617.2" y="519.5" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
-<text x="654.9" y="543.9" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">728</text>
+<text x="654.9" y="543.9" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">743</text>
 <rect x="692.6" y="519.5" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
-<text x="730.3" y="543.9" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">758</text>
+<text x="730.3" y="543.9" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">670</text>
 <text x="157.0" y="579.8" font-size="9px" text-anchor="end" font-weight="normal" fill="#111827">irq_handler_exec</text>
 <rect x="165.0" y="555.4" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
-<text x="202.7" y="579.8" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">24</text>
+<text x="202.7" y="579.8" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">17</text>
 <rect x="240.4" y="555.4" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
-<text x="278.1" y="579.8" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">17</text>
+<text x="278.1" y="579.8" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">27</text>
 <rect x="315.8" y="555.4" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
-<text x="353.4" y="579.8" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">824</text>
+<text x="353.4" y="579.8" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">825</text>
 <rect x="391.1" y="555.4" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
 <text x="428.8" y="579.8" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">824</text>
 <rect x="466.5" y="555.4" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
-<text x="504.2" y="579.8" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">116</text>
+<text x="504.2" y="579.8" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">87</text>
 <rect x="541.9" y="555.4" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
-<text x="579.6" y="579.8" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">145</text>
+<text x="579.6" y="579.8" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">87</text>
 <rect x="617.2" y="555.4" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
-<text x="654.9" y="579.8" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">3,266</text>
+<text x="654.9" y="579.8" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">3,441</text>
 <rect x="692.6" y="555.4" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
-<text x="730.3" y="579.8" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">3,412</text>
+<text x="730.3" y="579.8" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">3,441</text>
 <text x="157.0" y="615.6" font-size="9px" text-anchor="end" font-weight="normal" fill="#111827">deadline_miss_under_load</text>
-<rect x="165.0" y="591.2" width="74.4" height="34.9" fill="rgb(210,225,249)"/>
-<text x="202.7" y="615.6" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">1,690,185</text>
-<rect x="240.4" y="591.2" width="74.4" height="34.9" fill="rgb(226,237,252)"/>
-<text x="278.1" y="615.6" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">732,969</text>
-<rect x="315.8" y="591.2" width="74.4" height="34.9" fill="rgb(196,216,247)"/>
-<text x="353.4" y="615.6" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">2,483,680</text>
-<rect x="391.1" y="591.2" width="74.4" height="34.9" fill="rgb(214,228,250)"/>
-<text x="428.8" y="615.6" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">1,440,804</text>
+<rect x="165.0" y="591.2" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
+<text x="202.7" y="615.6" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">19,579</text>
+<rect x="240.4" y="591.2" width="74.4" height="34.9" fill="rgb(236,244,254)"/>
+<text x="278.1" y="615.6" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">133,713</text>
+<rect x="315.8" y="591.2" width="74.4" height="34.9" fill="rgb(237,244,254)"/>
+<text x="353.4" y="615.6" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">116,238</text>
+<rect x="391.1" y="591.2" width="74.4" height="34.9" fill="rgb(237,244,254)"/>
+<text x="428.8" y="615.6" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">100,702</text>
 <rect x="466.5" y="591.2" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
-<text x="504.2" y="615.6" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">6,625</text>
+<text x="504.2" y="615.6" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">7,762</text>
 <rect x="541.9" y="591.2" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
-<text x="579.6" y="615.6" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">8,574</text>
-<rect x="617.2" y="591.2" width="74.4" height="34.9" fill="rgb(233,241,253)"/>
-<text x="654.9" y="615.6" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">337,866</text>
-<rect x="692.6" y="591.2" width="74.4" height="34.9" fill="rgb(233,241,253)"/>
-<text x="730.3" y="615.6" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">338,070</text>
+<text x="579.6" y="615.6" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">3,191.667</text>
+<rect x="617.2" y="591.2" width="74.4" height="34.9" fill="rgb(234,242,254)"/>
+<text x="654.9" y="615.6" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">261,380.667</text>
+<rect x="692.6" y="591.2" width="74.4" height="34.9" fill="rgb(234,242,254)"/>
+<text x="730.3" y="615.6" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">258,270</text>
 <text x="157.0" y="651.5" font-size="9px" text-anchor="end" font-weight="normal" fill="#111827">net_event_latency</text>
-<rect x="165.0" y="627.1" width="74.4" height="34.9" fill="rgb(113,157,232)"/>
-<text x="202.7" y="651.5" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">7,407,616</text>
-<rect x="240.4" y="627.1" width="74.4" height="34.9" fill="rgb(232,241,253)"/>
-<text x="278.1" y="651.5" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">366,929</text>
-<rect x="315.8" y="627.1" width="74.4" height="34.9" fill="rgb(234,242,254)"/>
-<text x="353.4" y="651.5" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">288,707</text>
-<rect x="391.1" y="627.1" width="74.4" height="34.9" fill="rgb(231,240,253)"/>
-<text x="428.8" y="651.5" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">418,896</text>
-<rect x="466.5" y="627.1" width="74.4" height="34.9" fill="rgb(228,238,253)"/>
-<text x="504.2" y="651.5" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">602,991</text>
-<rect x="541.9" y="627.1" width="74.4" height="34.9" fill="rgb(229,239,253)"/>
-<text x="579.6" y="651.5" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">532,641</text>
-<rect x="617.2" y="627.1" width="74.4" height="34.9" fill="rgb(224,235,252)"/>
-<text x="654.9" y="651.5" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">853,912</text>
-<rect x="692.6" y="627.1" width="74.4" height="34.9" fill="rgb(230,239,253)"/>
-<text x="730.3" y="651.5" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">522,753</text>
-<text x="30.0" y="679.0" font-size="10px" text-anchor="start" font-weight="normal" fill="#111827">unit: ns; color scale min=16 max=9,994,424</text>
+<rect x="165.0" y="627.1" width="74.4" height="34.9" fill="rgb(236,244,254)"/>
+<text x="202.7" y="651.5" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">137,196</text>
+<rect x="240.4" y="627.1" width="74.4" height="34.9" fill="rgb(234,242,254)"/>
+<text x="278.1" y="651.5" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">281,217</text>
+<rect x="315.8" y="627.1" width="74.4" height="34.9" fill="rgb(229,239,253)"/>
+<text x="353.4" y="651.5" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">561,192</text>
+<rect x="391.1" y="627.1" width="74.4" height="34.9" fill="rgb(236,244,254)"/>
+<text x="428.8" y="651.5" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">137,508</text>
+<rect x="466.5" y="627.1" width="74.4" height="34.9" fill="rgb(234,242,254)"/>
+<text x="504.2" y="651.5" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">270,899.5</text>
+<rect x="541.9" y="627.1" width="74.4" height="34.9" fill="rgb(234,242,254)"/>
+<text x="579.6" y="651.5" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">253,000.333</text>
+<rect x="617.2" y="627.1" width="74.4" height="34.9" fill="rgb(232,241,253)"/>
+<text x="654.9" y="651.5" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">387,138</text>
+<rect x="692.6" y="627.1" width="74.4" height="34.9" fill="rgb(231,240,253)"/>
+<text x="730.3" y="651.5" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">446,268.667</text>
+<text x="30.0" y="679.0" font-size="10px" text-anchor="start" font-weight="normal" fill="#111827">unit: ns; color scale min=16 max=10,045,058</text>
 <text x="818.0" y="75.0" font-size="14px" text-anchor="start" font-weight="bold" fill="#111827">p95 ns</text>
 <text x="992.7" y="81.0" font-size="9px" text-anchor="middle" font-weight="normal" fill="#111827">Q-RT/L</text>
 <text x="1068.1" y="81.0" font-size="9px" text-anchor="middle" font-weight="normal" fill="#111827">Q-RT/S</text>
@@ -294,86 +294,86 @@
 <text x="1444.9" y="81.0" font-size="9px" text-anchor="middle" font-weight="normal" fill="#111827">R-Z/L</text>
 <text x="1520.3" y="81.0" font-size="9px" text-anchor="middle" font-weight="normal" fill="#111827">R-Z/S</text>
 <text x="947.0" y="113.4" font-size="9px" text-anchor="end" font-weight="normal" fill="#111827">timer_jitter</text>
-<rect x="955.0" y="89.0" width="74.4" height="34.9" fill="rgb(186,208,245)"/>
-<text x="992.7" y="113.4" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">7,507,776</text>
-<rect x="1030.4" y="89.0" width="74.4" height="34.9" fill="rgb(220,232,251)"/>
-<text x="1068.1" y="113.4" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">2,632,042.667</text>
-<rect x="1105.8" y="89.0" width="74.4" height="34.9" fill="rgb(227,237,252)"/>
-<text x="1143.4" y="113.4" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">1,621,664</text>
-<rect x="1181.1" y="89.0" width="74.4" height="34.9" fill="rgb(231,240,253)"/>
-<text x="1218.8" y="113.4" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">1,017,600</text>
+<rect x="955.0" y="89.0" width="74.4" height="34.9" fill="rgb(236,244,254)"/>
+<text x="992.7" y="113.4" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">159,690.667</text>
+<rect x="1030.4" y="89.0" width="74.4" height="34.9" fill="rgb(234,242,254)"/>
+<text x="1068.1" y="113.4" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">281,706.667</text>
+<rect x="1105.8" y="89.0" width="74.4" height="34.9" fill="rgb(218,231,251)"/>
+<text x="1143.4" y="113.4" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">1,295,168</text>
+<rect x="1181.1" y="89.0" width="74.4" height="34.9" fill="rgb(226,236,252)"/>
+<text x="1218.8" y="113.4" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">797,104</text>
 <rect x="1256.5" y="89.0" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
-<text x="1294.2" y="113.4" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">28,625</text>
+<text x="1294.2" y="113.4" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">21,354</text>
 <rect x="1331.9" y="89.0" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
-<text x="1369.6" y="113.4" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">64,364.25</text>
-<rect x="1407.2" y="89.0" width="74.4" height="34.9" fill="rgb(224,235,252)"/>
-<text x="1444.9" y="113.4" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">2,087,791</text>
-<rect x="1482.6" y="89.0" width="74.4" height="34.9" fill="rgb(224,235,252)"/>
-<text x="1520.3" y="113.4" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">2,078,166</text>
+<text x="1369.6" y="113.4" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">13,666.889</text>
+<rect x="1407.2" y="89.0" width="74.4" height="34.9" fill="rgb(205,222,249)"/>
+<text x="1444.9" y="113.4" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">2,083,000</text>
+<rect x="1482.6" y="89.0" width="74.4" height="34.9" fill="rgb(205,222,249)"/>
+<text x="1520.3" y="113.4" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">2,082,055.333</text>
 <text x="947.0" y="149.3" font-size="9px" text-anchor="end" font-weight="normal" fill="#111827">callback_exec</text>
 <rect x="955.0" y="124.9" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
 <text x="992.7" y="149.3" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">144</text>
 <rect x="1030.4" y="124.9" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
-<text x="1068.1" y="149.3" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">517.333</text>
-<rect x="1105.8" y="124.9" width="74.4" height="34.9" fill="rgb(239,246,255)"/>
-<text x="1143.4" y="149.3" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">16</text>
+<text x="1068.1" y="149.3" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">144</text>
+<rect x="1105.8" y="124.9" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
+<text x="1143.4" y="149.3" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">32</text>
 <rect x="1181.1" y="124.9" width="74.4" height="34.9" fill="rgb(239,246,255)"/>
 <text x="1218.8" y="149.3" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">16</text>
 <rect x="1256.5" y="124.9" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
-<text x="1294.2" y="149.3" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">291</text>
+<text x="1294.2" y="149.3" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">437</text>
 <rect x="1331.9" y="124.9" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
-<text x="1369.6" y="149.3" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">437</text>
+<text x="1369.6" y="149.3" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">388.333</text>
 <rect x="1407.2" y="124.9" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
-<text x="1444.9" y="149.3" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">291</text>
+<text x="1444.9" y="149.3" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">194</text>
 <rect x="1482.6" y="124.9" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
-<text x="1520.3" y="149.3" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">291</text>
+<text x="1520.3" y="149.3" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">232.8</text>
 <text x="947.0" y="185.1" font-size="9px" text-anchor="end" font-weight="normal" fill="#111827">preemption</text>
 <rect x="955.0" y="160.8" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
 <text x="992.7" y="185.1" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">624</text>
 <rect x="1030.4" y="160.8" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
-<text x="1068.1" y="185.1" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">1,488</text>
+<text x="1068.1" y="185.1" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">624</text>
 <rect x="1105.8" y="160.8" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
 <text x="1143.4" y="185.1" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">96</text>
 <rect x="1181.1" y="160.8" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
 <text x="1218.8" y="185.1" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">96</text>
 <rect x="1256.5" y="160.8" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
-<text x="1294.2" y="185.1" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">2,916</text>
+<text x="1294.2" y="185.1" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">2,479</text>
 <rect x="1331.9" y="160.8" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
-<text x="1369.6" y="185.1" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">2,625</text>
+<text x="1369.6" y="185.1" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">2,333</text>
 <rect x="1407.2" y="160.8" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
-<text x="1444.9" y="185.1" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">291</text>
+<text x="1444.9" y="185.1" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">583</text>
 <rect x="1482.6" y="160.8" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
-<text x="1520.3" y="185.1" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">583</text>
+<text x="1520.3" y="185.1" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">388.333</text>
 <text x="947.0" y="221.0" font-size="9px" text-anchor="end" font-weight="normal" fill="#111827">irq</text>
 <rect x="955.0" y="196.6" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
-<text x="992.7" y="221.0" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">123,936</text>
-<rect x="1030.4" y="196.6" width="74.4" height="34.9" fill="rgb(226,236,252)"/>
-<text x="1068.1" y="221.0" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">1,817,392</text>
+<text x="992.7" y="221.0" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">25,312</text>
+<rect x="1030.4" y="196.6" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
+<text x="1068.1" y="221.0" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">38,992</text>
 <rect x="1105.8" y="196.6" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
 <text x="1143.4" y="221.0" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">32</text>
 <rect x="1181.1" y="196.6" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
 <text x="1218.8" y="221.0" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">32</text>
-<rect x="1256.5" y="196.6" width="74.4" height="34.9" fill="rgb(237,245,254)"/>
-<text x="1294.2" y="221.0" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">170,333</text>
-<rect x="1331.9" y="196.6" width="74.4" height="34.9" fill="rgb(237,245,254)"/>
-<text x="1369.6" y="221.0" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">182,875</text>
+<rect x="1256.5" y="196.6" width="74.4" height="34.9" fill="rgb(237,244,254)"/>
+<text x="1294.2" y="221.0" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">103,104</text>
+<rect x="1331.9" y="196.6" width="74.4" height="34.9" fill="rgb(237,244,254)"/>
+<text x="1369.6" y="221.0" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">110,347</text>
 <rect x="1407.2" y="196.6" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
 <text x="1444.9" y="221.0" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">291</text>
 <rect x="1482.6" y="196.6" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
 <text x="1520.3" y="221.0" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">291</text>
 <text x="947.0" y="256.9" font-size="9px" text-anchor="end" font-weight="normal" fill="#111827">irq_to_task</text>
-<rect x="955.0" y="232.5" width="74.4" height="34.9" fill="rgb(223,234,252)"/>
-<text x="992.7" y="256.9" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">2,242,192</text>
-<rect x="1030.4" y="232.5" width="74.4" height="34.9" fill="rgb(211,226,250)"/>
-<text x="1068.1" y="256.9" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">3,934,768</text>
+<rect x="955.0" y="232.5" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
+<text x="992.7" y="256.9" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">26,912</text>
+<rect x="1030.4" y="232.5" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
+<text x="1068.1" y="256.9" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">45,328</text>
 <rect x="1105.8" y="232.5" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
 <text x="1143.4" y="256.9" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">96</text>
 <rect x="1181.1" y="232.5" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
 <text x="1218.8" y="256.9" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">96</text>
-<rect x="1256.5" y="232.5" width="74.4" height="34.9" fill="rgb(233,242,254)"/>
-<text x="1294.2" y="256.9" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">765,916</text>
-<rect x="1331.9" y="232.5" width="74.4" height="34.9" fill="rgb(233,242,254)"/>
-<text x="1369.6" y="256.9" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">715,458</text>
+<rect x="1256.5" y="232.5" width="74.4" height="34.9" fill="rgb(232,241,253)"/>
+<text x="1294.2" y="256.9" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">397,833</text>
+<rect x="1331.9" y="232.5" width="74.4" height="34.9" fill="rgb(232,241,253)"/>
+<text x="1369.6" y="256.9" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">423,013.333</text>
 <rect x="1407.2" y="232.5" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
 <text x="1444.9" y="256.9" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">583</text>
 <rect x="1482.6" y="232.5" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
@@ -382,7 +382,7 @@
 <rect x="955.0" y="268.4" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
 <text x="992.7" y="292.8" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">416</text>
 <rect x="1030.4" y="268.4" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
-<text x="1068.1" y="292.8" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">432</text>
+<text x="1068.1" y="292.8" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">416</text>
 <rect x="1105.8" y="268.4" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
 <text x="1143.4" y="292.8" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">32</text>
 <rect x="1181.1" y="268.4" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
@@ -397,21 +397,21 @@
 <text x="1520.3" y="292.8" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">291</text>
 <text x="947.0" y="328.6" font-size="9px" text-anchor="end" font-weight="normal" fill="#111827">mutex_inversion</text>
 <rect x="955.0" y="304.2" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
-<text x="992.7" y="328.6" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">5,888</text>
-<rect x="1030.4" y="304.2" width="74.4" height="34.9" fill="rgb(198,217,247)"/>
-<text x="1068.1" y="328.6" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">5,808,816</text>
+<text x="992.7" y="328.6" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">2,832</text>
+<rect x="1030.4" y="304.2" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
+<text x="1068.1" y="328.6" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">2,832</text>
 <rect x="1105.8" y="304.2" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
 <text x="1143.4" y="328.6" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">96</text>
 <rect x="1181.1" y="304.2" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
-<text x="1218.8" y="328.6" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">96</text>
+<text x="1218.8" y="328.6" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">80</text>
 <rect x="1256.5" y="304.2" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
 <text x="1294.2" y="328.6" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">9,041</text>
 <rect x="1331.9" y="304.2" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
-<text x="1369.6" y="328.6" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">9,041</text>
+<text x="1369.6" y="328.6" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">8,895.5</text>
 <rect x="1407.2" y="304.2" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
 <text x="1444.9" y="328.6" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">583</text>
 <rect x="1482.6" y="304.2" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
-<text x="1520.3" y="328.6" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">291</text>
+<text x="1520.3" y="328.6" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">583</text>
 <text x="947.0" y="364.5" font-size="9px" text-anchor="end" font-weight="normal" fill="#111827">wake_under_load</text>
 <rect x="955.0" y="340.1" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
 <text x="992.7" y="364.5" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">624</text>
@@ -438,14 +438,14 @@
 <text x="1143.4" y="400.4" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">96</text>
 <rect x="1181.1" y="376.0" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
 <text x="1218.8" y="400.4" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">96</text>
-<rect x="1256.5" y="376.0" width="74.4" height="34.9" fill="rgb(168,196,242)"/>
-<text x="1294.2" y="400.4" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">10,005,333</text>
-<rect x="1331.9" y="376.0" width="74.4" height="34.9" fill="rgb(168,195,242)"/>
-<text x="1369.6" y="400.4" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">10,044,708</text>
+<rect x="1256.5" y="376.0" width="74.4" height="34.9" fill="rgb(69,126,225)"/>
+<text x="1294.2" y="400.4" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">10,500,437.5</text>
+<rect x="1331.9" y="376.0" width="74.4" height="34.9" fill="rgb(77,131,226)"/>
+<text x="1369.6" y="400.4" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">10,002,222</text>
 <rect x="1407.2" y="376.0" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
-<text x="1444.9" y="400.4" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">291</text>
+<text x="1444.9" y="400.4" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">437</text>
 <rect x="1482.6" y="376.0" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
-<text x="1520.3" y="400.4" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">583</text>
+<text x="1520.3" y="400.4" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">364</text>
 <text x="947.0" y="436.3" font-size="9px" text-anchor="end" font-weight="normal" fill="#111827">scheduler_decision</text>
 <rect x="955.0" y="411.9" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
 <text x="992.7" y="436.3" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">128</text>
@@ -456,18 +456,18 @@
 <rect x="1181.1" y="411.9" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
 <text x="1218.8" y="436.3" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">96</text>
 <rect x="1256.5" y="411.9" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
-<text x="1294.2" y="436.3" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">583</text>
+<text x="1294.2" y="436.3" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">729</text>
 <rect x="1331.9" y="411.9" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
-<text x="1369.6" y="436.3" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">875</text>
+<text x="1369.6" y="436.3" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">777.667</text>
 <rect x="1407.2" y="411.9" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
 <text x="1444.9" y="436.3" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">291</text>
 <rect x="1482.6" y="411.9" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
-<text x="1520.3" y="436.3" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">583</text>
+<text x="1520.3" y="436.3" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">291</text>
 <text x="947.0" y="472.1" font-size="9px" text-anchor="end" font-weight="normal" fill="#111827">sync_sem</text>
 <rect x="955.0" y="447.8" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
-<text x="992.7" y="472.1" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">53,872</text>
+<text x="992.7" y="472.1" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">352</text>
 <rect x="1030.4" y="447.8" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
-<text x="1068.1" y="472.1" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">336</text>
+<text x="1068.1" y="472.1" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">352</text>
 <rect x="1105.8" y="447.8" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
 <text x="1143.4" y="472.1" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">80</text>
 <rect x="1181.1" y="447.8" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
@@ -475,14 +475,14 @@
 <rect x="1256.5" y="447.8" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
 <text x="1294.2" y="472.1" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">1,750</text>
 <rect x="1331.9" y="447.8" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
-<text x="1369.6" y="472.1" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">2,041</text>
+<text x="1369.6" y="472.1" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">1,847</text>
 <rect x="1407.2" y="447.8" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
 <text x="1444.9" y="472.1" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">583</text>
 <rect x="1482.6" y="447.8" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
 <text x="1520.3" y="472.1" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">583</text>
 <text x="947.0" y="508.0" font-size="9px" text-anchor="end" font-weight="normal" fill="#111827">sync_mutex</text>
 <rect x="955.0" y="483.6" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
-<text x="992.7" y="508.0" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">53,184</text>
+<text x="992.7" y="508.0" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">448</text>
 <rect x="1030.4" y="483.6" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
 <text x="1068.1" y="508.0" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">448</text>
 <rect x="1105.8" y="483.6" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
@@ -494,7 +494,7 @@
 <rect x="1331.9" y="483.6" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
 <text x="1369.6" y="508.0" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">2,333</text>
 <rect x="1407.2" y="483.6" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
-<text x="1444.9" y="508.0" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">583</text>
+<text x="1444.9" y="508.0" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">388.333</text>
 <rect x="1482.6" y="483.6" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
 <text x="1520.3" y="508.0" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">583</text>
 <text x="947.0" y="543.9" font-size="9px" text-anchor="end" font-weight="normal" fill="#111827">sync_mailbox</text>
@@ -509,11 +509,11 @@
 <rect x="1256.5" y="519.5" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
 <text x="1294.2" y="543.9" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">1,458</text>
 <rect x="1331.9" y="519.5" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
-<text x="1369.6" y="543.9" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">1,458</text>
+<text x="1369.6" y="543.9" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">1,750</text>
 <rect x="1407.2" y="519.5" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
 <text x="1444.9" y="543.9" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">875</text>
 <rect x="1482.6" y="519.5" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
-<text x="1520.3" y="543.9" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">875</text>
+<text x="1520.3" y="543.9" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">583</text>
 <text x="947.0" y="579.8" font-size="9px" text-anchor="end" font-weight="normal" fill="#111827">irq_handler_exec</text>
 <rect x="955.0" y="555.4" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
 <text x="992.7" y="579.8" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">32</text>
@@ -532,40 +532,40 @@
 <rect x="1482.6" y="555.4" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
 <text x="1520.3" y="579.8" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">3,208</text>
 <text x="947.0" y="615.6" font-size="9px" text-anchor="end" font-weight="normal" fill="#111827">deadline_miss_under_load</text>
-<rect x="955.0" y="591.2" width="74.4" height="34.9" fill="rgb(210,226,250)"/>
-<text x="992.7" y="615.6" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">3,994,656</text>
-<rect x="1030.4" y="591.2" width="74.4" height="34.9" fill="rgb(222,234,252)"/>
-<text x="1068.1" y="615.6" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">2,317,712</text>
-<rect x="1105.8" y="591.2" width="74.4" height="34.9" fill="rgb(207,223,249)"/>
-<text x="1143.4" y="615.6" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">4,520,272</text>
-<rect x="1181.1" y="591.2" width="74.4" height="34.9" fill="rgb(219,232,251)"/>
-<text x="1218.8" y="615.6" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">2,766,048</text>
+<rect x="955.0" y="591.2" width="74.4" height="34.9" fill="rgb(237,244,254)"/>
+<text x="992.7" y="615.6" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">97,616</text>
+<rect x="1030.4" y="591.2" width="74.4" height="34.9" fill="rgb(224,236,252)"/>
+<text x="1068.1" y="615.6" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">873,904</text>
+<rect x="1105.8" y="591.2" width="74.4" height="34.9" fill="rgb(236,244,254)"/>
+<text x="1143.4" y="615.6" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">174,672</text>
+<rect x="1181.1" y="591.2" width="74.4" height="34.9" fill="rgb(237,244,254)"/>
+<text x="1218.8" y="615.6" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">116,240</text>
 <rect x="1256.5" y="591.2" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
-<text x="1294.2" y="615.6" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">23,166</text>
+<text x="1294.2" y="615.6" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">26,396</text>
 <rect x="1331.9" y="591.2" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
-<text x="1369.6" y="615.6" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">20,541</text>
-<rect x="1407.2" y="591.2" width="74.4" height="34.9" fill="rgb(235,243,254)"/>
-<text x="1444.9" y="615.6" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">510,125</text>
-<rect x="1482.6" y="591.2" width="74.4" height="34.9" fill="rgb(235,243,254)"/>
-<text x="1520.3" y="615.6" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">505,750</text>
+<text x="1369.6" y="615.6" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">13,083.667</text>
+<rect x="1407.2" y="591.2" width="74.4" height="34.9" fill="rgb(234,242,254)"/>
+<text x="1444.9" y="615.6" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">287,874.333</text>
+<rect x="1482.6" y="591.2" width="74.4" height="34.9" fill="rgb(234,242,254)"/>
+<text x="1520.3" y="615.6" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">284,958</text>
 <text x="947.0" y="651.5" font-size="9px" text-anchor="end" font-weight="normal" fill="#111827">net_event_latency</text>
-<rect x="955.0" y="627.1" width="74.4" height="34.9" fill="rgb(69,126,225)"/>
-<text x="992.7" y="651.5" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">24,092,752</text>
-<rect x="1030.4" y="627.1" width="74.4" height="34.9" fill="rgb(232,241,253)"/>
-<text x="1068.1" y="651.5" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">984,544</text>
-<rect x="1105.8" y="627.1" width="74.4" height="34.9" fill="rgb(237,244,254)"/>
-<text x="1143.4" y="651.5" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">203,216</text>
-<rect x="1181.1" y="627.1" width="74.4" height="34.9" fill="rgb(236,244,254)"/>
-<text x="1218.8" y="651.5" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">366,240</text>
-<rect x="1256.5" y="627.1" width="74.4" height="34.9" fill="rgb(227,237,252)"/>
-<text x="1294.2" y="651.5" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">1,673,875</text>
-<rect x="1331.9" y="627.1" width="74.4" height="34.9" fill="rgb(234,242,254)"/>
-<text x="1369.6" y="651.5" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">653,041</text>
-<rect x="1407.2" y="627.1" width="74.4" height="34.9" fill="rgb(235,243,254)"/>
-<text x="1444.9" y="651.5" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">537,541</text>
-<rect x="1482.6" y="627.1" width="74.4" height="34.9" fill="rgb(235,243,254)"/>
-<text x="1520.3" y="651.5" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">545,708</text>
-<text x="820.0" y="679.0" font-size="10px" text-anchor="start" font-weight="normal" fill="#111827">unit: ns; color scale min=16 max=24,092,752</text>
+<rect x="955.0" y="627.1" width="74.4" height="34.9" fill="rgb(233,241,253)"/>
+<text x="992.7" y="651.5" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">359,184</text>
+<rect x="1030.4" y="627.1" width="74.4" height="34.9" fill="rgb(228,238,253)"/>
+<text x="1068.1" y="651.5" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">639,056</text>
+<rect x="1105.8" y="627.1" width="74.4" height="34.9" fill="rgb(221,233,251)"/>
+<text x="1143.4" y="651.5" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">1,098,816</text>
+<rect x="1181.1" y="627.1" width="74.4" height="34.9" fill="rgb(237,244,254)"/>
+<text x="1218.8" y="651.5" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">122,000</text>
+<rect x="1256.5" y="627.1" width="74.4" height="34.9" fill="rgb(230,239,253)"/>
+<text x="1294.2" y="651.5" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">550,374.5</text>
+<rect x="1331.9" y="627.1" width="74.4" height="34.9" fill="rgb(232,241,253)"/>
+<text x="1369.6" y="651.5" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">405,999.667</text>
+<rect x="1407.2" y="627.1" width="74.4" height="34.9" fill="rgb(231,240,253)"/>
+<text x="1444.9" y="651.5" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">471,235.667</text>
+<rect x="1482.6" y="627.1" width="74.4" height="34.9" fill="rgb(229,239,253)"/>
+<text x="1520.3" y="651.5" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">608,999.667</text>
+<text x="820.0" y="679.0" font-size="10px" text-anchor="start" font-weight="normal" fill="#111827">unit: ns; color scale min=16 max=10,500,437.5</text>
 <text x="28.0" y="750.0" font-size="14px" text-anchor="start" font-weight="bold" fill="#111827">p99 ns</text>
 <text x="202.7" y="756.0" font-size="9px" text-anchor="middle" font-weight="normal" fill="#111827">Q-RT/L</text>
 <text x="278.1" y="756.0" font-size="9px" text-anchor="middle" font-weight="normal" fill="#111827">Q-RT/S</text>
@@ -576,86 +576,86 @@
 <text x="654.9" y="756.0" font-size="9px" text-anchor="middle" font-weight="normal" fill="#111827">R-Z/L</text>
 <text x="730.3" y="756.0" font-size="9px" text-anchor="middle" font-weight="normal" fill="#111827">R-Z/S</text>
 <text x="157.0" y="788.4" font-size="9px" text-anchor="end" font-weight="normal" fill="#111827">timer_jitter</text>
-<rect x="165.0" y="764.0" width="74.4" height="34.9" fill="rgb(186,208,245)"/>
-<text x="202.7" y="788.4" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">7,507,776</text>
-<rect x="240.4" y="764.0" width="74.4" height="34.9" fill="rgb(220,232,251)"/>
-<text x="278.1" y="788.4" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">2,632,042.667</text>
-<rect x="315.8" y="764.0" width="74.4" height="34.9" fill="rgb(227,237,252)"/>
-<text x="353.4" y="788.4" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">1,621,664</text>
-<rect x="391.1" y="764.0" width="74.4" height="34.9" fill="rgb(231,240,253)"/>
-<text x="428.8" y="788.4" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">1,017,600</text>
+<rect x="165.0" y="764.0" width="74.4" height="34.9" fill="rgb(236,244,254)"/>
+<text x="202.7" y="788.4" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">159,690.667</text>
+<rect x="240.4" y="764.0" width="74.4" height="34.9" fill="rgb(234,242,254)"/>
+<text x="278.1" y="788.4" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">281,706.667</text>
+<rect x="315.8" y="764.0" width="74.4" height="34.9" fill="rgb(218,231,251)"/>
+<text x="353.4" y="788.4" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">1,295,168</text>
+<rect x="391.1" y="764.0" width="74.4" height="34.9" fill="rgb(226,236,252)"/>
+<text x="428.8" y="788.4" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">797,104</text>
 <rect x="466.5" y="764.0" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
-<text x="504.2" y="788.4" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">28,625</text>
+<text x="504.2" y="788.4" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">21,354</text>
 <rect x="541.9" y="764.0" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
-<text x="579.6" y="788.4" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">64,364.25</text>
-<rect x="617.2" y="764.0" width="74.4" height="34.9" fill="rgb(224,235,252)"/>
-<text x="654.9" y="788.4" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">2,087,791</text>
-<rect x="692.6" y="764.0" width="74.4" height="34.9" fill="rgb(224,235,252)"/>
-<text x="730.3" y="788.4" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">2,078,166</text>
+<text x="579.6" y="788.4" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">13,666.889</text>
+<rect x="617.2" y="764.0" width="74.4" height="34.9" fill="rgb(205,222,249)"/>
+<text x="654.9" y="788.4" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">2,083,000</text>
+<rect x="692.6" y="764.0" width="74.4" height="34.9" fill="rgb(205,222,249)"/>
+<text x="730.3" y="788.4" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">2,082,055.333</text>
 <text x="157.0" y="824.3" font-size="9px" text-anchor="end" font-weight="normal" fill="#111827">callback_exec</text>
 <rect x="165.0" y="799.9" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
 <text x="202.7" y="824.3" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">144</text>
 <rect x="240.4" y="799.9" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
-<text x="278.1" y="824.3" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">517.333</text>
-<rect x="315.8" y="799.9" width="74.4" height="34.9" fill="rgb(239,246,255)"/>
-<text x="353.4" y="824.3" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">16</text>
+<text x="278.1" y="824.3" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">144</text>
+<rect x="315.8" y="799.9" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
+<text x="353.4" y="824.3" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">32</text>
 <rect x="391.1" y="799.9" width="74.4" height="34.9" fill="rgb(239,246,255)"/>
 <text x="428.8" y="824.3" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">16</text>
 <rect x="466.5" y="799.9" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
-<text x="504.2" y="824.3" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">291</text>
+<text x="504.2" y="824.3" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">437</text>
 <rect x="541.9" y="799.9" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
-<text x="579.6" y="824.3" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">437</text>
+<text x="579.6" y="824.3" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">388.333</text>
 <rect x="617.2" y="799.9" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
-<text x="654.9" y="824.3" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">291</text>
+<text x="654.9" y="824.3" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">194</text>
 <rect x="692.6" y="799.9" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
-<text x="730.3" y="824.3" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">291</text>
+<text x="730.3" y="824.3" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">232.8</text>
 <text x="157.0" y="860.1" font-size="9px" text-anchor="end" font-weight="normal" fill="#111827">preemption</text>
 <rect x="165.0" y="835.8" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
 <text x="202.7" y="860.1" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">624</text>
 <rect x="240.4" y="835.8" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
-<text x="278.1" y="860.1" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">1,488</text>
+<text x="278.1" y="860.1" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">624</text>
 <rect x="315.8" y="835.8" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
 <text x="353.4" y="860.1" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">96</text>
 <rect x="391.1" y="835.8" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
 <text x="428.8" y="860.1" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">96</text>
 <rect x="466.5" y="835.8" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
-<text x="504.2" y="860.1" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">2,916</text>
+<text x="504.2" y="860.1" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">2,479</text>
 <rect x="541.9" y="835.8" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
-<text x="579.6" y="860.1" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">2,625</text>
+<text x="579.6" y="860.1" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">2,333</text>
 <rect x="617.2" y="835.8" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
-<text x="654.9" y="860.1" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">291</text>
+<text x="654.9" y="860.1" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">583</text>
 <rect x="692.6" y="835.8" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
-<text x="730.3" y="860.1" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">583</text>
+<text x="730.3" y="860.1" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">388.333</text>
 <text x="157.0" y="896.0" font-size="9px" text-anchor="end" font-weight="normal" fill="#111827">irq</text>
 <rect x="165.0" y="871.6" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
-<text x="202.7" y="896.0" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">123,936</text>
-<rect x="240.4" y="871.6" width="74.4" height="34.9" fill="rgb(226,236,252)"/>
-<text x="278.1" y="896.0" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">1,817,392</text>
+<text x="202.7" y="896.0" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">25,312</text>
+<rect x="240.4" y="871.6" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
+<text x="278.1" y="896.0" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">38,992</text>
 <rect x="315.8" y="871.6" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
 <text x="353.4" y="896.0" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">32</text>
 <rect x="391.1" y="871.6" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
 <text x="428.8" y="896.0" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">32</text>
-<rect x="466.5" y="871.6" width="74.4" height="34.9" fill="rgb(237,245,254)"/>
-<text x="504.2" y="896.0" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">170,333</text>
-<rect x="541.9" y="871.6" width="74.4" height="34.9" fill="rgb(237,245,254)"/>
-<text x="579.6" y="896.0" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">182,875</text>
+<rect x="466.5" y="871.6" width="74.4" height="34.9" fill="rgb(237,244,254)"/>
+<text x="504.2" y="896.0" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">103,104</text>
+<rect x="541.9" y="871.6" width="74.4" height="34.9" fill="rgb(237,244,254)"/>
+<text x="579.6" y="896.0" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">110,347</text>
 <rect x="617.2" y="871.6" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
 <text x="654.9" y="896.0" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">291</text>
 <rect x="692.6" y="871.6" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
 <text x="730.3" y="896.0" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">291</text>
 <text x="157.0" y="931.9" font-size="9px" text-anchor="end" font-weight="normal" fill="#111827">irq_to_task</text>
-<rect x="165.0" y="907.5" width="74.4" height="34.9" fill="rgb(223,234,252)"/>
-<text x="202.7" y="931.9" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">2,242,192</text>
-<rect x="240.4" y="907.5" width="74.4" height="34.9" fill="rgb(211,226,250)"/>
-<text x="278.1" y="931.9" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">3,934,768</text>
+<rect x="165.0" y="907.5" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
+<text x="202.7" y="931.9" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">26,912</text>
+<rect x="240.4" y="907.5" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
+<text x="278.1" y="931.9" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">45,328</text>
 <rect x="315.8" y="907.5" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
 <text x="353.4" y="931.9" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">96</text>
 <rect x="391.1" y="907.5" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
 <text x="428.8" y="931.9" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">96</text>
-<rect x="466.5" y="907.5" width="74.4" height="34.9" fill="rgb(233,242,254)"/>
-<text x="504.2" y="931.9" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">765,916</text>
-<rect x="541.9" y="907.5" width="74.4" height="34.9" fill="rgb(233,242,254)"/>
-<text x="579.6" y="931.9" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">715,458</text>
+<rect x="466.5" y="907.5" width="74.4" height="34.9" fill="rgb(232,241,253)"/>
+<text x="504.2" y="931.9" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">397,833</text>
+<rect x="541.9" y="907.5" width="74.4" height="34.9" fill="rgb(232,241,253)"/>
+<text x="579.6" y="931.9" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">423,013.333</text>
 <rect x="617.2" y="907.5" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
 <text x="654.9" y="931.9" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">583</text>
 <rect x="692.6" y="907.5" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
@@ -664,7 +664,7 @@
 <rect x="165.0" y="943.4" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
 <text x="202.7" y="967.8" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">416</text>
 <rect x="240.4" y="943.4" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
-<text x="278.1" y="967.8" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">432</text>
+<text x="278.1" y="967.8" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">416</text>
 <rect x="315.8" y="943.4" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
 <text x="353.4" y="967.8" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">32</text>
 <rect x="391.1" y="943.4" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
@@ -679,21 +679,21 @@
 <text x="730.3" y="967.8" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">291</text>
 <text x="157.0" y="1003.6" font-size="9px" text-anchor="end" font-weight="normal" fill="#111827">mutex_inversion</text>
 <rect x="165.0" y="979.2" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
-<text x="202.7" y="1003.6" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">5,888</text>
-<rect x="240.4" y="979.2" width="74.4" height="34.9" fill="rgb(198,217,247)"/>
-<text x="278.1" y="1003.6" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">5,808,816</text>
+<text x="202.7" y="1003.6" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">2,832</text>
+<rect x="240.4" y="979.2" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
+<text x="278.1" y="1003.6" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">2,832</text>
 <rect x="315.8" y="979.2" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
 <text x="353.4" y="1003.6" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">96</text>
 <rect x="391.1" y="979.2" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
-<text x="428.8" y="1003.6" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">96</text>
+<text x="428.8" y="1003.6" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">80</text>
 <rect x="466.5" y="979.2" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
 <text x="504.2" y="1003.6" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">9,041</text>
 <rect x="541.9" y="979.2" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
-<text x="579.6" y="1003.6" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">9,041</text>
+<text x="579.6" y="1003.6" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">8,895.5</text>
 <rect x="617.2" y="979.2" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
 <text x="654.9" y="1003.6" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">583</text>
 <rect x="692.6" y="979.2" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
-<text x="730.3" y="1003.6" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">291</text>
+<text x="730.3" y="1003.6" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">583</text>
 <text x="157.0" y="1039.5" font-size="9px" text-anchor="end" font-weight="normal" fill="#111827">wake_under_load</text>
 <rect x="165.0" y="1015.1" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
 <text x="202.7" y="1039.5" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">624</text>
@@ -720,14 +720,14 @@
 <text x="353.4" y="1075.4" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">96</text>
 <rect x="391.1" y="1051.0" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
 <text x="428.8" y="1075.4" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">96</text>
-<rect x="466.5" y="1051.0" width="74.4" height="34.9" fill="rgb(168,196,242)"/>
-<text x="504.2" y="1075.4" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">10,005,333</text>
-<rect x="541.9" y="1051.0" width="74.4" height="34.9" fill="rgb(168,195,242)"/>
-<text x="579.6" y="1075.4" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">10,044,708</text>
+<rect x="466.5" y="1051.0" width="74.4" height="34.9" fill="rgb(69,126,225)"/>
+<text x="504.2" y="1075.4" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">10,500,437.5</text>
+<rect x="541.9" y="1051.0" width="74.4" height="34.9" fill="rgb(77,131,226)"/>
+<text x="579.6" y="1075.4" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">10,002,222</text>
 <rect x="617.2" y="1051.0" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
-<text x="654.9" y="1075.4" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">291</text>
+<text x="654.9" y="1075.4" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">437</text>
 <rect x="692.6" y="1051.0" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
-<text x="730.3" y="1075.4" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">583</text>
+<text x="730.3" y="1075.4" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">364</text>
 <text x="157.0" y="1111.3" font-size="9px" text-anchor="end" font-weight="normal" fill="#111827">scheduler_decision</text>
 <rect x="165.0" y="1086.9" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
 <text x="202.7" y="1111.3" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">128</text>
@@ -738,18 +738,18 @@
 <rect x="391.1" y="1086.9" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
 <text x="428.8" y="1111.3" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">96</text>
 <rect x="466.5" y="1086.9" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
-<text x="504.2" y="1111.3" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">583</text>
+<text x="504.2" y="1111.3" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">729</text>
 <rect x="541.9" y="1086.9" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
-<text x="579.6" y="1111.3" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">875</text>
+<text x="579.6" y="1111.3" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">777.667</text>
 <rect x="617.2" y="1086.9" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
 <text x="654.9" y="1111.3" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">291</text>
 <rect x="692.6" y="1086.9" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
-<text x="730.3" y="1111.3" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">583</text>
+<text x="730.3" y="1111.3" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">291</text>
 <text x="157.0" y="1147.1" font-size="9px" text-anchor="end" font-weight="normal" fill="#111827">sync_sem</text>
 <rect x="165.0" y="1122.8" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
-<text x="202.7" y="1147.1" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">53,872</text>
+<text x="202.7" y="1147.1" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">352</text>
 <rect x="240.4" y="1122.8" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
-<text x="278.1" y="1147.1" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">336</text>
+<text x="278.1" y="1147.1" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">352</text>
 <rect x="315.8" y="1122.8" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
 <text x="353.4" y="1147.1" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">80</text>
 <rect x="391.1" y="1122.8" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
@@ -757,14 +757,14 @@
 <rect x="466.5" y="1122.8" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
 <text x="504.2" y="1147.1" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">1,750</text>
 <rect x="541.9" y="1122.8" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
-<text x="579.6" y="1147.1" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">2,041</text>
+<text x="579.6" y="1147.1" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">1,847</text>
 <rect x="617.2" y="1122.8" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
 <text x="654.9" y="1147.1" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">583</text>
 <rect x="692.6" y="1122.8" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
 <text x="730.3" y="1147.1" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">583</text>
 <text x="157.0" y="1183.0" font-size="9px" text-anchor="end" font-weight="normal" fill="#111827">sync_mutex</text>
 <rect x="165.0" y="1158.6" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
-<text x="202.7" y="1183.0" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">53,184</text>
+<text x="202.7" y="1183.0" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">448</text>
 <rect x="240.4" y="1158.6" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
 <text x="278.1" y="1183.0" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">448</text>
 <rect x="315.8" y="1158.6" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
@@ -776,7 +776,7 @@
 <rect x="541.9" y="1158.6" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
 <text x="579.6" y="1183.0" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">2,333</text>
 <rect x="617.2" y="1158.6" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
-<text x="654.9" y="1183.0" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">583</text>
+<text x="654.9" y="1183.0" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">388.333</text>
 <rect x="692.6" y="1158.6" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
 <text x="730.3" y="1183.0" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">583</text>
 <text x="157.0" y="1218.9" font-size="9px" text-anchor="end" font-weight="normal" fill="#111827">sync_mailbox</text>
@@ -791,11 +791,11 @@
 <rect x="466.5" y="1194.5" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
 <text x="504.2" y="1218.9" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">1,458</text>
 <rect x="541.9" y="1194.5" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
-<text x="579.6" y="1218.9" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">1,458</text>
+<text x="579.6" y="1218.9" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">1,750</text>
 <rect x="617.2" y="1194.5" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
 <text x="654.9" y="1218.9" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">875</text>
 <rect x="692.6" y="1194.5" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
-<text x="730.3" y="1218.9" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">875</text>
+<text x="730.3" y="1218.9" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">583</text>
 <text x="157.0" y="1254.8" font-size="9px" text-anchor="end" font-weight="normal" fill="#111827">irq_handler_exec</text>
 <rect x="165.0" y="1230.4" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
 <text x="202.7" y="1254.8" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">32</text>
@@ -814,40 +814,40 @@
 <rect x="692.6" y="1230.4" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
 <text x="730.3" y="1254.8" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">3,208</text>
 <text x="157.0" y="1290.6" font-size="9px" text-anchor="end" font-weight="normal" fill="#111827">deadline_miss_under_load</text>
-<rect x="165.0" y="1266.2" width="74.4" height="34.9" fill="rgb(210,226,250)"/>
-<text x="202.7" y="1290.6" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">3,994,656</text>
-<rect x="240.4" y="1266.2" width="74.4" height="34.9" fill="rgb(222,234,252)"/>
-<text x="278.1" y="1290.6" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">2,317,712</text>
-<rect x="315.8" y="1266.2" width="74.4" height="34.9" fill="rgb(207,223,249)"/>
-<text x="353.4" y="1290.6" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">4,520,272</text>
-<rect x="391.1" y="1266.2" width="74.4" height="34.9" fill="rgb(219,232,251)"/>
-<text x="428.8" y="1290.6" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">2,766,048</text>
+<rect x="165.0" y="1266.2" width="74.4" height="34.9" fill="rgb(237,244,254)"/>
+<text x="202.7" y="1290.6" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">97,616</text>
+<rect x="240.4" y="1266.2" width="74.4" height="34.9" fill="rgb(224,236,252)"/>
+<text x="278.1" y="1290.6" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">873,904</text>
+<rect x="315.8" y="1266.2" width="74.4" height="34.9" fill="rgb(236,244,254)"/>
+<text x="353.4" y="1290.6" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">174,672</text>
+<rect x="391.1" y="1266.2" width="74.4" height="34.9" fill="rgb(237,244,254)"/>
+<text x="428.8" y="1290.6" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">116,240</text>
 <rect x="466.5" y="1266.2" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
-<text x="504.2" y="1290.6" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">23,166</text>
+<text x="504.2" y="1290.6" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">26,396</text>
 <rect x="541.9" y="1266.2" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
-<text x="579.6" y="1290.6" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">20,541</text>
-<rect x="617.2" y="1266.2" width="74.4" height="34.9" fill="rgb(219,232,251)"/>
-<text x="654.9" y="1290.6" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">2,810,125</text>
-<rect x="692.6" y="1266.2" width="74.4" height="34.9" fill="rgb(235,243,254)"/>
-<text x="730.3" y="1290.6" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">505,750</text>
+<text x="579.6" y="1290.6" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">13,083.667</text>
+<rect x="617.2" y="1266.2" width="74.4" height="34.9" fill="rgb(234,242,254)"/>
+<text x="654.9" y="1290.6" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">287,874.333</text>
+<rect x="692.6" y="1266.2" width="74.4" height="34.9" fill="rgb(234,242,254)"/>
+<text x="730.3" y="1290.6" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">284,958</text>
 <text x="157.0" y="1326.5" font-size="9px" text-anchor="end" font-weight="normal" fill="#111827">net_event_latency</text>
-<rect x="165.0" y="1302.1" width="74.4" height="34.9" fill="rgb(69,126,225)"/>
-<text x="202.7" y="1326.5" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">24,092,752</text>
-<rect x="240.4" y="1302.1" width="74.4" height="34.9" fill="rgb(232,241,253)"/>
-<text x="278.1" y="1326.5" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">984,544</text>
-<rect x="315.8" y="1302.1" width="74.4" height="34.9" fill="rgb(237,244,254)"/>
-<text x="353.4" y="1326.5" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">203,216</text>
-<rect x="391.1" y="1302.1" width="74.4" height="34.9" fill="rgb(236,244,254)"/>
-<text x="428.8" y="1326.5" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">366,240</text>
-<rect x="466.5" y="1302.1" width="74.4" height="34.9" fill="rgb(227,237,252)"/>
-<text x="504.2" y="1326.5" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">1,673,875</text>
-<rect x="541.9" y="1302.1" width="74.4" height="34.9" fill="rgb(234,242,254)"/>
-<text x="579.6" y="1326.5" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">653,041</text>
-<rect x="617.2" y="1302.1" width="74.4" height="34.9" fill="rgb(235,243,254)"/>
-<text x="654.9" y="1326.5" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">537,541</text>
-<rect x="692.6" y="1302.1" width="74.4" height="34.9" fill="rgb(235,243,254)"/>
-<text x="730.3" y="1326.5" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">545,708</text>
-<text x="30.0" y="1354.0" font-size="10px" text-anchor="start" font-weight="normal" fill="#111827">unit: ns; color scale min=16 max=24,092,752</text>
+<rect x="165.0" y="1302.1" width="74.4" height="34.9" fill="rgb(233,241,253)"/>
+<text x="202.7" y="1326.5" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">359,184</text>
+<rect x="240.4" y="1302.1" width="74.4" height="34.9" fill="rgb(228,238,253)"/>
+<text x="278.1" y="1326.5" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">639,056</text>
+<rect x="315.8" y="1302.1" width="74.4" height="34.9" fill="rgb(221,233,251)"/>
+<text x="353.4" y="1326.5" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">1,098,816</text>
+<rect x="391.1" y="1302.1" width="74.4" height="34.9" fill="rgb(237,244,254)"/>
+<text x="428.8" y="1326.5" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">122,000</text>
+<rect x="466.5" y="1302.1" width="74.4" height="34.9" fill="rgb(230,239,253)"/>
+<text x="504.2" y="1326.5" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">550,374.5</text>
+<rect x="541.9" y="1302.1" width="74.4" height="34.9" fill="rgb(232,241,253)"/>
+<text x="579.6" y="1326.5" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">405,999.667</text>
+<rect x="617.2" y="1302.1" width="74.4" height="34.9" fill="rgb(231,240,253)"/>
+<text x="654.9" y="1326.5" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">471,235.667</text>
+<rect x="692.6" y="1302.1" width="74.4" height="34.9" fill="rgb(229,239,253)"/>
+<text x="730.3" y="1326.5" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">608,999.667</text>
+<text x="30.0" y="1354.0" font-size="10px" text-anchor="start" font-weight="normal" fill="#111827">unit: ns; color scale min=16 max=10,500,437.5</text>
 <text x="818.0" y="750.0" font-size="14px" text-anchor="start" font-weight="bold" fill="#111827">max ns</text>
 <text x="992.7" y="756.0" font-size="9px" text-anchor="middle" font-weight="normal" fill="#111827">Q-RT/L</text>
 <text x="1068.1" y="756.0" font-size="9px" text-anchor="middle" font-weight="normal" fill="#111827">Q-RT/S</text>
@@ -858,95 +858,95 @@
 <text x="1444.9" y="756.0" font-size="9px" text-anchor="middle" font-weight="normal" fill="#111827">R-Z/L</text>
 <text x="1520.3" y="756.0" font-size="9px" text-anchor="middle" font-weight="normal" fill="#111827">R-Z/S</text>
 <text x="947.0" y="788.4" font-size="9px" text-anchor="end" font-weight="normal" fill="#111827">timer_jitter</text>
-<rect x="955.0" y="764.0" width="74.4" height="34.9" fill="rgb(186,208,245)"/>
-<text x="992.7" y="788.4" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">7,507,776</text>
-<rect x="1030.4" y="764.0" width="74.4" height="34.9" fill="rgb(220,232,251)"/>
-<text x="1068.1" y="788.4" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">2,632,042.667</text>
-<rect x="1105.8" y="764.0" width="74.4" height="34.9" fill="rgb(227,237,252)"/>
-<text x="1143.4" y="788.4" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">1,621,888</text>
-<rect x="1181.1" y="764.0" width="74.4" height="34.9" fill="rgb(230,240,253)"/>
-<text x="1218.8" y="788.4" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">1,153,792</text>
+<rect x="955.0" y="764.0" width="74.4" height="34.9" fill="rgb(236,244,254)"/>
+<text x="992.7" y="788.4" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">159,690.667</text>
+<rect x="1030.4" y="764.0" width="74.4" height="34.9" fill="rgb(234,242,254)"/>
+<text x="1068.1" y="788.4" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">281,706.667</text>
+<rect x="1105.8" y="764.0" width="74.4" height="34.9" fill="rgb(215,229,250)"/>
+<text x="1143.4" y="788.4" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">1,434,736</text>
+<rect x="1181.1" y="764.0" width="74.4" height="34.9" fill="rgb(224,235,252)"/>
+<text x="1218.8" y="788.4" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">899,536</text>
 <rect x="1256.5" y="764.0" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
-<text x="1294.2" y="788.4" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">28,625</text>
+<text x="1294.2" y="788.4" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">21,354</text>
 <rect x="1331.9" y="764.0" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
-<text x="1369.6" y="788.4" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">64,364.25</text>
-<rect x="1407.2" y="764.0" width="74.4" height="34.9" fill="rgb(222,234,252)"/>
-<text x="1444.9" y="788.4" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">2,342,750</text>
-<rect x="1482.6" y="764.0" width="74.4" height="34.9" fill="rgb(222,234,252)"/>
-<text x="1520.3" y="788.4" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">2,343,625</text>
+<text x="1369.6" y="788.4" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">13,666.889</text>
+<rect x="1407.2" y="764.0" width="74.4" height="34.9" fill="rgb(201,219,248)"/>
+<text x="1444.9" y="788.4" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">2,343,374.5</text>
+<rect x="1482.6" y="764.0" width="74.4" height="34.9" fill="rgb(201,219,248)"/>
+<text x="1520.3" y="788.4" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">2,343,430</text>
 <text x="947.0" y="824.3" font-size="9px" text-anchor="end" font-weight="normal" fill="#111827">callback_exec</text>
 <rect x="955.0" y="799.9" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
 <text x="992.7" y="824.3" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">144</text>
 <rect x="1030.4" y="799.9" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
-<text x="1068.1" y="824.3" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">517.333</text>
-<rect x="1105.8" y="799.9" width="74.4" height="34.9" fill="rgb(239,246,255)"/>
-<text x="1143.4" y="824.3" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">16</text>
-<rect x="1181.1" y="799.9" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
-<text x="1218.8" y="824.3" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">32</text>
+<text x="1068.1" y="824.3" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">144</text>
+<rect x="1105.8" y="799.9" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
+<text x="1143.4" y="824.3" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">32</text>
+<rect x="1181.1" y="799.9" width="74.4" height="34.9" fill="rgb(239,246,255)"/>
+<text x="1218.8" y="824.3" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">16</text>
 <rect x="1256.5" y="799.9" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
-<text x="1294.2" y="824.3" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">291</text>
+<text x="1294.2" y="824.3" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">437</text>
 <rect x="1331.9" y="799.9" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
-<text x="1369.6" y="824.3" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">437</text>
+<text x="1369.6" y="824.3" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">388.333</text>
 <rect x="1407.2" y="799.9" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
-<text x="1444.9" y="824.3" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">291</text>
+<text x="1444.9" y="824.3" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">194</text>
 <rect x="1482.6" y="799.9" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
 <text x="1520.3" y="824.3" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">291</text>
 <text x="947.0" y="860.1" font-size="9px" text-anchor="end" font-weight="normal" fill="#111827">preemption</text>
 <rect x="955.0" y="835.8" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
 <text x="992.7" y="860.1" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">624</text>
 <rect x="1030.4" y="835.8" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
-<text x="1068.1" y="860.1" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">1,488</text>
+<text x="1068.1" y="860.1" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">624</text>
 <rect x="1105.8" y="835.8" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
 <text x="1143.4" y="860.1" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">96</text>
 <rect x="1181.1" y="835.8" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
 <text x="1218.8" y="860.1" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">96</text>
 <rect x="1256.5" y="835.8" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
-<text x="1294.2" y="860.1" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">2,916</text>
+<text x="1294.2" y="860.1" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">2,479</text>
 <rect x="1331.9" y="835.8" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
-<text x="1369.6" y="860.1" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">2,625</text>
+<text x="1369.6" y="860.1" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">2,333</text>
 <rect x="1407.2" y="835.8" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
 <text x="1444.9" y="860.1" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">583</text>
 <rect x="1482.6" y="835.8" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
 <text x="1520.3" y="860.1" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">583</text>
 <text x="947.0" y="896.0" font-size="9px" text-anchor="end" font-weight="normal" fill="#111827">irq</text>
 <rect x="955.0" y="871.6" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
-<text x="992.7" y="896.0" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">123,936</text>
-<rect x="1030.4" y="871.6" width="74.4" height="34.9" fill="rgb(226,236,252)"/>
-<text x="1068.1" y="896.0" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">1,817,392</text>
+<text x="992.7" y="896.0" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">25,312</text>
+<rect x="1030.4" y="871.6" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
+<text x="1068.1" y="896.0" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">38,992</text>
 <rect x="1105.8" y="871.6" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
 <text x="1143.4" y="896.0" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">32</text>
 <rect x="1181.1" y="871.6" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
 <text x="1218.8" y="896.0" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">32</text>
-<rect x="1256.5" y="871.6" width="74.4" height="34.9" fill="rgb(237,245,254)"/>
-<text x="1294.2" y="896.0" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">170,333</text>
-<rect x="1331.9" y="871.6" width="74.4" height="34.9" fill="rgb(237,245,254)"/>
-<text x="1369.6" y="896.0" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">182,875</text>
+<rect x="1256.5" y="871.6" width="74.4" height="34.9" fill="rgb(237,244,254)"/>
+<text x="1294.2" y="896.0" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">103,104</text>
+<rect x="1331.9" y="871.6" width="74.4" height="34.9" fill="rgb(237,244,254)"/>
+<text x="1369.6" y="896.0" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">110,347</text>
 <rect x="1407.2" y="871.6" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
-<text x="1444.9" y="896.0" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">583</text>
+<text x="1444.9" y="896.0" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">485.667</text>
 <rect x="1482.6" y="871.6" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
-<text x="1520.3" y="896.0" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">291</text>
+<text x="1520.3" y="896.0" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">583</text>
 <text x="947.0" y="931.9" font-size="9px" text-anchor="end" font-weight="normal" fill="#111827">irq_to_task</text>
-<rect x="955.0" y="907.5" width="74.4" height="34.9" fill="rgb(223,234,252)"/>
-<text x="992.7" y="931.9" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">2,242,192</text>
-<rect x="1030.4" y="907.5" width="74.4" height="34.9" fill="rgb(211,226,250)"/>
-<text x="1068.1" y="931.9" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">3,934,768</text>
+<rect x="955.0" y="907.5" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
+<text x="992.7" y="931.9" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">26,912</text>
+<rect x="1030.4" y="907.5" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
+<text x="1068.1" y="931.9" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">45,328</text>
 <rect x="1105.8" y="907.5" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
 <text x="1143.4" y="931.9" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">96</text>
 <rect x="1181.1" y="907.5" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
 <text x="1218.8" y="931.9" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">96</text>
-<rect x="1256.5" y="907.5" width="74.4" height="34.9" fill="rgb(233,242,254)"/>
-<text x="1294.2" y="931.9" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">765,916</text>
-<rect x="1331.9" y="907.5" width="74.4" height="34.9" fill="rgb(233,242,254)"/>
-<text x="1369.6" y="931.9" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">715,458</text>
+<rect x="1256.5" y="907.5" width="74.4" height="34.9" fill="rgb(232,241,253)"/>
+<text x="1294.2" y="931.9" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">397,833</text>
+<rect x="1331.9" y="907.5" width="74.4" height="34.9" fill="rgb(232,241,253)"/>
+<text x="1369.6" y="931.9" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">423,013.333</text>
 <rect x="1407.2" y="907.5" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
-<text x="1444.9" y="931.9" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">1,166</text>
+<text x="1444.9" y="931.9" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">875</text>
 <rect x="1482.6" y="907.5" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
-<text x="1520.3" y="931.9" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">1,750</text>
+<text x="1520.3" y="931.9" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">875</text>
 <text x="947.0" y="967.8" font-size="9px" text-anchor="end" font-weight="normal" fill="#111827">irq_disabled_duration</text>
 <rect x="955.0" y="943.4" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
 <text x="992.7" y="967.8" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">416</text>
 <rect x="1030.4" y="943.4" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
-<text x="1068.1" y="967.8" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">432</text>
+<text x="1068.1" y="967.8" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">416</text>
 <rect x="1105.8" y="943.4" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
 <text x="1143.4" y="967.8" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">32</text>
 <rect x="1181.1" y="943.4" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
@@ -958,24 +958,24 @@
 <rect x="1407.2" y="943.4" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
 <text x="1444.9" y="967.8" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">291</text>
 <rect x="1482.6" y="943.4" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
-<text x="1520.3" y="967.8" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">583</text>
+<text x="1520.3" y="967.8" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">291</text>
 <text x="947.0" y="1003.6" font-size="9px" text-anchor="end" font-weight="normal" fill="#111827">mutex_inversion</text>
 <rect x="955.0" y="979.2" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
-<text x="992.7" y="1003.6" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">5,888</text>
-<rect x="1030.4" y="979.2" width="74.4" height="34.9" fill="rgb(198,217,247)"/>
-<text x="1068.1" y="1003.6" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">5,808,816</text>
+<text x="992.7" y="1003.6" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">2,832</text>
+<rect x="1030.4" y="979.2" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
+<text x="1068.1" y="1003.6" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">2,832</text>
 <rect x="1105.8" y="979.2" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
 <text x="1143.4" y="1003.6" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">96</text>
 <rect x="1181.1" y="979.2" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
-<text x="1218.8" y="1003.6" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">96</text>
+<text x="1218.8" y="1003.6" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">80</text>
 <rect x="1256.5" y="979.2" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
 <text x="1294.2" y="1003.6" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">9,041</text>
 <rect x="1331.9" y="979.2" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
-<text x="1369.6" y="1003.6" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">9,041</text>
+<text x="1369.6" y="1003.6" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">8,895.5</text>
 <rect x="1407.2" y="979.2" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
-<text x="1444.9" y="1003.6" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">875</text>
+<text x="1444.9" y="1003.6" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">583</text>
 <rect x="1482.6" y="979.2" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
-<text x="1520.3" y="1003.6" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">875</text>
+<text x="1520.3" y="1003.6" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">1,020.5</text>
 <text x="947.0" y="1039.5" font-size="9px" text-anchor="end" font-weight="normal" fill="#111827">wake_under_load</text>
 <rect x="955.0" y="1015.1" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
 <text x="992.7" y="1039.5" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">624</text>
@@ -992,7 +992,7 @@
 <rect x="1407.2" y="1015.1" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
 <text x="1444.9" y="1039.5" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">875</text>
 <rect x="1482.6" y="1015.1" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
-<text x="1520.3" y="1039.5" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">1,166</text>
+<text x="1520.3" y="1039.5" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">972</text>
 <text x="947.0" y="1075.4" font-size="9px" text-anchor="end" font-weight="normal" fill="#111827">context_switch</text>
 <rect x="955.0" y="1051.0" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
 <text x="992.7" y="1075.4" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">432</text>
@@ -1002,12 +1002,12 @@
 <text x="1143.4" y="1075.4" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">96</text>
 <rect x="1181.1" y="1051.0" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
 <text x="1218.8" y="1075.4" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">96</text>
-<rect x="1256.5" y="1051.0" width="74.4" height="34.9" fill="rgb(168,196,242)"/>
-<text x="1294.2" y="1075.4" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">10,005,333</text>
-<rect x="1331.9" y="1051.0" width="74.4" height="34.9" fill="rgb(168,195,242)"/>
-<text x="1369.6" y="1075.4" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">10,044,708</text>
+<rect x="1256.5" y="1051.0" width="74.4" height="34.9" fill="rgb(69,126,225)"/>
+<text x="1294.2" y="1075.4" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">10,500,437.5</text>
+<rect x="1331.9" y="1051.0" width="74.4" height="34.9" fill="rgb(77,131,226)"/>
+<text x="1369.6" y="1075.4" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">10,002,222</text>
 <rect x="1407.2" y="1051.0" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
-<text x="1444.9" y="1075.4" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">875</text>
+<text x="1444.9" y="1075.4" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">583</text>
 <rect x="1482.6" y="1051.0" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
 <text x="1520.3" y="1075.4" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">583</text>
 <text x="947.0" y="1111.3" font-size="9px" text-anchor="end" font-weight="normal" fill="#111827">scheduler_decision</text>
@@ -1020,33 +1020,33 @@
 <rect x="1181.1" y="1086.9" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
 <text x="1218.8" y="1111.3" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">96</text>
 <rect x="1256.5" y="1086.9" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
-<text x="1294.2" y="1111.3" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">583</text>
+<text x="1294.2" y="1111.3" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">729</text>
 <rect x="1331.9" y="1086.9" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
-<text x="1369.6" y="1111.3" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">875</text>
+<text x="1369.6" y="1111.3" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">777.667</text>
 <rect x="1407.2" y="1086.9" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
-<text x="1444.9" y="1111.3" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">583</text>
+<text x="1444.9" y="1111.3" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">291</text>
 <rect x="1482.6" y="1086.9" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
-<text x="1520.3" y="1111.3" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">875</text>
+<text x="1520.3" y="1111.3" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">349.4</text>
 <text x="947.0" y="1147.1" font-size="9px" text-anchor="end" font-weight="normal" fill="#111827">sync_sem</text>
 <rect x="955.0" y="1122.8" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
-<text x="992.7" y="1147.1" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">53,872</text>
+<text x="992.7" y="1147.1" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">352</text>
 <rect x="1030.4" y="1122.8" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
-<text x="1068.1" y="1147.1" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">336</text>
+<text x="1068.1" y="1147.1" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">352</text>
 <rect x="1105.8" y="1122.8" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
-<text x="1143.4" y="1147.1" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">96</text>
+<text x="1143.4" y="1147.1" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">80</text>
 <rect x="1181.1" y="1122.8" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
 <text x="1218.8" y="1147.1" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">96</text>
 <rect x="1256.5" y="1122.8" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
 <text x="1294.2" y="1147.1" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">1,750</text>
 <rect x="1331.9" y="1122.8" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
-<text x="1369.6" y="1147.1" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">2,041</text>
+<text x="1369.6" y="1147.1" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">1,847</text>
 <rect x="1407.2" y="1122.8" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
 <text x="1444.9" y="1147.1" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">875</text>
 <rect x="1482.6" y="1122.8" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
 <text x="1520.3" y="1147.1" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">875</text>
 <text x="947.0" y="1183.0" font-size="9px" text-anchor="end" font-weight="normal" fill="#111827">sync_mutex</text>
 <rect x="955.0" y="1158.6" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
-<text x="992.7" y="1183.0" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">53,184</text>
+<text x="992.7" y="1183.0" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">448</text>
 <rect x="1030.4" y="1158.6" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
 <text x="1068.1" y="1183.0" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">448</text>
 <rect x="1105.8" y="1158.6" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
@@ -1060,7 +1060,7 @@
 <rect x="1407.2" y="1158.6" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
 <text x="1444.9" y="1183.0" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">583</text>
 <rect x="1482.6" y="1158.6" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
-<text x="1520.3" y="1183.0" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">583</text>
+<text x="1520.3" y="1183.0" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">777.667</text>
 <text x="947.0" y="1218.9" font-size="9px" text-anchor="end" font-weight="normal" fill="#111827">sync_mailbox</text>
 <rect x="955.0" y="1194.5" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
 <text x="992.7" y="1218.9" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">368</text>
@@ -1073,11 +1073,11 @@
 <rect x="1256.5" y="1194.5" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
 <text x="1294.2" y="1218.9" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">1,458</text>
 <rect x="1331.9" y="1194.5" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
-<text x="1369.6" y="1218.9" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">1,458</text>
+<text x="1369.6" y="1218.9" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">1,750</text>
 <rect x="1407.2" y="1194.5" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
 <text x="1444.9" y="1218.9" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">1,166</text>
 <rect x="1482.6" y="1194.5" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
-<text x="1520.3" y="1218.9" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">1,750</text>
+<text x="1520.3" y="1218.9" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">1,458</text>
 <text x="947.0" y="1254.8" font-size="9px" text-anchor="end" font-weight="normal" fill="#111827">irq_handler_exec</text>
 <rect x="955.0" y="1230.4" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
 <text x="992.7" y="1254.8" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">32</text>
@@ -1092,43 +1092,43 @@
 <rect x="1331.9" y="1230.4" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
 <text x="1369.6" y="1254.8" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">291</text>
 <rect x="1407.2" y="1230.4" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
-<text x="1444.9" y="1254.8" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">5,250</text>
+<text x="1444.9" y="1254.8" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">5,541</text>
 <rect x="1482.6" y="1230.4" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
-<text x="1520.3" y="1254.8" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">5,833</text>
+<text x="1520.3" y="1254.8" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">5,541</text>
 <text x="947.0" y="1290.6" font-size="9px" text-anchor="end" font-weight="normal" fill="#111827">deadline_miss_under_load</text>
-<rect x="955.0" y="1266.2" width="74.4" height="34.9" fill="rgb(210,226,250)"/>
-<text x="992.7" y="1290.6" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">3,994,656</text>
-<rect x="1030.4" y="1266.2" width="74.4" height="34.9" fill="rgb(222,234,252)"/>
-<text x="1068.1" y="1290.6" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">2,317,712</text>
-<rect x="1105.8" y="1266.2" width="74.4" height="34.9" fill="rgb(198,217,247)"/>
-<text x="1143.4" y="1290.6" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">5,704,560</text>
-<rect x="1181.1" y="1266.2" width="74.4" height="34.9" fill="rgb(198,217,247)"/>
-<text x="1218.8" y="1290.6" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">5,752,928</text>
+<rect x="955.0" y="1266.2" width="74.4" height="34.9" fill="rgb(237,244,254)"/>
+<text x="992.7" y="1290.6" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">97,616</text>
+<rect x="1030.4" y="1266.2" width="74.4" height="34.9" fill="rgb(224,236,252)"/>
+<text x="1068.1" y="1290.6" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">873,904</text>
+<rect x="1105.8" y="1266.2" width="74.4" height="34.9" fill="rgb(235,243,254)"/>
+<text x="1143.4" y="1290.6" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">203,632</text>
+<rect x="1181.1" y="1266.2" width="74.4" height="34.9" fill="rgb(237,244,254)"/>
+<text x="1218.8" y="1290.6" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">116,432</text>
 <rect x="1256.5" y="1266.2" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
-<text x="1294.2" y="1290.6" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">23,166</text>
+<text x="1294.2" y="1290.6" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">26,396</text>
 <rect x="1331.9" y="1266.2" width="74.4" height="34.9" fill="rgb(238,245,254)"/>
-<text x="1369.6" y="1290.6" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">20,541</text>
-<rect x="1407.2" y="1266.2" width="74.4" height="34.9" fill="rgb(235,243,254)"/>
-<text x="1444.9" y="1290.6" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">529,375</text>
-<rect x="1482.6" y="1266.2" width="74.4" height="34.9" fill="rgb(235,243,254)"/>
-<text x="1520.3" y="1290.6" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">513,333</text>
+<text x="1369.6" y="1290.6" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">13,083.667</text>
+<rect x="1407.2" y="1266.2" width="74.4" height="34.9" fill="rgb(234,242,254)"/>
+<text x="1444.9" y="1290.6" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">294,291</text>
+<rect x="1482.6" y="1266.2" width="74.4" height="34.9" fill="rgb(234,242,254)"/>
+<text x="1520.3" y="1290.6" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">289,624.333</text>
 <text x="947.0" y="1326.5" font-size="9px" text-anchor="end" font-weight="normal" fill="#111827">net_event_latency</text>
-<rect x="955.0" y="1302.1" width="74.4" height="34.9" fill="rgb(69,126,225)"/>
-<text x="992.7" y="1326.5" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">24,092,752</text>
-<rect x="1030.4" y="1302.1" width="74.4" height="34.9" fill="rgb(232,241,253)"/>
-<text x="1068.1" y="1326.5" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">984,544</text>
-<rect x="1105.8" y="1302.1" width="74.4" height="34.9" fill="rgb(227,237,252)"/>
-<text x="1143.4" y="1326.5" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">1,630,192</text>
-<rect x="1181.1" y="1302.1" width="74.4" height="34.9" fill="rgb(221,233,251)"/>
-<text x="1218.8" y="1326.5" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">2,521,392</text>
-<rect x="1256.5" y="1302.1" width="74.4" height="34.9" fill="rgb(227,237,252)"/>
-<text x="1294.2" y="1326.5" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">1,673,875</text>
-<rect x="1331.9" y="1302.1" width="74.4" height="34.9" fill="rgb(234,242,254)"/>
-<text x="1369.6" y="1326.5" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">653,041</text>
-<rect x="1407.2" y="1302.1" width="74.4" height="34.9" fill="rgb(212,226,250)"/>
-<text x="1444.9" y="1326.5" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">3,820,541</text>
-<rect x="1482.6" y="1302.1" width="74.4" height="34.9" fill="rgb(234,243,254)"/>
-<text x="1520.3" y="1326.5" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">576,041</text>
-<text x="820.0" y="1354.0" font-size="10px" text-anchor="start" font-weight="normal" fill="#111827">unit: ns; color scale min=16 max=24,092,752</text>
+<rect x="955.0" y="1302.1" width="74.4" height="34.9" fill="rgb(233,241,253)"/>
+<text x="992.7" y="1326.5" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">359,184</text>
+<rect x="1030.4" y="1302.1" width="74.4" height="34.9" fill="rgb(228,238,253)"/>
+<text x="1068.1" y="1326.5" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">639,056</text>
+<rect x="1105.8" y="1302.1" width="74.4" height="34.9" fill="rgb(181,205,244)"/>
+<text x="1143.4" y="1326.5" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">3,559,776</text>
+<rect x="1181.1" y="1302.1" width="74.4" height="34.9" fill="rgb(234,242,254)"/>
+<text x="1218.8" y="1326.5" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">301,408</text>
+<rect x="1256.5" y="1302.1" width="74.4" height="34.9" fill="rgb(230,239,253)"/>
+<text x="1294.2" y="1326.5" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">550,374.5</text>
+<rect x="1331.9" y="1302.1" width="74.4" height="34.9" fill="rgb(232,241,253)"/>
+<text x="1369.6" y="1326.5" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">405,999.667</text>
+<rect x="1407.2" y="1302.1" width="74.4" height="34.9" fill="rgb(226,237,252)"/>
+<text x="1444.9" y="1326.5" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">754,055.333</text>
+<rect x="1482.6" y="1302.1" width="74.4" height="34.9" fill="rgb(219,232,251)"/>
+<text x="1520.3" y="1326.5" font-size="8px" text-anchor="middle" font-weight="normal" fill="#111827">1,179,791.333</text>
+<text x="820.0" y="1354.0" font-size="10px" text-anchor="start" font-weight="normal" fill="#111827">unit: ns; color scale min=16 max=10,500,437.5</text>
 <text x="24.0" y="1460.0" font-size="11px" text-anchor="start" font-weight="normal" fill="#111827">All cells show measured nanosecond values from complete samples=10 records.</text>
 </svg>

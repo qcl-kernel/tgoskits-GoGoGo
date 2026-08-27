@@ -4,19 +4,21 @@
 
 | 项目 | 内容 |
 |---|---|
-| 日期 | 2026-08-25（数据采集）；2026-08-27（rebase 后复验） |
+| 日期 | 2026-08-25（首版）；2026-08-27（rebase 后重新采集，本版数据） |
 | 数据采集时分支 | `dev`（合并提交 `88084dd2a`，Task123 功能提交 `93c2d0e31`） |
 | 当前基线分支 | `upstream/pr-new`（集成提交 `87eb3fcc5`，适配提交 `621a063a9`） |
 | 当前基线 | upstream/dev `ba252ca67` |
 | 测试范围 | QEMU 四组合 + ROCK 4D 真机四组合 |
 | 数据目录 | `GoGoGo-成果材料/图标数据/` |
 
-> 注：本报告的数据于 2026-08-25 在当时的 `dev` 分支采集（提交 `88084dd2a` /
-> `93c2d0e31`）。2026-08-27 该工作 rebase 到最新 upstream/dev 并适配后，八组合
-> 门禁在 `upstream/pr-new`（`87eb3fcc5` + `621a063a9`）上全部复验通过；本报告
-> 的 RTBench 数值表仍为 8-25 采集批次。rebase 适配的四个修复（vCPU 独占
+> 注：本版数据于 2026-08-27 在 `upstream/pr-new`（`87eb3fcc5` + `621a063a9`，
+> 基于 upstream/dev `ba252ca67`）重新采集，覆盖 8-25 在当时 `dev` 分支
+> （`88084dd2a` / `93c2d0e31`）的首版数据。rebase 适配的四个修复（vCPU 独占
 > pinning、virtio-mmio QEMU vendor 身份、busy WFI fastpath 禁用、host-SPI 风暴
-> 熔断）见提交 `621a063a9` 的说明。
+> 熔断）见提交 `621a063a9` 的说明；其中 busy WFI fastpath 禁用使 ROCK 4D 上
+> RT-Thread 组合的 timer jitter 较 8-25 首版略有变化（p99 28,750 ns vs 33,375
+> ns，量级一致）。物理串口偶发的记录截断沿用首版的 retry 合并策略：每个组合
+> 保留主日志加 retry 日志，解析器只收完整记录并去重。
 
 本报告替代此前“ROCK 4D 在 guest 启动前阻塞”和“物理板 RTOS guest 为占位镜像”的
 阶段性结论。旧报告仍保留用于记录历史排障过程，不能与本轮最终数据混用。
@@ -50,14 +52,14 @@ p95=2900, p99=2900, max=2900`。这组 3 帧数据用于闭环和协议门禁，
 
 | 平台/RTOS/客户机 | 指标数 | 样本完整性 | timer jitter p99（ns，轮次最大值） |
 |---|---:|---|---:|
-| QEMU / RT-Thread / Linux | 16 | 10/10，missing=0 | 9,124,144 |
-| QEMU / RT-Thread / StarryOS | 16 | 10/10，missing=0 | 3,785,952 |
-| QEMU / Zephyr / Linux | 16 | 10/10，missing=0 | 1,621,664 |
-| QEMU / Zephyr / StarryOS | 16 | 10/10，missing=0 | 1,017,600 |
-| ROCK 4D / RT-Thread / Linux | 16 | 10/10，missing=0 | 33,375 |
-| ROCK 4D / RT-Thread / StarryOS | 16 | 10/10，missing=0 | 194,958 |
-| ROCK 4D / Zephyr / Linux | 16 | 10/10，missing=0 | 2,087,791 |
-| ROCK 4D / Zephyr / StarryOS | 16 | 10/10，missing=0 | 2,078,166 |
+| QEMU / RT-Thread / Linux | 16 | 10/10，missing=0 | 244,720 |
+| QEMU / RT-Thread / StarryOS | 16 | 10/10，missing=0 | 493,312 |
+| QEMU / Zephyr / Linux | 16 | 10/10，missing=0 | 1,295,168 |
+| QEMU / Zephyr / StarryOS | 16 | 10/10，missing=0 | 797,104 |
+| ROCK 4D / RT-Thread / Linux | 16 | 10/10，missing=0 | 28,750 |
+| ROCK 4D / RT-Thread / StarryOS | 16 | 10/10，missing=0 | 29,334 |
+| ROCK 4D / Zephyr / Linux | 16 | 10/10，missing=0 | 2,084,375 |
+| ROCK 4D / Zephyr / StarryOS | 16 | 10/10，missing=0 | 2,083,166 |
 
 图表只使用纳秒字段并按完整样本筛选；没有用 `16`、`0` 或复制其它指标来填充缺失
 值。图中出现的 `16` 仅在实际测量值为 16 ns 时保留。PMU cycles/instructions 不

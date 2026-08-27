@@ -26,11 +26,11 @@
 <rect x="252.0" y="109.3" width="32.6" height="168.7" fill="#65a30d"/>
 <text x="268.3" y="105.3" font-size="10px" text-anchor="middle" font-weight="normal" fill="#111827">1,461</text>
 <text x="268.3" y="294.0" font-size="9px" text-anchor="middle" font-weight="normal" fill="#111827">Q-Z/S</text>
-<rect x="306.4" y="109.3" width="32.6" height="168.7" fill="#ea580c"/>
-<text x="322.7" y="105.3" font-size="10px" text-anchor="middle" font-weight="normal" fill="#111827">1,461</text>
+<rect class="na" x="306.4" y="270.0" width="32.6" height="8"/>
+<text x="322.7" y="266.0" font-size="9px" text-anchor="middle" font-weight="normal" fill="#111827">NA</text>
 <text x="322.7" y="294.0" font-size="9px" text-anchor="middle" font-weight="normal" fill="#111827">R-RT/L</text>
-<rect x="360.8" y="109.3" width="32.6" height="168.7" fill="#c2410c"/>
-<text x="377.1" y="105.3" font-size="10px" text-anchor="middle" font-weight="normal" fill="#111827">1,461</text>
+<rect class="na" x="360.8" y="270.0" width="32.6" height="8"/>
+<text x="377.1" y="266.0" font-size="9px" text-anchor="middle" font-weight="normal" fill="#111827">NA</text>
 <text x="377.1" y="294.0" font-size="9px" text-anchor="middle" font-weight="normal" fill="#111827">R-RT/S</text>
 <rect x="415.1" y="109.3" width="32.6" height="168.7" fill="#9333ea"/>
 <text x="431.4" y="105.3" font-size="10px" text-anchor="middle" font-weight="normal" fill="#111827">1,461</text>
@@ -63,11 +63,11 @@
 <rect x="777.0" y="109.3" width="32.6" height="168.7" fill="#65a30d"/>
 <text x="793.3" y="105.3" font-size="10px" text-anchor="middle" font-weight="normal" fill="#111827">2,900</text>
 <text x="793.3" y="294.0" font-size="9px" text-anchor="middle" font-weight="normal" fill="#111827">Q-Z/S</text>
-<rect x="831.4" y="109.3" width="32.6" height="168.7" fill="#ea580c"/>
-<text x="847.7" y="105.3" font-size="10px" text-anchor="middle" font-weight="normal" fill="#111827">2,900</text>
+<rect class="na" x="831.4" y="270.0" width="32.6" height="8"/>
+<text x="847.7" y="266.0" font-size="9px" text-anchor="middle" font-weight="normal" fill="#111827">NA</text>
 <text x="847.7" y="294.0" font-size="9px" text-anchor="middle" font-weight="normal" fill="#111827">R-RT/L</text>
-<rect x="885.8" y="109.3" width="32.6" height="168.7" fill="#c2410c"/>
-<text x="902.1" y="105.3" font-size="10px" text-anchor="middle" font-weight="normal" fill="#111827">2,900</text>
+<rect class="na" x="885.8" y="270.0" width="32.6" height="8"/>
+<text x="902.1" y="266.0" font-size="9px" text-anchor="middle" font-weight="normal" fill="#111827">NA</text>
 <text x="902.1" y="294.0" font-size="9px" text-anchor="middle" font-weight="normal" fill="#111827">R-RT/S</text>
 <rect x="940.1" y="109.3" width="32.6" height="168.7" fill="#9333ea"/>
 <text x="956.4" y="105.3" font-size="10px" text-anchor="middle" font-weight="normal" fill="#111827">2,900</text>
@@ -100,11 +100,11 @@
 <rect x="1302.0" y="109.3" width="32.6" height="168.7" fill="#65a30d"/>
 <text x="1318.3" y="105.3" font-size="10px" text-anchor="middle" font-weight="normal" fill="#111827">2,900</text>
 <text x="1318.3" y="294.0" font-size="9px" text-anchor="middle" font-weight="normal" fill="#111827">Q-Z/S</text>
-<rect x="1356.4" y="109.3" width="32.6" height="168.7" fill="#ea580c"/>
-<text x="1372.7" y="105.3" font-size="10px" text-anchor="middle" font-weight="normal" fill="#111827">2,900</text>
+<rect class="na" x="1356.4" y="270.0" width="32.6" height="8"/>
+<text x="1372.7" y="266.0" font-size="9px" text-anchor="middle" font-weight="normal" fill="#111827">NA</text>
 <text x="1372.7" y="294.0" font-size="9px" text-anchor="middle" font-weight="normal" fill="#111827">R-RT/L</text>
-<rect x="1410.8" y="109.3" width="32.6" height="168.7" fill="#c2410c"/>
-<text x="1427.1" y="105.3" font-size="10px" text-anchor="middle" font-weight="normal" fill="#111827">2,900</text>
+<rect class="na" x="1410.8" y="270.0" width="32.6" height="8"/>
+<text x="1427.1" y="266.0" font-size="9px" text-anchor="middle" font-weight="normal" fill="#111827">NA</text>
 <text x="1427.1" y="294.0" font-size="9px" text-anchor="middle" font-weight="normal" fill="#111827">R-RT/S</text>
 <rect x="1465.1" y="109.3" width="32.6" height="168.7" fill="#9333ea"/>
 <text x="1481.4" y="105.3" font-size="10px" text-anchor="middle" font-weight="normal" fill="#111827">2,900</text>
@@ -146,8 +146,8 @@
 <rect x="415.1" y="409.2" width="32.6" height="168.7" fill="#9333ea"/>
 <text x="431.4" y="405.2" font-size="10px" text-anchor="middle" font-weight="normal" fill="#111827">1,461</text>
 <text x="431.4" y="594.0" font-size="9px" text-anchor="middle" font-weight="normal" fill="#111827">R-Z/L</text>
-<rect class="na" x="469.5" y="570.0" width="32.6" height="8"/>
-<text x="485.8" y="566.0" font-size="9px" text-anchor="middle" font-weight="normal" fill="#111827">NA</text>
+<rect x="469.5" y="409.2" width="32.6" height="168.7" fill="#db2777"/>
+<text x="485.8" y="405.2" font-size="10px" text-anchor="middle" font-weight="normal" fill="#111827">1,461</text>
 <text x="485.8" y="594.0" font-size="9px" text-anchor="middle" font-weight="normal" fill="#111827">R-Z/S</text>
 <text x="36.0" y="483.5" font-size="10px" text-anchor="middle" font-weight="normal" fill="#111827">q15</text>
 <text x="553.0" y="375.0" font-size="14px" text-anchor="start" font-weight="bold" fill="#111827">AI tracking error P95</text>
@@ -183,8 +183,8 @@
 <rect x="940.1" y="409.2" width="32.6" height="168.7" fill="#9333ea"/>
 <text x="956.4" y="405.2" font-size="10px" text-anchor="middle" font-weight="normal" fill="#111827">2,900</text>
 <text x="956.4" y="594.0" font-size="9px" text-anchor="middle" font-weight="normal" fill="#111827">R-Z/L</text>
-<rect class="na" x="994.5" y="570.0" width="32.6" height="8"/>
-<text x="1010.8" y="566.0" font-size="9px" text-anchor="middle" font-weight="normal" fill="#111827">NA</text>
+<rect x="994.5" y="409.2" width="32.6" height="168.7" fill="#db2777"/>
+<text x="1010.8" y="405.2" font-size="10px" text-anchor="middle" font-weight="normal" fill="#111827">2,900</text>
 <text x="1010.8" y="594.0" font-size="9px" text-anchor="middle" font-weight="normal" fill="#111827">R-Z/S</text>
 <text x="561.0" y="483.5" font-size="10px" text-anchor="middle" font-weight="normal" fill="#111827">q15</text>
 <text x="1078.0" y="375.0" font-size="14px" text-anchor="start" font-weight="bold" fill="#111827">AI tracking error P99</text>
@@ -220,8 +220,8 @@
 <rect x="1465.1" y="409.2" width="32.6" height="168.7" fill="#9333ea"/>
 <text x="1481.4" y="405.2" font-size="10px" text-anchor="middle" font-weight="normal" fill="#111827">2,900</text>
 <text x="1481.4" y="594.0" font-size="9px" text-anchor="middle" font-weight="normal" fill="#111827">R-Z/L</text>
-<rect class="na" x="1519.5" y="570.0" width="32.6" height="8"/>
-<text x="1535.8" y="566.0" font-size="9px" text-anchor="middle" font-weight="normal" fill="#111827">NA</text>
+<rect x="1519.5" y="409.2" width="32.6" height="168.7" fill="#db2777"/>
+<text x="1535.8" y="405.2" font-size="10px" text-anchor="middle" font-weight="normal" fill="#111827">2,900</text>
 <text x="1535.8" y="594.0" font-size="9px" text-anchor="middle" font-weight="normal" fill="#111827">R-Z/S</text>
 <text x="1086.0" y="483.5" font-size="10px" text-anchor="middle" font-weight="normal" fill="#111827">q15</text>
 <text x="28.0" y="675.0" font-size="14px" text-anchor="start" font-weight="bold" fill="#111827">Duplicates</text>
@@ -248,11 +248,11 @@
 <rect x="252.0" y="878.0" width="32.6" height="0.0" fill="#65a30d"/>
 <text x="268.3" y="874.0" font-size="10px" text-anchor="middle" font-weight="normal" fill="#111827">0</text>
 <text x="268.3" y="894.0" font-size="9px" text-anchor="middle" font-weight="normal" fill="#111827">Q-Z/S</text>
-<rect x="306.4" y="878.0" width="32.6" height="0.0" fill="#ea580c"/>
-<text x="322.7" y="874.0" font-size="10px" text-anchor="middle" font-weight="normal" fill="#111827">0</text>
+<rect class="na" x="306.4" y="870.0" width="32.6" height="8"/>
+<text x="322.7" y="866.0" font-size="9px" text-anchor="middle" font-weight="normal" fill="#111827">NA</text>
 <text x="322.7" y="894.0" font-size="9px" text-anchor="middle" font-weight="normal" fill="#111827">R-RT/L</text>
-<rect x="360.8" y="878.0" width="32.6" height="0.0" fill="#c2410c"/>
-<text x="377.1" y="874.0" font-size="10px" text-anchor="middle" font-weight="normal" fill="#111827">0</text>
+<rect class="na" x="360.8" y="870.0" width="32.6" height="8"/>
+<text x="377.1" y="866.0" font-size="9px" text-anchor="middle" font-weight="normal" fill="#111827">NA</text>
 <text x="377.1" y="894.0" font-size="9px" text-anchor="middle" font-weight="normal" fill="#111827">R-RT/S</text>
 <rect x="415.1" y="878.0" width="32.6" height="0.0" fill="#9333ea"/>
 <text x="431.4" y="874.0" font-size="10px" text-anchor="middle" font-weight="normal" fill="#111827">0</text>
@@ -285,11 +285,11 @@
 <rect class="na" x="777.0" y="870.0" width="32.6" height="8"/>
 <text x="793.3" y="866.0" font-size="9px" text-anchor="middle" font-weight="normal" fill="#111827">NA</text>
 <text x="793.3" y="894.0" font-size="9px" text-anchor="middle" font-weight="normal" fill="#111827">Q-Z/S</text>
-<rect x="831.4" y="878.0" width="32.6" height="0.0" fill="#ea580c"/>
-<text x="847.7" y="874.0" font-size="10px" text-anchor="middle" font-weight="normal" fill="#111827">0</text>
+<rect class="na" x="831.4" y="870.0" width="32.6" height="8"/>
+<text x="847.7" y="866.0" font-size="9px" text-anchor="middle" font-weight="normal" fill="#111827">NA</text>
 <text x="847.7" y="894.0" font-size="9px" text-anchor="middle" font-weight="normal" fill="#111827">R-RT/L</text>
-<rect x="885.8" y="878.0" width="32.6" height="0.0" fill="#c2410c"/>
-<text x="902.1" y="874.0" font-size="10px" text-anchor="middle" font-weight="normal" fill="#111827">0</text>
+<rect class="na" x="885.8" y="870.0" width="32.6" height="8"/>
+<text x="902.1" y="866.0" font-size="9px" text-anchor="middle" font-weight="normal" fill="#111827">NA</text>
 <text x="902.1" y="894.0" font-size="9px" text-anchor="middle" font-weight="normal" fill="#111827">R-RT/S</text>
 <rect x="940.1" y="878.0" width="32.6" height="0.0" fill="#9333ea"/>
 <text x="956.4" y="874.0" font-size="10px" text-anchor="middle" font-weight="normal" fill="#111827">0</text>
@@ -322,11 +322,11 @@
 <rect x="1302.0" y="878.0" width="32.6" height="0.0" fill="#65a30d"/>
 <text x="1318.3" y="874.0" font-size="10px" text-anchor="middle" font-weight="normal" fill="#111827">0</text>
 <text x="1318.3" y="894.0" font-size="9px" text-anchor="middle" font-weight="normal" fill="#111827">Q-Z/S</text>
-<rect x="1356.4" y="878.0" width="32.6" height="0.0" fill="#ea580c"/>
-<text x="1372.7" y="874.0" font-size="10px" text-anchor="middle" font-weight="normal" fill="#111827">0</text>
+<rect class="na" x="1356.4" y="870.0" width="32.6" height="8"/>
+<text x="1372.7" y="866.0" font-size="9px" text-anchor="middle" font-weight="normal" fill="#111827">NA</text>
 <text x="1372.7" y="894.0" font-size="9px" text-anchor="middle" font-weight="normal" fill="#111827">R-RT/L</text>
-<rect x="1410.8" y="878.0" width="32.6" height="0.0" fill="#c2410c"/>
-<text x="1427.1" y="874.0" font-size="10px" text-anchor="middle" font-weight="normal" fill="#111827">0</text>
+<rect class="na" x="1410.8" y="870.0" width="32.6" height="8"/>
+<text x="1427.1" y="866.0" font-size="9px" text-anchor="middle" font-weight="normal" fill="#111827">NA</text>
 <text x="1427.1" y="894.0" font-size="9px" text-anchor="middle" font-weight="normal" fill="#111827">R-RT/S</text>
 <rect x="1465.1" y="878.0" width="32.6" height="0.0" fill="#9333ea"/>
 <text x="1481.4" y="874.0" font-size="10px" text-anchor="middle" font-weight="normal" fill="#111827">0</text>

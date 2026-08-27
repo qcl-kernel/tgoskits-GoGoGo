@@ -10,10 +10,14 @@ The `rock4d/` directory contains the final physical-board captures:
 - `fixed-task123-rock4d-rtthread-starryos.log`
 - `fixed-task123-rock4d-zephyr-linux.log`
 - `fixed-task123-rock4d-zephyr-starryos.log`
+- `retry-<combo>-s*.log`：各组合的补充采集。物理串口偶发把单条 benchmark
+  记录从字段中间截断（mux 输出交错），一份日志可能缺个别完整记录；解析器
+  将主日志与 retry 日志合并、只收完整记录并按字段值去重。
 
-The final rerun captures were normalized from the serial retries. The parser keeps
-only complete rows and de-duplicates identical records. All four ROCK 4D combinations
-now provide the same 16 nanosecond probes.
+Captures were normalized from the serial retries (2026-08-27 batch, rebased
+`upstream/pr-new` baseline). The parser keeps only complete rows and
+de-duplicates identical records. All four ROCK 4D combinations provide the same
+16 nanosecond probes.
 
 ## QEMU
 

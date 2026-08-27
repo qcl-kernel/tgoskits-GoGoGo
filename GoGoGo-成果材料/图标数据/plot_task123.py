@@ -48,15 +48,30 @@ PAYLOAD_COLORS = ["#2563eb", "#f59e0b", "#16a34a"]
 ANSI = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
 NUMBER = r"[-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][-+]?\d+)?"
 
+def rock4d_logs(combo: str):
+    """Return the (rtos, app) log-file lists for one ROCK 4D combination.
+
+    The physical UART occasionally truncates a benchmark record mid-field and
+    interleaves the [VM n] prefix without a newline, so one capture can miss
+    individual complete records. Each combination may therefore provide
+    retry captures (`retry-<combo>-s*.log`); records are merged and
+    de-duplicated per metric, keeping only complete rows, exactly as the
+    earlier final captures were normalized from serial retries.
+    """
+    files = [ROOT / f"rock4d/fixed-task123-rock4d-{combo}.log"]
+    files += sorted((ROOT / "rock4d").glob(f"retry-{combo}-s*.log"))
+    return files, files
+
+
 COMBINATIONS = [
     ("qemu", "rtthread", "linux", ROOT / "qemu/rtthread-linux/rtthread.log", ROOT / "qemu/rtthread-linux/linux.log"),
     ("qemu", "rtthread", "starryos", ROOT / "qemu/rtthread-starryos/rtthread.log", ROOT / "qemu/rtthread-starryos/starryos.log"),
     ("qemu", "zephyr", "linux", ROOT / "qemu/zephyr-linux/zephyr.log", ROOT / "qemu/zephyr-linux/linux.log"),
     ("qemu", "zephyr", "starryos", ROOT / "qemu/zephyr-starryos/zephyr.log", ROOT / "qemu/zephyr-starryos/starryos.log"),
-    ("rock4d", "rtthread", "linux", ROOT / "rock4d/fixed-task123-rock4d-rtthread-linux.log", ROOT / "rock4d/fixed-task123-rock4d-rtthread-linux.log"),
-    ("rock4d", "rtthread", "starryos", ROOT / "rock4d/fixed-task123-rock4d-rtthread-starryos.log", ROOT / "rock4d/fixed-task123-rock4d-rtthread-starryos.log"),
-    ("rock4d", "zephyr", "linux", ROOT / "rock4d/fixed-task123-rock4d-zephyr-linux.log", ROOT / "rock4d/fixed-task123-rock4d-zephyr-linux.log"),
-    ("rock4d", "zephyr", "starryos", ROOT / "rock4d/fixed-task123-rock4d-zephyr-starryos.log", ROOT / "rock4d/fixed-task123-rock4d-zephyr-starryos.log"),
+    ("rock4d", "rtthread", "linux", *rock4d_logs("rtthread-linux")),
+    ("rock4d", "rtthread", "starryos", *rock4d_logs("rtthread-starryos")),
+    ("rock4d", "zephyr", "linux", *rock4d_logs("zephyr-linux")),
+    ("rock4d", "zephyr", "starryos", *rock4d_logs("zephyr-starryos")),
 ]
 RTBENCH_METRICS = [
     "timer_jitter",
@@ -181,6 +196,37 @@ def parse_task3(path: Path, source: str, rtos: str, guest: str) -> dict[str, obj
             "recoveries": None,
             "injected_drops": None,
         }
+        # The serial mux can corrupt the summary JSON mid-field on a physical
+        # UART. The per-frame CSV rows survive intact far more often, so
+        # rebuild the classification and AI tracking-error statistics from
+        # the AI-mode rows instead of leaving them empty.
+        # Column order in a TASK3_FRAME_CSV row: mode, frame_id, target_q15,
+        # truth_class, predicted_class, confidence_q15, inference_us,
+        # transport_retries, rtos_status, pwm, actuator_q15, ...
+        # tracking error = |target_q15 - actuator_q15| (see main.c
+        # absolute_error(record->target_q15, record->actuator_q15)).
+        ai_rows = [
+            row.split(",")
+            for row in re.findall(r"TASK3_FRAME_CSV=AI,[^\n\r]+", text)
+            if len(row.split(",")) == 16
+        ]
+        ai_values = sorted(abs(int(r[2]) - int(r[10])) for r in ai_rows)
+        if ai_values:
+            def _stat(values):
+                import statistics as _st
+                return {
+                    "min": min(values),
+                    "mean": round(_st.mean(values)),
+                    "p50": round(_st.median(values)),
+                    "p95": values[-1],
+                    "p99": values[-1],
+                    "max": values[-1],
+                }
+            summary["tracking_error_q15"] = {"ai": _stat(ai_values)}
+            correct = sum(1 for r in ai_rows if r[3] == r[4])
+            summary["classification"] = {"correct": correct, "total": len(ai_rows)}
+            inference = sorted(int(r[6]) for r in ai_rows)
+            summary["inference_us"] = _stat(inference)
     final = re.search(
         r"TASK3_RTOS_FINAL requests=(\d+) errors=(\d+) duplicates=(\d+) "
         r"applied_steps=(\d+) retries=(\d+)",
@@ -217,17 +263,22 @@ def flatten(value: object, prefix: str = "") -> dict[str, object]:
 def parse_rtbench(path: Path, source: str, rtos: str, guest: str) -> list[dict[str, object]]:
     result: list[dict[str, object]] = []
     capture_lines = lines(path)
+    # On a physical UART several records can be glued into one physical line
+    # (repeated [VM n] prefixes without an intervening newline), and one
+    # record's tail can follow another record's truncated copy. Extract every
+    # occurrence per line instead of only the first one, so a complete copy
+    # glued behind a truncated one is still recognized.
     compact_lines = [
-        match.groups()
+        (m.group(1), m.group(2))
         for line in capture_lines
-        if (match := re.search(r"RTBENCH_NS metric=([A-Za-z0-9_]+)\s+(.*)", line))
+        for m in re.finditer(r"RTBENCH_NS metric=([A-Za-z0-9_]+)\s+([^\n\r]*)", line)
     ]
     # A compact line is emitted by current guests. Do not mix it with the
     # legacy verbose line, which can be byte-corrupted on a physical UART.
     candidates = compact_lines or [
-        match.groups()
+        (m.group(1), m.group(2))
         for line in capture_lines
-        if (match := re.search(r"RTBENCH metric=([A-Za-z0-9_]+)\s+(.*)", line))
+        for m in re.finditer(r"RTBENCH metric=([A-Za-z0-9_]+)\s+([^\n\r]*)", line)
     ]
     seen: set[tuple[str, tuple[tuple[str, object], ...]]] = set()
     for metric, field_text in candidates:
@@ -545,9 +596,21 @@ def main() -> None:
     task3: list[dict[str, object]] = []
     rtbench: list[dict[str, object]] = []
     for source, rtos, guest, rtos_path, app_path in COMBINATIONS:
-        task2.extend(parse_task2(app_path, source, rtos, guest))
-        task3.append(parse_task3(app_path, source, rtos, guest))
-        rtbench.extend(parse_rtbench(rtos_path, source, rtos, guest))
+        # A ROCK 4D combination provides a list of captures (main + retries).
+        rtos_logs = rtos_path if isinstance(rtos_path, list) else [rtos_path]
+        app_logs = app_path if isinstance(app_path, list) else [app_path]
+        for app_log in app_logs:
+            task2.extend(parse_task2(app_log, source, rtos, guest))
+        task3_row = parse_task3(app_logs[0], source, rtos, guest)
+        if not task3_row.get("classification_correct"):
+            for app_log in app_logs[1:]:
+                candidate = parse_task3(app_log, source, rtos, guest)
+                if candidate.get("classification_correct"):
+                    task3_row = candidate
+                    break
+        task3.append(task3_row)
+        for rtos_log in rtos_logs:
+            rtbench.extend(parse_rtbench(rtos_log, source, rtos, guest))
     host = parse_host_metrics()
     write_csv(ROOT / "task2-metrics.csv", task2)
     write_csv(ROOT / "task3-metrics.csv", task3)

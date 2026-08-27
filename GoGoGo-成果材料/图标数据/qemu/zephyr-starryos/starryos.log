@@ -47,7 +47,7 @@ log_level = info
 backtrace = false
 smp = 2
 
-Boot at 1970-01-01 00:00:00.905447216 UTC
+Boot at 1970-01-01 00:00:00.789148832 UTC
 
 Initialized 6 tracepoints
 kmod subsystem initialized
@@ -65,22 +65,22 @@ Target: 192.168.77.30:9876, count=10 per size
 
 --- Payload 64B ---
   sent=10  recv=10  loss=0%
-  RTT: min=4ms avg=5ms max=7ms P50=5ms P95=6ms P99=6ms P99.9=6ms
-  throughput=11.57KiB/s
+  RTT: min=3ms avg=4ms max=7ms P50=4ms P95=6ms P99=6ms P99.9=6ms
+  throughput=13.89KiB/s
   request_timeouts=0 protocol_errors=0 reconnects=0
   transport: retrans=0 timeouts=0 dup=0 reorder=0 errors=0
 
 --- Payload 256B ---
   sent=10  recv=10  loss=0%
-  RTT: min=4ms avg=6ms max=23ms P50=5ms P95=7ms P99=7ms P99.9=7ms
-  throughput=36.23KiB/s
+  RTT: min=4ms avg=5ms max=16ms P50=4ms P95=7ms P99=7ms P99.9=7ms
+  throughput=41.67KiB/s
   request_timeouts=0 protocol_errors=0 reconnects=0
   transport: retrans=0 timeouts=0 dup=0 reorder=0 errors=0
 
 --- Payload 1024B ---
   sent=10  recv=10  loss=0%
-  RTT: min=5ms avg=7ms max=24ms P50=5ms P95=6ms P99=6ms P99.9=6ms
-  throughput=138.89KiB/s
+  RTT: min=3ms avg=6ms max=18ms P50=5ms P95=8ms P99=8ms P99.9=8ms
+  throughput=163.93KiB/s
   request_timeouts=0 protocol_errors=0 reconnects=0
   transport: retrans=0 timeouts=0 dup=0 reorder=0 errors=0
 
@@ -90,12 +90,12 @@ ALL TESTS COMPLETE
 RT-IPC client exited with rc=0
 TASK2_STARRY_END status=PASS
 TASK3_STARRY_READY ip=192.168.77.11 peer=192.168.77.30:9877
-TASK3_FRAME_CSV=FIXED,0,0,2,2,21649,1938,0,0,0,0,65,5357,0,0,0
-TASK3_FRAME_CSV=FIXED,1,1461,2,2,16624,1571,0,0,0,0,27,4140,0,0,0
-TASK3_FRAME_CSV=FIXED,2,2900,2,2,32767,1571,0,0,0,0,83,4386,0,0,0
-TASK3_FRAME_CSV=AI,0,0,2,2,21649,1647,0,0,0,0,27,7054,0,0,0
-TASK3_FRAME_CSV=AI,1,1461,2,2,16624,1618,0,0,0,0,27,3923,0,0,0
-TASK3_FRAME_CSV=AI,2,2900,2,2,32767,1831,0,0,0,0,27,4527,0,0,0
-TASK3_SUMMARY_JSON={"schema":1,"frames_per_mode":3,"records":6,"elapsed_us":436564,"requests":6,"successes":6,"success_rate":1.000000,"application_errors":0,"application_timeouts":0,"transport_retries":0,"duplicates":0,"recovered":0,"reconnects":0,"injected_drops":0,"classification":{"correct":3,"total":3,"accuracy":1.000000,"confusion_matrix":[[0,0,0],[0,3,0],[0,0,0]]},"inference_us":{"min":1571,"mean":1696,"p50":1618,"p95":1938,"p99":1938,"max":1938},"round_trip_us":{"min":3923,"mean":4897,"p50":4386,"p95":7054,"p99":7054,"max":7054},"tracking_error_q15":{"fixed":{"min":0,"mean":1453,"p50":1461,"p95":2900,"p99":2900,"max":2900},"ai":{"min":0,"mean":1453,"p50":1461,"p95":2900,"p99":2900,"max":2900}},"settling":{"fixed":{"direction_changes":0,"successes":0,"mean_frames":0,"max_frames":0},"ai":{"direction_changes":0,"successes":0,"mean_frames":0,"max_frames":0}},"effective_payload_bytes_per_second":329}
+TASK3_FRAME_CSV=FIXED,0,0,2,2,21649,1954,0,0,0,0,22,5472,0,0,0
+TASK3_FRAME_CSV=FIXED,1,1461,2,2,16624,1642,0,0,0,0,22,2294,0,0,0
+TASK3_FRAME_CSV=FIXED,2,2900,2,2,32767,1637,0,0,0,0,24,5624,0,0,0
+TASK3_FRAME_CSV=AI,0,0,2,2,21649,1798,0,0,0,0,23,3527,0,0,0
+TASK3_FRAME_CSV=AI,1,1461,2,2,16624,1980,0,0,0,0,36,6114,0,0,0
+TASK3_FRAME_CSV=AI,2,2900,2,2,32767,1740,0,0,0,0,54,2839,0,0,0
+TASK3_SUMMARY_JSON={"schema":1,"frames_per_mode":3,"records":6,"elapsed_us":433869,"requests":6,"successes":6,"success_rate":1.000000,"application_errors":0,"application_timeouts":0,"transport_retries":0,"duplicates":0,"recovered":0,"reconnects":0,"injected_drops":0,"classification":{"correct":3,"total":3,"accuracy":1.000000,"confusion_matrix":[[0,0,0],[0,3,0],[0,0,0]]},"inference_us":{"min":1637,"mean":1791,"p50":1740,"p95":1980,"p99":1980,"max":1980},"round_trip_us":{"min":2294,"mean":4311,"p50":3527,"p95":6114,"p99":6114,"max":6114},"tracking_error_q15":{"fixed":{"min":0,"mean":1453,"p50":1461,"p95":2900,"p99":2900,"max":2900},"ai":{"min":0,"mean":1453,"p50":1461,"p95":2900,"p99":2900,"max":2900}},"settling":{"fixed":{"direction_changes":0,"successes":0,"mean_frames":0,"max_frames":0},"ai":{"direction_changes":0,"successes":0,"mean_frames":0,"max_frames":0}},"effective_payload_bytes_per_second":331}
 TASK3_STARRY_END status=PASS
 TASK123_STARRY_END status=PASS

@@ -16,7 +16,7 @@
 
  \ | /
 - RT -     Thread Operating System
- / | \     5.2.2 build Aug 25 2026 01:33:37
+ / | \     5.2.2 build Aug 27 2026 12:05:49
  2006 - 2024 Copyright by RT-Thread team
 lwIP-2.1.2 initialized!
 
@@ -30,27 +30,67 @@ RTIPC_SERVER_READY ip=192.168.77.30 port=9876
 
 TASK3_RTOS_FINAL requests=6 errors=0 duplicates=0 applied_steps=6 retries=0
 TASK3_RTOS_FINAL_DONE
-RTBENCH_PMU status=ready event=0x8 cycles_delta=1549 instructions_delta=1549
-RTBENCH_NS metric=timer_jitter run=1 expected=10 collected=10 missing=0 p50_ns=2288416 p95_ns=8367760 p99_ns=8367760 p99_9_ns=8367760 max_ns=8367760 mean_ns=2635312
-RTBENCH_NS metric=callback_exec run=1 expected=10 collected=10 missing=0 p50_ns=128 p95_ns=144 p99_ns=144 p99_9_ns=144 max_ns=144 mean_ns=136
-RTBENCH_NS metric=timer_jitter run=2 expected=10 collected=10 missing=0 p50_ns=3208672 p95_ns=9124144 p99_ns=9124144 p99_9_ns=9124144 max_ns=9124144 mean_ns=3080166
-RTBENCH_NS metric=callback_exec run=2 expected=10 collected=10 missing=0 p50_ns=144 p95_ns=144 p99_ns=144 p99_9_ns=144 max_ns=144 mean_ns=140
-RTBENCH_NS metric=timer_jitter run=3 expected=10 collected=10 missing=0 p50_ns=420448 p95_ns=5031424 p99_ns=5031424 p99_9_ns=5031424 max_ns=5031424 mean_ns=1277892
-RTBENCH_NS metric=callback_exec run=3 expected=10 collected=10 missing=0 p50_ns=128 p95_ns=144 p99_ns=144 p99_9_ns=144 max_ns=144 mean_ns=132
+RTBENCH_BEGIN samples=10 frequency=62500000 pmu_event=0x8
+RTBENCH_NS metric=timer_jitter run=1 expected=10 collected=10 missing=0 p50_ns=592 p95_ns=32688 p99_ns=32688 p99_9_ns=32688 max_ns=32688 mean_ns=7257
+RTBENCH_NS metric=timer_jitter run=1 expected=10 collected=10 missing=0 p50_ns=592 p95_ns=32688 p99_ns=32688 p99_9_ns=32688 max_ns=32688 mean_ns=7257
+RTBENCH_NS metric=timer_jitter run=1 expected=10 collected=10 missing=0 p50_ns=592 p95_ns=32688 p99_ns=32688 p99_9_ns=32688 max_ns=32688 mean_ns=7257
+RTBENCH_NS metric=callback_exec run=1 expected=10 collected=10 missing=0 p50_ns=128 p95_ns=144 p99_ns=144 p99_9_ns=144 max_ns=144 mean_ns=132
+RTBENCH_NS metric=callback_exec run=1 expected=10 collected=10 missing=0 p50_ns=128 p95_ns=144 p99_ns=144 p99_9_ns=144 max_ns=144 mean_ns=132
+RTBENCH_NS metric=callback_exec run=1 expected=10 collected=10 missing=0 p50_ns=128 p95_ns=144 p99_ns=144 p99_9_ns=144 max_ns=144 mean_ns=132
+RTBENCH_NS metric=timer_jitter run=2 expected=10 collected=10 missing=0 p50_ns=6448 p95_ns=201664 p99_ns=201664 p99_9_ns=201664 max_ns=201664 mean_ns=29478
+RTBENCH_NS metric=timer_jitter run=2 expected=10 collected=10 missing=0 p50_ns=6448 p95_ns=201664 p99_ns=201664 p99_9_ns=201664 max_ns=201664 mean_ns=29478
+RTBENCH_NS metric=timer_jitter run=2 expected=10 collected=10 missing=0 p50_ns=6448 p95_ns=201664 p99_ns=201664 p99_9_ns=201664 max_ns=201664 mean_ns=29478
+RTBENCH_NS metric=callback_exec run=2 expected=10 collected=10 missing=0 p50_ns=128 p95_ns=144 p99_ns=144 p99_9_ns=144 max_ns=144 mean_ns=134
+RTBENCH_NS metric=callback_exec run=2 expected=10 collected=10 missing=0 p50_ns=128 p95_ns=144 p99_ns=144 p99_9_ns=144 max_ns=144 mean_ns=134
+RTBENCH_NS metric=callback_exec run=2 expected=10 collected=10 missing=0 p50_ns=128 p95_ns=144 p99_ns=144 p99_9_ns=144 max_ns=144 mean_ns=134
+RTBENCH_NS metric=timer_jitter run=3 expected=10 collected=10 missing=0 p50_ns=4896 p95_ns=244720 p99_ns=244720 p99_9_ns=244720 max_ns=244720 mean_ns=52913
+RTBENCH_NS metric=timer_jitter run=3 expected=10 collected=10 missing=0 p50_ns=4896 p95_ns=244720 p99_ns=244720 p99_9_ns=244720 max_ns=244720 mean_ns=52913
+RTBENCH_NS metric=timer_jitter run=3 expected=10 collected=10 missing=0 p50_ns=4896 p95_ns=244720 p99_ns=244720 p99_9_ns=244720 max_ns=244720 mean_ns=52913
+RTBENCH_NS metric=callback_exec run=3 expected=10 collected=10 missing=0 p50_ns=128 p95_ns=144 p99_ns=144 p99_9_ns=144 max_ns=144 mean_ns=131
+RTBENCH_NS metric=callback_exec run=3 expected=10 collected=10 missing=0 p50_ns=128 p95_ns=144 p99_ns=144 p99_9_ns=144 max_ns=144 mean_ns=131
+RTBENCH_NS metric=callback_exec run=3 expected=10 collected=10 missing=0 p50_ns=128 p95_ns=144 p99_ns=144 p99_9_ns=144 max_ns=144 mean_ns=131
 RTBENCH_NS metric=preemption run=1 expected=10 collected=10 missing=0 p50_ns=608 p95_ns=624 p99_ns=624 p99_9_ns=624 max_ns=624 mean_ns=611
-RTBENCH_NS metric=irq run=1 expected=10 collected=10 missing=0 p50_ns=27392 p95_ns=123936 p99_ns=123936 p99_9_ns=123936 max_ns=123936 mean_ns=56393
-RTBENCH_NS metric=irq_to_task run=1 expected=10 collected=10 missing=0 p50_ns=29040 p95_ns=2242192 p99_ns=2242192 p99_9_ns=2242192 max_ns=2242192 mean_ns=277696
+RTBENCH_NS metric=preemption run=1 expected=10 collected=10 missing=0 p50_ns=608 p95_ns=624 p99_ns=624 p99_9_ns=624 max_ns=624 mean_ns=611
+RTBENCH_NS metric=preemption run=1 expected=10 collected=10 missing=0 p50_ns=608 p95_ns=624 p99_ns=624 p99_9_ns=624 max_ns=624 mean_ns=611
+RTBENCH_NS metric=irq run=1 expected=10 collected=10 missing=0 p50_ns=25312 p95_ns=25312 p99_ns=25312 p99_9_ns=25312 max_ns=25312 mean_ns=25312
+RTBENCH_NS metric=irq run=1 expected=10 collected=10 missing=0 p50_ns=25312 p95_ns=25312 p99_ns=25312 p99_9_ns=25312 max_ns=25312 mean_ns=25312
+RTBENCH_NS metric=irq run=1 expected=10 collected=10 missing=0 p50_ns=25312 p95_ns=25312 p99_ns=25312 p99_9_ns=25312 max_ns=25312 mean_ns=25312
+RTBENCH_NS metric=irq_to_task run=1 expected=10 collected=10 missing=0 p50_ns=26912 p95_ns=26912 p99_ns=26912 p99_9_ns=26912 max_ns=26912 mean_ns=26814
+RTBENCH_NS metric=irq_to_task run=1 expected=10 collected=10 missing=0 p50_ns=26912 p95_ns=26912 p99_ns=26912 p99_9_ns=26912 max_ns=26912 mean_ns=26814
+RTBENCH_NS metric=irq_to_task run=1 expected=10 collected=10 missing=0 p50_ns=26912 p95_ns=26912 p99_ns=26912 p99_9_ns=26912 max_ns=26912 mean_ns=26814
 RTBENCH_NS metric=irq_disabled_duration run=1 expected=10 collected=10 missing=0 p50_ns=416 p95_ns=416 p99_ns=416 p99_9_ns=416 max_ns=416 mean_ns=416
-RTBENCH_NS metric=mutex_inversion run=1 expected=10 collected=10 missing=0 p50_ns=2832 p95_ns=5888 p99_ns=5888 p99_9_ns=5888 max_ns=5888 mean_ns=3131
-RTBENCH_NS metric=wake_under_load run=1 expected=10 collected=10 missing=0 p50_ns=608 p95_ns=624 p99_ns=624 p99_9_ns=624 max_ns=624 mean_ns=612
+RTBENCH_NS metric=irq_disabled_duration run=1 expected=10 collected=10 missing=0 p50_ns=416 p95_ns=416 p99_ns=416 p99_9_ns=416 max_ns=416 mean_ns=416
+RTBENCH_NS metric=irq_disabled_duration run=1 expected=10 collected=10 missing=0 p50_ns=416 p95_ns=416 p99_ns=416 p99_9_ns=416 max_ns=416 mean_ns=416
+RTBENCH_NS metric=mutex_inversion run=1 expected=10 collected=10 missing=0 p50_ns=2816 p95_ns=2832 p99_ns=2832 p99_9_ns=2832 max_ns=2832 mean_ns=2822
+RTBENCH_NS metric=mutex_inversion run=1 expected=10 collected=10 missing=0 p50_ns=2816 p95_ns=2832 p99_ns=2832 p99_9_ns=2832 max_ns=2832 mean_ns=2822
+RTBENCH_NS metric=mutex_inversion run=1 expected=10 collected=10 missing=0 p50_ns=2816 p95_ns=2832 p99_ns=2832 p99_9_ns=2832 max_ns=2832 mean_ns=2822
+RTBENCH_NS metric=wake_under_load run=1 expected=10 collected=10 missing=0 p50_ns=608 p95_ns=624 p99_ns=624 p99_9_ns=624 max_ns=624 mean_ns=609
+RTBENCH_NS metric=wake_under_load run=1 expected=10 collected=10 missing=0 p50_ns=608 p95_ns=624 p99_ns=624 p99_9_ns=624 max_ns=624 mean_ns=609
+RTBENCH_NS metric=wake_under_load run=1 expected=10 collected=10 missing=0 p50_ns=608 p95_ns=624 p99_ns=624 p99_9_ns=624 max_ns=624 mean_ns=609
+RTBENCH_NS metric=context_switch run=1 expected=10 collected=10 missing=0 p50_ns=416 p95_ns=432 p99_ns=432 p99_9_ns=432 max_ns=432 mean_ns=419
+RTBENCH_NS metric=context_switch run=1 expected=10 collected=10 missing=0 p50_ns=416 p95_ns=432 p99_ns=432 p99_9_ns=432 max_ns=432 mean_ns=419
 RTBENCH_NS metric=context_switch run=1 expected=10 collected=10 missing=0 p50_ns=416 p95_ns=432 p99_ns=432 p99_9_ns=432 max_ns=432 mean_ns=419
 RTBENCH_NS metric=scheduler_decision run=1 expected=10 collected=10 missing=0 p50_ns=128 p95_ns=128 p99_ns=128 p99_9_ns=128 max_ns=128 mean_ns=124
-RTBENCH_NS metric=sync_sem run=1 expected=10 collected=10 missing=0 p50_ns=336 p95_ns=53872 p99_ns=53872 p99_9_ns=53872 max_ns=53872 mean_ns=5689
-RTBENCH_NS metric=sync_mutex run=1 expected=10 collected=10 missing=0 p50_ns=448 p95_ns=53184 p99_ns=53184 p99_9_ns=53184 max_ns=53184 mean_ns=5721
+RTBENCH_NS metric=scheduler_decision run=1 expected=10 collected=10 missing=0 p50_ns=128 p95_ns=128 p99_ns=128 p99_9_ns=128 max_ns=128 mean_ns=124
+RTBENCH_NS metric=scheduler_decision run=1 expected=10 collected=10 missing=0 p50_ns=128 p95_ns=128 p99_ns=128 p99_9_ns=128 max_ns=128 mean_ns=124
+RTBENCH_NS metric=sync_sem run=1 expected=10 collected=10 missing=0 p50_ns=336 p95_ns=352 p99_ns=352 p99_9_ns=352 max_ns=352 mean_ns=337
+RTBENCH_NS metric=sync_sem run=1 expected=10 collected=10 missing=0 p50_ns=336 p95_ns=352 p99_ns=352 p99_9_ns=352 max_ns=352 mean_ns=337
+RTBENCH_NS metric=sync_sem run=1 expected=10 collected=10 missing=0 p50_ns=336 p95_ns=352 p99_ns=352 p99_9_ns=352 max_ns=352 mean_ns=337
+RTBENCH_NS metric=sync_mutex run=1 expected=10 collected=10 missing=0 p50_ns=448 p95_ns=448 p99_ns=448 p99_9_ns=448 max_ns=448 mean_ns=448
+RTBENCH_NS metric=sync_mutex run=1 expected=10 collected=10 missing=0 p50_ns=448 p95_ns=448 p99_ns=448 p99_9_ns=448 max_ns=448 mean_ns=448
+RTBENCH_NS metric=sync_mutex run=1 expected=10 collected=10 missing=0 p50_ns=448 p95_ns=448 p99_ns=448 p99_9_ns=448 max_ns=448 mean_ns=448
 RTBENCH_NS metric=sync_mailbox run=1 expected=10 collected=10 missing=0 p50_ns=368 p95_ns=368 p99_ns=368 p99_9_ns=368 max_ns=368 mean_ns=363
-RTBENCH_NS metric=irq_handler_exec run=1 expected=10 collected=10 missing=0 p50_ns=16 p95_ns=32 p99_ns=32 p99_9_ns=32 max_ns=32 mean_ns=24
-RTBENCH_NS metric=deadline_miss_under_load run=1 expected=10 collected=10 missing=0 p50_ns=739872 p95_ns=3994656 p99_ns=3994656 p99_9_ns=3994656 max_ns=3994656 mean_ns=1690185
+RTBENCH_NS metric=sync_mailbox run=1 expected=10 collected=10 missing=0 p50_ns=368 p95_ns=368 p99_ns=368 p99_9_ns=368 max_ns=368 mean_ns=363
+RTBENCH_NS metric=sync_mailbox run=1 expected=10 collected=10 missing=0 p50_ns=368 p95_ns=368 p99_ns=368 p99_9_ns=368 max_ns=368 mean_ns=363
+RTBENCH_NS metric=irq_handler_exec run=1 expected=10 collected=10 missing=0 p50_ns=16 p95_ns=32 p99_ns=32 p99_9_ns=32 max_ns=32 mean_ns=17
+RTBENCH_NS metric=irq_handler_exec run=1 expected=10 collected=10 missing=0 p50_ns=16 p95_ns=32 p99_ns=32 p99_9_ns=32 max_ns=32 mean_ns=17
+RTBENCH_NS metric=irq_handler_exec run=1 expected=10 collected=10 missing=0 p50_ns=16 p95_ns=32 p99_ns=32 p99_9_ns=32 max_ns=32 mean_ns=17
+RTBENCH_NS metric=deadline_miss_under_load run=1 expected=10 collected=10 missing=0 p50_ns=16 p95_ns=97616 p99_ns=97616 p99_9_ns=97616 max_ns=97616 mean_ns=19579
+RTBENCH_NS metric=deadline_miss_under_load run=1 expected=10 collected=10 missing=0 p50_ns=16 p95_ns=97616 p99_ns=97616 p99_9_ns=97616 max_ns=97616 mean_ns=19579
+RTBENCH_NS metric=deadline_miss_under_load run=1 expected=10 collected=10 missing=0 p50_ns=16 p95_ns=97616 p99_ns=97616 p99_9_ns=97616 max_ns=97616 mean_ns=19579
 RTBENCH_NET_READY port=9878 expected=10
-RTBENCH_NS metric=net_event_latency run=1 expected=10 collected=10 missing=0 p50_ns=4209168 p95_ns=24092752 p99_ns=24092752 p99_9_ns=24092752 max_ns=24092752 mean_ns=7407616
+RTBENCH_NS metric=net_event_latency run=1 expected=10 collected=10 missing=0 p50_ns=84096 p95_ns=359184 p99_ns=359184 p99_9_ns=359184 max_ns=359184 mean_ns=137196
+RTBENCH_NS metric=net_event_latency run=1 expected=10 collected=10 missing=0 p50_ns=84096 p95_ns=359184 p99_ns=359184 p99_9_ns=359184 max_ns=359184 mean_ns=137196
+RTBENCH_NS metric=net_event_latency run=1 expected=10 collected=10 missing=0 p50_ns=84096 p95_ns=359184 p99_ns=359184 p99_9_ns=359184 max_ns=359184 mean_ns=137196
 RTBENCH_NET_DIAGNOSTIC irq_dropped=0 irq_coalesced=0 probe_received=10 probe_acked=10 probe_no_irq=0 probe_duplicates=0 trigger_attempts=1 trigger_socket_failures=0 trigger_send_failures=0
 RTBENCH_END status=PASS
