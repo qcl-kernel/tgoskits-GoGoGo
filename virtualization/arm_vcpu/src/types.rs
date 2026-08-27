@@ -251,6 +251,13 @@ pub enum ArmVmExit {
         /// Value written by the guest.
         value: u64,
     },
+    /// The guest performed an EL1 stage-1 TLBI operation.
+    TlbInvalidate {
+        /// ISS-derived TLBI system-operation encoding.
+        addr: ArmSysRegAddr,
+        /// Operand supplied by the guest, if the selected operation uses one.
+        value: u64,
+    },
     /// The guest read a trapped GICv3 common CPU-interface register.
     GicCpuInterfaceRead {
         /// Register selected by the trapped MRS instruction.

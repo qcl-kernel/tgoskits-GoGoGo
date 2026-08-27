@@ -62,6 +62,9 @@ pub fn get_vm_config_template(params: VmTemplateParams) -> GuestConfig {
             name: params.name,
             guest_type: params.guest_type,
             cpu_num: params.cpu_num,
+            host_timer_policy: HostTimerPolicy::Periodic,
+            host_vcpu_idle_policy: HostVcpuIdlePolicy::Halt,
+            guest_tlbi_policy: GuestTlbiPolicy::Native,
             // Assign sequential CPU IDs starting from 0
             phys_cpu_ids: Some((0..params.cpu_num).collect()),
             phys_cpu_sets: None,
@@ -71,6 +74,7 @@ pub fn get_vm_config_template(params: VmTemplateParams) -> GuestConfig {
             entry_point: params.entry_point,
             kernel_path: params.kernel_path,
             kernel_load_addr: params.kernel_load_addr,
+            load_policy: KernelLoadPolicy::AdjustToMemory,
             enable_bios: false,
             boot_protocol: None,
             bios_path: None, // BIOS not used in most configurations

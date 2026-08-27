@@ -1,0 +1,4 @@
+interface:
+  display_name: "Perf Tracker"
+  short_description: "Record and chart qperf performance metrics"
+  default_prompt: "Use $perf-tracker to record metrics after cargo starry perf runs and plot performance trends from the accumulated data."

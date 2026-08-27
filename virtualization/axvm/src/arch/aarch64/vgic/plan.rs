@@ -211,12 +211,20 @@ fn vgic_region(region: GuestMmioRegion, operation: &'static str) -> AxVmResult<V
 fn assigned_spis(
     configured: &[crate::config::PassthroughInterrupt],
 ) -> AxVmResult<Vec<AssignedSpiConfig>> {
+    info!(
+        "assigned_spis: {} passthrough interrupts configured",
+        configured.len()
+    );
     configured
         .iter()
         .map(|route| {
             let intid = route.source.checked_add(32).ok_or_else(|| {
                 AxVmError::invalid_config("AArch64 passthrough SPI number overflows")
             })?;
+            info!(
+                "assigned_spis: source={} -> guest_intid={}",
+                route.source, intid
+            );
             AssignedSpiConfig::new(
                 SpiId::new(intid)
                     .map_err(|error| AxVmError::interrupt("validate assigned SPI", error))?,

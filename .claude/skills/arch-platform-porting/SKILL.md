@@ -151,6 +151,16 @@ Current Axvisor LoongArch QEMU bring-up uses the dynamic UEFI platform path. The
   previous binding epoch before that task can run elsewhere.
   AArch64 final aliases need cache maintenance consistent with their shareability attributes;
   RISC-V secondary boot must initialize `sscratch`; LoongArch must keep r21 and KS3 coherent.
+- **AArch64 guest PSCI CPU_ON**: keep secondary-vCPU startup asynchronous because the trapped
+  HVC path holds the vCPU CPU pin and preemption guard. That path may use only non-sleeping locks
+  and must publish task registration before the task can run. A secondary startup wait must also
+  terminate when the VM starts stopping, and every successful bind/count/ack commit must be
+  serialized with the VM lifecycle lock so stop cannot finish around an uncounted secondary. The
+  public stop and resume paths must wake runtime waiters themselves. A pause racing startup defers
+  the bind/count/ack commit until resume; it is not an architecture failure. If asynchronous
+  architecture binding fails after PSCI has returned success, remove the ack and task registration,
+  roll the vCPU back to `Free`, request VM stop with `StopReason::Fault`, and wake all vCPUs; never
+  leave the primary guest running after a failed secondary startup.
 - **CPU runtime**: update `components/axcpu/src/<arch>` for trap entry, context switch, user/kernel context, syscall return path, FP/SIMD state, and per-CPU assumptions.
 - **Platform bridge**: update `platforms/axplat-dyn`, `platforms/somehal`, platform config, memory regions, IRQ routing, timer source, power operations, and CPU boot operations.
 - **Scheduler-clock ownership**: keep comparable scheduler time in `ax-plat::time`, not in `ax-task` or an architecture trap module. `someboot` reports only whether its raw counter is synchronized across runtime CPUs; `axplat-dyn` initializes each bound CPU's clock anchor before scheduler/IRQ publication and stamps it from the local timer IRQ. On x86 SMP, an invariant TSC is not by itself proof of cross-CPU synchronization, so use the corrected per-CPU path unless boot code has established that proof. Remote readers may couple only the calling and target CPUs' published clocks; they must never substitute the calling CPU's raw TSC for a target sample. CPU-offline flow must close remote admission before withdrawing the target publication.

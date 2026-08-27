@@ -41,6 +41,15 @@ pub struct VmCpuRegisters {
     pub vm_system_regs: GuestSystemRegisters,
 }
 
+/// Floating-point and SIMD state owned by one execution context.
+#[repr(C, align(16))]
+#[derive(Clone, Copy, Debug, Default)]
+struct FpSimdState {
+    regs: [u128; 32],
+    fpcr: u64,
+    fpsr: u64,
+}
+
 /// Host-only state used by one guest entry/exit round.
 #[repr(C)]
 #[derive(Debug, Default)]
@@ -51,7 +60,8 @@ struct HostRuntimeContext {
     irq_interface: u64,
     irq_cpu_interface_base: usize,
     pending_irq_ack: u32,
-    _reserved: u32,
+    busy_wfi_fastpath: u32,
+    host_fp_simd: FpSimdState,
 }
 
 /// A virtual CPU within a guest.
@@ -62,6 +72,7 @@ pub struct ArmVcpu<H: ArmHostOps> {
     // Keep `ctx` first and `host` immediately after it.
     ctx: TrapFrame,
     host: HostRuntimeContext,
+    guest_fp_simd: FpSimdState,
     guest_system_regs: GuestSystemRegisters,
     timer: ArmVcpuTimer,
     /// The MPIDR_EL1 value for the vCPU.
@@ -106,6 +117,14 @@ pub(crate) const ARM_VCPU_HOST_IRQ_CPU_INTERFACE_BASE_OFFSET: usize =
 pub(crate) const ARM_VCPU_HOST_PENDING_IRQ_ACK_OFFSET: usize =
     core::mem::offset_of!(AssemblyArmVcpu, host)
         + core::mem::offset_of!(HostRuntimeContext, pending_irq_ack);
+pub(crate) const ARM_VCPU_HOST_BUSY_WFI_FASTPATH_OFFSET: usize =
+    core::mem::offset_of!(AssemblyArmVcpu, host)
+        + core::mem::offset_of!(HostRuntimeContext, busy_wfi_fastpath);
+pub(crate) const ARM_VCPU_HOST_FP_SIMD_OFFSET: usize = core::mem::offset_of!(AssemblyArmVcpu, host)
+    + core::mem::offset_of!(HostRuntimeContext, host_fp_simd);
+pub(crate) const ARM_VCPU_GUEST_FP_SIMD_OFFSET: usize =
+    core::mem::offset_of!(AssemblyArmVcpu, guest_fp_simd);
+pub(crate) const FP_SIMD_CONTROL_DELTA: usize = core::mem::offset_of!(FpSimdState, fpcr);
 /// Offset of the guest-owned `TPIDR_EL0` slot within [`ArmVcpu`].
 pub(crate) const ARM_VCPU_GUEST_TPIDR_EL0_OFFSET: usize =
     core::mem::offset_of!(AssemblyArmVcpu, guest_system_regs)
@@ -143,6 +162,10 @@ const _: () = {
         ARM_VCPU_HOST_IRQ_CPU_INTERFACE_BASE_OFFSET.is_multiple_of(core::mem::align_of::<usize>())
     );
     assert!(ARM_VCPU_HOST_PENDING_IRQ_ACK_OFFSET.is_multiple_of(core::mem::align_of::<u32>()));
+    assert!(ARM_VCPU_HOST_BUSY_WFI_FASTPATH_OFFSET.is_multiple_of(core::mem::align_of::<u32>()));
+    assert!(ARM_VCPU_HOST_FP_SIMD_OFFSET.is_multiple_of(core::mem::align_of::<FpSimdState>()));
+    assert!(ARM_VCPU_GUEST_FP_SIMD_OFFSET.is_multiple_of(core::mem::align_of::<FpSimdState>()));
+    assert!(FP_SIMD_CONTROL_DELTA == core::mem::size_of::<[u128; 32]>());
     assert!(
         ARM_VCPU_GUEST_TPIDR_EL0_OFFSET
             >= ARM_VCPU_HOST_TPIDR_EL0_OFFSET + core::mem::size_of::<u64>()
@@ -164,15 +187,26 @@ pub struct ArmVcpuCreateConfig {
     pub dtb_addr: usize,
 }
 
+/// Guest EL1 TLB-maintenance trap policy.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum ArmVcpuTlbiPolicy {
+    /// Execute guest EL1 TLBI instructions without trapping to EL2.
+    #[default]
+    Native,
+    /// Trap guest EL1 stage-1 TLBI instructions to EL2.
+    TrapEl1,
+}
+
 /// Fixed EL2 setup policy for a new [`ArmVcpu`].
 ///
-/// Physical interrupts and timers are always trapped. A physical device may
-/// back a virtual interrupt, but it must still pass through the VM-owned
-/// virtual interrupt controller rather than bypassing vCPU state.
+/// The physical timer and guest WFI remain software-trapped. TLBI trapping is
+/// opt-in so existing embedders retain their native guest behavior.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct ArmVcpuSetupConfig {
     timer: ArmTimerVmConfig,
     host_irq: ArmHostIrqConfig,
+    tlbi: ArmVcpuTlbiPolicy,
+    busy_wfi_fastpath: bool,
 }
 
 impl ArmVcpuSetupConfig {
@@ -181,7 +215,41 @@ impl ArmVcpuSetupConfig {
     ///
     /// Every vCPU in one VM must receive the same immutable configuration.
     pub const fn new(timer: ArmTimerVmConfig, host_irq: ArmHostIrqConfig) -> Self {
-        Self { timer, host_irq }
+        Self {
+            timer,
+            host_irq,
+            tlbi: ArmVcpuTlbiPolicy::Native,
+            busy_wfi_fastpath: false,
+        }
+    }
+
+    /// Creates setup state with an explicit guest EL1 TLBI policy.
+    pub const fn with_tlbi_policy(
+        timer: ArmTimerVmConfig,
+        host_irq: ArmHostIrqConfig,
+        tlbi: ArmVcpuTlbiPolicy,
+    ) -> Self {
+        Self {
+            timer,
+            host_irq,
+            tlbi,
+            busy_wfi_fastpath: false,
+        }
+    }
+
+    /// Creates setup state with explicit TLB and trapped-WFI runtime policies.
+    pub const fn with_runtime_policies(
+        timer: ArmTimerVmConfig,
+        host_irq: ArmHostIrqConfig,
+        tlbi: ArmVcpuTlbiPolicy,
+        busy_wfi_fastpath: bool,
+    ) -> Self {
+        Self {
+            timer,
+            host_irq,
+            tlbi,
+            busy_wfi_fastpath,
+        }
     }
 
     /// Returns the VM-wide timer configuration.
@@ -192,6 +260,16 @@ impl ArmVcpuSetupConfig {
     /// Returns the host IRQ interface consumed by the world-switch assembly.
     pub const fn host_irq(self) -> ArmHostIrqConfig {
         self.host_irq
+    }
+
+    /// Returns the guest EL1 TLBI trap policy.
+    pub const fn tlbi(self) -> ArmVcpuTlbiPolicy {
+        self.tlbi
+    }
+
+    /// Returns whether trapped guest WFI may return directly without a world switch.
+    pub const fn busy_wfi_fastpath(self) -> bool {
+        self.busy_wfi_fastpath
     }
 }
 
@@ -204,6 +282,7 @@ impl<H: ArmHostOps> ArmVcpu<H> {
         Ok(Self {
             ctx,
             host: HostRuntimeContext::default(),
+            guest_fp_simd: FpSimdState::default(),
             guest_system_regs: GuestSystemRegisters::default(),
             timer: ArmVcpuTimer::unconfigured(),
             mpidr: config.mpidr_el1,
@@ -221,6 +300,13 @@ impl<H: ArmHostOps> ArmVcpu<H> {
     pub fn set_entry(&mut self, entry: ArmGuestPhysAddr) -> ArmVcpuResult {
         debug!("set vcpu entry:{entry:?}");
         self.set_elr(entry.as_usize());
+        // Initialize VBAR_EL1 to the entry point. The guest will set its own
+        // vector table early in boot, but if an exception fires before that,
+        // fetching the handler from VBAR=0 (default) causes a Stage-2 fault.
+        // Pointing VBAR at valid guest code prevents this.
+        if self.guest_system_regs.vbar_el1 == 0 {
+            self.guest_system_regs.vbar_el1 = entry.as_usize() as u64;
+        }
         Ok(())
     }
 
@@ -240,6 +326,25 @@ impl<H: ArmHostOps> ArmVcpu<H> {
     /// Returns the architectural timer state saved at the last VM exit.
     pub fn timer_snapshot(&self) -> ArmVcpuResult<ArmTimerSnapshot> {
         self.timer.snapshot()
+    }
+
+    /// Returns the saved setup registers without loading them into hardware.
+    #[doc(hidden)]
+    pub fn saved_setup_state_for_test(&self) -> (u64, u64, u64) {
+        let timer = core::ptr::addr_of!(self.timer).cast::<u8>();
+        // SAFETY: `ArmVcpuTimer` has a stable `repr(C)` layout and the offset
+        // names its initialized guest CNTHCTL_EL2 field.
+        let cnthctl_el2 = unsafe {
+            timer
+                .add(crate::timer::TIMER_GUEST_HYPERVISOR_CONTROL_OFFSET)
+                .cast::<u64>()
+                .read()
+        };
+        (
+            cnthctl_el2,
+            self.guest_system_regs.hcr_el2,
+            self.guest_system_regs.vbar_el1,
+        )
     }
 
     /// Runs the vCPU until a VM exit while the caller holds the host IRQ mask.
@@ -304,13 +409,13 @@ impl<H: ArmHostOps> ArmVcpu<H> {
 
     /// Init guest context. Also set some el2 register value.
     fn init_vm_context(&mut self, config: ArmVcpuSetupConfig) {
-        // CNTHCTL_EL2.modify(CNTHCTL_EL2::EL1PCEN::SET + CNTHCTL_EL2::EL1PCTEN::SET);
         let guest_hypervisor_control =
             (CNTHCTL_EL2::EL1PCEN::CLEAR + CNTHCTL_EL2::EL1PCTEN::CLEAR).into();
         self.timer = ArmVcpuTimer::new(config.timer(), guest_hypervisor_control);
         self.host.irq_interface = config.host_irq().interface();
         self.host.irq_cpu_interface_base = config.host_irq().cpu_interface_base();
         self.host.pending_irq_ack = u32::MAX;
+        self.host.busy_wfi_fastpath = u32::from(config.busy_wfi_fastpath());
 
         self.guest_system_regs.sctlr_el1 = 0x30C50830;
         self.guest_system_regs.pmcr_el0 = 0;
@@ -322,12 +427,15 @@ impl<H: ArmHostOps> ArmVcpu<H> {
             self.guest_system_regs.vtcr_el2 = vtcr_for_config(levels, gpa_bits, pa_bits);
         }
 
-        let hcr_el2 = HCR_EL2::VM::Enable
+        let mut hcr_el2 = HCR_EL2::VM::Enable
             + HCR_EL2::TSC::EnableTrapEl1SmcToEl2
-            + HCR_EL2::TWI::SET
             + HCR_EL2::RW::EL1IsAarch64
             + HCR_EL2::IMO::EnableVirtualIRQ
             + HCR_EL2::FMO::EnableVirtualFIQ;
+        hcr_el2 += HCR_EL2::TWI::SET;
+        if config.tlbi() == ArmVcpuTlbiPolicy::TrapEl1 {
+            hcr_el2 += HCR_EL2::TTLB::SET;
+        }
 
         self.guest_system_regs.hcr_el2 = hcr_el2.into();
 

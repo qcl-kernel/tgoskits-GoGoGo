@@ -1,0 +1,8 @@
+# task3_csv_schema=1
+mode,frame_id,target_q15,truth_class,predicted_class,confidence_q15,inference_us,transport_retries,rtos_status,pwm,actuator_q15,rtos_processing_us,round_trip_us,error_code,duplicate,recovered
+FIXED,0,0,2,2,21649,3654,0,0,0,0,27,6123,0,0,0
+FIXED,1,1461,2,2,16624,5472,0,0,0,0,27,22892,0,0,0
+FIXED,2,2900,2,2,32767,11577,0,0,0,0,27,9401,0,0,0
+AI,0,0,2,2,21649,6120,0,0,0,0,27,5028,0,0,0
+AI,1,1461,2,2,16624,4859,0,0,0,0,27,10027,0,0,0
+AI,2,2900,2,2,32767,5665,0,0,0,0,27,10298,0,0,0

@@ -190,6 +190,8 @@ impl<T: GuestMemoryAccessor + Clone> VirtioMmioState<T> {
         let offset = transport::calculate_offset(addr, self.base_ipa);
         if offset < vc::VIRTIO_MMIO_CONFIG_OFFSET {
             transport::validate_access_width(width)?;
+            // Round to 4-byte register boundary for sub-word accesses
+            // (some guests like RT-Thread emit byte-width volatile reads).
         }
 
         let value = match offset {
@@ -301,6 +303,8 @@ impl<T: GuestMemoryAccessor + Clone> VirtioMmioState<T> {
         let offset = transport::calculate_offset(addr, self.base_ipa);
         if offset < vc::VIRTIO_MMIO_CONFIG_OFFSET {
             transport::validate_access_width(width)?;
+            // Round to 4-byte register boundary for sub-word accesses
+            // (some guests like RT-Thread emit byte-width volatile reads).
         }
         let val = val as u32;
 
@@ -368,6 +372,9 @@ impl<T: GuestMemoryAccessor + Clone> VirtioMmioState<T> {
             | vc::VIRTIO_MMIO_QUEUE_AVAIL_HIGH
             | vc::VIRTIO_MMIO_QUEUE_USED_LOW
             | vc::VIRTIO_MMIO_QUEUE_USED_HIGH) => self.write_queue_address(reg, val),
+            // Legacy virtio-mmio register offsets that some guests (e.g. RT-Thread)
+            // still write even in version 2 mode. Treat as no-ops.
+            0x028 | 0x03c | 0x040 => {}
             _ => return Err(VirtioError::InvalidRegister),
         }
         Ok(MmioWriteAction::None)

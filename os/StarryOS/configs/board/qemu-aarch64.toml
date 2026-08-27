@@ -1,4 +1,5 @@
 features = [
+  "block-root",
   "ax-driver/nvme",
   "ax-driver/virtio-net",
   "ax-driver/virtio-gpu",

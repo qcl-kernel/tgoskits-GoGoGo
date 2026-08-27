@@ -13,6 +13,7 @@ version = "0.4.1"
 efi = []
 hv = []
 mmu = []
+qemu-aarch64-three-guest-net = []
 thead-mae = []
 tls = []
 uspace = ["mmu"]

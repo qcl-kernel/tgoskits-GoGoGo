@@ -1,7 +1,7 @@
-#[cfg(all(feature = "net", feature = "fs"))]
+#[cfg(all(feature = "net", any(feature = "fs", feature = "embedded-rootfs")))]
 pub(crate) struct AxFsUnixNamespace;
 
-#[cfg(all(feature = "net", feature = "fs"))]
+#[cfg(all(feature = "net", any(feature = "fs", feature = "embedded-rootfs")))]
 impl ax_net::unix::UnixNamespace for AxFsUnixNamespace {
     fn resolve(&self, path: &str) -> ax_net::NetResult<alloc::sync::Arc<ax_net::unix::BindSlot>> {
         use axfs_ng_vfs::NodeType;
@@ -45,7 +45,7 @@ impl ax_net::unix::UnixNamespace for AxFsUnixNamespace {
     }
 }
 
-#[cfg(all(feature = "net", feature = "fs"))]
+#[cfg(all(feature = "net", any(feature = "fs", feature = "embedded-rootfs")))]
 fn namespace_vfs_error(error: axfs_ng_vfs::VfsError) -> ax_net::NetError {
     use ax_net::NetError;
     use axfs_ng_vfs::VfsError;

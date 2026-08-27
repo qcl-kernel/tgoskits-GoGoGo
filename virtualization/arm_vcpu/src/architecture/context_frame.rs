@@ -178,7 +178,7 @@ pub struct GuestSystemRegisters {
     par_el1: u64,
     mair_el1: u64,
     amair_el1: u64,
-    vbar_el1: u64,
+    pub vbar_el1: u64,
     contextidr_el1: u32,
     tpidr_el0: u64,
     tpidr_el1: u64,

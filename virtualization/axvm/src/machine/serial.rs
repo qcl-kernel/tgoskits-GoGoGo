@@ -293,11 +293,15 @@ fn serial_model(firmware: &FdtNodeSpec) -> Option<GuestSerialModel> {
         .any(|compatible| compatible == "arm,pl011")
     {
         Some(GuestSerialModel::Pl011)
-    } else if firmware
-        .compatible()
-        .iter()
-        .any(|compatible| matches!(compatible.as_str(), "ns16550" | "ns16550a"))
-    {
+    } else if firmware.compatible().iter().any(|compatible| {
+        // The DesignWare APB UART (dw-apb-uart) used by Rockchip RK3576 is a
+        // 16550-compatible 8250 core; Linux drives it through the same 8250
+        // driver as ns16550a. Treat it as a 16550 guest model.
+        matches!(
+            compatible.as_str(),
+            "ns16550" | "ns16550a" | "snps,dw-apb-uart"
+        )
+    }) {
         Some(GuestSerialModel::Uart16550)
     } else {
         None

@@ -1911,6 +1911,13 @@ fn unsupported_limit_sysctl_file(fs: &Arc<SimpleFs>, value: &'static str) -> Arc
 fn builder(fs: Arc<SimpleFs>, view: PidView) -> DirMaker {
     let mut root = DirMapping::new();
     root.add(
+        "cmdline",
+        SimpleFile::new_regular(fs.clone(), || {
+            let bootargs = ax_runtime::hal::boot::bootargs().unwrap_or_default();
+            Ok(format!("{bootargs}\n"))
+        }),
+    );
+    root.add(
         "mounts",
         SimpleFile::new_regular(fs.clone(), || {
             let fs_context = current_fs_context();

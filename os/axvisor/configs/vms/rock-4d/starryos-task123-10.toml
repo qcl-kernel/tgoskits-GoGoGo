@@ -1,0 +1,28 @@
+# ROCK 4D board VM config: StarryOS Task123 application guest.
+[base]
+id = 1
+name = "starryos-task123-rock4d"
+guest_type = "virtualized"
+cpu_num = 2
+guest_tlbi_policy = "vm_scoped"
+phys_cpu_ids = [0x100, 0x101]
+
+[kernel]
+entry_point = 0x8020_0000
+image_location = "memory"
+kernel_path = "../../../../../target/aarch64-unknown-none-softfloat/release/starryos-task123.bin"
+kernel_load_addr = 0x8020_0000
+dtb_load_addr = 0x9f00_0000
+cmdline = "task2.count=10 task3.frames=3 task3.fault=normal rtbench.net.count=10"
+memory_regions = [
+  [0x8000_0000, 0x2000_0000, 0x7, 2],
+]
+
+[devices]
+passthrough = []
+disabled = []
+
+[[devices.virtual]]
+id = "net0"
+model = "virtio-net"
+guest_mac = [0x52, 0x54, 0x00, 0x77, 0x00, 0x01]

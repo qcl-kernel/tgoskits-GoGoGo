@@ -530,6 +530,12 @@ pub(crate) fn deactivate_host_irq(token: usize) {
 
 /// Dispatches an already acknowledged IRQ through the host dynamic framework.
 pub(crate) fn dispatch_acknowledged_host_irq(token: usize) {
+    // A guest exit may acknowledge a host IRQ without passing through the
+    // platform's raw-vector entry wrapper. Keep this path equivalent to
+    // `ax_hal::irq::handle_irq`: handlers may wake work, but the scheduler
+    // must not switch tasks while the IRQ-context marker is still set.
+    let _irq_guard = ax_std::os::arceos::sync::IrqSaveGuard::new();
+    let _preempt_guard = ax_std::os::arceos::sync::PreemptGuard::new();
     let raw = host_irq_intid(token);
     let irq = match ax_std::os::arceos::modules::ax_hal::irq::resolve_percpu_irq(
         ax_std::os::arceos::modules::ax_hal::irq::HwIrq(raw),

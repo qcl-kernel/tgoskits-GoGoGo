@@ -15,6 +15,7 @@ use crate::{
     AxVmResult,
     architecture::cpu_up::{self, CpuUpExit, CpuUpOps},
     ax_err,
+    config::{GuestTlbiPolicy, HostVcpuIdlePolicy},
 };
 
 mod capabilities;
@@ -24,6 +25,7 @@ mod gic;
 mod npt;
 mod resource_pools;
 mod shared_provider;
+mod tlbi;
 mod vgic;
 mod vm;
 mod vm_plan;
@@ -122,6 +124,16 @@ impl ArchOps for Aarch64Arch {
                     value,
                 },
             ),
+            ArmVmExit::TlbInvalidate { .. } => {
+                if vm.guest_tlbi_policy() != GuestTlbiPolicy::VmScoped {
+                    return ax_err!(
+                        BadState,
+                        "received trapped EL1 TLBI while VM-scoped policy is disabled"
+                    );
+                }
+                tlbi::invalidate_vm(vm)?;
+                Ok(BoundVcpuExit::Continue)
+            }
             ArmVmExit::GicCpuInterfaceRead {
                 register,
                 destination,
@@ -297,10 +309,14 @@ impl ArmHostOps for AxvmArmHostOps {
     }
 
     fn handle_current_host_irq() {
-        if let Some(token) = gic::acknowledge_host_irq()
-            && let Err(error) = gic::route_acknowledged_host_irq(token)
-        {
-            warn!("{error}");
+        if let Some(token) = gic::acknowledge_host_irq() {
+            let intid = token & 0x3ff;
+            if intid >= 32 {
+                info!("VM host IRQ: intid={} (SPI {})", intid, intid - 32);
+            }
+            if let Err(error) = gic::route_acknowledged_host_irq(token) {
+                warn!("{error}");
+            }
         }
     }
 }
@@ -611,6 +627,10 @@ impl VmArchPerCpuOps for AxvmArmPerCpu {
     }
 }
 
+fn aarch64_guest_wfi_action(policy: HostVcpuIdlePolicy) -> VcpuRunAction {
+    VcpuRunAction::for_guest_wfi(policy)
+}
+
 fn arm_result<T>(result: ArmVcpuResult<T>) -> BackendResult<T> {
     result.map_err(arm_error_to_backend)
 }
@@ -673,7 +693,15 @@ fn arm_sys_reg_addr_to_ax(addr: ArmSysRegAddr) -> SysRegAddr {
 
 #[cfg(test)]
 mod tests {
+    use axvmconfig::HostVcpuIdlePolicy;
+
     use super::*;
+
+    #[test]
+    fn guest_wfi_obeys_per_vm_host_idle_policy() {
+        assert!(aarch64_guest_wfi_action(HostVcpuIdlePolicy::Halt).waits_for_event);
+        assert!(!aarch64_guest_wfi_action(HostVcpuIdlePolicy::Busy).waits_for_event);
+    }
 
     #[test]
     fn converts_arm_vcpu_errors_to_backend_errors() {

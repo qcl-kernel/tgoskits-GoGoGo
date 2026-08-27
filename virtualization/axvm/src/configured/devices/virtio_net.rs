@@ -12,7 +12,7 @@ use std::{
 
 use axdevice::*;
 use axdevice_base::{
-    BusKind, Device, DeviceAccess, DeviceContext, DeviceError, DmaGrant, InterruptSharing,
+    BusKind, ControllerInputId, Device, DeviceAccess, DeviceContext, DeviceError, DmaGrant, InterruptSharing,
     InterruptTrigger, IrqLine, Resource,
 };
 use axvirtio_common::{GuestMemory, NoGuestMemoryAccessor, VirtioError};
@@ -29,6 +29,11 @@ use crate::{ConfiguredDeviceError, ConfiguredModelRegistration, DeviceInstantiat
 const MMIO_SLOT: &str = "mmio";
 const IRQ_SLOT: &str = "irq";
 const MMIO_SIZE: u64 = 0x200;
+/// Legacy fixed guest placement shared by the RT-Thread and Zephyr task123
+/// guests: their static page tables / board DTS hard-code the virtio-mmio
+/// window at 0x0a00_0000 and GIC SPI 16 (controller input 48).
+const LEGACY_MMIO_BASE: u64 = 0x0a00_0000;
+const LEGACY_IRQ_INPUT: usize = 48;
 const INGRESS_CAPACITY: usize = 64;
 
 static NEXT_PORT_ID: AtomicUsize = AtomicUsize::new(0);
@@ -127,14 +132,14 @@ impl DeviceModel for VirtioNetModel {
                 ResourceSlot::new(MMIO_SLOT)?,
                 MMIO_SIZE,
                 MMIO_SIZE,
-                ResourceRequest::Auto,
+                ResourceRequest::Fixed(LEGACY_MMIO_BASE),
             )?
             .with_wired_irq(
                 ResourceSlot::new(IRQ_SLOT)?,
                 self.controller,
                 InterruptTrigger::EdgeTriggered,
                 InterruptSharing::Exclusive,
-                ResourceRequest::Auto,
+                ResourceRequest::Fixed(ControllerInputId::new(LEGACY_IRQ_INPUT)),
             )
     }
 

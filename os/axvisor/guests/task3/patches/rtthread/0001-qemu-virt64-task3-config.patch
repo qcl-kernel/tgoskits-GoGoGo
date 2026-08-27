@@ -1,0 +1,28 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Task3 Builder <task3@example.invalid>
+Date: Fri, 15 Aug 2026 00:00:00 +0800
+Subject: [PATCH] qemu-virt64-aarch64: scan application subdirectories
+
+Allow the staged task3 application to carry its own SConscript without
+modifying upstream application sources in place.
+---
+ bsp/qemu-virt64-aarch64/applications/SConscript | 7 +++++++
+ 1 file changed, 7 insertions(+)
+
+diff --git a/bsp/qemu-virt64-aarch64/applications/SConscript b/bsp/qemu-virt64-aarch64/applications/SConscript
+index 8f95c72..ce83f8e 100644
+--- a/bsp/qemu-virt64-aarch64/applications/SConscript
++++ b/bsp/qemu-virt64-aarch64/applications/SConscript
+@@ -1 +1,2 @@
+ from building import *
++import os
+@@ -7 +8,7 @@ CPPPATH = [cwd]
+ group = DefineGroup('Applications', src, depend = [''], CPPPATH = CPPPATH)
++
++for item in os.listdir(cwd):
++    itempath = os.path.join(cwd, item)
++    sconscript = os.path.join(itempath, 'SConscript')
++    if os.path.isdir(itempath) and os.path.isfile(sconscript):
++        group += SConscript(sconscript)
+--
+2.43.0

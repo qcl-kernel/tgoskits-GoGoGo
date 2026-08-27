@@ -80,6 +80,11 @@ struct ConsoleState {
     output: GuestOutputMux,
     host_logs: HostLogBacklog,
     next_backend_generation: u64,
+    /// Board fix guard: on boards without an interactive host input path the
+    /// serial line only carries guest output; the first stray byte (e.g.
+    /// baud-probe noise) must not steal the foreground and silence the other
+    /// guests. Only an explicit shortcut attach enables interactive selection.
+    explicit_attach: bool,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -224,6 +229,7 @@ impl GuestConsoleMux {
         state.attached = Some(vm_id);
         state.last_attached = Some(vm_id);
         state.shortcut_prefix_pending = false;
+        state.explicit_attach = true;
         let host_output = state.output.buffer_all();
         drop(state);
         submit_host_bytes(&host_output);
@@ -336,7 +342,15 @@ fn route_literal_input(
 ) -> RoutedInput {
     match state.attached {
         Some(vm_id) => {
-            let host_output = state.output.select_foreground_on_input(vm_id);
+            let host_output = if state.explicit_attach {
+                state.output.select_foreground_on_input(vm_id)
+            } else {
+                // Stay in boot multiplex: forward the byte to the guest but
+                // keep multiplexed output for every running VM.
+                let mut out = state.output.format(vm_id, state.running.len() > 1, guest_bytes);
+                out.clear();
+                out
+            };
             let input_overflow = enqueue_guest_input(state, vm_id, guest_bytes).then_some(vm_id);
             RoutedInput {
                 event: ConsoleInputEvent::Consumed,

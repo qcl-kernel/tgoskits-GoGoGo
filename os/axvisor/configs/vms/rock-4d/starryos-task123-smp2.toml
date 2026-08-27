@@ -1,0 +1,35 @@
+# ROCK 4D (RK3576) board VM config: StarryOS task123 guest, virtualized.
+# Board variant of os/axvisor/configs/vms/qemu/aarch64/starryos-task123.toml:
+# - guest image embedded at build time (image_location = "memory")
+# - pinned to the two big Cortex-A72 cores (mpidr 0x100/0x101; cpu_b0/cpu_b1);
+#   also verified on the little Cortex-A53 cores (phys_cpu_ids = [0, 1]) with
+#   the same result — the exec icache fix covers both core types.
+# - no virtual virtio-net yet: the board host has no ethernet backend driver,
+#   first bring-up validates the virtualized CPU/memory/GIC/UART path only.
+[base]
+id = 1
+name = "starryos-task123-rock4d"
+guest_type = "virtualized"
+cpu_num = 2
+guest_tlbi_policy = "vm_scoped"
+phys_cpu_ids = [0x100, 0x101]
+
+[kernel]
+entry_point = 0x8020_0000
+image_location = "memory"
+kernel_path = "../../../../../target/aarch64-unknown-none-softfloat/release/starryos-task123.bin"
+kernel_load_addr = 0x8020_0000
+dtb_load_addr = 0x9f00_0000
+cmdline = "task2.count=1000 task3.frames=3 task3.fault=normal"
+memory_regions = [
+  [0x8000_0000, 0x2000_0000, 0x7, 2],
+]
+
+[devices]
+passthrough = []
+disabled = []
+
+[[devices.virtual]]
+id = "net0"
+model = "virtio-net"
+guest_mac = [0x52, 0x54, 0x00, 0x77, 0x00, 0x01]

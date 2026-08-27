@@ -25,7 +25,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 #[allow(unused_imports)]
 pub(crate) use dispatcher::VcpuIrqDispatcher;
 
-use crate::{AxVmError, AxVmResult, StopReason, VmStatus, ax_err};
+use crate::{AxVmError, AxVmResult, StopReason, VmStatus, ax_err, config::HostTimerPolicy};
 
 /// The instantiated VM ref type (by `Arc`).
 pub type VMRef = crate::AxVMRef;
@@ -36,6 +36,7 @@ static VMM: crate::HostWaitQueueHandle = crate::HostWaitQueueHandle::new();
 
 /// The number of running VMs. This is used to determine when to exit the VMM.
 static RUNNING_VM_COUNT: AtomicUsize = AtomicUsize::new(0);
+
 
 /// Initialize runtime state for already registered VMs.
 pub fn init() {
@@ -354,5 +355,47 @@ mod tests {
             entered.load(Ordering::Acquire),
             "vCPU task must have entered the guest run loop"
         );
+    }
+
+    #[derive(Default)]
+    struct RecordingTimerControl {
+        states: RefCell<Vec<super::PeriodicTimerState>>,
+    }
+
+    impl super::CurrentCpuPeriodicTimer for RecordingTimerControl {
+        fn set_periodic_timer_state(&self, state: super::PeriodicTimerState) {
+            self.states.borrow_mut().push(state);
+        }
+    }
+
+    #[test]
+    fn tickless_host_timer_is_restored_after_guest_run_unwinds() {
+        let timer = RecordingTimerControl::default();
+
+        let result = std::panic::catch_unwind(AssertUnwindSafe(|| {
+            super::with_vcpu_host_timer_policy(super::HostTimerPolicy::Tickless, &timer, || {
+                panic!("guest run")
+            });
+        }));
+
+        assert!(result.is_err());
+        assert_eq!(
+            *timer.states.borrow(),
+            vec![
+                super::PeriodicTimerState::Disabled,
+                super::PeriodicTimerState::Enabled
+            ]
+        );
+    }
+
+    #[test]
+    fn periodic_host_timer_policy_does_not_toggle_the_timer() {
+        let timer = RecordingTimerControl::default();
+
+        let result =
+            super::with_vcpu_host_timer_policy(super::HostTimerPolicy::Periodic, &timer, || 42);
+
+        assert_eq!(result, 42);
+        assert!(timer.states.borrow().is_empty());
     }
 }

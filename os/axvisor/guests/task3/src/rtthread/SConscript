@@ -1,0 +1,12 @@
+from building import *
+
+cwd = GetCurrentDir()
+src = Glob('*.c')
+group = DefineGroup(
+    'task3-server',
+    src,
+    depend=['RT_USING_LWIP'],
+    CPPPATH=[cwd],
+)
+
+Return('group')

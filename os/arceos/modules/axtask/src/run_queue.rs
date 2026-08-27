@@ -553,12 +553,16 @@ pub(crate) fn select_run_queue<G: GuardState>(task: &AxTaskRef) -> AxRunQueueRef
     #[cfg(feature = "smp")]
     {
         // When SMP is enabled, prefer the current CPU to keep the task's
-        // cache warm. Fall back to round-robin only when affinity forbids it.
+        // cache warm after honoring an explicit first-placement preference.
+        // Fall back to round-robin only when affinity forbids the current CPU.
+        let cpumask = task.cpumask();
         let current_cpu = this_cpu_id();
-        let index = if task.cpumask().get(current_cpu) {
+        let index = if let Some(initial_cpu) = take_initial_run_queue_index(task, cpumask) {
+            initial_cpu
+        } else if cpumask.get(current_cpu) {
             current_cpu
         } else {
-            select_run_queue_index(task.cpumask())
+            select_run_queue_index(cpumask)
         };
         AxRunQueueRef {
             inner: get_run_queue(index),
@@ -566,6 +570,12 @@ pub(crate) fn select_run_queue<G: GuardState>(task: &AxTaskRef) -> AxRunQueueRef
             _phantom: core::marker::PhantomData,
         }
     }
+}
+
+#[cfg(feature = "smp")]
+fn take_initial_run_queue_index(task: &AxTaskRef, cpumask: AxCpuMask) -> Option<usize> {
+    task.take_initial_cpu()
+        .filter(|&cpu_id| cpu_id < crate::build_info::CPU_CAPACITY && cpumask.get(cpu_id))
 }
 
 /// Selects a run queue for waking a blocked task.

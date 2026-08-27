@@ -1,0 +1,6 @@
+board:
+  name: axvisor_rock4d
+  full_name: AxVisor ROCK 4D guest
+  vendor: axvisor
+  socs:
+    - name: qemu_cortex_a53

@@ -1,6 +1,9 @@
 //! Integration tests for axvirtio-net (plan sections 13.3-13.6).
 
-use std::sync::{Arc, Mutex};
+use std::sync::{
+    Arc, Mutex,
+    atomic::{AtomicUsize, Ordering},
+};
 
 use ax_memory_addr::PhysAddr;
 use axaddrspace::GuestMemoryAccessor;
@@ -68,11 +71,12 @@ impl GuestMemoryAccessor for SharedMem {
     }
 }
 
-/// Recording TX backend shared between the device and the test.
+/// Recording network backend shared between the device and the test.
 #[derive(Clone)]
 struct RecordBackend {
     frames: Arc<Mutex<Vec<Vec<u8>>>>,
     fail_next: Arc<Mutex<bool>>,
+    rx_notification_calls: Arc<AtomicUsize>,
 }
 
 impl RecordBackend {
@@ -82,6 +86,7 @@ impl RecordBackend {
             Self {
                 frames: frames.clone(),
                 fail_next: Arc::new(Mutex::new(false)),
+                rx_notification_calls: Arc::new(AtomicUsize::new(0)),
             },
             frames,
         )
@@ -92,6 +97,9 @@ impl RecordBackend {
     fn calls(&self) -> usize {
         self.frames.lock().unwrap().len()
     }
+    fn rx_notification_calls(&self) -> usize {
+        self.rx_notification_calls.load(Ordering::Relaxed)
+    }
 }
 
 impl NetworkBackend for RecordBackend {
@@ -101,6 +109,10 @@ impl NetworkBackend for RecordBackend {
         }
         self.frames.lock().unwrap().push(frame.to_vec());
         Ok(())
+    }
+
+    fn rx_queue_notified(&self) {
+        self.rx_notification_calls.fetch_add(1, Ordering::Relaxed);
     }
 }
 
@@ -282,6 +294,30 @@ fn device_identity_and_features() {
 }
 
 #[test]
+fn device_identity_can_use_qemu_virtio_mmio_vendor_id() {
+    let mem = Arc::new(MockMem::new(0x3000));
+    let (backend, _) = RecordBackend::new();
+    let dev = VirtioMmioNetDevice::new_with_vendor_id(
+        GuestPhysAddr::from(BASE_IPA),
+        REGION_LEN,
+        backend,
+        VirtioNetConfig::default(),
+        SharedMem(mem),
+        0x554d_4551,
+    )
+    .unwrap();
+
+    assert_eq!(
+        dev.mmio_read(
+            GuestPhysAddr::from(BASE_IPA + vc::VIRTIO_MMIO_VENDOR_ID),
+            AccessWidth::Dword,
+        )
+        .unwrap(),
+        0x554d_4551
+    );
+}
+
+#[test]
 fn mac_and_status_config_reads() {
     let mem = Arc::new(MockMem::new(0x3000));
     let cfg = VirtioNetConfig::new([0x00, 0x11, 0x22, 0x33, 0x44, 0x55]);
@@ -351,6 +387,19 @@ fn feature_negotiation_rejects_unsupported_bits() {
         "FEATURES_OK must be cleared"
     );
     assert_ne!(status & vc::VIRTIO_STATUS_FAILED, 0, "FAILED must be set");
+}
+
+#[test]
+fn queue_notify_routes_only_rx_queue_to_rx_backend_hook() {
+    let h = Harness::new();
+    h.bring_up();
+
+    assert_eq!(h.backend.rx_notification_calls(), 0);
+    assert_eq!(h.w(vc::VIRTIO_MMIO_QUEUE_NOTIFY, 0), DeviceEvent::None);
+    assert_eq!(h.backend.rx_notification_calls(), 1);
+
+    assert_eq!(h.w(vc::VIRTIO_MMIO_QUEUE_NOTIFY, 1), DeviceEvent::None);
+    assert_eq!(h.backend.rx_notification_calls(), 1);
 }
 
 // ---------------------------------------------------------------------------

@@ -1,0 +1,7 @@
+metric,scenario,p50_ns,p95_ns,p99_ns,p99_9_ns,max_ns,mean_ns,miss_100us,miss_500us,miss_1ms
+stability_jitter,A_native,368,2416,9584,30384,180592,764,6,0,0
+stability_jitter,B_axvisor_rtthread,2272,8240,15232,137872,386544,3401,638,0,0
+stability_jitter,C_axvisor_linux_rtthread,27648,315984,413056,446704,816960,83455,90742,20,0
+callback_exec,A_native,112,176,432,9488,34080,179,0,0,0
+callback_exec,B_axvisor_rtthread,448,528,688,1344,132032,467,3,0,0
+callback_exec,C_axvisor_linux_rtthread,544,656,912,3792,197888,611,120,0,0

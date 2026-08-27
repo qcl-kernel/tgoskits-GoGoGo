@@ -1,3 +1,5 @@
+.arch armv8-a+fp+simd
+
 .macro SAVE_REGS_FROM_EL1
     # Currently `sp` points to the address of `ArmVcpu.host.stack_top`.
     sub     sp, sp, {trap_frame_size}
@@ -29,7 +31,61 @@
     stp     x10, x11, [sp, 32 * 8]
 .endm
 
+.macro SAVE_FP_SIMD base, state_offset
+    add     x9, \base, #\state_offset
+    stp     q0, q1, [x9, 0 * 16]
+    stp     q2, q3, [x9, 2 * 16]
+    stp     q4, q5, [x9, 4 * 16]
+    stp     q6, q7, [x9, 6 * 16]
+    stp     q8, q9, [x9, 8 * 16]
+    stp     q10, q11, [x9, 10 * 16]
+    stp     q12, q13, [x9, 12 * 16]
+    stp     q14, q15, [x9, 14 * 16]
+    stp     q16, q17, [x9, 16 * 16]
+    stp     q18, q19, [x9, 18 * 16]
+    stp     q20, q21, [x9, 20 * 16]
+    stp     q22, q23, [x9, 22 * 16]
+    stp     q24, q25, [x9, 24 * 16]
+    stp     q26, q27, [x9, 26 * 16]
+    stp     q28, q29, [x9, 28 * 16]
+    stp     q30, q31, [x9, 30 * 16]
+    mrs     x10, fpcr
+    mrs     x11, fpsr
+    add     x12, x9, #{fp_control_delta}
+    stp     x10, x11, [x12]
+.endm
+
+.macro RESTORE_FP_SIMD base, state_offset
+    add     x9, \base, #\state_offset
+    ldp     q0, q1, [x9, 0 * 16]
+    ldp     q2, q3, [x9, 2 * 16]
+    ldp     q4, q5, [x9, 4 * 16]
+    ldp     q6, q7, [x9, 6 * 16]
+    ldp     q8, q9, [x9, 8 * 16]
+    ldp     q10, q11, [x9, 10 * 16]
+    ldp     q12, q13, [x9, 12 * 16]
+    ldp     q14, q15, [x9, 14 * 16]
+    ldp     q16, q17, [x9, 16 * 16]
+    ldp     q18, q19, [x9, 18 * 16]
+    ldp     q20, q21, [x9, 20 * 16]
+    ldp     q22, q23, [x9, 22 * 16]
+    ldp     q24, q25, [x9, 24 * 16]
+    ldp     q26, q27, [x9, 26 * 16]
+    ldp     q28, q29, [x9, 28 * 16]
+    ldp     q30, q31, [x9, 30 * 16]
+    add     x12, x9, #{fp_control_delta}
+    ldp     x10, x11, [x12]
+    msr     fpcr, x10
+    msr     fpsr, x11
+    isb
+.endm
+
 .macro SAVE_VCPU_RUNTIME_FROM_EL1
+    # The guest state must leave the hardware before host Rust resumes. Restore
+    # the host state here so the world switch obeys the AArch64 function ABI.
+    SAVE_FP_SIMD sp, {guest_fp_simd_offset}
+    RESTORE_FP_SIMD sp, {host_fp_simd_offset}
+
     # Capture the guest timer, stop it, and restore the host counter domain
     # before any branch-and-link can execute Rust.
     mrs     x9, cntv_ctl_el0
@@ -183,7 +239,29 @@
     # vmexit_trampoline returns directly to ArmVcpu::run.
 .endm
 
+.macro FAST_RETURN_BUSY_WFI
+    # A busy-pinned vCPU treats WFI as a NOP. Keep the direct guest timer
+    # loaded and avoid the full register save, Rust exit, and scheduler yield.
+    stp     x9, x10, [sp, #-16]!
+    mrs     x9, esr_el2
+    ubfx    x10, x9, #26, #6
+    cmp     x10, #1
+    b.ne    .Lbusy_wfi_slow\@
+    tbnz    x9, #0, .Lbusy_wfi_slow\@
+    add     x10, sp, #16
+    ldr     w9, [x10, {host_busy_wfi_fastpath_delta}]
+    cbz     w9, .Lbusy_wfi_slow\@
+    mrs     x9, elr_el2
+    add     x9, x9, #4
+    msr     elr_el2, x9
+    ldp     x9, x10, [sp], #16
+    eret
+.Lbusy_wfi_slow\@:
+    ldp     x9, x10, [sp], #16
+.endm
+
 .macro HANDLE_LOWER_SYNC_VCPU
+    FAST_RETURN_BUSY_WFI
     SAVE_VCPU_REGS_FROM_EL1
     mov     x0, {exception_sync}
     bl      vmexit_trampoline
@@ -252,6 +330,9 @@ context_vm_entry:
     mov     w9, #1
     strb    w9, [sp, {timer_loaded_offset}]
     isb
+    # No Rust or branch-and-link may run after installing guest FP/SIMD state.
+    SAVE_FP_SIMD sp, {host_fp_simd_offset}
+    RESTORE_FP_SIMD sp, {guest_fp_simd_offset}
     RESTORE_GUEST_REGS_INTO_EL1
     eret
 

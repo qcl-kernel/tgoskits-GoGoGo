@@ -3,6 +3,9 @@
 
 extern crate alloc;
 
+#[macro_use]
+extern crate log;
+
 use ax_hal as _;
 use ax_std as _;
 use axvm as _;

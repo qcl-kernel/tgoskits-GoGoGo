@@ -81,6 +81,8 @@ dev-log = []
 # only enables its use. Only meaningful on aarch64 (other arches stub to false).
 user-access-fastpath = []
 ext4 = ["ax-fs-ng/ext4"]
+ext4-rootfs = ["ext4"]
+embedded-rootfs = ["ax-runtime/embedded-rootfs"]
 fat = ["ax-fs-ng/fat"]
 input = ["dep:ax-input", "ax-runtime/input"]
 ipi = ["ax-runtime/ipi"]
@@ -142,7 +144,6 @@ axplat-dyn.workspace = true
 ax-runtime = { workspace = true, features = [
     "uspace",
     "rtc",
-    "ext4fs",
     "net",
 ] }
 ax-task = { workspace = true, features = [

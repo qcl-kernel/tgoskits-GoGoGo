@@ -1,0 +1,16 @@
+qemu-system-aarch64: -serial unix:/tmp/tmp.HZgnt2SXoy/serial.sock,server=on,wait=on: info: QEMU waiting for connection on: disconnected:unix:/tmp/tmp.HZgnt2SXoy/serial.sock,server=on
+qemu-system-aarch64: warning: hub 77 is not connected to host network
+AX_QEMU_TIMER_BOUNDARY cpu=2 intid=27 cval=0x8ca2b2 assert_match=1 assert_from_cb=0 entry_match=1 assert_late_ns=1143424 assert_to_entry_ns=1540 entry_to_iar_ns=1070 entry_late_ns=1145008 assert_to_iar_ns=2610 iar_late_ns=1146032
+AX_QEMU_TIMER_BOUNDARY cpu=2 intid=27 cval=0x9026e0e assert_match=1 assert_from_cb=1 entry_match=1 assert_late_ns=5344 assert_to_entry_ns=1007862 entry_to_iar_ns=2100 entry_late_ns=1013280 assert_to_iar_ns=1009962 iar_late_ns=1015296
+AX_QEMU_TIMER_BOUNDARY cpu=2 intid=27 cval=0x9045656 assert_match=1 assert_from_cb=1 entry_match=1 assert_late_ns=5696 assert_to_entry_ns=891852 entry_to_iar_ns=1690 entry_late_ns=897616 assert_to_iar_ns=893542 iar_late_ns=899232
+AX_QEMU_TIMER_BOUNDARY cpu=2 intid=27 cval=0x24e0de12 assert_match=1 assert_from_cb=1 entry_match=1 assert_late_ns=2608 assert_to_entry_ns=908601 entry_to_iar_ns=2240 entry_late_ns=911264 assert_to_iar_ns=910841 iar_late_ns=913440
+AX_QEMU_TIMER_BOUNDARY cpu=2 intid=27 cval=0x18613aede assert_match=1 assert_from_cb=0 entry_match=1 assert_late_ns=1015952 assert_to_entry_ns=1430 entry_to_iar_ns=840 entry_late_ns=1017456 assert_to_iar_ns=2270 iar_late_ns=1018224
+AX_QEMU_TIMER_BOUNDARY cpu=2 intid=27 cval=0x1a307a3ce assert_match=1 assert_from_cb=0 entry_match=1 assert_late_ns=876384 assert_to_entry_ns=1580 entry_to_iar_ns=1040 entry_late_ns=878032 assert_to_iar_ns=2620 iar_late_ns=879008
+AX_QEMU_TIMER_BOUNDARY cpu=2 intid=27 cval=0x1ad2a9672 assert_match=1 assert_from_cb=0 entry_match=1 assert_late_ns=627296 assert_to_entry_ns=1351902 entry_to_iar_ns=1160 entry_late_ns=1979264 assert_to_iar_ns=1353062 iar_late_ns=1980352
+AX_QEMU_TIMER_BOUNDARY cpu=2 intid=27 cval=0x2eccbd812 assert_match=1 assert_from_cb=1 entry_match=1 assert_late_ns=6160 assert_to_entry_ns=1000242 entry_to_iar_ns=940 entry_late_ns=1006480 assert_to_iar_ns=1001182 iar_late_ns=1007328
+AX_QEMU_TIMER_BOUNDARY cpu=2 intid=27 cval=0x2f7c92eea assert_match=1 assert_from_cb=0 entry_match=1 assert_late_ns=531456 assert_to_entry_ns=3210 entry_to_iar_ns=1840 entry_late_ns=534816 assert_to_iar_ns=5050 iar_late_ns=536512
+AX_QEMU_TIMER_BOUNDARY cpu=2 intid=27 cval=0x3c1ff942e assert_match=1 assert_from_cb=1 entry_match=1 assert_late_ns=3152 assert_to_entry_ns=720021 entry_to_iar_ns=600 entry_late_ns=723216 assert_to_iar_ns=720621 iar_late_ns=723744
+AX_QEMU_TIMER_BOUNDARY cpu=2 intid=27 cval=0x3c6b0413a assert_match=1 assert_from_cb=1 entry_match=1 assert_late_ns=3168 assert_to_entry_ns=1186342 entry_to_iar_ns=1290 entry_late_ns=1189568 assert_to_iar_ns=1187632 iar_late_ns=1190768
+AX_QEMU_TIMER_BOUNDARY cpu=2 intid=27 cval=0x46cc5eab6 assert_match=1 assert_from_cb=0 entry_match=1 assert_late_ns=12515344 assert_to_entry_ns=1090 entry_to_iar_ns=640 entry_late_ns=12516496 assert_to_iar_ns=1730 iar_late_ns=12517072
+AX_QEMU_TIMER_BOUNDARY cpu=2 intid=27 cval=0x4fd249c7e assert_match=1 assert_from_cb=0 entry_match=1 assert_late_ns=1952464 assert_to_entry_ns=2850 entry_to_iar_ns=1350 entry_late_ns=1955392 assert_to_iar_ns=4200 iar_late_ns=1956672
+qemu-system-aarch64: terminating on signal 15 from pid 3155837 (bash)

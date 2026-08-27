@@ -1,0 +1,5 @@
+config BR2_PACKAGE_TASK3_LINUX
+	bool "task3-linux"
+	depends on BR2_aarch64
+	help
+	  Deterministic int8 CNN and RT-IPC line-control experiment client.

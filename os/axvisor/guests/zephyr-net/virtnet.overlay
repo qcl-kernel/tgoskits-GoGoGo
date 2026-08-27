@@ -1,0 +1,32 @@
+/ {
+	chosen {
+		zephyr,sram = &sram0;
+	};
+};
+
+&sram0 {
+	reg = <0x0 0xa0000000 0x0 DT_SIZE_M(256)>;
+};
+
+&virtio_mmio2 {
+	status = "okay";
+	interrupts = <GIC_SPI 18 IRQ_TYPE_EDGE IRQ_DEFAULT_PRIORITY>;
+
+	virtio_net: virtio-net {
+		compatible = "virtio,net";
+		status = "okay";
+		local-mac-address = [52 54 00 77 00 03];
+	};
+};
+
+&pcie {
+	status = "disabled";
+};
+
+&{/chosen} {
+	/delete-property/ zephyr,pcie-controller;
+};
+
+&eth0 {
+	status = "disabled";
+};

@@ -1,0 +1,9 @@
+# ROCK 4D board Task123: StarryOS application guest + Zephyr RTOS guest.
+features = []
+log = "Info"
+max_cpu_num = 8
+target = "aarch64-unknown-none-softfloat"
+vm_configs = [
+  "os/axvisor/configs/vms/rock-4d/starryos-task123-10.toml",
+  "os/axvisor/configs/vms/rock-4d/zephyr-task123.toml",
+]

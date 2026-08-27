@@ -1266,6 +1266,9 @@ pub struct AxVM {
     /// Lifecycle and runtime state reached from both task and interrupt context.
     machine: IrqSafeMutex<Machine<AxVMResources, Arc<VmRuntimeHandle>>>,
     fw_cfg_payload: Arc<FwCfgPayloadSlot>,
+    host_timer_policy: crate::config::HostTimerPolicy,
+    host_vcpu_idle_policy: crate::config::HostVcpuIdlePolicy,
+    guest_tlbi_policy: crate::config::GuestTlbiPolicy,
 }
 
 impl AxVM {
@@ -1285,12 +1288,18 @@ impl AxVM {
             &mut config,
             fw_cfg_payload.clone(),
         )?;
+        let host_timer_policy = config.host_timer_policy();
+        let host_vcpu_idle_policy = config.host_vcpu_idle_policy();
+        let guest_tlbi_policy = config.guest_tlbi_policy();
         let result = Arc::new(Self {
             id,
             name,
             config: SleepMutex::new(config),
             machine: IrqSafeMutex::new(Machine::Ready(resources)),
             fw_cfg_payload,
+            host_timer_policy,
+            host_vcpu_idle_policy,
+            guest_tlbi_policy,
         });
 
         info!("VM created: id={}", result.id());
@@ -1307,6 +1316,21 @@ impl AxVM {
     /// Returns the configured VM name.
     pub fn name(&self) -> String {
         self.name.clone()
+    }
+
+    /// Returns the host timer policy applied while this VM's vCPU executes.
+    pub(crate) const fn host_timer_policy(&self) -> crate::config::HostTimerPolicy {
+        self.host_timer_policy
+    }
+
+    /// Returns the host behavior selected for trapped guest WFI exits.
+    pub(crate) const fn host_vcpu_idle_policy(&self) -> crate::config::HostVcpuIdlePolicy {
+        self.host_vcpu_idle_policy
+    }
+
+    /// Returns the guest EL1 TLB-maintenance policy.
+    pub(crate) const fn guest_tlbi_policy(&self) -> crate::config::GuestTlbiPolicy {
+        self.guest_tlbi_policy
     }
 
     /// Returns the current lifecycle status.

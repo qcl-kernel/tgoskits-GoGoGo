@@ -1,0 +1,5 @@
+#!/bin/sh
+
+# rdinit=/init is the normal path. Keep BusyBox init boots on the same
+# combined workload without maintaining a second launcher.
+exec /init

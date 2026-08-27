@@ -1,0 +1,56 @@
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+ \ | /
+- RT -     Thread Operating System
+ / | \     5.2.2 build Aug 25 2026 01:33:37
+ 2006 - 2024 Copyright by RT-Thread team
+lwIP-2.1.2 initialized!
+
+
+Axvisor RT-Thread guest ready
+TASK3_RTOS_READY ip=192.168.77.30 port=9877
+msh />
+RTIPC_SERVER_READY ip=192.168.77.30 port=9876
+
+
+
+TASK3_RTOS_FINAL requests=6 errors=0 duplicates=0 applied_steps=6 retries=0
+TASK3_RTOS_FINAL_DONE
+RTBENCH_PMU status=ready event=0x8 cycles_delta=1549 instructions_delta=1549
+RTBENCH_NS metric=timer_jitter run=1 expected=10 collected=10 missing=0 p50_ns=444288 p95_ns=2339632 p99_ns=2339632 p99_9_ns=2339632 max_ns=2339632 mean_ns=790180
+RTBENCH_NS metric=callback_exec run=1 expected=10 collected=10 missing=0 p50_ns=128 p95_ns=144 p99_ns=144 p99_9_ns=144 max_ns=144 mean_ns=136
+RTBENCH_NS metric=timer_jitter run=2 expected=10 collected=10 missing=0 p50_ns=202656 p95_ns=3785952 p99_ns=3785952 p99_9_ns=3785952 max_ns=3785952 mean_ns=814889
+RTBENCH_NS metric=callback_exec run=2 expected=10 collected=10 missing=0 p50_ns=128 p95_ns=1024 p99_ns=1024 p99_9_ns=1024 max_ns=1024 mean_ns=222
+RTBENCH_NS metric=timer_jitter run=3 expected=10 collected=10 missing=0 p50_ns=348976 p95_ns=1770544 p99_ns=1770544 p99_9_ns=1770544 max_ns=1770544 mean_ns=498777
+RTBENCH_NS metric=callback_exec run=3 expected=10 collected=10 missing=0 p50_ns=128 p95_ns=384 p99_ns=384 p99_9_ns=384 max_ns=384 mean_ns=156
+RTBENCH_NS metric=preemption run=1 expected=10 collected=10 missing=0 p50_ns=608 p95_ns=1488 p99_ns=1488 p99_9_ns=1488 max_ns=1488 mean_ns=697
+RTBENCH_NS metric=irq run=1 expected=10 collected=10 missing=0 p50_ns=118240 p95_ns=1817392 p99_ns=1817392 p99_9_ns=1817392 max_ns=1817392 mean_ns=350096
+RTBENCH_NS metric=irq_to_task run=1 expected=10 collected=10 missing=0 p50_ns=132032 p95_ns=3934768 p99_ns=3934768 p99_9_ns=3934768 max_ns=3934768 mean_ns=1123566
+RTBENCH_NS metric=irq_disabled_duration run=1 expected=10 collected=10 missing=0 p50_ns=416 p95_ns=432 p99_ns=432 p99_9_ns=432 max_ns=432 mean_ns=417
+RTBENCH_NS metric=mutex_inversion run=1 expected=10 collected=10 missing=0 p50_ns=2816 p95_ns=5808816 p99_ns=5808816 p99_9_ns=5808816 max_ns=5808816 mean_ns=587529
+RTBENCH_NS metric=wake_under_load run=1 expected=10 collected=10 missing=0 p50_ns=608 p95_ns=624 p99_ns=624 p99_9_ns=624 max_ns=624 mean_ns=611
+RTBENCH_NS metric=context_switch run=1 expected=10 collected=10 missing=0 p50_ns=416 p95_ns=432 p99_ns=432 p99_9_ns=432 max_ns=432 mean_ns=419
+RTBENCH_NS metric=scheduler_decision run=1 expected=10 collected=10 missing=0 p50_ns=128 p95_ns=128 p99_ns=128 p99_9_ns=128 max_ns=128 mean_ns=124
+RTBENCH_NS metric=sync_sem run=1 expected=10 collected=10 missing=0 p50_ns=336 p95_ns=336 p99_ns=336 p99_9_ns=336 max_ns=336 mean_ns=336
+RTBENCH_NS metric=sync_mutex run=1 expected=10 collected=10 missing=0 p50_ns=448 p95_ns=448 p99_ns=448 p99_9_ns=448 max_ns=448 mean_ns=448
+RTBENCH_NS metric=sync_mailbox run=1 expected=10 collected=10 missing=0 p50_ns=368 p95_ns=368 p99_ns=368 p99_9_ns=368 max_ns=368 mean_ns=361
+RTBENCH_NS metric=irq_handler_exec run=1 expected=10 collected=10 missing=0 p50_ns=16 p95_ns=32 p99_ns=32 p99_9_ns=32 max_ns=32 mean_ns=17
+RTBENCH_NS metric=deadline_miss_under_load run=1 expected=10 collected=10 missing=0 p50_ns=376576 p95_ns=2317712 p99_ns=2317712 p99_9_ns=2317712 max_ns=2317712 mean_ns=732969
+RTBENCH_NET_READY port=9878 expected=10
+RTBENCH_NS metric=net_event_latency run=1 expected=10 collected=10 missing=0 p50_ns=156032 p95_ns=984544 p99_ns=984544 p99_9_ns=984544 max_ns=984544 mean_ns=366929
+RTBENCH_NET_DIAGNOSTIC irq_dropped=0 irq_coalesced=0 probe_received=10 probe_acked=10 probe_no_irq=0 probe_duplicates=0 trigger_attempts=1 trigger_socket_failures=0 trigger_send_failures=0
+RTBENCH_END status=PASS

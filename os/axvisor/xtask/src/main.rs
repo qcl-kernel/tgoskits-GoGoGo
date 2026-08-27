@@ -320,7 +320,7 @@ fn normalize_command_paths(
             }
             TestCommand::Qemu(_) | TestCommand::Board(_) => {}
         },
-        Command::Defconfig(_) | Command::Config(_) => {}
+        Command::Task123(_) | Command::Defconfig(_) | Command::Config(_) => {}
     }
 }
 

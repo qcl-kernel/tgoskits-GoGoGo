@@ -51,6 +51,7 @@ vm_configs = ["os/axvisor/configs/vms/qemu/x86_64/linux-vmx-smp1.toml"]
 ### 2.2 VM 选择
 
 CLI 传入的 `--vmconfigs` 非空时覆盖该配置中的 `vm_configs`；否则使用 Build Config 中的列表。
+
 相对 VM config 路径相对于 workspace 根解析；其中五个 `[kernel]` 镜像路径字段支持 Ostool
 变量，并按原 VM config 目录解析相对路径。最终解析后的配置写入 `AXVISOR_VM_CONFIGS`，以
 平台路径分隔符连接。
@@ -99,6 +100,21 @@ cargo xtask axvisor test qemu --arch x86_64 --test-case smoke-svm
 cargo xtask axvisor config ls
 cargo xtask axvisor defconfig qemu-x86_64
 cargo xtask axvisor build
+
+# ROCK 4D Task123：准备 RT-Thread/StarryOS、生成 guest VM 配置、构建 AxVisor 并通过 U-Boot 上板
+cargo xtask axvisor task123 uboot \
+  --config os/axvisor/configs/board/rock-4d-task123-twoguest.toml \
+  --uboot-config os/StarryOS/configs/board/rock-4d-uboot-local.toml
 ```
+
+Task123 的 U-Boot 配置必须指向实际串口，并包含 `TASK2_STARRY_END`、
+`TASK3_STARRY_END`、`TASK123_STARRY_END` 和 `TASK123_STARRY_EXIT` 成功 marker。
+流程会为本次运行生成临时 U-Boot 配置，等待物理板 RT-Thread 的
+`RTBENCH_STABILITY_END status=PASS` 和 `TASK123_STARRY_EXIT status=0` 两个 marker
+都出现（顺序不限）后，才对保存的完整串口日志逐项执行 Task 1/2/3 结果门禁；
+不会因 `ostool` 将 `success_regex` 数组按“任意匹配”处理而在任一单项完成后提前退出。输出目录会保留
+`console.log`、`frames.csv`、`summary.json` 和拆分后的 guest 日志。流程还会把
+本次构建生成的 RT-Thread 镜像通过临时 VM 配置传给 AxVisor，不读取板卡 VM 模板中的
+开发者本地绝对路径。
 
 详见 [构建](./build)、[运行](./runtime) 和 [测试](./test)。

@@ -1,0 +1,32 @@
+PQR[32m[I/rtdm.ofw] Booting RT-Thread on physical CPU 0x0[0m
+[32m[I/rtdm.ofw] Machine model: linux,dummy-virt[0m
+[32m[I/rtdm.ofw] Memory node(0) ranges: 0x0000000040000000 - 0x0000000080000000[0m
+[32m[I/mm.memblock] System memory:[0m
+[32m[I/mm.memblock]                    [0x0000000040000000, 0x0000000080000000][0m
+[32m[I/mm.memblock] Reserved memory:[0m
+[32m[I/mm.memblock]                    [0x0000000040200000, 0x0000000040302000][0m
+[32m[I/mm.memblock]                    [0x0000000040302000, 0x0000000044302000][0m
+[32m[I/mm.memblock]                    [0x0000000044302000, 0x0000000044502000][0m
+[32m[I/mm.memblock]                    [0x0000000044502000, 0x0000000044602000][0m
+[32m[I/mm.memblock] physical memory region [0x0000000040000000-0x0000000040200000] installed to system page[0m
+[32m[I/mm.memblock] physical memory region [0x0000000044602000-0x0000000080000000] installed to system page[0m
+[32m[I/mm.memblock] 1002 MB memory installed to system page[0m
+[32m[I/osi.psci] Using PSCI v1.1 Function IDs[0m
+[32m[I/rtdm.ofw] Console: uart0 (<no-node>)[0m
+
+ \ | /
+- RT -     Thread Operating System
+ / | \     5.2.2 build Aug 15 2026 22:33:14
+ 2006 - 2024 Copyright by RT-Thread team
+lwIP-2.1.2 initialized!
+[32m[I/sal.skt] Socket Abstraction Layer initialize success.[0m
+[32m[I/rtdm.mnt] File system initialization done[0m
+Axvisor RT-Thread guest ready
+msh />rtbench_stability 300
+RTBENCH_STABILITY_BEGIN seconds=300 expected=299999
+msh />RTIPC: NO NETWORK DEVICE
+ALL TESTS COMPLETE
+RTBENCH metric=stability_jitter run=1 expected=299999 collected=299999 missing=0 p50_ns=512 p95_ns=8368 p99_ns=37360 p99_9_ns=1315696 max_ns=24384448 miss_100us=2372 miss_500us=1444 miss_1ms=414 mean_ns=8944
+RTBENCH metric=callback_exec run=1 expected=299999 collected=299999 missing=0 p50_ns=112 p95_ns=448 p99_ns=928 p99_9_ns=13040 max_ns=2277424 miss_100us=2 miss_500us=1 miss_1ms=1 mean_ns=208
+RTBENCH_STABILITY_END status=FAIL expected=299999 collected=299999 missing=0
+RTBENCH_STABILITY_DONE

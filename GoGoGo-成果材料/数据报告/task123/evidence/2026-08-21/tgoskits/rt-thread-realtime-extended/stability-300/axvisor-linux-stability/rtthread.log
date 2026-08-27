@@ -1,0 +1,34 @@
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+ \ | /
+- RT -     Thread Operating System
+ / | \     5.2.2 build Aug 21 2026 02:00:46
+ 2006 - 2024 Copyright by RT-Thread team
+lwIP-2.1.2 initialized!
+
+
+Axvisor RT-Thread guest ready
+TASK3_RTOS_READY ip=192.168.77.30 port=9877
+msh />
+RTIPC_SERVER_READY ip=192.168.77.30 port=9876
+
+RTBENCH_STABILITY_BEGIN seconds=300 expected=299999
+TASK3_RTOS_FINAL requests=9 errors=0 duplicates=0 applied_steps=3 retries=0
+RTBENCH metric=stability_jitter run=1 expected=299999 collected=299999 missing=0 p50_ns=66960 p95_ns=370080 p99_ns=422208 p99_9_ns=443392 max_ns=827280 miss_100us=123235 miss_500us=19 miss_1ms=0 mean_ns=114225
+RTBENCH metric=callback_exec run=1 expected=299999 collected=299999 missing=0 p50_ns=528 p95_ns=720 p99_ns=3088 p99_9_ns=10288 max_ns=172048 miss_100us=62 miss_500us=0 miss_1ms=0 mean_ns=618
+RTBENCH_STABILITY_END status=PASS expected=299999 collected=299999 missing=0
+RTBENCH_STABILITY_DONE

@@ -14,7 +14,7 @@ pub use self::{
     pcpu::ArmPerCpu,
     vcpu::{
         ARM_VCPU_HOST_SP_EL0_OFFSET, ARM_VCPU_HOST_STACK_TOP_OFFSET, ARM_VCPU_TRAP_FRAME_SIZE,
-        ArmVcpu, ArmVcpuCreateConfig, ArmVcpuSetupConfig,
+        ArmVcpu, ArmVcpuCreateConfig, ArmVcpuSetupConfig, ArmVcpuTlbiPolicy,
     },
 };
 

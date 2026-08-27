@@ -1,0 +1,4 @@
+interface:
+  display_name: "TODO: Agent 显示名称"
+  short_description: "TODO: 一句话简述"
+  default_prompt: "Use $agent-template to TODO: 描述默认触发动作。"

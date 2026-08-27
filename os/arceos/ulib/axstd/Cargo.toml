@@ -70,13 +70,13 @@ stack-guard-page = ["ax-runtime/stack-guard-page"]
 stack-protector = ["ax-runtime/stack-protector"]
 
 # File system
-fs = [
+fs-base = [
     "ax-api/fs",
     "ax-posix-api/fs",
-    "ax-runtime/fs",
-    "ax-driver/nvme",
     "fd",
 ]
+fs = ["fs-base", "ax-runtime/fs", "ax-driver/nvme"]
+embedded-rootfs = ["fs-base", "ax-runtime/embedded-rootfs"]
 ext4fs = ["fs", "ax-runtime/ext4fs"]
 fatfs = ["fs", "ax-runtime/fatfs"]
 
