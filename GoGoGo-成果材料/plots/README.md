@@ -1,6 +1,6 @@
 # Task123 Test Logs
 
-完整复现命令见 [`../task123-reproduction-cn.md`](../task123-reproduction-cn.md)。
+完整复现命令见 [`../docs/reproduce.md`](../docs/reproduce.md)。
 
 ## ROCK 4D
 
@@ -52,7 +52,7 @@ because there is no QEMU process sampler on the physical board, not because RTBe
 data is missing.
 
 The detailed conclusion is in
-`../../数据报告/task123-final-qemu-rock4d-report.md`.
+`../../docs/results-report.md`.
 
 The complete parsed data is in `parsed-data.json` and the normalized tables are
 `task2-metrics.csv`, `task3-metrics.csv`, `rtbench-metrics.csv`, and

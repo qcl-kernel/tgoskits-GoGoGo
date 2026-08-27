@@ -1,0 +1,89 @@
+# 系统设计
+
+## 1. 总体架构
+
+Axvisor（Type-1 虚拟化管理器，运行于 EL2）在一块物理板上同时承载两个客户机：
+
+```text
+┌──────────────────────────── ROCK 4D (RK3576: 4×A72 + 4×A53, GIC-400) ─────────────┐
+│                                                                                    │
+│  Axvisor @ EL2（基于 ArceOS，std/musl 构建）                                         │
+│  ├── VM[1] 应用客户机：Linux 或 StarryOS（SMP，pin 到独占物理核）                     │
+│  │     └── virtio-net 0x52:54:00:77:00:01（192.168.77.11）                          │
+│  ├── VM[3] RTOS 客户机：RT-Thread 或 Zephyr（单核）                                  │
+│  │     └── virtio-net 0x52:54:00:77:00:03（192.168.77.30）                          │
+│  └── 内部 VirtualSwitch：virtio-net guest-to-guest，不需要物理网卡                    │
+│                                                                                    │
+└────────────────────────────────────────────────────────────────────────────────────┘
+```
+
+两个 guest 通过 hypervisor 内部的 `VirtualSwitch` 以 virtio-net 互联（标准
+virtio-mmio 传输层 + IPv4/UDP），不使用共享内存、HyperCall、裸 MMIO 或 vsock。
+
+## 2. 三个任务的闭环
+
+| 任务 | 内容 | 数据通路 |
+|---|---|---|
+| Task 1 实时性 | RTOS guest 内运行 RTBench（16 项纳秒指标） | guest 本地 + 网络探针 |
+| Task 2 通信 | 应用 guest 作为 RT-IPC 客户端，向 RTOS guest 的 echo 服务器发 N 次请求 | virtio-net UDP :9876 |
+| Task 3 AI 控制 | 应用 guest 逐帧读取 Y4M 图像 → TinyCNN int8 推理（LEFT/CENTER/RIGHT 三分类）→ 发给 RTOS guest 更新虚拟 PWM 与转向位置 | virtio-net UDP :9877 |
+
+Task 3 的 TinyCNN 为自研 3×3 Conv(1→4) → ReLU → 2×2 maxpool → 3×3 Conv(4→8)
+→ ReLU → 空间池化 → 24→3 全连接，固定种子训练，int8 量化，C 推理与 Python
+golden 逐向量等价（准确率门槛 95%，实测 100%）。
+
+## 3. 关键设计点
+
+### 3.1 guest 静态设备映射的兼容
+
+RT-Thread / Zephyr 的 QEMU BSP 在自己的静态页表中硬编码 virtio-mmio 窗口
+`0x0a00_0000` 与 GIC SPI 16（控制器输入 48）。配置化设备框架把 virtio-net
+固定放置在该传统位置（`ResourceRequest::Fixed`），并允许 GICv3 框架下的
+固定输入窗口，使这些 guest 无需改动即可探测设备。
+
+### 3.2 RT-Thread 移植补丁集
+
+RT-Thread v5.2.2（pin 到 `ddf52e2c`）通过 `os/axvisor/patches/rtthread/`
+的 12 个补丁移植：基础 AArch64 移植（0000）、lwIP RX mailbox 恢复（0002）、
+virtio-net TX/RX used-ring 修复（0003/0004）、GICv3 redistributor 寄存器
+（0006/0007）、绝对定时器截止（0008）、内存布局（0009）、benchmark 钩子
+（0010）、ROCK 4D 板级端口（0011，GICv2 地址 + NS16550 串口 + `RT_USING_TASK123_SERVER`
+门控）以及 RX DMA cache 一致性（0011）。补丁状态以 digest 记录，防脏树重放。
+
+### 3.3 Zephyr 移植
+
+Zephyr v4.4.2 通过 `os/axvisor/guests/zephyr-task123/`（板型 `axvisor_rock4d`
+overlay + virtnet overlay）构建。guest 在 task3 会话结束后自动运行 RTBench，
+并实现 RTBENCH_NET 探针握手（trigger → READY → 逐序列 ACK → DONE），使应用
+guest 的探针监听器能完整走完——这是板级串口门禁能匹配到
+`TASK123_*_RTBENCH_END` 的前提。
+
+### 3.4 板级串口门禁
+
+ostool 以 U-Boot 方式启动（TFTP 下发 axvisor.bin），成功判据是串口流中同时
+出现 benchmark 结束 marker 与组合 marker（`TASK123_<GUEST>_RTBENCH_END
+status=PASS`，二者必须落在 2 KiB 匹配窗口内——由 app guest 的 init 在探针
+完成后紧邻打印保证）。物理串口偶发把单条 benchmark 记录从字段中间截断
+（mux 输出交错），每组合保留主日志 + retry 日志，解析器合并去重只收完整行。
+
+### 3.5 vCPU 与中断隔离
+
+- 应用客户机 SMP：每个 vCPU 独占一个物理核（`phys_cpu_sets` 单核位），避免
+  CPU_ON 握手撞上 current-vCPU publication 守卫。
+- RTOS 客户机单核，pin 到独立核；`guest_tlbi_policy = vm_scoped` 时按 vCPU
+  亲和集收敛 TLB 失效广播。
+- host-SPI 风暴熔断：板级设备（观察到调试 UART）的 handler 声称已处理却
+  不清源时，GIC 线会以 exit 路径极限速率重触发、饿死 guest 虚拟时间。同一
+  host SPI 在 10 ms 内分发超过 32 次即由一次性 host task 在 distributor
+  掩蔽该线。
+
+## 4. 验证矩阵
+
+| 平台 | RTOS | 应用客户机 |
+|---|---|---|
+| QEMU AArch64 TCG（4 vCPU） | RT-Thread / Zephyr | Linux / StarryOS |
+| ROCK 4D 真机（8 核，--smp 8） | RT-Thread / Zephyr | Linux / StarryOS |
+
+每个组合运行 Task 2（10 请求）+ Task 3（3 帧 ×2 模式）+ Task123 门禁 +
+RTBench 16 指标 × 10 样本。门禁与指标要求见
+[results-report.md](results-report.md)。

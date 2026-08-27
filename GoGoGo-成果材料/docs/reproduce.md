@@ -1,5 +1,7 @@
 # Task123 当前结果复现指南
 
+> 本文档属于 [GoGoGo 成果材料](../README.md) ｜ 文档集：[设计](design.md) · [更改](changes.md) · [性能](performance.md) · [验证报告](results-report.md) · [复现](reproduce.md)
+
 本文是成果材料的统一复现入口，覆盖 Task 1 实时性、Task 2 客户机通信和 Task 3 AI
 控制闭环。当前结果矩阵包含 2 种 RTOS、2 种应用客户机和 2 种运行平台：
 
@@ -10,8 +12,8 @@
 | ROCK 4D 真机 | RT-Thread | Linux / StarryOS |
 | ROCK 4D 真机 | Zephyr | Linux / StarryOS |
 
-QEMU 和 ROCK 4D 的最终数据、日志和图表见 [`图标数据/`](图标数据/)；八个组合的验收
-汇总见[最终验证报告](数据报告/task123-final-qemu-rock4d-report.md)。
+QEMU 和 ROCK 4D 的最终数据、日志和图表见 [`../plots/`](../plots/)；八个组合的验收
+汇总见[最终验证报告](docs/results-report.md)。
 
 ## 1. 前置条件
 
@@ -185,25 +187,25 @@ cargo xtask axvisor task123 uboot --rtos rtthread --app-guest linux \
 使用已保存的 QEMU 和 ROCK 4D 日志重建 CSV、JSON 和 SVG：
 
 ```bash
-python3 GoGoGo-成果材料/图标数据/plot_task123.py
+python3 GoGoGo-成果材料/../plots/plot_task123.py
 ```
 
 脚本只将完整的纳秒记录纳入 RTBench 图表，不用 `16`、`0` 或其它值填充缺失数据；图中
 出现 `16` 时，含义是实际测得的 16 ns。生成结果位于：
 
 ```text
-GoGoGo-成果材料/图标数据/parsed-data.json
-GoGoGo-成果材料/图标数据/*-metrics.csv
-GoGoGo-成果材料/图标数据/plots/*.svg
+GoGoGo-成果材料/../plots/parsed-data.json
+GoGoGo-成果材料/../plots/*-metrics.csv
+GoGoGo-成果材料/../plots/plots/*.svg
 ```
 
 ## 5. 结果判定与证据
 
-最终八组合的 timer jitter p99 轮次最大值和完整性见[最终验证报告](数据报告/task123-final-qemu-rock4d-report.md)。
+最终八组合的 timer jitter p99 轮次最大值和完整性见[最终验证报告](docs/results-report.md)。
 原始证据按平台存放在：
 
-- `GoGoGo-成果材料/图标数据/qemu/`：QEMU 四组合日志和矩阵汇总；
-- `GoGoGo-成果材料/图标数据/rock4d/`：ROCK 4D 四组合串口日志；
-- `GoGoGo-成果材料/图标数据/plots/`：Task 2、Task 3 和 RTBench 对比图。
+- `GoGoGo-成果材料/../plots/qemu/`：QEMU 四组合日志和矩阵汇总；
+- `GoGoGo-成果材料/../plots/rock4d/`：ROCK 4D 四组合串口日志；
+- `GoGoGo-成果材料/../plots/plots/`：Task 2、Task 3 和 RTBench 对比图。
 
 PMU cycles/instructions 是可选扩展，不作为 QEMU 与 ROCK 4D 的跨平台完整性条件。

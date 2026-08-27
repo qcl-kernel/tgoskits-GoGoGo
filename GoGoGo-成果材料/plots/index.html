@@ -1,0 +1,41 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Task123 performance comparison</title>
+<style>
+body { font-family: Arial, sans-serif; margin: 2rem; color: #111827; }
+main { max-width: 1600px; margin: auto; }
+section { margin: 2rem 0; }
+figure { margin: 1rem 0 2rem; }
+img { display: block; width: 100%; height: auto; border: 1px solid #d1d5db; }
+figcaption { margin: .5rem 0; font-weight: 700; }
+a { color: #1d4ed8; }
+</style>
+<main>
+<h1>Task123 performance comparison</h1>
+<p>The comparison includes all four QEMU and four ROCK 4D combinations. Every
+combination has complete 16-metric nanosecond RTBench data; ROCK 4D host-resource
+cells are NA because physical-board runs do not have a QEMU process sampler. Raw
+captures and the regeneration script are in
+<a href="README.md">README.md</a>.</p>
+<section>
+<h2>Task 2 network</h2>
+<figure><figcaption>Latency</figcaption><img src="plots/plots/task2-latency.svg" alt="Task 2 latency comparison"></figure>
+<figure><figcaption>Throughput</figcaption><img src="plots/plots/task2-throughput.svg" alt="Task 2 throughput comparison"></figure>
+</section>
+<section>
+<h2>Task 3 application</h2>
+<figure><figcaption>Inference latency</figcaption><img src="plots/plots/task3-inference.svg" alt="Task 3 inference latency comparison"></figure>
+<figure><figcaption>Round-trip latency</figcaption><img src="plots/plots/task3-roundtrip.svg" alt="Task 3 round-trip latency comparison"></figure>
+<figure><figcaption>Reliability and throughput</figcaption><img src="plots/plots/task3-reliability.svg" alt="Task 3 reliability comparison"></figure>
+<figure><figcaption>Control and recovery</figcaption><img src="plots/plots/task3-control.svg" alt="Task 3 control comparison"></figure>
+</section>
+<section>
+<h2>RTBench</h2>
+<figure><figcaption>Nanosecond metrics</figcaption><img src="plots/plots/rtbench-nanoseconds.svg" alt="RTBench nanosecond heatmaps"></figure>
+<figure><figcaption>Miss counts</figcaption><img src="plots/plots/rtbench-miss-counts.svg" alt="RTBench miss count heatmaps"></figure>
+</section>
+<section>
+<h2>Host resources</h2>
+<figure><figcaption>QEMU host resource samples</figcaption><img src="plots/plots/host-resources.svg" alt="Host resource comparison"></figure>
+</section>
+</main>

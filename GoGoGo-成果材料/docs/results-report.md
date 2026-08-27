@@ -1,5 +1,7 @@
 # Task123 最终 QEMU 与 ROCK 4D 验证报告
 
+> 本文档属于 [GoGoGo 成果材料](../README.md) ｜ 文档集：[设计](design.md) · [更改](changes.md) · [性能](performance.md) · [验证报告](results-report.md) · [复现](reproduce.md)
+
 ## 1. 报告信息
 
 | 项目 | 内容 |
@@ -9,7 +11,7 @@
 | 当前基线分支 | `upstream/pr-new`（集成提交 `87eb3fcc5`，适配提交 `621a063a9`） |
 | 当前基线 | upstream/dev `ba252ca67` |
 | 测试范围 | QEMU 四组合 + ROCK 4D 真机四组合 |
-| 数据目录 | `GoGoGo-成果材料/图标数据/` |
+| 数据目录 | `GoGoGo-成果材料/plots/` |
 
 > 注：本版数据于 2026-08-27 在 `upstream/pr-new`（`87eb3fcc5` + `621a063a9`，
 > 基于 upstream/dev `ba252ca67`）重新采集，覆盖 8-25 在当时 `dev` 分支
@@ -67,19 +69,19 @@ p95=2900, p99=2900, max=2900`。这组 3 帧数据用于闭环和协议门禁，
 
 ## 4. 数据与复现入口
 
-- 独立复现指南：[task123-reproduction-cn.md](../task123-reproduction-cn.md)
-- 图表入口：[图标数据/index.html](../图标数据/index.html)
-- 生成脚本：[图标数据/plot_task123.py](../图标数据/plot_task123.py)
-- 纳秒明细：[图标数据/rtbench-metrics.csv](../图标数据/rtbench-metrics.csv)
-- 完整解析数据：[图标数据/parsed-data.json](../图标数据/parsed-data.json)
-- QEMU 与 ROCK 4D 原始串口日志：分别位于 `图标数据/qemu/` 和 `图标数据/rock4d/`
-- 本批次完整运行日志（含构建输出与串口全流）：`数据报告/log-<平台>-<RTOS>-<客户机>.log`；
-  ROCK 4D 的补充采集带 `-retryN` 后缀，与 `图标数据/rock4d/retry-*.log` 一一对应
+- 独立复现指南：[task123-reproduction-cn.md](reproduce.md)
+- 图表入口：[plots/index.html](../plots/index.html)
+- 生成脚本：[plots/plot_task123.py](../plots/plot_task123.py)
+- 纳秒明细：[plots/rtbench-metrics.csv](../plots/rtbench-metrics.csv)
+- 完整解析数据：[plots/parsed-data.json](../plots/parsed-data.json)
+- QEMU 与 ROCK 4D 原始串口日志：分别位于 `../plots/qemu/` 和 `../plots/rock4d/`
+- 本批次完整运行日志（含构建输出与串口全流）：`../logs/log-<平台>-<RTOS>-<客户机>.log`；
+  ROCK 4D 的补充采集带 `-retryN` 后缀，与 `../plots/rock4d/retry-*.log` 一一对应
 
 重新生成图表：
 
 ```bash
-python3 GoGoGo-成果材料/图标数据/plot_task123.py
+python3 GoGoGo-成果材料/plots/plot_task123.py
 ```
 
 QEMU 和真机使用各自的入口命令；真机命令必须显式提供个人的

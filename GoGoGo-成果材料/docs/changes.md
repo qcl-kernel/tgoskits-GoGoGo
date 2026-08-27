@@ -1,0 +1,75 @@
+# 相对 upstream/dev 的更改
+
+基线：upstream/dev `ba252ca67`。本分支在其上共两个核心提交：
+`87eb3fcc5`（集成，1298 文件）与 `621a063a9`（rebase 适配，7 文件）。
+原始 237-commit 开发历史保留在 `backup/pr-new-pre-rebase` 分支。
+
+## 1. 集成提交 `87eb3fcc5`：task123 全栈
+
+### 1.1 新增的 guest 侧组件（`os/axvisor/guests/`）
+
+| 目录 | 内容 |
+|---|---|
+| `rt-ipc/` | RT-IPC v2 协议：rtthread 服务器、linux/starryos 客户端 |
+| `task3/` | TinyCNN 训练/量化（Python + NumPy 自研）、Linux 控制器、rtthread 服务器、Buildroot 配置 |
+| `rt-benchmark/` | RT-Thread RTBench 基准（16 项纳秒指标、UDP 网络探针协议） |
+| `zephyr-task123/` | Zephyr 板型 overlay、RT-IPC/task3/RTBENCH guest、net-probe 握手 |
+| `starryos-task123/` | StarryOS guest 构建脚本与 rootfs 组装 |
+
+### 1.2 RT-Thread 补丁集（`os/axvisor/patches/rtthread/`）
+
+12 个补丁（0000–0011）覆盖基础移植、lwIP/virtio-net 修复、GICv3 寄存器、
+绝对定时器截止、ROCK 4D 板级端口（GICv2@0x2a701000 + NS16550@0x2ad40000
+轮询串口 + `RT_USING_TASK123_SERVER` 编译开关）。应用脚本带 digest 校验，
+脏树/漂移树拒绝重放；`README.md` 记录完整清单与上游基线。
+
+### 1.3 运行与验证基础设施
+
+- `os/axvisor/scripts/run_task123*.sh`：guest 对比 runner（QEMU/板级两入口、
+  四组合矩阵、网络探针、结果门禁、矩阵汇总）。
+- `compare_task123_guests.py` / `prepare_task123_uboot_config.py` 等：分析与
+  板级串口 gate 生成。
+- `os/axvisor/configs/board/rock-4d-task123-*.toml` + `configs/vms/rock-4d/`：
+  板级/VM 配置（task123 双 guest、rtbench、zephyr 变体）。
+- `scripts/axbuild` 的 `task123` 子命令：矩阵编排、uboot 入口。
+
+### 1.4 嫁接到 upstream 重构上的分支独有机制
+
+upstream 在同期重构了 timer 所有权、配置化设备框架、mandatory-IRQ 等，
+分支独有的每 VM 策略以 graft 方式保留：
+
+- `axvmconfig`：`host_timer_policy` / `host_vcpu_idle_policy` /
+  `guest_tlbi_policy` 解析与 arch 校验（busy 策略仅 aarch64）。
+- `axvm` config/vm：三策略字段贯通 + `pub(crate)` 访问器。
+- `axvm` virtio-net 模型：传统固定放置（MMIO `0x0a00_0000` + 控制器输入
+  48），并在 `resource_pools.rs` 注册对应固定窗口。
+- `axruntime`：`embedded-rootfs` feature（cpio 归档经 `EmbeddedRootFsIf`
+  注入），适配 mandatory-IRQ 后的 feature 布局；与块设备 `fs` 互斥。
+- `starryos`：`fs` 变为可选 feature，`axvisor-guest`（嵌入 rootfs + 网络）
+  构建不再与 fs 统一。
+- `guest_console` mux：`explicit_attach` 守卫——无交互输入的板上，串口首
+  个噪声字节不得抢占多路输出的 foreground。
+- Zephyr guest 的 RTBENCH_NET 探针握手（trigger/READY/ACK/DONE）。
+
+## 2. 适配提交 `621a063a9`：rebase 后四项修复
+
+| # | 问题 | 修复 |
+|---|---|---|
+| 1 | 共享 `phys_cpu_sets` 使 PSCI CPU_ON 握手把次级 vCPU 调度到仍持有 current-vCPU publication 的核，触发 nested-vCPU panic | 每 vCPU 独占 host CPU（QEMU 模板 `phys_cpu_sets = [0b0001, 0b0010]`） |
+| 2 | 配置化 virtio-net 报规范 vendor ID 0x1AF4，RT-Thread BSP 按 QEMU 身份 0x554D4551 匹配，探测不到设备 | `new_with_vendor_id(QEMU_VIRTIO_MMIO_VENDOR_ID)` |
+| 3 | busy WFI fastpath 把 WFI 当 NOP 不退出 EL2，idle guest 的 timer PPI 永无注入机会（GICv2 板） | 暂禁 fastpath，走常规 WFI exit + host timer event 等待 |
+| 4 | 板级调试 UART 的 handler 不清源导致 host SPI 76 以极限速率重触发，饿死 guest 虚拟时间 | host-SPI 风暴熔断（10 ms 内 >32 次则由 host task 掩蔽该线）+ per-IRQ 日志降 debug |
+
+## 3. 文档与证据
+
+- `docs/results-report.md`：8 组合门禁与 RTBench 表（2026-08-27 批次）。
+- `docs/reproduce.md`：完整复现指南。
+- `logs/` + `plots/`：本批次运行日志、串口捕获、解析数据与图表。
+
+## 4. 已知边界
+
+- QEMU TCG 数据不能当作物理硬实时 WCET 上界（报告结论边界节）。
+- busy WFI fastpath 禁用后，板上 RT-Thread timer jitter p99 与首版基本同量级
+  （28,750 vs 33,375 ns）；重新启用需要在统一 host-timer 所有权模型下让
+  fastpath 直接加载 guest 定时器。
+- 板级共 tenant 场景（同核双 RTOS）曾出现非确定性冻结，本轮矩阵未启用。

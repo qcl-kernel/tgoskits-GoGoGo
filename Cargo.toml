@@ -332,3 +332,10 @@ x2apic = "0.5"
 kmod-tools = "0.3"
 kprobe = "0.6"
 
+[patch.crates-io]
+# LOCAL DEV PATCH — do not commit (machine-specific absolute path).
+# Fixes ostool serde-flatten shadowing so board_reset_cmd/board_power_off_cmd
+# from .uboot.toml actually execute in the local U-Boot backend.
+# Upstream bug: duplicate fields on UbootConfig + flattened LocalUbootConfig
+# (still present in 0.27.2). git fix: /home/yfblock/Code/ostool (fix/board-reset-cmd).
+ostool = { path = "/home/yfblock/Code/ostool-0.27.1-fix" }
