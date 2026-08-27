@@ -30,7 +30,32 @@ qemu-system-aarch64 --version
 cargo xtask --help
 ```
 
+### 当前分支基线
+
+本指南对应分支 `upstream/pr-new`（基于 upstream/dev `ba252ca67`，集成提交
+`87eb3fcc5` + 适配提交 `621a063a9`）。成果数据于 2026-08-25 采集，2026-08-27
+rebase 后八组合门禁在该分支全部复验通过。
+
+```bash
+git switch upstream/pr-new
+git rev-parse HEAD   # 应为 621a063a9...
+```
+
 ## 2. QEMU 四组合
+
+### 2.0 快速冒烟（可选）
+
+正式采集前可先用 quick 矩阵验证入口功能（每组合 10 个 Task 2 请求、1 秒稳定性
+窗口，只做门禁检查，不用于数据报告）：
+
+```bash
+rm -rf tmp/task123-qemu-smoke
+cargo xtask axvisor task123 --quick --matrix all \
+  --cache tmp/task123-artifact-cache \
+  --output tmp/task123-qemu-smoke
+```
+
+四个组合全部 `task123=PASS` 即入口正常，随后再跑 2.1 的正式矩阵。
 
 ### 2.1 一次运行完整矩阵
 
@@ -99,6 +124,8 @@ test -e /dev/ttyUSB0
 cargo xtask board ls
 ```
 
+### 3.1 正式采集（16 指标 realtime-suite）
+
 如果串口不是 `/dev/ttyUSB0`，在本机 `rock-4d-uboot-local.toml` 中填写实际路径；不要
 修改下面命令中的仓库配置路径。四条命令分别对应四种组合：
 
@@ -129,11 +156,26 @@ cargo xtask axvisor task123 uboot --rtos zephyr --app-guest starryos \
 ```
 
 U-Boot 运行期间保存完整串口输出；不要用旧内核、旧 DTB 或旧 RTOS 镜像继续测试。
-每条命令都必须同时满足：
+每条正式命令都必须同时满足：
 
 1. 对应客户机输出 `TASK123_*_END status=PASS`；
 2. 16 项纳秒 RTBench 指标均为 `expected=10 collected=10 missing=0`；
 3. Task 2、Task 3 和 Task123 结果门禁均为 `PASS`。
+
+### 3.2 板级快速自检（可选）
+
+正式采集前可去掉 `--realtime-suite --rtbench-samples 10` 跑 quick 模式（门禁
+marker 与探针握手相同，但不做 16 指标正式采集）。rebase 后的四组合复验即用此
+路径：
+
+```bash
+cargo xtask axvisor task123 uboot --rtos rtthread --app-guest linux \
+  --config os/axvisor/configs/board/rock-4d-task123-linuxleg.toml \
+  --uboot-config os/StarryOS/configs/board/rock-4d-uboot-local.toml
+```
+
+串口出现 `=== SUCCESS PATTERN MATCHED ===` 且命令退出码为 0 即该组合通过；四条
+命令替换 `--rtos`/`--app-guest`/`--config` 后同法验证。
 
 真机没有 QEMU 进程采样器，因此 host CPU/RSS 图中的 ROCK 4D host 字段显示 `NA` 是
 预期行为；这不表示真机 RTBench 指标缺失。
