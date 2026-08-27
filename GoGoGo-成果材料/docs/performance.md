@@ -1,6 +1,6 @@
 # 性能数据
 
-> 本文档属于 [GoGoGo 成果材料](../README.md) ｜ 文档集：[设计](design.md) · [更改](changes.md) · [性能](performance.md) · [验证报告](results-report.md) · [任务对照](task-coverage.md) · [复现](reproduce.md)
+> 本文档属于 [GoGoGo 成果材料](../README.md) ｜ 文档集：[设计](design.md) · [更改](changes.md) · [性能](performance.md) · [验证报告](results-report.md) · [任务对照](task-coverage.md) · [提交基线](commits.md) · [复现](reproduce.md)
 
 数据批次：2026-08-27，分支 `upstream/pr-new`（`87eb3fcc5` + `621a063a9`）。
 8 组合 × 16 项纳秒 RTBench 指标 × 10 样本全部完整（10/10，missing=0）。

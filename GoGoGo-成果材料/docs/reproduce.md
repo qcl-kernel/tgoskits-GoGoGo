@@ -1,6 +1,6 @@
 # Task123 当前结果复现指南
 
-> 本文档属于 [GoGoGo 成果材料](../README.md) ｜ 文档集：[设计](design.md) · [更改](changes.md) · [性能](performance.md) · [验证报告](results-report.md) · [任务对照](task-coverage.md) · [复现](reproduce.md)
+> 本文档属于 [GoGoGo 成果材料](../README.md) ｜ 文档集：[设计](design.md) · [更改](changes.md) · [性能](performance.md) · [验证报告](results-report.md) · [任务对照](task-coverage.md) · [提交基线](commits.md) · [复现](reproduce.md)
 
 本文是成果材料的统一复现入口，覆盖 Task 1 实时性、Task 2 客户机通信和 Task 3 AI
 控制闭环。当前结果矩阵包含 2 种 RTOS、2 种应用客户机和 2 种运行平台：
