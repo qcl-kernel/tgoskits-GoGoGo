@@ -1,3 +1,0 @@
-RTTHREAD_IMAGE_METADATA_OK /home/yfblock/Code/hyper-rtos/tgoskits/tmp/rt-thread-5.2.2-native-current/bsp/qemu-virt64-aarch64/rtthread.bin
-QEMU realtime control applied: pid=2402521 uclamp.min=1024
-PASS: RT benchmark stability completed (300s, 299999 samples)

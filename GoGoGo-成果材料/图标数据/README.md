@@ -52,7 +52,7 @@ because there is no QEMU process sampler on the physical board, not because RTBe
 data is missing.
 
 The detailed conclusion is in
-`../数据报告/task123/report/2026-08-25/tgoskits/task123-final-qemu-rock4d-report.md`.
+`../../数据报告/task123-final-qemu-rock4d-report.md`.
 
 The complete parsed data is in `parsed-data.json` and the normalized tables are
 `task2-metrics.csv`, `task3-metrics.csv`, `rtbench-metrics.csv`, and

@@ -1,8 +1,0 @@
-schema=1
-qemu_pid=867456
-elapsed_ms=185374
-cpu_time_ms=359110
-peak_rss_kb=1299392
-max_threads=7
-sample_count=1809
-interval_ms=100

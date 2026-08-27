@@ -1,43 +1,0 @@
-[32m[I/rtdm.ofw] Booting RT-Thread on physical CPU 0x0[0m
-[32m[I/rtdm.ofw] Machine model: linux,dummy-virt[0m
-[32m[I/rtdm.ofw] Memory node(0) ranges: 0x0000000040000000 - 0x0000000080000000[0m
-[32m[I/mm.memblock] System memory:[0m
-[32m[I/mm.memblock]                    [0x0000000040000000, 0x0000000080000000][0m
-[32m[I/mm.memblock] Reserved memory:[0m
-[32m[I/mm.memblock]                    [0x0000000040200000, 0x0000000040335000][0m
-[32m[I/mm.memblock]                    [0x0000000040335000, 0x0000000044335000][0m
-[32m[I/mm.memblock]                    [0x0000000044335000, 0x0000000044535000][0m
-[32m[I/mm.memblock]                    [0x0000000044535000, 0x0000000044635000][0m
-[32m[I/mm.memblock] physical memory region [0x0000000040000000-0x0000000040200000] installed to system page[0m
-[32m[I/mm.memblock] physical memory region [0x0000000044635000-0x0000000080000000] installed to system page[0m
-[32m[I/mm.memblock] 1002 MB memory installed to system page[0m
-[32m[I/osi.psci] Using PSCI v1.1 Function IDs[0m
-[32m[I/rtdm.ofw] Console: uart0 (<no-node>)[0m
-
- \ | /
-- RT -     Thread Operating System
- / | \     5.2.2 build Aug 20 2026 14:30:33
- 2006 - 2024 Copyright by RT-Thread team
-lwIP-2.1.2 initialized!
-[32m[I/sal.skt] Socket Abstraction Layer initialize success.[0m
-[32m[I/rtdm.mnt] File system initialization done[0m
-Axvisor RT-Thread guest ready
-TASK3_RTOS_READY ip=192.168.77.30 port=9877
-msh />benchmark 10
-msh />RTBENCH_BEGIN samples=10 frequency=62500000
-RTBENCH metric=timer_jitter run=1 expected=10 collected=10 missing=0 p50_ns=1408 p95_ns=41632 p99_ns=41632 p99_9_ns=41632 max_ns=41632 miss_100us=0 miss_500us=0 miss_1ms=0 mean_ns=5401
-RTBENCH metric=callback_exec run=1 expected=10 collected=10 missing=0 p50_ns=96 p95_ns=35072 p99_ns=35072 p99_9_ns=35072 max_ns=35072 miss_100us=0 miss_500us=0 miss_1ms=0 mean_ns=3604
-RTBENCH metric=timer_jitter run=2 expected=10 collected=10 missing=0 p50_ns=800 p95_ns=3872 p99_ns=3872 p99_9_ns=3872 max_ns=3872 miss_100us=0 miss_500us=0 miss_1ms=0 mean_ns=1387
-RTBENCH metric=callback_exec run=2 expected=10 collected=10 missing=0 p50_ns=96 p95_ns=192 p99_ns=192 p99_9_ns=192 max_ns=192 miss_100us=0 miss_500us=0 miss_1ms=0 mean_ns=102
-RTBENCH metric=timer_jitter run=3 expected=10 collected=10 missing=0 p50_ns=704 p95_ns=1456 p99_ns=1456 p99_9_ns=1456 max_ns=1456 miss_100us=0 miss_500us=0 miss_1ms=0 mean_ns=728
-RTBENCH metric=callback_exec run=3 expected=10 collected=10 missing=0 p50_ns=80 p95_ns=112 p99_ns=112 p99_9_ns=112 max_ns=112 miss_100us=0 miss_500us=0 miss_1ms=0 mean_ns=89
-RTBENCH metric=preemption run=1 expected=10 collected=10 missing=0 p50_ns=1712 p95_ns=8240 p99_ns=8240 p99_9_ns=8240 max_ns=8240 miss_100us=0 miss_500us=0 miss_1ms=0 mean_ns=2544
-RTBENCH metric=irq run=1 expected=10 collected=10 missing=0 p50_ns=1424 p95_ns=41456 p99_ns=41456 p99_9_ns=41456 max_ns=41456 miss_100us=0 miss_500us=0 miss_1ms=0 mean_ns=5472
-RTBENCH metric=irq_to_task run=1 expected=10 collected=10 missing=0 p50_ns=2480 p95_ns=18640 p99_ns=18640 p99_9_ns=18640 max_ns=18640 miss_100us=0 miss_500us=0 miss_1ms=0 mean_ns=4163
-RTBENCH metric=irq_disabled_duration run=1 expected=10 collected=10 missing=0 p50_ns=240 p95_ns=16736 p99_ns=16736 p99_9_ns=16736 max_ns=16736 miss_100us=0 miss_500us=0 miss_1ms=0 mean_ns=1899
-RTBENCH metric=mutex_inversion run=1 expected=10 collected=10 missing=0 p50_ns=6336 p95_ns=18976 p99_ns=18976 p99_9_ns=18976 max_ns=18976 miss_100us=0 miss_500us=0 miss_1ms=0 mean_ns=7736
-RTBENCH metric=wake_under_load run=1 expected=10 collected=10 missing=0 p50_ns=1440 p95_ns=7056 p99_ns=7056 p99_9_ns=7056 max_ns=7056 miss_100us=0 miss_500us=0 miss_1ms=0 mean_ns=2001
-RTBENCH_NET_READY port=9878 expected=10
-RTBENCH metric=net_event_latency run=1 expected=10 collected=10 missing=0 p50_ns=25136 p95_ns=60816 p99_ns=60816 p99_9_ns=60816 max_ns=60816 miss_100us=0 miss_500us=0 miss_1ms=0 mean_ns=29464
-RTBENCH_NET_DIAGNOSTIC irq_dropped=0 irq_coalesced=0 probe_received=10 probe_acked=10 probe_no_irq=0 probe_duplicates=0
-RTBENCH_END status=PASS

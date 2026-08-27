@@ -1,1 +1,0 @@
-rtthread image metadata: metadata is missing for /home/yfblock/Code/hyper-rtos/tgoskits/tmp/rtthread-net-fixed-entry.bin; expected /home/yfblock/Code/hyper-rtos/tgoskits/tmp/rtthread-net-fixed-entry.bin.meta.json. rebuild RT-Thread with the current AxVisor patch set

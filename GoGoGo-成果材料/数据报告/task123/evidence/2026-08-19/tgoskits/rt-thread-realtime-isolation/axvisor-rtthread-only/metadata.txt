@@ -1,7 +1,0 @@
-scenario=axvisor-rtthread-only
-duration_seconds=300
-rtthread_source_image=tmp/.task123-comparison-cache.task123-guest-comparison-quick-20260819T124222Z.1124867/rtthread.bin
-qemu=/home/yfblock/.local/qemu-arm/bin/qemu-system-aarch64
-git_commit=9b7a85d928c5f99985a0aac0036876418796f1c3
-ffe5a4cc04ea206bd120e03dd5d215e39d90ac76c916d6dbc7a966e8679232d4  tmp/.task123-comparison-cache.task123-guest-comparison-quick-20260819T124222Z.1124867/rtthread.bin
-a9d79b0344bddde4b5b39cb80a1ba20ff98bdbb8bd3d565319ca19945ec43420  /home/yfblock/Code/hyper-rtos/tgoskits/tmp/rtthread-runtime.BMkutG/rtthread-net.toml

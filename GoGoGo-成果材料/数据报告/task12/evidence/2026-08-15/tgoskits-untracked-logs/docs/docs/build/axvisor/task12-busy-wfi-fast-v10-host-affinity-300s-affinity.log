@@ -1,5 +1,0 @@
-tid=3502899 name=qemu-system-aar affinity=15
-tid=3502962 name=CPU 0/TCG affinity=0
-tid=3502963 name=CPU 1/TCG affinity=1
-tid=3502964 name=CPU 2/TCG affinity=14
-tid=3502965 name=CPU 3/TCG affinity=2

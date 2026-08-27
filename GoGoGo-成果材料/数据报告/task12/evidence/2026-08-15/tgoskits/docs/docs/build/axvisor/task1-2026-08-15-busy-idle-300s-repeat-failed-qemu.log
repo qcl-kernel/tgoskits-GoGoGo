@@ -1,3 +1,0 @@
-qemu-system-aarch64: -serial unix:/tmp/tmp.ALoYUBivpQ/serial.sock,server=on,wait=on: info: QEMU waiting for connection on: disconnected:unix:/tmp/tmp.ALoYUBivpQ/serial.sock,server=on
-qemu-system-aarch64: warning: hub 77 is not connected to host network
-qemu-system-aarch64: terminating on signal 2 from pid 1974117 (/home/yfblock/.nvm/versions/node/v22.22.3/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/bin/codex)

@@ -1,2 +1,0 @@
-qemu-system-aarch64: -serial unix:/tmp/tmp.DnFuNxEPrB/serial.sock,server=on,wait=on: info: QEMU waiting for connection on: disconnected:unix:/tmp/tmp.DnFuNxEPrB/serial.sock,server=on
-qemu-system-aarch64: terminating on signal 15 from pid 2386954 (bash)

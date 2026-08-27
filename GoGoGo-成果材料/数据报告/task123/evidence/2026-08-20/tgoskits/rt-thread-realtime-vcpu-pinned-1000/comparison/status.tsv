@@ -1,3 +1,0 @@
-native-suite	PASS
-axvisor-only-suite	FAIL-CONTINUE	rc=1
-axvisor-linux-suite	FAIL-CONTINUE	rc=1

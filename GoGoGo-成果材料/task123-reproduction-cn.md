@@ -11,7 +11,7 @@
 | ROCK 4D 真机 | Zephyr | Linux / StarryOS |
 
 QEMU 和 ROCK 4D 的最终数据、日志和图表见 [`图标数据/`](图标数据/)；八个组合的验收
-汇总见[最终验证报告](数据报告/task123/report/2026-08-25/tgoskits/task123-final-qemu-rock4d-report.md)。
+汇总见[最终验证报告](数据报告/task123-final-qemu-rock4d-report.md)。
 
 ## 1. 前置条件
 
@@ -199,7 +199,7 @@ GoGoGo-成果材料/图标数据/plots/*.svg
 
 ## 5. 结果判定与证据
 
-最终八组合的 timer jitter p99 轮次最大值和完整性见[最终验证报告](数据报告/task123/report/2026-08-25/tgoskits/task123-final-qemu-rock4d-report.md)。
+最终八组合的 timer jitter p99 轮次最大值和完整性见[最终验证报告](数据报告/task123-final-qemu-rock4d-report.md)。
 原始证据按平台存放在：
 
 - `GoGoGo-成果材料/图标数据/qemu/`：QEMU 四组合日志和矩阵汇总；

@@ -1,2 +1,0 @@
-qemu-system-aarch64: -device nvme,drive=disk0,serial=tgoskits,max_ioqpairs=64,msix_qsize=65: Failed to get "write" lock
-Is another process using the image [tmp/rootfs.img]?
