@@ -45,7 +45,11 @@ impl Aarch64Arch {
             })?;
             let timer_config = timer_vm_config(&timer_profile, &vcpu_mappings)?;
             let guest_tlbi_policy = config.guest_tlbi_policy();
-            let busy_wfi_fastpath =
+            // The busy idle policy currently only feeds the WFI fastpath,
+            // which is disabled above; keep reading the policy so config
+            // mistakes (e.g. `busy` on unsupported arches) still surface.
+            #[allow(clippy::let_underscore_untyped)]
+            let _busy_wfi_fastpath =
                 config.host_vcpu_idle_policy() == HostVcpuIdlePolicy::Busy;
             if guest_tlbi_policy == GuestTlbiPolicy::VmScoped {
                 super::tlbi::vm_pcpu_mask(&vcpu_mappings).map_err(|error| {
@@ -88,7 +92,14 @@ impl Aarch64Arch {
                     timer_config,
                     host_irq_config,
                     vcpu_tlbi_policy,
-                    busy_wfi_fastpath,
+                    // The busy WFI fastpath skips the EL2 exit entirely, so a
+                    // guest that goes idle never re-enters the inject loop and
+                    // its timer PPI stays pending on hardware GICv2 boards.
+                    // Take the regular WFI exit (host waits for the timer
+                    // event) until the fastpath learns to keep the guest
+                    // timer directly loaded under the unified host-timer
+                    // ownership model.
+                    false,
                 ))
             })?;
 

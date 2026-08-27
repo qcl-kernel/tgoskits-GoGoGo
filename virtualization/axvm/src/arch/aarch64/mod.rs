@@ -312,7 +312,10 @@ impl ArmHostOps for AxvmArmHostOps {
         if let Some(token) = gic::acknowledge_host_irq() {
             let intid = token & 0x3ff;
             if intid >= 32 {
-                info!("VM host IRQ: intid={} (SPI {})", intid, intid - 32);
+                // Per-interrupt logging on the exit hot path floods the
+                // shared host console when a board device misbehaves; keep it
+                // at debug level.
+                debug!("VM host IRQ: intid={} (SPI {})", intid, intid - 32);
             }
             if let Err(error) = gic::route_acknowledged_host_irq(token) {
                 warn!("{error}");

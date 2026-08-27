@@ -5,7 +5,10 @@ guest_type = "virtualized"
 cpu_num = 2
 guest_tlbi_policy = "vm_scoped"
 phys_cpu_ids = [0, 1]
-phys_cpu_sets = [0b1011, 0b1011]
+# Each vCPU owns a dedicated host CPU: overlapping sets let the CPU_ON
+# handshake run the secondary vCPU task on the primary vCPU's core while it
+# is still inside its current-vCPU publication (upstream pins this way).
+phys_cpu_sets = [0b0001, 0b0010]
 
 [kernel]
 entry_point = 0x8020_0000

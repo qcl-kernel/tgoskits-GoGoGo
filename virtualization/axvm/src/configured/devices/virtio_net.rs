@@ -34,6 +34,8 @@ const MMIO_SIZE: u64 = 0x200;
 /// window at 0x0a00_0000 and GIC SPI 16 (controller input 48).
 const LEGACY_MMIO_BASE: u64 = 0x0a00_0000;
 const LEGACY_IRQ_INPUT: usize = 48;
+/// Vendor identity expected by the RT-Thread QEMU virtio-mmio probe.
+const QEMU_VIRTIO_MMIO_VENDOR_ID: u32 = 0x554d_4551;
 const INGRESS_CAPACITY: usize = 64;
 
 static NEXT_PORT_ID: AtomicUsize = AtomicUsize::new(0);
@@ -187,12 +189,15 @@ impl DeviceModel for VirtioNetModel {
             switch,
         };
         let model = Arc::new(
-            VirtioMmioNetDevice::new(
+            VirtioMmioNetDevice::new_with_vendor_id(
                 GuestPhysAddr::from(base as usize),
                 size as usize,
                 backend,
                 VirtioNetConfig::new(self.guest_mac),
                 NoGuestMemoryAccessor,
+                // RT-Thread's QEMU virtio-mmio probe matches QEMU's vendor
+                // identity; Linux guests ignore this transport-specific ID.
+                QEMU_VIRTIO_MMIO_VENDOR_ID,
             )
             .map_err(|error| DeviceManagerError::InvalidConfig {
                 operation: "construct virtio-net device",

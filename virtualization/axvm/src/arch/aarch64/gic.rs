@@ -529,6 +529,86 @@ pub(crate) fn deactivate_host_irq(token: usize) {
 }
 
 /// Dispatches an already acknowledged IRQ through the host dynamic framework.
+/// Host-SPI storm breaker.
+///
+/// A board device whose handler claims `handled` but never deasserts the
+/// source (observed with the ROCK 4D debug UART after U-Boot) re-pends the
+/// GIC line as fast as the exit path can acknowledge it, starving the
+/// guests' virtual time. When the same host SPI is dispatched more than
+/// `STORM_WINDOW` times inside `STORM_INTERVAL_NANOS` (physically impossible
+/// for a well-handled line, whose handler deasserts the source), mask the
+/// line at the
+/// distributor once and report it; a well-behaved driver that later probes
+/// re-enables its own line.
+const STORM_INTERVAL_NANOS: u64 = 10_000_000;
+const STORM_WINDOW: u32 = 32;
+
+fn storm_breaker_host_spi(raw: u32) -> bool {
+    use core::sync::atomic::{AtomicBool, AtomicU64, AtomicU32, Ordering};
+
+    if raw < 32 {
+        return false;
+    }
+    let slot = ((raw - 32) % 256) as usize;
+    static FIRST_SEEN: [AtomicU64; 256] = {
+        #[allow(clippy::declare_interior_mutable_const)]
+        const Z: AtomicU64 = AtomicU64::new(0);
+        [Z; 256]
+    };
+    static FIRES: [AtomicU32; 256] = {
+        #[allow(clippy::declare_interior_mutable_const)]
+        const Z: AtomicU32 = AtomicU32::new(0);
+        [Z; 256]
+    };
+    static MASKED: [AtomicBool; 256] = {
+        #[allow(clippy::declare_interior_mutable_const)]
+        const Z: AtomicBool = AtomicBool::new(false);
+        [Z; 256]
+    };
+
+    if MASKED[slot].load(Ordering::Acquire) {
+        return true;
+    }
+    let now = ax_std::os::arceos::modules::ax_hal::time::monotonic_time_nanos();
+    let first = FIRST_SEEN[slot].load(Ordering::Relaxed);
+    if first == 0 || now.saturating_sub(first) > STORM_INTERVAL_NANOS {
+        FIRST_SEEN[slot].store(now, Ordering::Relaxed);
+        FIRES[slot].store(1, Ordering::Relaxed);
+        return false;
+    }
+    let fires = FIRES[slot].fetch_add(1, Ordering::Relaxed) + 1;
+    if fires < STORM_WINDOW {
+        return false;
+    }
+    if MASKED[slot]
+        .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+        .is_err()
+    {
+        return true;
+    }
+    warn!(
+        "Host SPI {} fired {fires} times in 10 ms and its handler never deasserted the source; masking the line",
+        raw - 32
+    );
+    // `try_with_gic` takes the control-plane driver lock, which must not be
+    // acquired from the IRQ dispatch context. Defer the actual distributor
+    // mask to a one-shot host task.
+    let line = raw;
+    let task = crate::host::task::TaskInner::new(
+        move || {
+            if let Err(error) = try_with_gic("mask storming host SPI", |intc| {
+                intc.set_enabled(rdif_intc::HwIrq(line), false)
+            }) {
+                warn!("masking storming host SPI {line} failed: {error:?}");
+            }
+        },
+        std::format!("host-spi-{line}-storm-mask"),
+        0x8_000, // 32 KiB: logging + one control-plane call.
+    );
+    crate::host::task::spawn_task(task);
+    true
+}
+
 pub(crate) fn dispatch_acknowledged_host_irq(token: usize) {
     // A guest exit may acknowledge a host IRQ without passing through the
     // platform's raw-vector entry wrapper. Keep this path equivalent to
@@ -548,6 +628,9 @@ pub(crate) fn dispatch_acknowledged_host_irq(token: usize) {
         }
     };
     let outcome = ax_std::os::arceos::modules::ax_hal::irq::dispatch_irq(irq);
+    if storm_breaker_host_spi(raw) {
+        return;
+    }
     if !outcome.handled {
         if outcome.called == 0 {
             warn!("Unhandled acknowledged host IRQ {raw}");
