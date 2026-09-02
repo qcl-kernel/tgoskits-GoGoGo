@@ -6,7 +6,6 @@ SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(CDPATH= cd -- "$SCRIPT_DIR/../../.." && pwd)"
 export TGOS_SOURCE_CACHE="${TGOS_SOURCE_CACHE:-$ROOT/tmp/source-cache}"
 export UV_CACHE_DIR="${UV_CACHE_DIR:-$TGOS_SOURCE_CACHE/uv}"
-export TGOS_IMAGE_LOCAL_STORAGE="${TGOS_IMAGE_LOCAL_STORAGE:-$TGOS_SOURCE_CACHE/rootfs}"
 TASK3_ROOT="$ROOT/os/axvisor/guests/task3"
 RUN_UNTIL="${RUN_UNTIL:-$SCRIPT_DIR/run_until_log_marker.sh}"
 QEMU_REALTIME_CONTROL="${QEMU_REALTIME_CONTROL:-$SCRIPT_DIR/apply_qemu_realtime_controls.sh}"
@@ -725,25 +724,64 @@ resolve_dependencies() {
     PROTOCOL_HEADER="$(canonical_existing_file protocol-header "$PROTOCOL_HEADER")"
 }
 
+managed_rootfs_extract_dir() {
+    # Mirrors the xtask image-tool storage contract: TGOS_IMAGE_EXTRACT_DIR
+    # overrides the extract_dir recorded in tmp/axbuild/.image.toml, whose
+    # default is <workspace>/tmp/axbuild/rootfs (see docs/docs/rootfs/overview.md).
+    local configured
+    if [[ -n "${TGOS_IMAGE_EXTRACT_DIR:-}" ]]; then
+        printf '%s\n' "$TGOS_IMAGE_EXTRACT_DIR"
+        return 0
+    fi
+    configured="$(sed -n 's/^extract_dir[[:space:]]*=[[:space:]]*"\(.*\)"[[:space:]]*$/\1/p' \
+        "$ROOT/tmp/axbuild/.image.toml" 2>/dev/null | tail -n 1)"
+    if [[ -n "$configured" ]]; then
+        [[ "$configured" == /* ]] || configured="$ROOT/$configured"
+        printf '%s\n' "$configured"
+        return 0
+    fi
+    printf '%s\n' "$ROOT/tmp/axbuild/rootfs"
+}
+
+find_managed_rootfs_image() {
+    # Current layout: the pulled image is a plain file directly inside the
+    # managed extract dir. Legacy pre-refactor caches kept the image inside a
+    # <storage>/rootfs-aarch64-alpine.img/ directory; honor them so old
+    # task123 runs keep working without a re-pull.
+    local candidate storage
+    candidate="$(managed_rootfs_extract_dir)/rootfs-aarch64-alpine.img"
+    if [[ -f "$candidate" ]]; then
+        printf '%s\n' "$candidate"
+        return 0
+    fi
+    for storage in "${TGOS_IMAGE_LOCAL_STORAGE:-}" "$TGOS_SOURCE_CACHE/rootfs"; do
+        [[ -n "$storage" ]] || continue
+        candidate="$storage/rootfs-aarch64-alpine.img/rootfs-aarch64-alpine.img"
+        if [[ -f "$candidate" ]]; then
+            printf '%s\n' "$candidate"
+            return 0
+        fi
+    done
+    return 1
+}
+
 resolve_rootfs_image() {
     if [[ -n "${ROOTFS_IMAGE:-}" ]]; then
         ROOTFS_IMAGE="$(canonical_existing_file rootfs "$ROOTFS_IMAGE")"
         return
     fi
 
-    local rootfs_dir="$TGOS_IMAGE_LOCAL_STORAGE/rootfs-aarch64-alpine.img"
-    local rootfs_candidates=()
-    mapfile -t rootfs_candidates < <(find "$rootfs_dir" -type f -name rootfs-aarch64-alpine.img -print 2>/dev/null || true)
-    if [[ "${#rootfs_candidates[@]}" -eq 0 ]]; then
+    local discovered=
+    discovered="$(find_managed_rootfs_image)" || discovered=
+    if [[ -z "$discovered" ]]; then
         run_timed "$TASK123_BUILD_TIMEOUT_S" image-pull \
             "$CARGO" xtask image pull --arch aarch64
-        mapfile -t rootfs_candidates < <(find "$rootfs_dir" -type f -name rootfs-aarch64-alpine.img -print)
+        discovered="$(find_managed_rootfs_image)" || {
+            fail "managed aarch64 rootfs pull did not produce rootfs-aarch64-alpine.img under $(managed_rootfs_extract_dir)"
+            return 1
+        }
     fi
-    [[ "${#rootfs_candidates[@]}" -eq 1 ]] || {
-        fail "managed aarch64 rootfs pull must produce exactly one rootfs-aarch64-alpine.img (found ${#rootfs_candidates[@]})"
-        return 1
-    }
-    ROOTFS_IMAGE="$(canonical_existing_file rootfs "${rootfs_candidates[0]}")"
+    ROOTFS_IMAGE="$(canonical_existing_file rootfs "$discovered")"
 }
 
 linux_image_has_task123_probe() {

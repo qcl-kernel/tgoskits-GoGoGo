@@ -636,21 +636,21 @@ printf '%s\n' 'unverified cached kernel' \
 printf '%s\n' \
   '#!/usr/bin/env bash' \
   'set -euo pipefail' \
-  'printf "%s\\t%s\\n" "${TGOS_IMAGE_REGISTRY_FALLBACK_URL:-}" "$*" >>"$FAKE_CARGO_LOG"' \
-  'output_dir=""' \
+  'printf "%s\\n" "$*" >>"$FAKE_CARGO_LOG"' \
+  'extract_dir=""' \
   'previous=""' \
   'for argument in "$@"; do' \
-  '  if [ "$previous" = --output-dir ]; then output_dir="$argument"; fi' \
+  '  if [ "$previous" = --extract-dir ]; then extract_dir="$argument"; fi' \
   '  previous="$argument"' \
   'done' \
-  'if [ -n "$output_dir" ]; then' \
-  '  image_name="${!#}"' \
-  '  mkdir -p "${output_dir}/${image_name}"' \
-  '  printf "%s\\n" "registry-verified kernel" >"${output_dir}/${image_name}/qemu-aarch64"' \
-  'elif printf "%s\\n" "$*" | grep -q -- "--arch aarch64"; then' \
+  'if printf "%s\\n" "$*" | grep -q -- "--arch aarch64"; then' \
   '  printf "%s\\n" "image pull: fetched rootfs-aarch64-alpine.img"' \
-  '  mkdir -p "$TGOS_IMAGE_LOCAL_STORAGE"' \
-  '  printf "%s\\n" "registry-verified rootfs" >"${TGOS_IMAGE_LOCAL_STORAGE}/rootfs-aarch64-alpine.img"' \
+  '  mkdir -p "$extract_dir"' \
+  '  printf "%s\\n" "registry-verified rootfs" >"${extract_dir}/rootfs-aarch64-alpine.img"' \
+  'else' \
+  '  image_name="${!#}"' \
+  '  mkdir -p "${extract_dir}/${image_name}"' \
+  '  printf "%s\\n" "registry-verified kernel" >"${extract_dir}/${image_name}/qemu-aarch64"' \
   'fi' \
   >"${provenance_bin}/cargo"
 chmod +x "${provenance_bin}/cargo"
@@ -666,12 +666,11 @@ FAKE_CARGO_LOG="$provenance_log" \
   ' bash "$SETUP_SOURCE" "$provenance_images" "$provenance_repo"
 [ -s "$provenance_log" ] \
   || fail_test "seeded guest cache bypassed the image-tool checksum boundary"
-IFS=$'\t' read -r observed_fallback observed_pull <"$provenance_log"
-[ "$observed_fallback" = "$expected_guest_registry" ] \
-  || fail_test "guest image pull did not pin its fallback registry"
-printf '%s\n' "$observed_pull" \
-  | rg -q --fixed-strings -- "--registry ${expected_guest_registry}" \
+observed_pull="$(cat "$provenance_log")"
+rg -q --fixed-strings -- "--registry ${expected_guest_registry}" <<<"$observed_pull" \
   || fail_test "guest image pull did not use the pinned registry"
+rg -q --fixed-strings -- "--extract-dir ${provenance_images}" <<<"$observed_pull" \
+  || fail_test "guest image pull did not target the managed extract dir"
 
 rootfs_target="${provenance_root}/rootfs-target.img"
 rootfs_pull_stderr="${provenance_root}/rootfs-pull.stderr"

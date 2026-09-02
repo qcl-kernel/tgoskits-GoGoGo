@@ -49,7 +49,7 @@ for artifact in linux-kernel initramfs.cpio rtthread-normal.bin \
     zephyr.bin rootfs.img model.bin; do
     printf '%s\n' "$artifact" > "$fixtures/$artifact"
 done
-printf '%s\n' '{"schema":1,"rtos":"zephyr","image_sha256":"'"$(sha256sum -- "$fixtures/zephyr.bin" | cut -d' ' -f1)"'","image_size":'"$(stat -c %s -- "$fixtures/zephyr.bin")"',"entry_point":1073746180,"zephyr_version":"fixture","zephyr_commit":"fixture","zephyr_sdk_version":"fixture","board":"fixture","virtio_net":true,"real_spi_interrupt":true}' \
+printf '%s\n' '{"schema":1,"rtos":"zephyr","image_sha256":"'"$(sha256sum -- "$fixtures/zephyr.bin" | cut -d' ' -f1)"'","image_size":'"$(stat -c %s -- "$fixtures/zephyr.bin")"',"entry_point":1073746180,"zephyr_version":"fixture","zephyr_commit":"fixture","zephyr_sdk_version":"fixture","board":"fixture","board_target":"qemu_cortex_a53/qemu_cortex_a53","virtio_net":true,"real_spi_interrupt":true}' \
     > "$fixtures/zephyr.bin.meta.json"
 printf '%s\n' 'ddf52e2cdd977f14fc04035c88672ac204aec713' \
     > "$fixtures/rtthread-source/.axvisor-rtthread-source-commit"
@@ -70,11 +70,11 @@ set -euo pipefail
 printf '%q ' "$@" >> "$FAKE_CARGO_LOG"
 printf '\n' >> "$FAKE_CARGO_LOG"
 if [[ "$1" == xtask && "$2" == image && "$3" == pull && "$4" == --arch && "$5" == aarch64 ]]; then
-    output_dir="${TGOS_IMAGE_LOCAL_STORAGE:?}"
-    mkdir -p "$output_dir/rootfs-aarch64-alpine.img"
+    extract_dir="${TGOS_IMAGE_EXTRACT_DIR:?fake cargo emulates the managed extract-dir contract}"
+    mkdir -p "$extract_dir"
     case "${FAKE_ROOTFS_BEHAVIOR:-one}" in
         zero) ;;
-        one) printf 'pulled rootfs\n' > "$output_dir/rootfs-aarch64-alpine.img/rootfs-aarch64-alpine.img" ;;
+        one) printf 'pulled rootfs\n' > "$extract_dir/rootfs-aarch64-alpine.img" ;;
         multiple)
             exit 93
             ;;
@@ -870,14 +870,16 @@ assert_reaped "$(cat "$records/qemu.pid")"
 : > "$records/cargo.log"
 : > "$records/qemu.log"
 default_rootfs_output="$tmp/default-rootfs-output"
+default_rootfs_extract="$tmp/default-rootfs-extract"
 default_rootfs_cache="$tmp/default-rootfs-cache"
-env "${common_env[@]}" ROOTFS_IMAGE= TGOS_SOURCE_CACHE="$default_rootfs_cache" \
+env "${common_env[@]}" ROOTFS_IMAGE= TGOS_IMAGE_EXTRACT_DIR="$default_rootfs_extract" \
+    TGOS_SOURCE_CACHE="$default_rootfs_cache" \
     "$RUNNER" --mode smoke \
     --task2-count 2 --task3-frames 3 --output "$default_rootfs_output" >/dev/null ||
     fail "default rootfs pull run failed"
 grep -Eq '^xtask image pull --arch aarch64[[:space:]]*$' \
     "$records/cargo.log" || fail "runner did not pull the managed aarch64 rootfs"
-grep -Eq '^ARTIFACT name=rootfs path=/.*rootfs/rootfs-aarch64-alpine\.img/rootfs-aarch64-alpine\.img sha256=[0-9a-f]{64}$' \
+grep -Eq '^ARTIFACT name=rootfs path=/.*rootfs-aarch64-alpine\.img sha256=[0-9a-f]{64}$' \
     "$default_rootfs_output/manifest.txt" ||
     fail "manifest did not record the uniquely pulled rootfs"
 [[ "$(wc -l < "$records/qemu.log")" -eq 1 ]] ||
@@ -887,7 +889,8 @@ assert_reaped "$(cat "$records/qemu.pid")"
 : > "$records/cargo.log"
 : > "$records/qemu.log"
 reused_rootfs_output="$tmp/reused-rootfs-output"
-env "${common_env[@]}" ROOTFS_IMAGE= TGOS_SOURCE_CACHE="$default_rootfs_cache" \
+env "${common_env[@]}" ROOTFS_IMAGE= TGOS_IMAGE_EXTRACT_DIR="$default_rootfs_extract" \
+    TGOS_SOURCE_CACHE="$default_rootfs_cache" \
     "$RUNNER" --mode smoke --task2-count 2 --task3-frames 3 \
     --output "$reused_rootfs_output" >/dev/null ||
     fail "cached rootfs reuse run failed"
@@ -896,13 +899,36 @@ env "${common_env[@]}" ROOTFS_IMAGE= TGOS_SOURCE_CACHE="$default_rootfs_cache" \
 [[ "$(wc -l < "$records/qemu.log")" -eq 1 ]] ||
     fail "cached rootfs run did not reach exactly one QEMU"
 
+: > "$records/cargo.log"
+: > "$records/qemu.log"
+legacy_rootfs_output="$tmp/legacy-rootfs-output"
+legacy_rootfs_extract="$tmp/legacy-rootfs-extract"
+legacy_rootfs_cache="$tmp/legacy-rootfs-cache"
+mkdir -p "$legacy_rootfs_cache/rootfs/rootfs-aarch64-alpine.img"
+printf 'legacy cached rootfs\n' \
+    > "$legacy_rootfs_cache/rootfs/rootfs-aarch64-alpine.img/rootfs-aarch64-alpine.img"
+env "${common_env[@]}" ROOTFS_IMAGE= TGOS_IMAGE_EXTRACT_DIR="$legacy_rootfs_extract" \
+    TGOS_SOURCE_CACHE="$legacy_rootfs_cache" \
+    "$RUNNER" --mode smoke --task2-count 2 --task3-frames 3 \
+    --output "$legacy_rootfs_output" >/dev/null ||
+    fail "pre-refactor rootfs layout reuse run failed"
+[[ "$(grep -Ec 'xtask image pull --arch aarch64' "$records/cargo.log")" -eq 0 ]] ||
+    fail "legacy layout rootfs triggered a redundant pull"
+grep -Eq '^ARTIFACT name=rootfs path=/.*rootfs/rootfs-aarch64-alpine\.img/rootfs-aarch64-alpine\.img sha256=[0-9a-f]{64}$' \
+    "$legacy_rootfs_output/manifest.txt" ||
+    fail "manifest did not record the legacy-layout rootfs"
+[[ "$(wc -l < "$records/qemu.log")" -eq 1 ]] ||
+    fail "legacy layout rootfs run did not reach exactly one QEMU"
+
 for rootfs_behavior in zero failure; do
     : > "$records/cargo.log"
     : > "$records/qemu.log"
     bad_rootfs_output="$tmp/rootfs-$rootfs_behavior-output"
+    bad_rootfs_extract="$tmp/rootfs-$rootfs_behavior-extract"
     bad_rootfs_cache="$tmp/rootfs-$rootfs_behavior-cache"
     expect_failure "rootfs pull with $rootfs_behavior candidates returned success" \
-        env "${common_env[@]}" ROOTFS_IMAGE= TGOS_SOURCE_CACHE="$bad_rootfs_cache" \
+        env "${common_env[@]}" ROOTFS_IMAGE= TGOS_IMAGE_EXTRACT_DIR="$bad_rootfs_extract" \
+        TGOS_SOURCE_CACHE="$bad_rootfs_cache" \
         FAKE_ROOTFS_BEHAVIOR="$rootfs_behavior" \
             "$RUNNER" --mode smoke --task2-count 2 --task3-frames 3 \
             --output "$bad_rootfs_output"

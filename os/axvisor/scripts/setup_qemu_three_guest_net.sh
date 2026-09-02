@@ -109,11 +109,9 @@ pull_guest_image() {
   mkdir -p "$IMAGE_ROOT"
   echo "[three-guest-net] pulling ${image_name} from ${GUEST_REGISTRY}" >&2
   if ! (cd "$REPO_ROOT" && \
-    TGOS_IMAGE_LOCAL_STORAGE="${IMAGE_ROOT}/managed" \
-    TGOS_IMAGE_REGISTRY_FALLBACK_URL="$GUEST_REGISTRY" \
     cargo xtask image pull \
       --registry "$GUEST_REGISTRY" \
-      --output-dir "$IMAGE_ROOT" \
+      --extract-dir "$IMAGE_ROOT" \
       "$image_name" >&2); then
     die "unable to pull ${image_name}; provide a local kernel with AXVISOR_THREE_GUEST_LINUX_IMAGE or AXVISOR_THREE_GUEST_RTOS_IMAGE"
   fi
@@ -204,9 +202,8 @@ prepare_rootfs() {
     local rootfs_store="${IMAGE_ROOT}/rootfs-managed"
     echo "[three-guest-net] pulling the AArch64 QEMU rootfs" >&2
     (cd "$REPO_ROOT" && \
-      TGOS_IMAGE_LOCAL_STORAGE="$rootfs_store" \
-      cargo xtask image pull --arch aarch64 >&2)
-    source="$(find "$rootfs_store" -type f -name 'rootfs-aarch64-alpine.img' -print -quit)"
+      cargo xtask image pull --arch aarch64 --extract-dir "$rootfs_store" >&2)
+    source="${rootfs_store}/rootfs-aarch64-alpine.img"
   fi
 
   [ -f "$source" ] || die "QEMU rootfs image does not exist: ${source}"
