@@ -22,6 +22,19 @@
 
 #define RTIPC_PORT 9876
 #define TASK3_PORT 9877
+/* RTBENCH network-probe handshake with the application guest (see
+ * guests/task3/src/linux/rtbench_net_probe.c). The RT-Thread benchmark
+ * speaks the same protocol: trigger the app-guest probe listener, echo
+ * its READY/probe datagrams on the event port, and report DONE when the
+ * benchmark suite finishes. Without the handshake the app guest blocks
+ * in `wait $net_probe_pid` and the board run never reaches its exit
+ * marker. */
+#define RTBENCH_NET_EVENT_PORT 9878
+#define RTBENCH_NET_TRIGGER_PORT 9879
+#define RTBENCH_NET_MAGIC UINT32_C(0x5254424e)
+#define RTBENCH_NET_SEQ_READY UINT32_C(0xffffffff)
+#define RTBENCH_NET_SEQ_DONE UINT32_C(0xfffffffd)
+#define RTBENCH_NET_APP_ADDR "192.168.77.11"
 #define RECV_TIMEOUT_MS 10
 #define RTBENCH_PERIOD_NS 1000000ULL
 #define RTBENCH_HZ 1000000000ULL
@@ -743,6 +756,154 @@ static int cmd_benchmark(const struct shell *shell, size_t argc, char **argv)
 
 SHELL_CMD_REGISTER(benchmark, NULL, "run latency benchmark suite", cmd_benchmark);
 
+static int rtbench_net_probe_fd = -1;
+
+static void rtbench_net_send_control(uint32_t sequence)
+{
+	struct sockaddr_in peer = {
+		.sin_family = AF_INET,
+		.sin_port = htons(RTBENCH_NET_TRIGGER_PORT),
+	};
+	uint32_t payload[2] = {
+		htonl(RTBENCH_NET_MAGIC),
+		htonl(sequence),
+	};
+
+	if (zsock_inet_pton(AF_INET, RTBENCH_NET_APP_ADDR,
+			    &peer.sin_addr) != 1) {
+		return;
+	}
+	int fd = zsock_socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+
+	if (fd < 0) {
+		return;
+	}
+	(void)zsock_sendto(fd, payload, sizeof(payload), 0,
+			   (const struct sockaddr *)&peer, sizeof(peer));
+	zsock_close(fd);
+}
+
+/* Echo one datagram back to its sender. Used for the READY confirmation
+ * and for probe-sequence acknowledgements. */
+static void rtbench_net_echo(int fd, const uint8_t *payload, size_t len,
+			     const struct sockaddr *to, socklen_t to_len)
+{
+	if (len == 2U * sizeof(uint32_t)) {
+		(void)zsock_sendto(fd, payload, len, 0, to, to_len);
+	}
+}
+
+/* Complete the app-guest probe handshake: trigger the listener, wait for
+ * READY, then acknowledge every probe datagram of the sequence stream.
+ * The completion (DONE) is sent by the caller after the benchmark. */
+static int rtbench_net_prologue(uint32_t expected)
+{
+	struct sockaddr_in local_addr = {
+		.sin_family = AF_INET,
+		.sin_addr = INADDR_ANY,
+	};
+	uint8_t *seen = k_calloc(expected, sizeof(*seen));
+	int fd = zsock_socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+	bool ready = false;
+	uint32_t collected = 0U;
+
+	if (seen == NULL) {
+		return -ENOMEM;
+	}
+	if (fd < 0) {
+		k_free(seen);
+		return -errno;
+	}
+	local_addr.sin_port = htons(RTBENCH_NET_EVENT_PORT);
+	if (zsock_bind(fd, (const struct sockaddr *)&local_addr,
+		       sizeof(local_addr)) != 0) {
+		zsock_close(fd);
+		k_free(seen);
+		return -errno;
+	}
+	configure_socket_timeout(fd);
+
+	/* Trigger with retries until the listener answers READY (or asks for
+	 * a retry through the probe-ready control marker). */
+	for (uint32_t attempt = 0U; attempt < 100U && !ready; ++attempt) {
+		uint8_t buf[64];
+		struct sockaddr_in src;
+		socklen_t src_len = sizeof(src);
+		ssize_t rx;
+
+		rtbench_net_send_control(expected);
+		rx = zsock_recvfrom(fd, buf, sizeof(buf), 0,
+				    (struct sockaddr *)&src, &src_len);
+		if (rx == (ssize_t)(2U * sizeof(uint32_t))) {
+			uint32_t magic = sys_get_be32(buf);
+			uint32_t sequence = sys_get_be32(buf + sizeof(uint32_t));
+
+			if (magic != RTBENCH_NET_MAGIC) {
+				continue;
+			}
+			if (sequence == RTBENCH_NET_SEQ_READY) {
+				rtbench_net_echo(fd, buf, (size_t)rx,
+						 (const struct sockaddr *)&src,
+						 src_len);
+				ready = true;
+			}
+			/* Other control markers keep the trigger loop going. */
+		}
+	}
+	if (!ready) {
+		printk("RTBENCH_ERROR metric=net_probe reason=trigger_timeout\n");
+		zsock_close(fd);
+		k_free(seen);
+		return -ETIMEDOUT;
+	}
+
+	/* Acknowledge the paced probe stream until every expected sequence
+	 * arrived (bounded by the socket receive timeout per attempt). */
+	for (uint32_t idle = 0U; collected < expected && idle < 50U;) {
+		uint8_t buf[64];
+		struct sockaddr_in src;
+		socklen_t src_len = sizeof(src);
+		ssize_t rx = zsock_recvfrom(fd, buf, sizeof(buf), 0,
+					    (struct sockaddr *)&src, &src_len);
+
+		if (rx != (ssize_t)(2U * sizeof(uint32_t))) {
+			++idle;
+			continue;
+		}
+		idle = 0U;
+		uint32_t magic = sys_get_be32(buf);
+		uint32_t sequence = sys_get_be32(buf + sizeof(uint32_t));
+
+		if (magic != RTBENCH_NET_MAGIC) {
+			continue;
+		}
+		rtbench_net_echo(fd, buf, (size_t)rx,
+				 (const struct sockaddr *)&src, src_len);
+		if (sequence < expected && !seen[sequence]) {
+			seen[sequence] = 1U;
+			++collected;
+		}
+	}
+	k_free(seen);
+	if (collected < expected) {
+		printk("RTBENCH_ERROR metric=net_probe reason=incomplete collected=%u\n",
+		       collected);
+		zsock_close(fd);
+		return -EIO;
+	}
+	rtbench_net_probe_fd = fd;
+	return 0;
+}
+
+static void rtbench_net_epilogue(void)
+{
+	if (rtbench_net_probe_fd >= 0) {
+		rtbench_net_send_control(RTBENCH_NET_SEQ_DONE);
+		zsock_close(rtbench_net_probe_fd);
+		rtbench_net_probe_fd = -1;
+	}
+}
+
 int main(void)
 {
 	int echo_fd = zsock_socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
@@ -870,7 +1031,12 @@ task3_poll:
 			printk("TASK3_RTOS_FINAL_DONE\n");
 #if defined(CONFIG_BOARD_AXVISOR_ROCK4D)
 			printk("RTBENCH_AUTO samples=10\n");
-			rtbench_run(10U, false);
+			if (rtbench_net_prologue(10U) == 0) {
+				rtbench_run(10U, false);
+				rtbench_net_epilogue();
+			} else {
+				rtbench_run(10U, false);
+			}
 #endif
 			break;
 		}

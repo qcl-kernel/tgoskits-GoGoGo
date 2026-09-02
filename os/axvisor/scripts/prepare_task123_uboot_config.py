@@ -61,8 +61,20 @@ def task123_marker(app_guest: str, realtime: bool = False) -> str:
 
 
 def combined_success_regex(app_guest: str, samples: int | None) -> str:
-    marker = task123_marker(app_guest, realtime=samples is not None)
-    benchmark_marker = "RTBENCH_END|RTBENCH_STABILITY_END" if samples else "RTBENCH_STABILITY_END"
+    # Always gate on the combined TASK123_*_RTBENCH_END marker: the app
+    # guest's init prints it only after the RT-IPC suite passed AND the
+    # network probe completed, so a single marker proves both. The plain
+    # TASK123_*_END marker is emitted several KiB earlier (before the
+    # benchmark runs), which the serial matcher's bounded window cannot
+    # span together with the benchmark end marker.
+    marker = task123_marker(app_guest, realtime=True)
+    # Quick profile reports RTBENCH_END while realtime reports
+    # RTBENCH_STABILITY_END; accept both.
+    # Board quick runs (no --rtbench-samples) still require the RTOS guest
+    # to finish its auto benchmark, but the quick profile reports RTBENCH_END,
+    # not RTBENCH_STABILITY_END. Accept both so the serial gate matches what
+    # the RT-Thread/Zephyr guests actually print on the board.
+    benchmark_marker = "RTBENCH_END|RTBENCH_STABILITY_END"
     return (
         rf"(?s:(?:(?:{benchmark_marker}) status=PASS.*{marker}|"
         rf"{marker}.*(?:{benchmark_marker}) status=PASS))"

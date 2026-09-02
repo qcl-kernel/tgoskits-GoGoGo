@@ -401,7 +401,7 @@ async fn run_uboot(axvisor: &mut Axvisor, args: Task123UbootArgs) -> anyhow::Res
         .arg(args.app_guest.as_str())
         .args(
             args.rtbench_samples
-                .map(|samples| ["--rtbench-samples".to_string(), samples.to_string()])
+                .map(|samples| vec!["--rtbench-samples".to_string(), samples.to_string()])
                 .unwrap_or_default(),
         )
         .arg(&source_uboot)
