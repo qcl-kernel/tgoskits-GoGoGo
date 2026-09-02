@@ -32,7 +32,7 @@
 //! # Correct Patterns
 //!
 //! ```ignore
-//! // ✓ Lightweight trigger: socket paths request the unique protocol executor.
+//! // ✓ Lightweight trigger: socket paths request the dedicated worker.
 //! fn socket_operation() {
 //!     request_poll()
 //! }
@@ -56,12 +56,13 @@
 //! waker.wake();  // WRONG: potential self-deadlock
 //! ```
 
-use alloc::{boxed::Box, string::String, sync::Arc, vec, vec::Vec};
+use alloc::{boxed::Box, format, string::String, sync::Arc, vec, vec::Vec};
 use core::{
     pin::Pin,
     task::{Context, Waker},
 };
 
+use ax_errno::{AxError, AxResult, ax_err_type};
 use ax_hal::time::{NANOS_PER_MICROS, TimeValue, monotonic_time_nanos, wall_time_nanos};
 use ax_sync::SpinRwLock as RwLock;
 use ax_task::future::sleep_until;
@@ -77,14 +78,14 @@ use smoltcp::{
 };
 
 use crate::{
-    NetError, NetResult, SOCKET_SET,
+    SOCKET_SET,
     addr::mask_from_prefix,
     config::{
         DeviceBinding, DnsServerEntry, DnsSource, InterfaceFlags, InterfaceId, InterfaceInfo,
         InterfaceKind, Ipv4InterfaceConfig, RouteInfo,
     },
     consts::STANDARD_MTU,
-    device::ArpEntry,
+    device::{ArpEntry, EthernetDevice},
     dhcp_server::{DhcpServer, parse_dhcp_packet},
     router::{NetDevStats, RouteDecision, Router, SharedRouteTable},
 };
@@ -174,7 +175,7 @@ impl NetControl {
         self.routes.read().default_routes()
     }
 
-    pub fn local_binding_for(&self, endpoint: &IpListenEndpoint) -> NetResult<DeviceBinding> {
+    pub fn local_binding_for(&self, endpoint: &IpListenEndpoint) -> AxResult<DeviceBinding> {
         match endpoint.addr {
             Some(addr) => {
                 let state = self.state.read();
@@ -188,13 +189,18 @@ impl NetControl {
                     .map(|interface_id| DeviceBinding {
                         bound_if: Some(interface_id),
                     })
-                    .ok_or(NetError::NoSuchDeviceOrAddress)
+                    .ok_or_else(|| {
+                        ax_err_type!(
+                            NoSuchDeviceOrAddress,
+                            format!("local address {addr} is not assigned to any interface")
+                        )
+                    })
             }
             None => Ok(DeviceBinding::default()),
         }
     }
 
-    pub fn select_route(&self, dst_addr: &IpAddress) -> NetResult<RouteDecision> {
+    pub fn select_route(&self, dst_addr: &IpAddress) -> AxResult<RouteDecision> {
         self.select_route_with_binding(dst_addr, DeviceBinding::default())
     }
 
@@ -202,7 +208,7 @@ impl NetControl {
         &self,
         dst_addr: &IpAddress,
         binding: DeviceBinding,
-    ) -> NetResult<RouteDecision> {
+    ) -> AxResult<RouteDecision> {
         let state = self.state.read();
         let routes = self.routes.read();
         let route = routes
@@ -219,7 +225,12 @@ impl NetControl {
                     .find(|interface| interface.id == interface_id)
                     .is_some_and(|interface| interface.flags.contains(InterfaceFlags::UP))
             })
-            .ok_or(NetError::NoSuchDeviceOrAddress)?;
+            .ok_or_else(|| {
+                ax_err_type!(
+                    NoSuchDeviceOrAddress,
+                    format!("no route to destination {dst_addr}")
+                )
+            })?;
         if let Some(interface) = state
             .interfaces
             .iter()
@@ -263,6 +274,33 @@ impl NetControl {
         self.routes
             .write()
             .replace_ipv4_rules_for_interface(update.interface_id, routes);
+    }
+
+    fn add_interface(&self, interface: NetInterface, routes: Vec<crate::router::Rule>) {
+        self.routes
+            .write()
+            .replace_ipv4_rules_for_interface(interface.id, routes);
+        self.state.write().interfaces.push(interface);
+    }
+
+    fn allocate_interface_id(&self) -> InterfaceId {
+        let state = self.state.read();
+        let next = state
+            .interfaces
+            .iter()
+            .map(|interface| interface.id.get())
+            .max()
+            .unwrap_or(InterfaceId::LOOPBACK.get())
+            .saturating_add(1);
+        InterfaceId::new(next)
+    }
+
+    fn contains_interface_name(&self, name: &str) -> bool {
+        self.state
+            .read()
+            .interfaces
+            .iter()
+            .any(|interface| interface.name == name)
     }
 }
 
@@ -511,6 +549,45 @@ impl Service {
         }
     }
 
+    pub fn register_static_device(
+        &mut self,
+        name: String,
+        dev: EthernetDevice,
+        mac: EthernetAddress,
+        cidr: Ipv4Cidr,
+    ) -> usize {
+        if self.control.contains_interface_name(&name) {
+            panic!("interface name conflict: {}", name);
+        }
+
+        let interface_id = self.control.allocate_interface_id();
+        let metric = 100;
+        let dev = self.router.add_device(interface_id, Box::new(dev));
+        let routes = self
+            .router
+            .ipv4_rules(dev, interface_id, metric, Some(cidr), None);
+        Self::set_interface_ipv4(&mut self.iface, None, Some(cidr));
+        self.control.add_interface(
+            NetInterface {
+                id: interface_id,
+                name,
+                kind: InterfaceKind::Ethernet,
+                mac: Some(mac),
+                ipv4: Some(cidr),
+                gateway: None,
+                mtu: STANDARD_MTU,
+                metric,
+                flags: InterfaceFlags::UP
+                    | InterfaceFlags::RUNNING
+                    | InterfaceFlags::BROADCAST
+                    | InterfaceFlags::MULTICAST,
+            },
+            routes,
+        );
+        self.router.start_device_workers(dev);
+        dev
+    }
+
     pub fn enable_dhcp(
         &mut self,
         interface_id: InterfaceId,
@@ -554,6 +631,11 @@ impl Service {
         info!("dev {dev}: DHCP server enabled (lease {client_ip})");
     }
 
+    /// Finds the router device index for an interface name such as `wlan0`.
+    pub fn device_index(&self, name: &str) -> Option<usize> {
+        self.router.device_index(name)
+    }
+
     /// Assigns a static IPv4 address to an interface at runtime.
     ///
     /// The current control model owns a single IPv4 address per interface. Keep
@@ -565,21 +647,21 @@ impl Service {
         interface_id: InterfaceId,
         address: Ipv4Address,
         prefix_len: u8,
-    ) -> NetResult {
+    ) -> AxResult {
         if prefix_len > 32 {
-            return Err(NetError::InvalidInput);
+            return Err(AxError::InvalidInput);
         }
 
         let dev = self
             .router
             .device_index_for_interface_id(interface_id)
-            .ok_or(NetError::NoSuchDevice)?;
-        let interface = self.interface_for_dev(dev).ok_or(NetError::NoSuchDevice)?;
+            .ok_or(AxError::NoSuchDevice)?;
+        let interface = self.interface_for_dev(dev).ok_or(AxError::NoSuchDevice)?;
         if interface.kind != InterfaceKind::Ethernet {
-            return Err(NetError::OperationNotSupported);
+            return Err(AxError::OperationNotSupported);
         }
         if interface.ipv4.is_some() {
-            return Err(NetError::AlreadyExists);
+            return Err(AxError::AlreadyExists);
         }
 
         self.dhcp.retain(|state| state.dev != dev);
@@ -602,21 +684,21 @@ impl Service {
         interface_id: InterfaceId,
         address: Ipv4Address,
         prefix_len: u8,
-    ) -> NetResult {
+    ) -> AxResult {
         if prefix_len > 32 {
-            return Err(NetError::InvalidInput);
+            return Err(AxError::InvalidInput);
         }
 
         let dev = self
             .router
             .device_index_for_interface_id(interface_id)
-            .ok_or(NetError::NoSuchDevice)?;
-        let interface = self.interface_for_dev(dev).ok_or(NetError::NoSuchDevice)?;
+            .ok_or(AxError::NoSuchDevice)?;
+        let interface = self.interface_for_dev(dev).ok_or(AxError::NoSuchDevice)?;
         // Runtime deletion is intentionally exact: with one IPv4 address per
         // interface, a mismatched address or prefix must not clear the current
         // configuration.
         if interface.ipv4 != Some(Ipv4Cidr::new(address, prefix_len)) {
-            return Err(NetError::NotFound);
+            return Err(AxError::NotFound);
         }
 
         self.dhcp.retain(|state| state.dev != dev);
@@ -707,33 +789,6 @@ impl Service {
 
         self.enable_dhcp(interface.id, dev, interface.name, mac, interface.metric);
         info!("dev {dev}: reconfigured as STA, DHCP client enabled");
-    }
-
-    /// Removes the protocol configuration after a wireless disconnect.
-    pub fn reconfigure_as_disconnected(&mut self, dev: usize) {
-        let Some(interface) = self.interface_for_dev(dev) else {
-            warn!("dev {dev}: cannot disconnect unknown wireless device");
-            return;
-        };
-        if self
-            .dhcp_server
-            .as_ref()
-            .is_some_and(|server| server.dev == dev)
-        {
-            self.dhcp_server = None;
-        }
-        self.dhcp.retain(|state| state.dev != dev);
-        self.commit_network_state(NetworkStateUpdate {
-            interface_id: interface.id,
-            dev,
-            metric: interface.metric,
-            old_ipv4: interface.ipv4,
-            ipv4: None,
-            gateway: None,
-            dns_source: DnsSource::Static,
-            dns_servers: Vec::new(),
-        });
-        info!("dev {dev}: wireless link disconnected");
     }
 
     /// Returns true once DHCP has produced at least one usable interface.
@@ -945,6 +1000,10 @@ impl Service {
         self.router.net_dev_stats()
     }
 
+    pub fn wake_all_devices(&self) {
+        self.router.wake_all_devices();
+    }
+
     pub fn register_waker(&mut self, binding: DeviceBinding, waker: &Waker) {
         let next = self.iface.poll_at(now(), &SOCKET_SET.inner.lock());
 
@@ -968,6 +1027,10 @@ impl Service {
         }
 
         self.router.register_waker(binding, waker);
+    }
+
+    pub fn register_device_waker(&mut self, waker: &Waker) {
+        self.router.register_device_waker(waker);
     }
 }
 

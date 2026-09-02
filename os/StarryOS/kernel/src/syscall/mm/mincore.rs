@@ -8,12 +8,13 @@
 
 use alloc::vec;
 
+use ax_errno::{AxError, AxResult};
 use ax_memory_addr::{MemoryAddr, PAGE_SIZE_4K, VirtAddr};
 use ax_runtime::hal::paging::MappingFlags;
 use ax_task::current;
 use starry_vm::vm_write_slice;
 
-use crate::{StarryError, StarryResult, task::AsThread};
+use crate::task::AsThread;
 
 /// Check whether pages are resident in memory.
 ///
@@ -42,17 +43,17 @@ use crate::{StarryError, StarryResult, task::AsThread};
 /// - EFAULT: vec points to invalid address
 /// - EINVAL: addr not page-aligned
 /// - ENOMEM: length > (TASK_SIZE - addr), negative length, or unmapped memory
-pub fn sys_mincore(addr: usize, length: usize, vec: *mut u8) -> StarryResult<isize> {
+pub fn sys_mincore(addr: usize, length: usize, vec: *mut u8) -> AxResult<isize> {
     let start_addr = VirtAddr::from(addr);
 
     // EINVAL: addr must be a multiple of the page size
     if !start_addr.is_aligned(PAGE_SIZE_4K) {
-        return Err(StarryError::InvalidInput);
+        return Err(AxError::InvalidInput);
     }
 
     // EFAULT: vec must not be null (basic check, vm_write_slice will do full validation)
     if vec.is_null() {
-        return Err(StarryError::BadAddress);
+        return Err(AxError::BadAddress);
     }
 
     debug!("sys_mincore <= addr: {addr:#x}, length: {length:#x}, vec: {vec:?}");
@@ -81,11 +82,11 @@ pub fn sys_mincore(addr: usize, length: usize, vec: *mut u8) -> StarryResult<isi
             let addr = start_addr + i * PAGE_SIZE_4K;
 
             // ENOMEM: Check if this page is within a valid VMA
-            let area = aspace.find_area(addr).ok_or(StarryError::NoMemory)?;
+            let area = aspace.find_area(addr).ok_or(AxError::NoMemory)?;
 
             // Verify we have at least USER access permission
             if !area.flags().contains(MappingFlags::USER) {
-                return Err(StarryError::NoMemory);
+                return Err(AxError::NoMemory);
             }
 
             // Query page table with batch awareness
@@ -120,8 +121,8 @@ pub fn sys_mincore(addr: usize, length: usize, vec: *mut u8) -> StarryResult<isi
     Ok(0)
 }
 
-#[cfg(all(test, not(axtest)))]
-fn mincore_validation_rules_hold_for_test() -> bool {
+#[cfg(axtest)]
+pub(crate) fn mincore_validation_rules_hold_for_test() -> bool {
     use ax_memory_addr::{MemoryAddr, PAGE_SIZE_4K, VirtAddr};
     // Test mincore validation logic
     // Page-aligned address should pass alignment check
@@ -150,12 +151,4 @@ fn mincore_validation_rules_hold_for_test() -> bool {
     assert!(page_count == 1);
 
     true
-}
-
-#[cfg(all(test, not(axtest)))]
-mod tests {
-    #[test]
-    fn mincore_validation_rules_hold() {
-        assert!(super::mincore_validation_rules_hold_for_test());
-    }
 }

@@ -1,10 +1,7 @@
 use alloc::{collections::VecDeque, sync::Arc};
 
 use super::waiters::CapacityWaiters;
-use crate::{
-    BlockError,
-    os::{BlockNotification, runtime_ops, sync::IrqMutex},
-};
+use crate::os::{BlockNotification, runtime_ops, sync::IrqMutex};
 
 pub(super) enum SendError<T> {
     Full(T),
@@ -27,9 +24,9 @@ impl<T> BoundedChannel<T> {
     pub(super) fn with_item_notification(
         capacity: usize,
         item_ready: Arc<dyn BlockNotification>,
-    ) -> Result<Self, BlockError> {
+    ) -> Result<Self, ax_errno::AxError> {
         if capacity == 0 {
-            return Err(BlockError::InvalidRequest);
+            return Err(ax_errno::AxError::InvalidInput);
         }
         Ok(Self::new(capacity, item_ready))
     }

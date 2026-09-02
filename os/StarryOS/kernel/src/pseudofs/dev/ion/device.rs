@@ -3,8 +3,9 @@
 use alloc::sync::Arc;
 use core::any::Any;
 
+use ax_errno::AxError;
 use ax_memory_addr::PhysAddrRange;
-use axfs_ng_vfs::{NodeFlags, VfsError, VfsResult};
+use axfs_ng_vfs::{NodeFlags, VfsResult};
 use sg2002_tpu::ion::{
     IonAllocData, IonBufferManager, IonFdData, IonHandle, IonHandleData, IonHeapData,
     IonHeapManager, IonHeapQuery, IonHeapType, MAX_HEAP_NAME,
@@ -14,7 +15,6 @@ use starry_vm::{VmMutPtr, VmPtr};
 
 use super::global_ion_buffer_manager;
 use crate::{
-    StarryError, StarryResult,
     file::{add_file_like, ion::IonBufferFile},
     pseudofs::{DeviceMmap, DeviceOps},
 };
@@ -37,7 +37,7 @@ impl IonDevice {
     }
 
     /// 处理 ION_IOC_ALLOC 命令
-    fn handle_alloc(&self, user_ptr: usize) -> StarryResult<usize> {
+    fn handle_alloc(&self, user_ptr: usize) -> VfsResult<usize> {
         debug!("Processing ION_IOC_ALLOC");
 
         // 从用户空间读取分配数据
@@ -64,16 +64,19 @@ impl IonDevice {
                 "No supported heap type in mask: 0x{:x}",
                 alloc_data.heap_id_mask
             );
-            return Err(StarryError::InvalidInput);
+            return Err(AxError::InvalidInput);
         };
 
         // 分配缓冲区
         let buffer = self
             .heap_manager
-            .alloc_buffer(alloc_data.len as usize, 1, heap_type)?;
+            .alloc_buffer(alloc_data.len as usize, 1, heap_type)
+            .map_err(AxError::from)?;
 
         // 注册缓冲区（全局表保持一份强引用，供后续查找）
-        self.buffer_manager.register_buffer(buffer.clone())?;
+        self.buffer_manager
+            .register_buffer(buffer.clone())
+            .map_err(AxError::from)?;
 
         // 创建 IonBufferFile 并在 fd 表中保有另一份强引用：
         // 只要 fd 未关闭，物理页就不会被归还。
@@ -81,7 +84,7 @@ impl IonDevice {
         let handle = buffer.handle.as_u32();
         let ion_file = IonBufferFile::new(buffer.clone());
         let fd = add_file_like(alloc::sync::Arc::new(ion_file), false)
-            .map_err(|_| StarryError::TooManyOpenFiles)?;
+            .map_err(|_| AxError::TooManyOpenFiles)?;
 
         // 返回结果
         let mut result_data = alloc_data;
@@ -99,7 +102,7 @@ impl IonDevice {
     }
 
     /// 处理 ION_IOC_FREE 命令
-    fn handle_free(&self, user_ptr: usize) -> StarryResult<usize> {
+    fn handle_free(&self, user_ptr: usize) -> VfsResult<usize> {
         debug!("Processing ION_IOC_FREE");
 
         // 从用户空间读取句柄数据
@@ -130,7 +133,7 @@ impl IonDevice {
     }
 
     /// 处理 ION_IOC_IMPORT 命令
-    fn handle_import(&self, user_ptr: usize) -> StarryResult<usize> {
+    fn handle_import(&self, user_ptr: usize) -> VfsResult<usize> {
         debug!("Processing ION_IOC_IMPORT");
 
         // 从用户空间读取 FD 数据
@@ -159,7 +162,7 @@ impl IonDevice {
     }
 
     /// 处理 ION_IOC_HEAP_QUERY 命令
-    fn handle_heap_query(&self, user_ptr: usize) -> StarryResult<usize> {
+    fn handle_heap_query(&self, user_ptr: usize) -> VfsResult<usize> {
         debug!("Processing ION_IOC_HEAP_QUERY");
 
         // 从用户空间读取查询数据
@@ -250,17 +253,16 @@ impl DeviceOps for IonDevice {
     }
 
     fn ioctl(&self, cmd: u32, arg: usize) -> VfsResult<usize> {
-        let result = match cmd {
+        match cmd {
             ION_IOC_HEAP_QUERY => self.handle_heap_query(arg),
             ION_IOC_ALLOC => self.handle_alloc(arg),
             ION_IOC_FREE => self.handle_free(arg),
             ION_IOC_IMPORT => self.handle_import(arg),
             _ => {
                 warn!("Unsupported Ion ioctl command: 0x{:x}", cmd);
-                return Err(VfsError::Unsupported);
+                Err(AxError::Unsupported)
             }
-        };
-        Ok(result?)
+        }
     }
 
     fn as_any(&self) -> &dyn Any {

@@ -1,6 +1,7 @@
 use alloc::vec::Vec;
 use core::{fmt, time::Duration};
 
+use ax_errno::{AxError, AxResult};
 use ax_task::future::{self, block_on, poll_io};
 use axpoll::IoEvents;
 use bitmaps::Bitmap;
@@ -12,7 +13,6 @@ use starry_signal::SignalSet;
 
 use super::FdPollSet;
 use crate::{
-    StarryError, StarryResult,
     mm::{UserConstPtr, UserPtr, nullable},
     syscall::signal::check_sigset_size,
     task::with_blocked_signals,
@@ -57,9 +57,9 @@ fn do_select(
     exceptfds: UserPtr<__kernel_fd_set>,
     timeout: Option<Duration>,
     sigmask: UserConstPtr<SignalSetWithSize>,
-) -> StarryResult<isize> {
+) -> AxResult<isize> {
     if nfds > __FD_SETSIZE {
-        return Err(StarryError::InvalidInput);
+        return Err(AxError::InvalidInput);
     }
     let sigmask = if let Some(sigmask) = nullable!(sigmask.get_as_ref())? {
         check_sigset_size(sigmask.sigsetsize)?;
@@ -91,7 +91,7 @@ fn do_select(
     for fd in fd_bitmap.into_iter() {
         let f = fd_table
             .get(fd)
-            .ok_or(StarryError::BadFileDescriptor)?
+            .ok_or(AxError::BadFileDescriptor)?
             .inner
             .clone();
         let mut events = IoEvents::empty();
@@ -118,15 +118,11 @@ fn do_select(
                 for ((fd, interested), index) in fds.0.iter().zip(fd_indices.iter().copied()) {
                     let events = fd.poll();
                     let always_report = events & IoEvents::ALWAYS_POLL;
-                    // Linux fs/select.c: POLLIN_SET carries HUP|ERR but
-                    // POLLOUT_SET carries only ERR, so a hangup makes a fd
-                    // readable (read returns EOF) yet never writable.
-                    let write_report = events & IoEvents::ERR;
                     let selected = events & *interested;
                     let selected_read = selected.contains(IoEvents::IN)
                         || (read_set.0.get(index) && !always_report.is_empty());
                     let selected_write = selected.contains(IoEvents::OUT)
-                        || (write_set.0.get(index) && !write_report.is_empty());
+                        || (write_set.0.get(index) && !always_report.is_empty());
                     let selected_except =
                         selected.contains(IoEvents::ERR) && except_set.0.get(index);
 
@@ -150,7 +146,7 @@ fn do_select(
                     return Ok(res as _);
                 }
 
-                Err(StarryError::WouldBlock)
+                Err(AxError::WouldBlock)
             }),
         ));
         match result {
@@ -173,7 +169,7 @@ pub fn sys_select(
     writefds: UserPtr<__kernel_fd_set>,
     exceptfds: UserPtr<__kernel_fd_set>,
     timeout: UserConstPtr<timeval>,
-) -> StarryResult<isize> {
+) -> AxResult<isize> {
     do_select(
         nfds,
         readfds,
@@ -200,7 +196,7 @@ pub fn sys_pselect6(
     exceptfds: UserPtr<__kernel_fd_set>,
     timeout: UserConstPtr<timespec>,
     sigmask: UserConstPtr<SignalSetWithSize>,
-) -> StarryResult<isize> {
+) -> AxResult<isize> {
     do_select(
         nfds,
         readfds,
@@ -213,28 +209,20 @@ pub fn sys_pselect6(
     )
 }
 
-#[cfg(all(test, not(axtest)))]
-fn select_fd_set_and_validation_rules_hold_for_test() -> bool {
+#[cfg(axtest)]
+pub(crate) fn select_fd_set_and_validation_rules_hold_for_test() -> bool {
     use linux_raw_sys::general::__FD_SETSIZE;
 
     // Test nfds validation: must be <= __FD_SETSIZE
     let valid_nfds = 1024u32;
-    assert!(valid_nfds <= __FD_SETSIZE);
+    assert!(valid_nfds <= __FD_SETSIZE as u32);
 
-    let max_nfds = __FD_SETSIZE;
-    assert!(max_nfds <= __FD_SETSIZE);
+    let max_nfds = __FD_SETSIZE as u32;
+    assert!(max_nfds <= __FD_SETSIZE as u32);
 
     // Invalid: nfds > __FD_SETSIZE
-    let invalid_nfds = __FD_SETSIZE + 1;
-    assert!(invalid_nfds > __FD_SETSIZE);
+    let invalid_nfds = (__FD_SETSIZE + 1) as u32;
+    assert!(invalid_nfds > __FD_SETSIZE as u32);
 
     true
-}
-
-#[cfg(all(test, not(axtest)))]
-mod tests {
-    #[test]
-    fn select_fd_set_and_validation_rules_hold() {
-        assert!(super::select_fd_set_and_validation_rules_hold_for_test());
-    }
 }

@@ -27,13 +27,14 @@ use core::{
 
 use async_channel::TryRecvError;
 use async_trait::async_trait;
+use ax_errno::{AxError, AxResult};
 use ax_hal::time::wall_time;
 use ax_io::{Read, Write};
 use ax_sync::{Mutex, SpinRwLock as RwLock};
 use axpoll::{IoEvents, PollSet, Pollable};
 
 use crate::{
-    CMsgData, NetError, NetResult, RecvFlags, RecvOptions, SendOptions, SocketAddrEx, SocketCmsg,
+    CMsgData, RecvFlags, RecvOptions, SendOptions, SocketAddrEx, SocketCmsg,
     general::GeneralOptions,
     options::{Configurable, GetSocketOption, SetSocketOption, UnixCredentials},
     unix::{Transport, TransportOps, UnixSocketAddr, with_slot},
@@ -95,8 +96,8 @@ struct SeqConnRequest {
     connected: Channel,
     /// Client address reported to `accept`.
     addr: UnixSocketAddr,
-    /// Client identity used for peer credentials.
-    credentials: UnixCredentials,
+    /// Client pid used for peer credentials.
+    pid: u32,
     /// Timestamp state owned by the accepted server socket.
     receive_timestamp: Arc<AtomicBool>,
     /// Passcred state owned by the accepted server socket.
@@ -122,12 +123,12 @@ impl SeqBind {
     fn connect(
         &self,
         addr: UnixSocketAddr,
-        credentials: UnixCredentials,
+        pid: u32,
         client_receive_timestamp: Arc<AtomicBool>,
         client_receive_credentials: Arc<AtomicBool>,
-    ) -> NetResult<(PacketRx, Channel, Arc<PollSet>)> {
+    ) -> AxResult<(PacketRx, Channel, Arc<PollSet>)> {
         if !self.listening.load(Ordering::Acquire) {
-            return Err(NetError::ConnectionRefused);
+            return Err(AxError::ConnectionRefused);
         }
         let (tx1, rx1) = async_channel::unbounded();
         let (tx2, rx2) = async_channel::unbounded();
@@ -147,11 +148,11 @@ impl SeqBind {
                     receive_credentials: client_receive_credentials,
                 },
                 addr,
-                credentials,
+                pid,
                 receive_timestamp: server_receive_timestamp.clone(),
                 receive_credentials: server_receive_credentials.clone(),
             })
-            .map_err(|_| NetError::ConnectionRefused)?;
+            .map_err(|_| AxError::ConnectionRefused)?;
         // The caller wakes accept waiters after publishing the client endpoint
         // and releasing namespace, bind-slot, and transport locks.
         Ok((
@@ -198,13 +199,13 @@ pub struct DgramTransport {
     /// Per-receiver `SO_PASSCRED` state shared with channels targeting this
     /// socket.
     receive_credentials: Arc<AtomicBool>,
-    /// Creator identity used for SO_PEERCRED-style reporting.
-    credentials: UnixCredentials,
+    /// Creator pid used for SO_PEERCRED-style reporting.
+    pid: u32,
 }
 impl DgramTransport {
     /// Create a new unconnected `SOCK_DGRAM` transport.
-    pub fn new(credentials: impl Into<UnixCredentials>) -> Self {
-        Self::new_typed(credentials.into(), 2) // SOCK_DGRAM
+    pub fn new(pid: u32) -> Self {
+        Self::new_typed(pid, 2) // SOCK_DGRAM
     }
 
     pub(super) fn wake_connected(&self) {
@@ -217,11 +218,11 @@ impl DgramTransport {
     /// SEQPACKET reuses the datagram delivery path (message boundaries), but
     /// reports its own `SO_TYPE` and is connection-oriented at the syscall
     /// layer, matching `net/unix/af_unix.c` `unix_seqpacket_ops`.
-    pub fn new_seqpacket(credentials: impl Into<UnixCredentials>) -> Self {
-        Self::new_typed(credentials.into(), 5) // SOCK_SEQPACKET
+    pub fn new_seqpacket(pid: u32) -> Self {
+        Self::new_typed(pid, 5) // SOCK_SEQPACKET
     }
 
-    fn new_typed(credentials: UnixCredentials, socket_type: i32) -> Self {
+    fn new_typed(pid: u32, socket_type: i32) -> Self {
         DgramTransport {
             data_rx: Mutex::new(None),
             connected: RwLock::new(None),
@@ -234,14 +235,14 @@ impl DgramTransport {
             general: GeneralOptions::new(socket_type, 1, 0),
             receive_timestamp: Arc::new(AtomicBool::new(false)),
             receive_credentials: Arc::new(AtomicBool::new(false)),
-            credentials,
+            pid,
         }
     }
 
     fn new_connected(
         data_rx: (async_channel::Receiver<Packet>, Arc<PollSet>),
         connected: Channel,
-        credentials: UnixCredentials,
+        pid: u32,
         socket_type: i32,
         receive_timestamp: Arc<AtomicBool>,
         receive_credentials: Arc<AtomicBool>,
@@ -258,21 +259,21 @@ impl DgramTransport {
             general: GeneralOptions::new(socket_type, 1, 0),
             receive_timestamp,
             receive_credentials,
-            credentials,
+            pid,
         }
     }
 
     /// Create a connected pair of `SOCK_DGRAM` transports.
-    pub fn new_pair(credentials: impl Into<UnixCredentials>) -> (Self, Self) {
-        Self::new_pair_typed(credentials.into(), 2) // SOCK_DGRAM
+    pub fn new_pair(pid: u32) -> (Self, Self) {
+        Self::new_pair_typed(pid, 2) // SOCK_DGRAM
     }
 
     /// Create a connected pair of `SOCK_SEQPACKET` transports.
-    pub fn new_pair_seqpacket(credentials: impl Into<UnixCredentials>) -> (Self, Self) {
-        Self::new_pair_typed(credentials.into(), 5) // SOCK_SEQPACKET
+    pub fn new_pair_seqpacket(pid: u32) -> (Self, Self) {
+        Self::new_pair_typed(pid, 5) // SOCK_SEQPACKET
     }
 
-    fn new_pair_typed(credentials: UnixCredentials, socket_type: i32) -> (Self, Self) {
+    fn new_pair_typed(pid: u32, socket_type: i32) -> (Self, Self) {
         let (tx1, rx1) = async_channel::unbounded();
         let (tx2, rx2) = async_channel::unbounded();
         let poll1 = Arc::new(PollSet::new());
@@ -289,7 +290,7 @@ impl DgramTransport {
                 receive_timestamp: timestamp2.clone(),
                 receive_credentials: credentials2.clone(),
             },
-            credentials.clone(),
+            pid,
             socket_type,
             timestamp1.clone(),
             credentials1.clone(),
@@ -302,7 +303,7 @@ impl DgramTransport {
                 receive_timestamp: timestamp1,
                 receive_credentials: credentials1,
             },
-            credentials,
+            pid,
             socket_type,
             timestamp2,
             credentials2,
@@ -312,7 +313,7 @@ impl DgramTransport {
 }
 
 impl Configurable for DgramTransport {
-    fn get_option_inner(&self, opt: &mut GetSocketOption) -> NetResult<bool> {
+    fn get_option_inner(&self, opt: &mut GetSocketOption) -> AxResult<bool> {
         use GetSocketOption as O;
 
         if self.general.get_option_inner(opt)? {
@@ -330,14 +331,14 @@ impl Configurable for DgramTransport {
                 // Datagram sockets are stateless and do not have a peer, so we
                 // return the credentials of the process that created the
                 // socket.
-                **cred = self.credentials.clone();
+                **cred = UnixCredentials::new(self.pid);
             }
             _ => return Ok(false),
         }
         Ok(true)
     }
 
-    fn set_option_inner(&self, opt: SetSocketOption) -> NetResult<bool> {
+    fn set_option_inner(&self, opt: SetSocketOption) -> AxResult<bool> {
         use SetSocketOption as O;
 
         if self.general.set_option_inner(opt)? {
@@ -358,16 +359,16 @@ impl Configurable for DgramTransport {
 }
 #[async_trait]
 impl TransportOps for DgramTransport {
-    fn bind(&self, slot: &super::BindSlot, local_addr: &UnixSocketAddr) -> NetResult {
+    fn bind(&self, slot: &super::BindSlot, local_addr: &UnixSocketAddr) -> AxResult {
         if self.is_seqpacket {
             // Seqpacket bind installs a connection-request queue (like stream).
             let mut slot = slot.seqpacket.lock();
             if slot.is_some() {
-                return Err(NetError::AddrInUse);
+                return Err(AxError::AddrInUse);
             }
             let mut guard = self.conn_rx.lock();
             if guard.is_some() {
-                return Err(NetError::InvalidInput);
+                return Err(AxError::InvalidInput);
             }
             let (tx, rx) = async_channel::unbounded();
             let poll = Arc::new(PollSet::new());
@@ -386,11 +387,11 @@ impl TransportOps for DgramTransport {
         }
         let mut slot = slot.dgram.lock();
         if slot.is_some() {
-            return Err(NetError::AddrInUse);
+            return Err(AxError::AddrInUse);
         }
         let mut guard = self.data_rx.lock();
         if guard.is_some() {
-            return Err(NetError::InvalidInput);
+            return Err(AxError::InvalidInput);
         }
         let (tx, rx) = async_channel::unbounded();
         let poll_update = Arc::new(PollSet::new());
@@ -409,12 +410,12 @@ impl TransportOps for DgramTransport {
         Ok(())
     }
 
-    fn listen(&self) -> NetResult {
+    fn listen(&self) -> AxResult {
         if !self.is_seqpacket {
-            return Err(NetError::OperationNotSupported);
+            return Err(AxError::OperationNotSupported);
         }
         if self.conn_rx.lock().is_none() {
-            return Err(NetError::InvalidInput);
+            return Err(AxError::InvalidInput);
         }
         self.listening.store(true, Ordering::Release);
         Ok(())
@@ -428,19 +429,19 @@ impl TransportOps for DgramTransport {
         &self,
         slot: &super::BindSlot,
         _local_addr: &UnixSocketAddr,
-    ) -> NetResult<Option<Arc<PollSet>>> {
+    ) -> AxResult<Option<Arc<PollSet>>> {
         if self.is_seqpacket {
             // Seqpacket connect performs the stream-style handshake: exchange a
             // packet channel pair with the listener, keep the client half.
             if self.connected.read().is_some() {
-                return Err(NetError::AlreadyConnected);
+                return Err(AxError::AlreadyConnected);
             }
             let client_addr = self.local_addr.read().clone();
             let (client_rx, client_chan, accept_poll) = {
                 let slot = slot.seqpacket.lock();
-                slot.as_ref().ok_or(NetError::ConnectionRefused)?.connect(
+                slot.as_ref().ok_or(AxError::ConnectionRefused)?.connect(
                     client_addr,
-                    self.credentials.clone(),
+                    self.pid,
                     self.receive_timestamp.clone(),
                     self.receive_credentials.clone(),
                 )?
@@ -450,42 +451,42 @@ impl TransportOps for DgramTransport {
             return Ok(Some(accept_poll));
         }
         if self.connected.read().is_some() {
-            return Err(NetError::AlreadyConnected);
+            return Err(AxError::AlreadyConnected);
         }
         let connected = {
             slot.dgram
                 .lock()
                 .as_ref()
-                .ok_or(NetError::NotConnected)?
+                .ok_or(AxError::NotConnected)?
                 .connect()
         };
         let mut guard = self.connected.write();
         if guard.is_some() {
-            return Err(NetError::AlreadyConnected);
+            return Err(AxError::AlreadyConnected);
         }
         *guard = Some(connected);
         Ok(None)
     }
 
-    async fn accept(&self) -> NetResult<(Transport, UnixSocketAddr)> {
+    async fn accept(&self) -> AxResult<(Transport, UnixSocketAddr)> {
         if !self.is_seqpacket {
             // Connectionless SOCK_DGRAM has no accept: Linux net/unix/af_unix.c
             // `unix_dgram_ops.accept = sock_no_accept` returns -EOPNOTSUPP.
-            return Err(NetError::OperationNotSupported);
+            return Err(AxError::OperationNotSupported);
         }
         if !self.is_listening() {
-            return Err(NetError::InvalidInput);
+            return Err(AxError::InvalidInput);
         }
         let Some((rx, _)) = self.conn_rx.lock().clone() else {
             // Not a listening seqpacket socket: accept requires listen(). Linux
             // returns EINVAL for accept on a non-listening socket.
-            return Err(NetError::InvalidInput);
+            return Err(AxError::InvalidInput);
         };
-        let req = rx.recv().await.map_err(|_| NetError::ConnectionReset)?;
+        let req = rx.recv().await.map_err(|_| AxError::ConnectionReset)?;
         let transport = DgramTransport::new_connected(
             req.data_rx,
             req.connected,
-            req.credentials,
+            req.pid,
             5,
             req.receive_timestamp,
             req.receive_credentials,
@@ -493,43 +494,43 @@ impl TransportOps for DgramTransport {
         Ok((Transport::Dgram(transport), req.addr))
     }
 
-    fn try_accept(&self) -> NetResult<(Transport, UnixSocketAddr)> {
+    fn try_accept(&self) -> AxResult<(Transport, UnixSocketAddr)> {
         if !self.is_seqpacket {
             // Connectionless SOCK_DGRAM has no accept: Linux net/unix/af_unix.c
             // `unix_dgram_ops.accept = sock_no_accept` returns -EOPNOTSUPP.
             // Must not return WouldBlock, or the accept poll loop hangs forever.
-            return Err(NetError::OperationNotSupported);
+            return Err(AxError::OperationNotSupported);
         }
         if !self.is_listening() {
-            return Err(NetError::InvalidInput);
+            return Err(AxError::InvalidInput);
         }
         let Some((rx, _)) = self.conn_rx.lock().clone() else {
             // Not a listening seqpacket socket: accept requires listen(). Linux
             // returns EINVAL for accept on a non-listening socket.
-            return Err(NetError::InvalidInput);
+            return Err(AxError::InvalidInput);
         };
         match rx.try_recv() {
             Ok(req) => {
                 let transport = DgramTransport::new_connected(
                     req.data_rx,
                     req.connected,
-                    req.credentials,
+                    req.pid,
                     5,
                     req.receive_timestamp,
                     req.receive_credentials,
                 );
                 Ok((Transport::Dgram(transport), req.addr))
             }
-            Err(TryRecvError::Empty) => Err(NetError::WouldBlock),
-            Err(TryRecvError::Closed) => Err(NetError::ConnectionReset),
+            Err(TryRecvError::Empty) => Err(AxError::WouldBlock),
+            Err(TryRecvError::Closed) => Err(AxError::ConnectionReset),
         }
     }
 
-    fn send(&self, mut src: impl Read, options: SendOptions) -> NetResult<usize> {
+    fn send(&self, mut src: impl Read, options: SendOptions) -> AxResult<usize> {
         // Unix datagram/seqpacket sockets do not carry out-of-band data.
         // Linux `unix_dgram_sendmsg` rejects MSG_OOB with EOPNOTSUPP.
         if options.flags.contains(crate::SendFlags::OOB) {
-            return Err(NetError::OperationNotSupported);
+            return Err(AxError::OperationNotSupported);
         }
         let mut message = Vec::new();
         let mut buf = [0u8; 4096];
@@ -537,7 +538,7 @@ impl TransportOps for DgramTransport {
             match src.read(&mut buf) {
                 Ok(0) => break,
                 Ok(n) => message.extend_from_slice(&buf[..n]),
-                Err(error) => return Err(error.into()),
+                Err(e) => return Err(e),
             }
         }
         let len = message.len();
@@ -550,7 +551,7 @@ impl TransportOps for DgramTransport {
             with_slot(&addr, |slot| {
                 if let Some(bind) = slot.dgram.lock().as_ref() {
                     if bind.receive_credentials.load(Ordering::Acquire)
-                        && let Some(credentials) = sender_credentials.clone()
+                        && let Some(credentials) = sender_credentials
                     {
                         cmsg.push(Box::new(SocketCmsg::Credentials(credentials)));
                     }
@@ -565,15 +566,15 @@ impl TransportOps for DgramTransport {
                     };
                     bind.data_tx
                         .try_send(packet)
-                        .map_err(|_| NetError::BrokenPipe)?;
+                        .map_err(|_| AxError::BrokenPipe)?;
                     Ok(bind.poll_update.clone())
                 } else {
-                    Err(NetError::NotConnected)
+                    Err(AxError::NotConnected)
                 }
             })?
         } else if let Some(chan) = self.connected.read().as_ref() {
             if chan.receive_credentials.load(Ordering::Acquire)
-                && let Some(credentials) = sender_credentials.clone()
+                && let Some(credentials) = sender_credentials
             {
                 cmsg.push(Box::new(SocketCmsg::Credentials(credentials)));
             }
@@ -588,21 +589,21 @@ impl TransportOps for DgramTransport {
             };
             chan.data_tx
                 .try_send(packet)
-                .map_err(|_| NetError::BrokenPipe)?;
+                .map_err(|_| AxError::BrokenPipe)?;
             chan.poll_update.clone()
         } else {
-            return Err(NetError::NotConnected);
+            return Err(AxError::NotConnected);
         };
         // Datagram packet is queued before waking the receiver.
         unsafe { wake_poll.wake(IoEvents::IN) };
         Ok(len)
     }
 
-    fn recv(&self, mut dst: impl Write, mut options: RecvOptions) -> NetResult<usize> {
+    fn recv(&self, mut dst: impl Write, mut options: RecvOptions) -> AxResult<usize> {
         // Unix datagram/seqpacket sockets do not carry out-of-band data.
         // Linux `unix_dgram_recvmsg` rejects MSG_OOB with EOPNOTSUPP.
         if options.flags.contains(RecvFlags::OOB) {
-            return Err(NetError::OperationNotSupported);
+            return Err(AxError::OperationNotSupported);
         }
         let extra_nb = options.flags.contains(RecvFlags::DONTWAIT);
         let peek = options.flags.contains(RecvFlags::PEEK);
@@ -615,11 +616,11 @@ impl TransportOps for DgramTransport {
             } else {
                 let mut guard = self.data_rx.lock();
                 let Some((rx, _)) = guard.as_mut() else {
-                    return Err(NetError::NotConnected);
+                    return Err(AxError::NotConnected);
                 };
                 match rx.try_recv() {
                     Ok(packet) => packet,
-                    Err(TryRecvError::Empty) => return Err(NetError::WouldBlock),
+                    Err(TryRecvError::Empty) => return Err(AxError::WouldBlock),
                     Err(TryRecvError::Closed) => return Ok(0),
                 }
             };

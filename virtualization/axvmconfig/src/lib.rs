@@ -118,40 +118,6 @@ mod vm_mem_config_vec_serde {
     }
 }
 
-mod guest_type_serde {
-    use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
-
-    use super::*;
-
-    #[derive(serde::Deserialize)]
-    #[serde(untagged)]
-    enum GuestTypeInput {
-        Named(GuestType),
-        LegacyVmType(u8),
-    }
-
-    pub fn serialize<S>(value: &GuestType, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        value.serialize(serializer)
-    }
-
-    pub fn deserialize<'de, D>(deserializer: D) -> Result<GuestType, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        match GuestTypeInput::deserialize(deserializer)? {
-            GuestTypeInput::Named(guest_type) => Ok(guest_type),
-            GuestTypeInput::LegacyVmType(0 | 1) => Ok(GuestType::Passthrough),
-            GuestTypeInput::LegacyVmType(2) => Ok(GuestType::Virtualized),
-            GuestTypeInput::LegacyVmType(value) => Err(de::Error::custom(alloc::format!(
-                "unsupported legacy vm_type {value}"
-            ))),
-        }
-    }
-}
-
 #[cfg_attr(all(feature = "std", any(windows, unix)), derive(schemars::JsonSchema))]
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 enum VMBootProtocolSerde {
@@ -254,6 +220,56 @@ fn boot_protocol_name(protocol: VMBootProtocol) -> &'static str {
     }
 }
 
+/// Host timer policy applied to the physical CPU running a VM vCPU.
+#[cfg_attr(all(feature = "std", any(windows, unix)), derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum HostTimerPolicy {
+    /// Keep the ArceOS periodic scheduler timer enabled.
+    #[default]
+    Periodic,
+    /// Disable the periodic scheduler timer while guest code is running,
+    /// while retaining task and AxVM one-shot deadlines.
+    Tickless,
+}
+
+/// Guest WFI execution and host-idle behavior for a VM vCPU.
+#[cfg_attr(all(feature = "std", any(windows, unix)), derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum HostVcpuIdlePolicy {
+    /// Trap guest WFI and suspend the host vCPU task until an event arrives.
+    #[default]
+    Halt,
+    /// Trap guest WFI and immediately re-enter the guest.
+    Busy,
+}
+
+/// Controls whether AxVM adjusts a kernel image to the primary guest memory
+/// base or preserves the addresses declared by the VM configuration.
+#[cfg_attr(all(feature = "std", any(windows, unix)), derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum KernelLoadPolicy {
+    /// Use the boot protocol's default placement relative to primary memory.
+    #[default]
+    AdjustToMemory,
+    /// Preserve `kernel_load_addr` and `entry_point` exactly as configured.
+    KeepConfigured,
+}
+
+/// Guest EL1 TLB-maintenance behavior.
+#[cfg_attr(all(feature = "std", any(windows, unix)), derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum GuestTlbiPolicy {
+    /// Execute guest TLBI instructions natively.
+    #[default]
+    Native,
+    /// Trap guest EL1 TLBI and synchronize only the VM's configured host CPUs.
+    VmScoped,
+}
+
 /// The configuration structure for the guest VM base info.
 #[cfg_attr(all(feature = "std", any(windows, unix)), derive(schemars::JsonSchema))]
 #[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
@@ -264,12 +280,16 @@ pub struct VMBaseConfig {
     /// VM name.
     pub name: String,
     /// Guest address-space and physical-device assignment model.
-    #[serde(alias = "vm_type", with = "guest_type_serde")]
-    #[cfg_attr(all(feature = "std", any(windows, unix)), schemars(with = "GuestType"))]
     pub guest_type: GuestType,
     // Resources.
     /// The number of virtual CPUs.
     pub cpu_num: usize,
+    /// Host timer policy applied while this VM's vCPU executes guest code.
+    pub host_timer_policy: HostTimerPolicy,
+    /// Guest WFI execution and host-idle behavior.
+    pub host_vcpu_idle_policy: HostVcpuIdlePolicy,
+    /// Guest EL1 TLB-maintenance behavior.
+    pub guest_tlbi_policy: GuestTlbiPolicy,
     /// The physical CPU ids.
     /// - if `None`, vcpu's physical id will be set as vcpu id.
     /// - if set, each vcpu will be assigned to the specified physical CPU mask.
@@ -301,6 +321,9 @@ pub struct VMKernelConfig {
     pub kernel_path: String,
     /// The load address of the kernel image.
     pub kernel_load_addr: usize,
+    /// Policy for deriving the effective kernel load and entry addresses.
+    #[serde(default)]
+    pub load_policy: KernelLoadPolicy,
     /// Whether to enable BIOS boot flow for this VM.
     #[serde(default)]
     pub enable_bios: bool,
@@ -568,11 +591,6 @@ impl GuestDevices {
             .map(|device| vec![device.path.clone()])
             .collect()
     }
-
-    /// Returns virtual device requests from the structured model catalog.
-    pub fn virtual_device_requests(&self) -> &[VirtualDeviceRequest] {
-        &self.virtual_devices
-    }
 }
 
 /// Open configuration boundary for one code-registered virtual-device model.
@@ -643,8 +661,6 @@ impl VirtualDeviceRequest {
             "irq_id",
             "base_gpa",
             "base_hpa",
-            "legacy_base_gpa",
-            "legacy_length",
             "mmio_base",
             "pio_base",
             "msi_device_id",

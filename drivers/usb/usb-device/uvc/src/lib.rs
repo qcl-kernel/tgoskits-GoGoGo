@@ -9,7 +9,7 @@ use alloc::{
 };
 
 use anyhow::anyhow;
-use crab_usb::{Device, DeviceInfo, InterfaceSession, err::USBError};
+use crab_usb::{Device, DeviceInfo, err::USBError};
 use log::*;
 use usb_if::{
     descriptor::{Class, EndpointType},
@@ -231,8 +231,6 @@ struct StreamControl {
 
 pub struct UvcDevice {
     device: Device,
-    _video_control_session: InterfaceSession,
-    video_streaming_session: Option<InterfaceSession>,
 
     video_streaming_interface_num: u8,
     processing_unit_id: Option<u8>, // 处理单元ID
@@ -314,14 +312,12 @@ impl UvcDevice {
 
         debug!("Using Video Control interface: {video_control_info:?}");
 
-        let video_control_session = device
+        device
             .claim_interface(video_control_info.0, video_control_info.1)
             .await?;
 
         Ok(Self {
             device,
-            _video_control_session: video_control_session,
-            video_streaming_session: None,
             // video_streaming_interface,
             video_streaming_interface_num: video_streaming_info
                 .map(|(num, _)| num)
@@ -866,20 +862,9 @@ impl UvcDevice {
         );
 
         // 切换到选中的 alternate setting
-        match self.video_streaming_session.as_mut() {
-            Some(session) => {
-                session
-                    .set_alternate(&mut self.device, alt_setting.alternate_setting)
-                    .await?;
-            }
-            None => {
-                self.video_streaming_session = Some(
-                    self.device
-                        .claim_interface(vs_interface_num, alt_setting.alternate_setting)
-                        .await?,
-                );
-            }
-        }
+        self.device
+            .claim_interface(vs_interface_num, alt_setting.alternate_setting)
+            .await?;
 
         let mut ep = None;
         // 查找同步 IN 端点
@@ -894,11 +879,7 @@ impl UvcDevice {
         }
 
         let ep_desc = ep.ok_or(anyhow!("No isochronous IN endpoint found"))?;
-        let ep = self
-            .video_streaming_session
-            .as_ref()
-            .ok_or(USBError::InterfaceBroken)?
-            .endpoint(ep_desc.address)?;
+        let ep = self.device.endpoint(ep_desc.address)?;
 
         debug!("Starting video streaming");
         self.state = UvcDeviceState::Streaming;

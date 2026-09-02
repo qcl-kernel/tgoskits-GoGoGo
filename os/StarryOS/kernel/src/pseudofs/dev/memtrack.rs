@@ -169,7 +169,7 @@ impl DeviceOps for MemTrack {
     }
 }
 
-#[cfg(all(test, not(axtest)))]
+#[cfg(test)]
 mod tests {
     use super::*;
 

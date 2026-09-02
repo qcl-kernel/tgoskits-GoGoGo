@@ -1,0 +1,9 @@
+# Axvisor build config for the ROCK 4D (RK3576) board running the task123
+# StarryOS guest in virtualized mode. The guest image is embedded at build
+# time (see os/axvisor/configs/vms/rock-4d/starryos-task123-smp2.toml), so no
+# host filesystem/rootfs is required on the board.
+features = []
+log = "Info"
+max_cpu_num = 8
+target = "aarch64-unknown-none-softfloat"
+vm_configs = ["os/axvisor/configs/vms/rock-4d/starryos-task123-smp2.toml"]

@@ -6,9 +6,9 @@ use usb_if::{
     transfer::{Recipient, Request, RequestType},
 };
 
-use super::EndpointHandle;
+use super::Endpoint;
 
-impl EndpointHandle {
+impl Endpoint {
     pub async fn control_in(
         &mut self,
         param: usb_if::host::ControlSetup,

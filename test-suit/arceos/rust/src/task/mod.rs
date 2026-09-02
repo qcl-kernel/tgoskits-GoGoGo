@@ -4,8 +4,6 @@ pub mod affinity;
 pub mod ipi;
 #[cfg(feature = "task-irq")]
 pub mod irq;
-#[cfg(feature = "task-mutex")]
-pub mod mutex;
 #[cfg(feature = "task-parallel")]
 pub mod parallel;
 #[cfg(any(feature = "task-priority", feature = "sched-cfs", feature = "sched-rr"))]

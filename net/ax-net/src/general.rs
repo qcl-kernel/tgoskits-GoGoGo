@@ -11,8 +11,8 @@
 //! The helpers in this module bridge poll-based readiness with synchronous
 //! socket operations. They should only wait on protocol-specific pollers and
 //! must not drive the smoltcp interface directly. Progress is requested through
-//! the unique protocol executor so application threads do not become temporary
-//! protocol stack owners.
+//! the net-poll worker so application threads do not become temporary protocol
+//! stack owners.
 
 use core::{
     sync::atomic::{AtomicBool, AtomicI32, AtomicU8, AtomicU32, AtomicU64, Ordering},
@@ -20,11 +20,11 @@ use core::{
     time::Duration,
 };
 
+use ax_errno::{AxError, AxResult, LinuxError};
 use ax_task::future::{block_on, poll_io, timeout};
 use axpoll::{IoEvents, Pollable};
 
 use crate::{
-    NetError, NetResult,
     config::{DeviceBinding, InterfaceId},
     get_service, interface_by_id,
     options::{Configurable, GetSocketOption, SetSocketOption},
@@ -168,9 +168,9 @@ impl GeneralOptions {
 
     /// Updates the IP_MTU_DISCOVER mode. Rejects modes Linux does not define so a
     /// probing client sees the same EINVAL, then stores the mode for readback.
-    pub fn set_ip_mtu_discover(&self, mode: u8) -> NetResult<()> {
+    pub fn set_ip_mtu_discover(&self, mode: u8) -> AxResult<()> {
         if mode > IP_PMTUDISC_MAX {
-            return Err(NetError::InvalidInput);
+            return Err(AxError::from(LinuxError::EINVAL));
         }
         self.ip_mtu_discover.store(mode, Ordering::Relaxed);
         Ok(())
@@ -202,35 +202,34 @@ impl GeneralOptions {
     }
 
     /// Updates SO_PRIORITY using Linux's ordinary unprivileged range.
-    pub fn set_priority(&self, priority: i32) -> NetResult<()> {
+    pub fn set_priority(&self, priority: i32) -> AxResult<()> {
         if !(0..=SO_PRIORITY_UNPRIVILEGED_MAX).contains(&priority) {
-            return Err(NetError::OperationNotPermitted);
+            return Err(AxError::from(LinuxError::EPERM));
         }
         self.priority.store(priority, Ordering::Relaxed);
         Ok(())
     }
 
-    /// Publishes protocol work and registers any protocol deadline for this
-    /// socket. Queue IRQs independently schedule their exact poll group.
+    /// Registers a waker with the service/device path for the bound interface.
     pub fn register_waker(&self, waker: &Waker) {
         get_service().register_waker(self.device_binding(), waker);
     }
 
     /// Runs a send operation through the standard blocking/nonblocking poller.
-    pub fn send_poller<P: Pollable, F: FnMut() -> NetResult<T>, T>(
+    pub fn send_poller<P: Pollable, F: FnMut() -> AxResult<T>, T>(
         &self,
         pollable: &P,
         f: F,
-    ) -> NetResult<T> {
+    ) -> AxResult<T> {
         self.send_poller_with(pollable, false, f)
     }
 
     /// Runs a receive operation through the standard blocking/nonblocking poller.
-    pub fn recv_poller<P: Pollable, F: FnMut() -> NetResult<T>, T>(
+    pub fn recv_poller<P: Pollable, F: FnMut() -> AxResult<T>, T>(
         &self,
         pollable: &P,
         f: F,
-    ) -> NetResult<T> {
+    ) -> AxResult<T> {
         self.recv_poller_with(pollable, false, f)
     }
 
@@ -238,12 +237,12 @@ impl GeneralOptions {
     /// behavior for this call only (e.g. `MSG_DONTWAIT`). The effective
     /// non-blocking state is the OR of the socket's own `nonblocking()`
     /// and `extra_nonblocking`.
-    pub fn send_poller_with<P: Pollable, F: FnMut() -> NetResult<T>, T>(
+    pub fn send_poller_with<P: Pollable, F: FnMut() -> AxResult<T>, T>(
         &self,
         pollable: &P,
         extra_nonblocking: bool,
         f: F,
-    ) -> NetResult<T> {
+    ) -> AxResult<T> {
         block_on(timeout(
             self.send_timeout(),
             poll_io(
@@ -257,12 +256,12 @@ impl GeneralOptions {
 
     /// Like [`recv_poller`] but lets the caller force non-blocking
     /// behavior for this call only (e.g. `MSG_DONTWAIT`).
-    pub fn recv_poller_with<P: Pollable, F: FnMut() -> NetResult<T>, T>(
+    pub fn recv_poller_with<P: Pollable, F: FnMut() -> AxResult<T>, T>(
         &self,
         pollable: &P,
         extra_nonblocking: bool,
         f: F,
-    ) -> NetResult<T> {
+    ) -> AxResult<T> {
         block_on(timeout(
             self.recv_timeout(),
             poll_io(
@@ -275,7 +274,7 @@ impl GeneralOptions {
     }
 }
 impl Configurable for GeneralOptions {
-    fn get_option_inner(&self, option: &mut GetSocketOption) -> NetResult<bool> {
+    fn get_option_inner(&self, option: &mut GetSocketOption) -> AxResult<bool> {
         use GetSocketOption as O;
         match option {
             O::Error(error) => {
@@ -332,7 +331,7 @@ impl Configurable for GeneralOptions {
         Ok(true)
     }
 
-    fn set_option_inner(&self, option: SetSocketOption) -> NetResult<bool> {
+    fn set_option_inner(&self, option: SetSocketOption) -> AxResult<bool> {
         use SetSocketOption as O;
 
         match option {
@@ -360,7 +359,7 @@ impl Configurable for GeneralOptions {
                 if let Some(id) = *interface_id
                     && interface_by_id(id).is_none()
                 {
-                    return Err(NetError::NoSuchDevice);
+                    return Err(AxError::NoSuchDevice);
                 }
                 self.set_device_binding(DeviceBinding {
                     bound_if: *interface_id,
@@ -386,7 +385,7 @@ impl Configurable for GeneralOptions {
             }
             O::SocketType(_) | O::SocketProtocol(_) | O::SocketDomain(_) => {
                 // Read-only options
-                return Err(NetError::ProtocolOptionUnsupported);
+                return Err(AxError::from(LinuxError::ENOPROTOOPT));
             }
             _ => return Ok(false),
         }
@@ -453,11 +452,11 @@ mod tests {
 
         assert_eq!(
             options.set_priority(7).unwrap_err(),
-            NetError::OperationNotPermitted
+            AxError::from(LinuxError::EPERM)
         );
         assert_eq!(
             options.set_priority(-1).unwrap_err(),
-            NetError::OperationNotPermitted
+            AxError::from(LinuxError::EPERM)
         );
         assert_eq!(options.priority(), 6);
     }

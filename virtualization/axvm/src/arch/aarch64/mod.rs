@@ -8,6 +8,7 @@ use std::sync::Arc;
 
 use arm_vcpu::*;
 use arm_vgic::{GicV3VcpuBinding, IntId, VgicCore};
+use ax_memory_addr::VirtAddr;
 use axvm_types::{VmBackendError as BackendError, VmBackendResult as BackendResult, *};
 
 use super::*;
@@ -15,24 +16,31 @@ use crate::{
     AxVmResult,
     architecture::cpu_up::{self, CpuUpExit, CpuUpOps},
     ax_err,
+    config::{GuestTlbiPolicy, HostVcpuIdlePolicy},
 };
 
 mod capabilities;
 pub(crate) mod fdt;
 mod firmware_plan;
 mod gic;
+mod images;
 mod npt;
 mod resource_pools;
+mod shared_mmio;
 mod shared_provider;
+#[path = "../../architecture/sysreg.rs"]
+mod sysreg;
+mod tlbi;
 mod vgic;
 mod vm;
 mod vm_plan;
 pub(crate) use vm_plan::Aarch64VmPlan;
 mod vtimer;
 
+pub use capabilities::{host_fdt_bootarg, host_phys_to_virt};
+pub use images::ImageLoader;
+use sysreg::{SysRegReadExit, SysRegWriteExit};
 use vgic::Aarch64VgicRuntimeKey;
-
-use crate::architecture::sysreg::{self, SysRegReadExit, SysRegWriteExit};
 
 pub(crate) struct Aarch64Arch;
 
@@ -53,12 +61,28 @@ impl ArchOps for Aarch64Arch {
         arm_vcpu::has_hardware_support()
     }
 
-    fn enter_runtime(vm: &crate::AxVM) -> AxVmResult {
+    fn clean_dcache_range(addr: VirtAddr, size: usize) {
+        aarch64_cpu_ext::cache::dcache_range(
+            aarch64_cpu_ext::cache::CacheOp::Clean,
+            addr.as_usize(),
+            size,
+        );
+    }
+
+    fn activate_devices(vm: &crate::AxVM) -> AxVmResult {
         vgic_runtime(vm)?.activate()
     }
 
-    fn exit_runtime(vm: &crate::AxVM) -> AxVmResult {
+    fn deactivate_devices(vm: &crate::AxVM) -> AxVmResult {
         vgic_runtime(vm)?.deactivate()
+    }
+
+    fn bind_runtime(
+        vm: &crate::AxVM,
+        runtime: std::sync::Arc<crate::vm::VmRuntimeHandle>,
+    ) -> AxVmResult {
+        vgic_runtime(vm)?.bind_runtime(&runtime);
+        Ok(())
     }
 
     fn before_vcpu_run(
@@ -66,6 +90,10 @@ impl ArchOps for Aarch64Arch {
         vcpu: &crate::vm::AxVCpuRef<Self::VCpu>,
     ) -> AxVmResult {
         vcpu.get_arch_vcpu().prepare_timer_run()
+    }
+
+    fn on_last_vcpu_exit(vm: &crate::AxVMRef) -> AxVmResult {
+        Self::deactivate_devices(vm)
     }
 
     fn handle_vcpu_exit_bound(
@@ -97,9 +125,8 @@ impl ArchOps for Aarch64Arch {
                     signed_ext,
                 },
             ),
-            ArmVmExit::MmioWrite { addr, width, data } => super::handle_mmio_write(
+            ArmVmExit::MmioWrite { addr, width, data } => super::handle_mmio_write::<Self>(
                 vm,
-                vcpu,
                 MmioWriteExit {
                     addr: arm_guest_phys_addr_to_ax(addr),
                     width: arm_access_width_to_ax(width),
@@ -116,12 +143,21 @@ impl ArchOps for Aarch64Arch {
             ),
             ArmVmExit::SysRegWrite { addr, value } => sysreg::handle_write(
                 vm,
-                vcpu,
                 SysRegWriteExit {
                     addr: arm_sys_reg_addr_to_ax(addr),
                     value,
                 },
             ),
+            ArmVmExit::TlbInvalidate { .. } => {
+                if vm.guest_tlbi_policy() != GuestTlbiPolicy::VmScoped {
+                    return ax_err!(
+                        BadState,
+                        "received trapped EL1 TLBI while VM-scoped policy is disabled"
+                    );
+                }
+                tlbi::invalidate_vm(vm)?;
+                Ok(BoundVcpuExit::Continue)
+            }
             ArmVmExit::GicCpuInterfaceRead {
                 register,
                 destination,
@@ -137,12 +173,15 @@ impl ArchOps for Aarch64Arch {
             ArmVmExit::ExternalInterrupt { token } => Ok(BoundVcpuExit::Defer(
                 Aarch64DeferredRunWork::ExternalInterrupt { token },
             )),
-            ArmVmExit::WaitForInterrupt => Ok(BoundVcpuExit::Complete(VcpuRunAction {
-                waits_for_event: true,
-                stop_reason: None,
-                resets_vm: false,
-                exits_vcpu: false,
-            })),
+            ArmVmExit::WaitForInterrupt => match vm.host_vcpu_idle_policy() {
+                HostVcpuIdlePolicy::Busy => Ok(BoundVcpuExit::Continue),
+                HostVcpuIdlePolicy::Halt => {
+                    vcpu.get_arch_vcpu().arm_timer_wait()?;
+                    Ok(BoundVcpuExit::Complete(aarch64_guest_wfi_action(
+                        HostVcpuIdlePolicy::Halt,
+                    )))
+                }
+            },
             ArmVmExit::CpuDown { state } => {
                 warn!(
                     "VM[{}] run VCpu[{}] CpuDown state {state:#x}",
@@ -210,6 +249,7 @@ impl ArchOps for Aarch64Arch {
                         })?;
                     }
                 }
+                crate::check_timer_events();
             }
         }
         Ok(VcpuRunAction {
@@ -225,11 +265,13 @@ impl ArchOps for Aarch64Arch {
         vcpu: &crate::vm::AxVCpuRef<Self::VCpu>,
         runtime: &crate::vm::VmRuntimeHandle,
     ) {
-        let wait_snapshot = runtime.vcpu_event_wait_snapshot();
+        let observed_generation = runtime.vcpu_notification_generation(vcpu.id());
         if !vm.running() {
             return;
         }
-        if wait_snapshot.has_pending_event(runtime) {
+        // Device polling is owned by vCPU0. Keep the VM-level request from
+        // being consumed by a secondary vCPU that cannot perform the poll.
+        if vcpu.id() == 0 && runtime.take_device_poll_request() {
             return;
         }
         match vcpu.get_arch_vcpu().has_pending_interrupt() {
@@ -244,17 +286,14 @@ impl ArchOps for Aarch64Arch {
                 return;
             }
         }
-        let timer_wait = match vcpu.get_arch_vcpu().arm_timer_wait(runtime) {
-            Ok(timer_wait) => timer_wait,
-            Err(error) => {
-                warn!(
-                    "VM[{}] VCpu[{}] cannot rearm architectural timer before WFI wait: {error:?}",
-                    vm.id(),
-                    vcpu.id()
-                );
-                return;
-            }
-        };
+        if let Err(error) = vcpu.get_arch_vcpu().arm_timer_wait() {
+            warn!(
+                "VM[{}] VCpu[{}] cannot rearm architectural timer before WFI wait: {error:?}",
+                vm.id(),
+                vcpu.id()
+            );
+            return;
+        }
         match vcpu.get_arch_vcpu().has_pending_interrupt() {
             Ok(true) => return,
             Ok(false) => {}
@@ -268,13 +307,9 @@ impl ArchOps for Aarch64Arch {
             }
         }
 
-        crate::vm::wait_for_vcpu_event_if_idle_with(
-            runtime,
-            &wait_snapshot,
-            || vm.running(),
-            || timer_wait.is_some_and(|token| vcpu.get_arch_vcpu().timer_wait_completed(token)),
-            |condition| vcpu.get_arch_vcpu().wait_for_timer_event(condition),
-        );
+        runtime.wait_vcpu_until(vcpu.id(), || {
+            !vm.running() || runtime.vcpu_notification_generation(vcpu.id()) != observed_generation
+        });
     }
 }
 
@@ -297,15 +332,21 @@ impl ArmHostOps for AxvmArmHostOps {
     }
 
     fn handle_current_host_irq() {
-        if let Some(token) = gic::acknowledge_host_irq()
-            && let Err(error) = gic::route_acknowledged_host_irq(token)
-        {
-            warn!("{error}");
+        if let Some(token) = gic::acknowledge_host_irq() {
+            let intid = token & 0x3ff;
+            if intid >= 32 {
+                info!("VM host IRQ: intid={} (SPI {})", intid, intid - 32);
+            }
+            if let Err(error) = gic::route_acknowledged_host_irq(token) {
+                warn!("{error}");
+            }
         }
+        crate::check_timer_events();
     }
 }
 
 pub(crate) struct AxvmArmVcpu {
+    vm_id: usize,
     inner: ArmVcpu<AxvmArmHostOps>,
     vgic: Option<Arc<VgicCore>>,
     vgic_binding: Option<GicV3VcpuBinding>,
@@ -330,6 +371,7 @@ impl AxvmArmVcpu {
             host_virtual_timer_intid,
         } = irq_binding;
         let timer_binding = vtimer::Aarch64TimerBinding::new(
+            self.vm_id,
             vgic.clone(),
             backend,
             binding.vcpu(),
@@ -394,10 +436,7 @@ impl AxvmArmVcpu {
         vgic_backend_result(binding.synchronize(snapshot))
     }
 
-    fn arm_timer_wait(
-        &self,
-        runtime: &crate::vm::VmRuntimeHandle,
-    ) -> AxVmResult<Option<vtimer::Aarch64TimerWaitToken>> {
+    fn arm_timer_wait(&self) -> AxVmResult {
         let snapshot = self.inner.timer_snapshot().map_err(|error| {
             crate::AxVmError::vcpu(
                 "snapshot AArch64 architectural timers",
@@ -409,21 +448,8 @@ impl AxvmArmVcpu {
             .ok_or_else(|| {
                 crate::AxVmError::resource_unavailable("AArch64 timer binding", "missing")
             })?
-            .arm_wait(runtime, snapshot)
+            .arm_wait(snapshot)
             .map_err(|error| crate::AxVmError::interrupt("arm architectural timer wait", error))
-    }
-
-    fn timer_wait_completed(&self, token: vtimer::Aarch64TimerWaitToken) -> bool {
-        self.timer_binding
-            .as_ref()
-            .is_some_and(|binding| binding.timer_wait_completed(token))
-    }
-
-    fn wait_for_timer_event(&self, condition: &dyn Fn() -> bool) {
-        self.timer_binding
-            .as_ref()
-            .expect("a running AArch64 vCPU must have a timer binding")
-            .wait_until(condition);
     }
 
     fn invalidate_virtual_timer_wait(&self) {
@@ -440,15 +466,17 @@ impl AxvmArmVcpu {
         binding
             .prepare_run()
             .map_err(|error| crate::AxVmError::interrupt("prepare timer PPI route", error))?;
+        // Re-publish the guest timer PPI input levels before the world switch
+        // loads the vGIC state. On hardware GICv2 nothing else asserts the
+        // virtual PPI: the physical CNTV expiry is claimed as a host
+        // activation and deactivated, so without this publication the guest
+        // never observes its own scheduler tick and boot-time sleeps hang.
         let snapshot = self.inner.timer_snapshot().map_err(|error| {
-            crate::AxVmError::vcpu(
-                "snapshot AArch64 architectural timers before entry",
-                std::format!("{error:?}"),
-            )
+            crate::AxVmError::vcpu("snapshot AArch64 timers", format!("{error:?}"))
         })?;
         binding
-            .publish_for_entry(snapshot)
-            .map_err(|error| crate::AxVmError::interrupt("publish timer PPI before entry", error))
+            .synchronize(snapshot)
+            .map_err(|error| crate::AxVmError::interrupt("publish timer PPI levels", error))
     }
 
     fn accept_host_timer_irq(&self, token: usize) -> bool {
@@ -475,6 +503,7 @@ impl VmArchVcpuOps for AxvmArmVcpu {
 
     fn new(vm_id: VMId, vcpu_id: VCpuId, config: Self::CreateConfig) -> BackendResult<Self> {
         arm_result(ArmVcpu::new(vm_id, vcpu_id, config)).map(|inner| Self {
+            vm_id,
             inner,
             vgic: None,
             vgic_binding: None,
@@ -611,6 +640,10 @@ impl VmArchPerCpuOps for AxvmArmPerCpu {
     }
 }
 
+fn aarch64_guest_wfi_action(policy: HostVcpuIdlePolicy) -> VcpuRunAction {
+    VcpuRunAction::for_guest_wfi(policy)
+}
+
 fn arm_result<T>(result: ArmVcpuResult<T>) -> BackendResult<T> {
     result.map_err(arm_error_to_backend)
 }
@@ -673,7 +706,15 @@ fn arm_sys_reg_addr_to_ax(addr: ArmSysRegAddr) -> SysRegAddr {
 
 #[cfg(test)]
 mod tests {
+    use axvmconfig::HostVcpuIdlePolicy;
+
     use super::*;
+
+    #[test]
+    fn guest_wfi_obeys_per_vm_host_idle_policy() {
+        assert!(aarch64_guest_wfi_action(HostVcpuIdlePolicy::Halt).waits_for_event);
+        assert!(!aarch64_guest_wfi_action(HostVcpuIdlePolicy::Busy).waits_for_event);
+    }
 
     #[test]
     fn converts_arm_vcpu_errors_to_backend_errors() {

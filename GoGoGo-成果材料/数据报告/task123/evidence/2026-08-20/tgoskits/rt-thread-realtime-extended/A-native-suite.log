@@ -1,0 +1,46 @@
+[32m[I/rtdm.ofw] Booting RT-Thread on physical CPU 0x0[0m
+[32m[I/rtdm.ofw] Machine model: linux,dummy-virt[0m
+[32m[I/rtdm.ofw] Memory node(0) ranges: 0x0000000040000000 - 0x0000000080000000[0m
+[32m[I/mm.memblock] System memory:[0m
+[32m[I/mm.memblock]                    [0x0000000040000000, 0x0000000080000000][0m
+[32m[I/mm.memblock] Reserved memory:[0m
+[32m[I/mm.memblock]                    [0x0000000040200000, 0x0000000040335000][0m
+[32m[I/mm.memblock]                    [0x0000000040335000, 0x0000000044335000][0m
+[32m[I/mm.memblock]                    [0x0000000044335000, 0x0000000044535000][0m
+[32m[I/mm.memblock]                    [0x0000000044535000, 0x0000000044635000][0m
+[32m[I/mm.memblock] physical memory region [0x0000000040000000-0x0000000040200000] installed to system page[0m
+[32m[I/mm.memblock] physical memory region [0x0000000044635000-0x0000000080000000] installed to system page[0m
+[32m[I/mm.memblock] 1002 MB memory installed to system page[0m
+[32m[I/osi.psci] Using PSCI v1.1 Function IDs[0m
+[32m[I/rtdm.ofw] Console: uart0 (<no-node>)[0m
+
+ \ | /
+- RT -     Thread Operating System
+ / | \     5.2.2 build Aug 20 2026 15:19:14
+ 2006 - 2024 Copyright by RT-Thread team
+lwIP-2.1.2 initialized!
+[32m[I/sal.skt] Socket Abstraction Layer initialize success.[0m
+[32m[I/rtdm.mnt] File system initialization done[0m
+Axvisor RT-Thread guest ready
+TASK3_RTOS_READY ip=192.168.77.30 port=9877
+msh />benchmark 100000
+msh />RTBENCH_BEGIN samples=100000 frequency=62500000
+[32m[I/rtipic.srv] server starting on 192.168.77.30:9876[0m
+RTIPC_SERVER_READY ip=192.168.77.30 port=9876
+[32m[I/rtipic.srv] listening...[0m
+RTBENCH metric=timer_jitter run=1 expected=100000 collected=100000 missing=0 p50_ns=720 p95_ns=4352 p99_ns=14608 p99_9_ns=41680 max_ns=180192 miss_100us=2 miss_500us=0 miss_1ms=0 mean_ns=1449
+RTBENCH metric=callback_exec run=1 expected=100000 collected=100000 missing=0 p50_ns=112 p95_ns=192 p99_ns=448 p99_9_ns=9408 max_ns=32464 miss_100us=0 miss_500us=0 miss_1ms=0 mean_ns=146
+RTBENCH metric=timer_jitter run=2 expected=100000 collected=100000 missing=0 p50_ns=768 p95_ns=4384 p99_ns=15632 p99_9_ns=43568 max_ns=83088 miss_100us=0 miss_500us=0 miss_1ms=0 mean_ns=1520
+RTBENCH metric=callback_exec run=2 expected=100000 collected=100000 missing=0 p50_ns=112 p95_ns=192 p99_ns=752 p99_9_ns=9360 max_ns=20272 miss_100us=0 miss_500us=0 miss_1ms=0 mean_ns=153
+RTBENCH metric=timer_jitter run=3 expected=100000 collected=100000 missing=0 p50_ns=784 p95_ns=5056 p99_ns=17200 p99_9_ns=45200 max_ns=158032 miss_100us=6 miss_500us=0 miss_1ms=0 mean_ns=1612
+RTBENCH metric=callback_exec run=3 expected=100000 collected=100000 missing=0 p50_ns=112 p95_ns=224 p99_ns=784 p99_9_ns=9568 max_ns=20832 miss_100us=0 miss_500us=0 miss_1ms=0 mean_ns=159
+RTBENCH metric=preemption run=1 expected=100000 collected=100000 missing=0 p50_ns=2176 p95_ns=2288 p99_ns=6256 p99_9_ns=12000 max_ns=13216 miss_100us=0 miss_500us=0 miss_1ms=0 mean_ns=2280
+RTBENCH metric=irq run=1 expected=100000 collected=100000 missing=0 p50_ns=1728 p95_ns=1888 p99_ns=5808 p99_9_ns=11744 max_ns=46544 miss_100us=0 miss_500us=0 miss_1ms=0 mean_ns=1858
+RTBENCH metric=irq_to_task run=1 expected=100000 collected=100000 missing=0 p50_ns=2656 p95_ns=2688 p99_ns=3120 p99_9_ns=10576 max_ns=39328 miss_100us=0 miss_500us=0 miss_1ms=0 mean_ns=2698
+RTBENCH metric=irq_disabled_duration run=1 expected=100000 collected=100000 missing=0 p50_ns=224 p95_ns=240 p99_ns=240 p99_9_ns=416 max_ns=20144 miss_100us=0 miss_500us=0 miss_1ms=0 mean_ns=225
+RTBENCH metric=mutex_inversion run=1 expected=100000 collected=100000 missing=0 p50_ns=5568 p95_ns=10976 p99_ns=12656 p99_9_ns=23040 max_ns=49360 miss_100us=0 miss_500us=0 miss_1ms=0 mean_ns=5759
+RTBENCH metric=wake_under_load run=1 expected=100000 collected=100000 missing=0 p50_ns=1488 p95_ns=1520 p99_ns=1568 p99_9_ns=8000 max_ns=12448 miss_100us=0 miss_500us=0 miss_1ms=0 mean_ns=1516
+RTBENCH_NET_READY port=9878 expected=100000
+RTBENCH metric=net_event_latency run=1 expected=100000 collected=100000 missing=0 p50_ns=27936 p95_ns=38448 p99_ns=79680 p99_9_ns=108160 max_ns=1201248 miss_100us=238 miss_500us=1 miss_1ms=1 mean_ns=30372
+RTBENCH_NET_DIAGNOSTIC irq_dropped=0 irq_coalesced=0 probe_received=100000 probe_acked=100000 probe_no_irq=0 probe_duplicates=0
+RTBENCH_END status=PASS

@@ -1,0 +1,634 @@
+root=/dev/nvme0n1 rw init=/bin/sh
+VM Load @PA:0x40200000
+VM Load Offset: 0xffff0000c0200000
+Memory Map:
+  Free   0x00000040000000 - 0x00000040200000 (2 MiB)
+  KImg   0x00000040200000 - 0x00000043a00000 (56 MiB)
+  Free   0x00000043a00000 - 0x00000240000000 (7.94 GiB)
+Initialize RAM allocator: 0x43a00000..0x240000000
+Reserving CPU-local areas
+CPU-local area stride: 0x44000 bytes
+Total CPU-local allocation: 0x110000 bytes (4 CPUs)
+Flushed RAM used range to memory map: 0x43a00000..0x43b00000, current: 0x43b00000
+Flushed RAM used range to memory map: 0x43b00000..0x43c10000, current: 0x43c10000
+CPU-local areas allocated at 0x43b00000 - 0x43c10000
+EL: 2
+Mapping early memory regions...
+Ram                 : [0x0000000040000000, 0x0000000240000000) -> [0x0000000040000000, 0x0000000240000000) (8 GiB)
+KImage              : [0x0000ffff80000000, 0x0000ffff83800000) -> [0x0000000040200000, 0x0000000043a00000) (56 MiB)
+PerCpu              : [0x0000ff0043b00000, 0x0000ff0043c10000) -> [0x0000000043b00000, 0x0000000043c10000) (1.06 MiB)
+Debug serial        : [0x0000000009000000, 0x0000000009001000) -> [0x0000000009000000, 0x0000000009001000) (4 KiB)
+Boot page table at physical address: PA:0x43c10000
+Setting up table registers...
+MMU Entry point at physical address: 0x4045c53c
+Trap vector at 0xffff80260000
+Memory Map:
+  MMIO   0x00000009000000 - 0x00000009001000 (4 KiB)
+  Free   0x00000040000000 - 0x00000040200000 (2 MiB)
+  KImg   0x00000040200000 - 0x00000043a00000 (56 MiB)
+  Rsv    0x00000043a00000 - 0x00000043b00000 (1 MiB)
+  PerCPU 0x00000043b00000 - 0x00000043c10000 (1.06 MiB)
+  Rsv    0x00000043c10000 - 0x00000043c1a000 (40 KiB)
+  Free   0x00000043c1a000 - 0x00000240000000 (7.94 GiB)
+Jumping to main entry point at 0xffff80244368 with SP 0x0000ff0043b44000
+
+       d8888                            .d88888b.   .d8888b.
+      d88888                           d88P" "Y88b d88P  Y88b
+     d88P888                           888     888 Y88b.
+    d88P 888 888d888  .d8888b  .d88b.  888     888  "Y888b.
+   d88P  888 888P"   d88P"    d8P  Y8b 888     888     "Y88b.
+  d88P   888 888     888      88888888 888     888       "888
+ d8888888888 888     Y88b.    Y8b.     Y88b. .d88P Y88b  d88P
+d88P     888 888      "Y8888P  "Y8888   "Y88888P"   "Y8888P"
+
+arch = aarch64
+platform = linux,dummy-virt
+target = aarch64-unknown-none-softfloat
+build_mode = 
+log_level = info
+backtrace = false
+smp = 3
+
+[37m[  0.050500 ax_runtime:220] [32mLogging is enabled.[m
+[m[37m[  0.050798 ax_runtime:221] [32mPrimary CPU 0 started, arg = 0x43a00000.[m
+[m[37m[  0.050886 ax_runtime:223] [32mFound physcial memory regions:[m
+[m[37m[  0.051628 ax_runtime:225] [32m  [PA:0x9000000, PA:0x9001000) mmio (READ | WRITE | DEVICE | RESERVED)[m
+[m[37m[  0.051816 ax_runtime:225] [32m  [PA:0x40000000, PA:0x40200000) free memory (READ | WRITE | FREE)[m
+[m[37m[  0.051929 ax_runtime:225] [32m  [PA:0x40200000, PA:0x43a00000) reserved (READ | WRITE | EXECUTE | RESERVED)[m
+[m[37m[  0.052032 ax_runtime:225] [32m  [PA:0x43a00000, PA:0x43b00000) reserved (READ | WRITE | EXECUTE | RESERVED)[m
+[m[37m[  0.052132 ax_runtime:225] [32m  [PA:0x43b00000, PA:0x43c10000) reserved (READ | WRITE | EXECUTE | RESERVED)[m
+[m[37m[  0.052232 ax_runtime:225] [32m  [PA:0x43c10000, PA:0x43c1a000) reserved (READ | WRITE | EXECUTE | RESERVED)[m
+[m[37m[  0.052332 ax_runtime:225] [32m  [PA:0x43c1a000, PA:0x240000000) free memory (READ | WRITE | FREE)[m
+[m[37m[  0.052440 ax_runtime:373] [32mInitialize global memory allocator...[m
+[m[37m[  0.052524 ax_runtime:374] [32m  use buddy-slab-allocator allocator.[m
+[m[37m[  0.052674 ax_alloc::buddy_slab:158] [32mInitialize global memory allocator, start_vaddr: 0x43c1a000, size: 0x1fc3e6000[m
+[m[37m[  0.058161 ax_alloc::buddy_slab:424] [32mglobal allocator initialized[m
+[m[37m[  0.058297 ax_alloc::buddy_slab:168] [32mAdd memory region, start_vaddr: 0x40000000, size: 0x200000[m
+[m[37m[  0.058433 buddy_slab_allocator::global:151] [32mGlobalAllocator: skip region 0x40000000+0x200000, no allocator-visible memory after 2097152 alignment[m
+[m[37m[  0.058699 ax_runtime:260] [32mkernel aspace: [VA:0x0, VA:0xffffffffffffffff)[m
+[m[37m[  0.058851 ax_mm:103] [32mInitialize virtual memory management...[m
+[m[37m[  0.620478 ax_runtime:272] [32mInitialize platform devices...[m
+[m[37m[  0.625622 someboot::arch::power:23] [32mPower management method : SMC[m
+[m[37m[  0.625793 somehal::driver:5] [32mInitializing rdrive with FDT at 0x43a00000[m
+[m[37m[  0.636438 somehal::arch::gic::v3:284] [32mGICv3 CPU 0 EOI mode: two_step=true[m
+[m[37m[  0.642170 ax_task::api:137] [32mInitialize scheduling...[m
+[m[37m[  0.643203 ax_task::api:145] [32m  use Round-robin scheduler.[m
+[m[37m[  0.643477 ax_runtime:298] [32mInitialize interrupt handlers...[m
+[m[37m[  0.645155 ax_runtime::devices:2] [32mProbe platform devices...[m
+[m[37m[  0.667357 ax_driver::block::nvme:42] [32mNVMe PCI endpoint 0000:00:01.0: BAR0=0x8000000000..0x8000004000, int_pin=1, int_line=0[m
+[m[37m[  0.677609 nvme_driver::nvme:161] [32mNVME @0x8000000000 deferred init, version: 1.4.0[m
+[m[37m[  0.678106 ax_driver::block::nvme:74] [32mNVMe block device registered at 0000:00:01.0 with 65 MSI-X vectors[m
+[m[37m[  0.682642 ax_fs_ng::block::runtime::lifecycle::device:300] [32mblock device nvme IRQ source 0 (IrqId { domain: IrqDomainId(9), hwirq: HwIrq(0) }) fixed to CPU 0 for queue mask 0x0[m
+[m[37m[  0.700187 ax_fs_ng::block::runtime::hctx:177] [32mblock hctx 0 bound to CPU 0 with hardware depth 63[m
+[m[37m[  0.700601 ax_fs_ng::block::runtime::lifecycle::device:300] [32mblock device nvme IRQ source 1 (IrqId { domain: IrqDomainId(9), hwirq: HwIrq(1) }) fixed to CPU 0 for queue mask 0x1[m
+[m[37m[  0.705999 ax_fs_ng::root:341] [32m    raw device fs=Some(Ext4)[m
+[m[37m[  0.706176 ax_fs_ng::root:372] [32m  block device 0 (nvme) has no usable partition table; treating the whole disk as a candidate[m
+[m[37m[  0.706512 ax_fs_ng::root:481] [32m  matched root by raw device path on disk0 raw device[m
+[m[37m[  0.706866 ax_fs_ng:86] [32mInitialize filesystem subsystem...[m
+[m[37m[  0.706944 ax_fs_ng:87] [32m  selected root device: disk0 raw device[m
+[m[37m[  0.709441 rsext4::crc32c::arm64:54] [33mID_AA64ISAR0_EL1[19:16]: 0x1[m
+[m[37m[  0.709538 rsext4::crc32c::arm64:57] [33mHardware CRC32C support detected.[m
+[m[37m[  0.714909 rsext4::ext4::mount:331] [32m/lost+found exists (superblock hint inode=11)[m
+[m[37m[  0.715865 rsext4::ext4::mount:466] [32mExt4 filesystem mounted[m
+[m[37m[  0.715952 rsext4::ext4::mount:467] [32m  - block size: 4096 bytes[m
+[m[37m[  0.716033 rsext4::ext4::mount:468] [32m  - total blocks: 8192[m
+[m[37m[  0.716109 rsext4::ext4::mount:469] [32m  - free blocks: 1226[m
+[m[37m[  0.716182 rsext4::ext4::mount:470] [32m  - total inodes: 8192[m
+[m[37m[  0.716256 rsext4::ext4::mount:471] [32m  - free inodes: 8151[m
+[m[37m[  0.716339 rsext4::ext4::sync:13] [32mSyncing filesystem...[m
+[m[37m[  0.722216 rsext4::ext4::mount:550] [32mExt4 filesystem mounted[m
+[m[37m[  0.722643 ax_fs_ng:99] [32m  filesystem type: "ext4"[m
+[m[37m[  0.730037 somehal::arch::gic::v3:284] [32mGICv3 CPU 1 EOI mode: two_step=true[m
+[m[37m[  0.730531 ax_runtime::mp:79] [32mSecondary CPU 1 started.[m
+[m[37m[  0.731135 ax_runtime::mp:110] [32mSecondary CPU 1 init OK.[m
+[m[37m[  0.736630 somehal::arch::gic::v3:284] [32mGICv3 CPU 2 EOI mode: two_step=true[m
+[m[37m[  0.736739 ax_runtime::mp:79] [32mSecondary CPU 2 started.[m
+[m[37m[  0.736792 ax_runtime:346] [32mPrimary CPU 0 init OK.[m
+[m[37m[  0.736908 ax_runtime::mp:110] [32mSecondary CPU 2 init OK.[m
+[m[37m[  0.745170 0:4 ax_fs_ng::block::runtime::hctx:177] [32mblock hctx 1 bound to CPU 1 with hardware depth 63[m
+[m[37m[  0.745361 0:4 ax_fs_ng::block::runtime::hctx:177] [32mblock hctx 2 bound to CPU 2 with hardware depth 63[m
+[m[37m[  0.745701 0:4 ax_fs_ng::block::runtime::lifecycle::device:300] [32mblock device nvme IRQ source 2 (IrqId { domain: IrqDomainId(9), hwirq: HwIrq(2) }) fixed to CPU 1 for queue mask 0x2[m
+[m[37m[  0.745969 0:4 ax_fs_ng::block::runtime::lifecycle::device:300] [32mblock device nvme IRQ source 3 (IrqId { domain: IrqDomainId(9), hwirq: HwIrq(3) }) fixed to CPU 2 for queue mask 0x4[m
+[m[37m[  0.747304 0:2 ax_fs_ng::block::runtime::lifecycle::device:385] [32mblock device nvme online with 3 hctxs across 3 CPUs[m
+[m
+
+       d8888            888     888  d8b
+      d88888            888     888  Y8P
+     d88P888            888     888
+    d88P 888  888  888  Y88b   d88P  888  .d8888b    .d88b.   888d888
+   d88P  888  `Y8bd8P'   Y88b d88P   888  88K       d88""88b  888P"
+  d88P   888    X88K      Y88o88P    888  "Y8888b.  888  888  888
+ d8888888888  .d8""8b.     Y888P     888       X88  Y88..88P  888
+d88P     888  888  888      Y8P      888   88888P'   "Y88P"   888
+
+
+by AxVisor Team
+
+[37m[  0.749263 0:2 axvisor:73] [32mStarting virtualization...[m
+[m[37m[  0.749379 0:2 axvm::host::arceos:349] [32mEnabling hardware virtualization support on all cores...[m
+[m[37m[  0.749509 0:2 axvm::host::arceos:355] [32mCore 0 is initializing hardware virtualization support...[m
+[m[37m[  0.749633 0:2 axvm::timer:318] [32mInitializing AxVM timer wheel...[m
+[m[37m[  0.753907 0:2 axvm::host::arceos:357] [32mHardware virtualization support enabled on core 0[m
+[m[37m[  0.754290 1:15 axvm::host::arceos:367] [32mCore 1 is initializing hardware virtualization support...[m
+[m[37m[  0.754518 1:15 axvm::timer:318] [32mInitializing AxVM timer wheel...[m
+[m[37m[  0.754594 2:16 axvm::host::arceos:367] [32mCore 2 is initializing hardware virtualization support...[m
+[m[37m[  0.754593 0:2 axvm::host::arceos:383] [32mWaiting for all cores to enable hardware virtualization...[m
+[m[37m[  0.754788 2:16 axvm::timer:318] [32mInitializing AxVM timer wheel...[m
+[m[37m[  0.754977 1:15 axvm::host::arceos:370] [32mHardware virtualization support enabled on core 1[m
+[m[37m[  0.755063 2:16 axvm::host::arceos:370] [32mHardware virtualization support enabled on core 2[m
+[m[37m[  0.755773 0:2 axvm::host::arceos:399] [32mAll cores have enabled hardware virtualization support.[m
+[m[37m[  0.759175 0:2 axvisor::manager:143] [32mNOT find dir: /guest/vm_default in filesystem[m
+[m[37m[  0.759352 0:2 axvisor::config:90] [32mUsing static VM configs.[m
+[m[37m[  0.773532 0:2 axvm::arch::aarch64::fdt::core:79] [32mVM[1] virtual GIC follows host firmware resources: GuestGicProfile { compatible: "arm,gic-v3", node_path: "/intc@8000000", node_phandle: Some(32773), distributor: GuestMmioRegion { base: 134217728, length: 65536 }, cpu_region: Redistributors(GuestGicRedistributorProfile { regions: [GuestMmioRegion { base: 134873088, length: 16121856 }], stride: 131072 }), its: [GuestItsProfile { id: ItsId(0), node_path: "/intc@8000000/its@8080000", node_phandle: Some(32774), registers: GuestMmioRegion { base: 134742016, length: 131072 } }] }[m
+[m[37m[  0.776213 0:2 axvm::arch::aarch64::fdt::core:93] [32mVM[1] architectural timer follows host firmware PPIs[m
+[m[37m[  0.780286 0:2 axvm::arch::aarch64::fdt::core::parser:442] [32mCPU node: /cpus/cpu@0, node_id: 0x0, hardware_cpu_id: 0x0[m
+[m[37m[  0.780472 0:2 axvm::arch::aarch64::fdt::core::parser:442] [32mCPU node: /cpus/cpu@1, node_id: 0x1, hardware_cpu_id: 0x1[m
+[m[37m[  0.780615 0:2 axvm::arch::aarch64::fdt::core::parser:442] [32mCPU node: /cpus/cpu@2, node_id: 0x2, hardware_cpu_id: 0x2[m
+[m[37m[  0.780741 0:2 axvm::arch::aarch64::fdt::core::parser:442] [32mCPU node: /cpus/cpu@3, node_id: 0x3, hardware_cpu_id: 0x3[m
+[m[37m[  0.780920 0:2 axvm::arch::aarch64::fdt::core::parser:449] [32mFound 4 host CPU nodes[m
+[m[37m[  0.781507 0:2 axvm::arch::aarch64::fdt::core:144] [32mVM[1] DTB not found, generating from the VM configuration[m
+[m[37m[  0.796674 0:2 axvm::arch::aarch64::fdt::core::device:96] [32mFound excluded devices: ["/virtio_mmio@a000000", "/virtio_mmio@a000200", "/virtio_mmio@a000400", "/virtio_mmio@a000600", "/virtio_mmio@a000800", "/virtio_mmio@a000a00", "/virtio_mmio@a000c00", "/virtio_mmio@a000e00", "/virtio_mmio@a001000", "/virtio_mmio@a001200", "/virtio_mmio@a001400", "/virtio_mmio@a001600", "/virtio_mmio@a001800", "/virtio_mmio@a001a00", "/virtio_mmio@a001c00", "/virtio_mmio@a001e00", "/virtio_mmio@a002000", "/virtio_mmio@a002200", "/virtio_mmio@a002400", "/virtio_mmio@a002600", "/virtio_mmio@a002800", "/virtio_mmio@a002a00", "/virtio_mmio@a002c00", "/virtio_mmio@a002e00", "/virtio_mmio@a003000", "/virtio_mmio@a003200", "/virtio_mmio@a003400", "/virtio_mmio@a003600", "/virtio_mmio@a003800", "/virtio_mmio@a003a00", "/virtio_mmio@a003c00", "/virtio_mmio@a003e00", "/pcie@10000000", "/pl061@9030000", "/pl031@9010000", "/gpio-key-poweroff", "/intc@8000000", "/pl011@9000000", "/timer", "/intc@8000000/its@8080000"][m
+[m[37m[  0.805200 0:2 axvm::arch::aarch64::fdt::core::device:96] [32mFound excluded devices: ["/virtio_mmio@a000000", "/virtio_mmio@a000200", "/virtio_mmio@a000400", "/virtio_mmio@a000600", "/virtio_mmio@a000800", "/virtio_mmio@a000a00", "/virtio_mmio@a000c00", "/virtio_mmio@a000e00", "/virtio_mmio@a001000", "/virtio_mmio@a001200", "/virtio_mmio@a001400", "/virtio_mmio@a001600", "/virtio_mmio@a001800", "/virtio_mmio@a001a00", "/virtio_mmio@a001c00", "/virtio_mmio@a001e00", "/virtio_mmio@a002000", "/virtio_mmio@a002200", "/virtio_mmio@a002400", "/virtio_mmio@a002600", "/virtio_mmio@a002800", "/virtio_mmio@a002a00", "/virtio_mmio@a002c00", "/virtio_mmio@a002e00", "/virtio_mmio@a003000", "/virtio_mmio@a003200", "/virtio_mmio@a003400", "/virtio_mmio@a003600", "/virtio_mmio@a003800", "/virtio_mmio@a003a00", "/virtio_mmio@a003c00", "/virtio_mmio@a003e00", "/pcie@10000000", "/pl061@9030000", "/pl031@9010000", "/gpio-key-poweroff", "/intc@8000000", "/pl011@9000000", "/timer", "/intc@8000000/its@8080000"][m
+[m[37m[  0.807027 0:2 axvisor::config:137] [32mCreating VM[1] "linux-net"[m
+[m[37m[  0.807482 0:2 axvm::arch::aarch64::vgic::plan:214] [32massigned_spis: 0 passthrough interrupts configured[m
+[m[37m[  0.819503 0:2 axvm::vm:821] [32mVM created: id=1[m
+[m[37m[  0.820480 0:2 axvisor::config:149] [32mVM[1] created success, loading images...[m
+[m[37m[  0.920163 0:2 axvm::boot::images:137] [32mLoading ramdisk image from memory (2948096 bytes) into GPA @0x8c000000[m
+[m[37m[  0.947987 0:2 axdevice::device:1232] [32mDeviceRuntime: registered device id=0[m
+[m[37m[  0.948309 0:2 axdevice::device:1232] [32mDeviceRuntime: registered device id=1[m
+[m[37m[  0.948449 0:2 axdevice::device:1232] [32mDeviceRuntime: registered device id=2[m
+[m[37m[  0.949688 0:2 axdevice::device:1232] [32mDeviceRuntime: registered device id=3[m
+[m[37m[  0.951024 0:2 axdevice::device:1232] [32mDeviceRuntime: registered device id=4[m
+[m[37m[  0.954348 0:2 axvm::vm::prepare:82] [32mVM setup: id=1[m
+[m[37m[  0.957798 0:2 axvm::arch::aarch64::fdt::core:79] [32mVM[3] virtual GIC follows host firmware resources: GuestGicProfile { compatible: "arm,gic-v3", node_path: "/intc@8000000", node_phandle: Some(32773), distributor: GuestMmioRegion { base: 134217728, length: 65536 }, cpu_region: Redistributors(GuestGicRedistributorProfile { regions: [GuestMmioRegion { base: 134873088, length: 16121856 }], stride: 131072 }), its: [GuestItsProfile { id: ItsId(0), node_path: "/intc@8000000/its@8080000", node_phandle: Some(32774), registers: GuestMmioRegion { base: 134742016, length: 131072 } }] }[m
+[m[37m[  0.958414 0:2 axvm::arch::aarch64::fdt::core:93] [32mVM[3] architectural timer follows host firmware PPIs[m
+[m[37m[  0.961905 0:2 axvm::arch::aarch64::fdt::core::parser:442] [32mCPU node: /cpus/cpu@0, node_id: 0x0, hardware_cpu_id: 0x0[m
+[m[37m[  0.962037 0:2 axvm::arch::aarch64::fdt::core::parser:442] [32mCPU node: /cpus/cpu@1, node_id: 0x1, hardware_cpu_id: 0x1[m
+[m[37m[  0.962162 0:2 axvm::arch::aarch64::fdt::core::parser:442] [32mCPU node: /cpus/cpu@2, node_id: 0x2, hardware_cpu_id: 0x2[m
+[m[37m[  0.962285 0:2 axvm::arch::aarch64::fdt::core::parser:442] [32mCPU node: /cpus/cpu@3, node_id: 0x3, hardware_cpu_id: 0x3[m
+[m[37m[  0.962433 0:2 axvm::arch::aarch64::fdt::core::parser:449] [32mFound 4 host CPU nodes[m
+[m[37m[  0.962532 0:2 axvm::arch::aarch64::fdt::core:144] [32mVM[3] DTB not found, generating from the VM configuration[m
+[m[37m[  0.970943 0:2 axvm::arch::aarch64::fdt::core::device:96] [32mFound excluded devices: ["/virtio_mmio@a000000", "/virtio_mmio@a000200", "/virtio_mmio@a000400", "/virtio_mmio@a000600", "/virtio_mmio@a000800", "/virtio_mmio@a000a00", "/virtio_mmio@a000c00", "/virtio_mmio@a000e00", "/virtio_mmio@a001000", "/virtio_mmio@a001200", "/virtio_mmio@a001400", "/virtio_mmio@a001600", "/virtio_mmio@a001800", "/virtio_mmio@a001a00", "/virtio_mmio@a001c00", "/virtio_mmio@a001e00", "/virtio_mmio@a002000", "/virtio_mmio@a002200", "/virtio_mmio@a002400", "/virtio_mmio@a002600", "/virtio_mmio@a002800", "/virtio_mmio@a002a00", "/virtio_mmio@a002c00", "/virtio_mmio@a002e00", "/virtio_mmio@a003000", "/virtio_mmio@a003200", "/virtio_mmio@a003400", "/virtio_mmio@a003600", "/virtio_mmio@a003800", "/virtio_mmio@a003a00", "/virtio_mmio@a003c00", "/virtio_mmio@a003e00", "/pcie@10000000", "/pl061@9030000", "/pl031@9010000", "/gpio-key-poweroff", "/intc@8000000", "/pl011@9000000", "/timer", "/intc@8000000/its@8080000"][m
+[m[37m[  0.977214 0:2 axvm::arch::aarch64::fdt::core::device:96] [32mFound excluded devices: ["/virtio_mmio@a000000", "/virtio_mmio@a000200", "/virtio_mmio@a000400", "/virtio_mmio@a000600", "/virtio_mmio@a000800", "/virtio_mmio@a000a00", "/virtio_mmio@a000c00", "/virtio_mmio@a000e00", "/virtio_mmio@a001000", "/virtio_mmio@a001200", "/virtio_mmio@a001400", "/virtio_mmio@a001600", "/virtio_mmio@a001800", "/virtio_mmio@a001a00", "/virtio_mmio@a001c00", "/virtio_mmio@a001e00", "/virtio_mmio@a002000", "/virtio_mmio@a002200", "/virtio_mmio@a002400", "/virtio_mmio@a002600", "/virtio_mmio@a002800", "/virtio_mmio@a002a00", "/virtio_mmio@a002c00", "/virtio_mmio@a002e00", "/virtio_mmio@a003000", "/virtio_mmio@a003200", "/virtio_mmio@a003400", "/virtio_mmio@a003600", "/virtio_mmio@a003800", "/virtio_mmio@a003a00", "/virtio_mmio@a003c00", "/virtio_mmio@a003e00", "/pcie@10000000", "/pl061@9030000", "/pl031@9010000", "/gpio-key-poweroff", "/intc@8000000", "/pl011@9000000", "/timer", "/intc@8000000/its@8080000"][m
+[m[37m[  0.978688 0:2 axvisor::config:137] [32mCreating VM[3] "rtthread-net"[m
+[m[37m[  0.978784 0:2 axvm::arch::aarch64::vgic::plan:214] [32massigned_spis: 0 passthrough interrupts configured[m
+[m[37m[  0.980007 0:2 axvm::vm:821] [32mVM created: id=3[m
+[m[37m[  0.980157 0:2 axvisor::config:149] [32mVM[3] created success, loading images...[m
+[m[37m[  0.985747 0:2 axdevice::device:1232] [32mDeviceRuntime: registered device id=0[m
+[m[37m[  0.985841 0:2 axdevice::device:1232] [32mDeviceRuntime: registered device id=1[m
+[m[37m[  0.985920 0:2 axdevice::device:1232] [32mDeviceRuntime: registered device id=2[m
+[m[37m[  0.986073 0:2 axdevice::device:1232] [32mDeviceRuntime: registered device id=3[m
+[m[37m[  0.986501 0:2 axdevice::device:1232] [32mDeviceRuntime: registered device id=4[m
+[m[37m[  0.986676 0:2 axvm::vm::prepare:82] [32mVM setup: id=3[m
+[m[37m[  0.986858 0:2 axvm::runtime:42] [32mInitializing VMM...[m
+[m[37m[  0.987355 0:2 axvm::runtime:53] [32mVMM starting, booting VMs...[m
+[m[37m[  0.987514 0:2 axvm::vm:1046] [32mStarting VM[1][m
+[m[37m[  0.987634 0:2 axvm::runtime::vcpus:343] [32mSpawning task for VM[1] VCpu[0][m
+[m[37m[  0.987963 0:2 axvm::runtime::vcpus:360] [32mVCpu task Task(19, "VM[1]-VCpu[0]") created cpumask: [0, 1, ][m
+[m[37m[  0.989758 0:2 axvm::runtime:61] [32mVM[1] boot success[m
+[m[37m[  0.989832 0:2 axvm::vm:1046] [32mStarting VM[3][m
+[m[37m[  0.989890 0:2 axvm::runtime::vcpus:343] [32mSpawning task for VM[3] VCpu[0][m
+[m[37m[  0.989984 0:2 axvm::runtime::vcpus:360] [32mVCpu task Task(21, "VM[3]-VCpu[0]") created cpumask: [2, ][m
+[m[37m[  0.990270 0:2 axvm::runtime:61] [32mVM[3] boot success[m
+[m[37m[  0.990453 2:21 axvm::runtime::vcpus:414] [32mVM[3] VCpu[0] waiting for running[m
+[m[37m[  0.990769 2:21 axvm::runtime::vcpus:456] [32mVM[3] VCpu[0] running...[m
+[m[37m[  0.991646 0:2 axvisor:89] [32m[OK] Default guest initialized[m
+[m[37m[  0.992193 0:19 axvm::runtime::vcpus:414] [32mVM[1] VCpu[0] waiting for running[m
+[m[37m[  0.992279 0:19 axvm::runtime::vcpus:456] [32mVM[1] VCpu[0] running...[m
+[m[VM 3] [32m[I/rtdm.ofw] Booting RT-Thread on physical CPU 0x0[0m
+[VM 3] [32m[I/rtdm.ofw] Machine model: linux,dummy-virt[0m
+[VM 3] [32m[I/rtdm.ofw] Memory node(0) ranges: 0x00000000a0000000 - 0x00000000b0000000[0m
+[VM 3] [32m[I/mm.memblock] System memory:[0m
+[VM 3] [32m[I/mm.memblock]                    [0x00000000a0000000, 0x00000000b0000000][0m
+[VM 3] [32m[I/mm.memblock] Reserved memory:[0m
+[VM 3] [32m[I/mm.memblock]                    [0x00000000a0000000, 0x00000000a0102000][0m
+[VM 3] [32m[I/mm.memblock]                    [0x00000000a0102000, 0x00000000a4102000][0m
+[VM 3] [32m[I/mm.memblock]                    [0x00000000a4102000, 0x00000000a4302000][0m
+[VM 3] [32m[I/mm.memblock]                    [0x00000000a4302000, 0x00000000a4303000][0m
+[37m[  1.039177 0:19 axvm::runtime::hvc:258] [32mVM[1] PSCI_FEATURES function_id=0x80000000[m
+[m[37m[  1.039823 0:19 axvm::runtime::hvc:258] [32mVM[1] PSCI_FEATURES function_id=0xc4000001[m
+[m[37m[  1.040086 0:19 axvm::runtime::hvc:258] [32mVM[1] PSCI_FEATURES function_id=0xc400000e[m
+[m[37m[  1.040311 0:19 axvm::runtime::hvc:258] [32mVM[1] PSCI_FEATURES function_id=0xc4000012[m
+[m[37m[  1.040533 0:19 axvm::runtime::hvc:258] [32mVM[1] PSCI_FEATURES function_id=0xc4000015[m
+[m[VM 3] [32m[I/mm.memblock] physical memory region [0x00000000a4303000-0x00000000b0000000] installed to system page[0m
+[VM 3] [32m[I/mm.memblock] 198 MB memory installed to system page[0m
+[VM 3] [32m[I/osi.psci] Using PSCI v1.1 Function IDs[0m
+[VM 3] [32m[I/rtdm.ofw] Console: uart0 (<no-node>)[0m
+[VM 3] 
+[VM 3]  \ | /
+[VM 3] - RT -     Thread Operating System
+[VM 3]  / | \     5.2.2 build Aug 16 2026 15:01:07
+[VM 3]  2006 - 2024 Copyright by RT-Thread team
+[VM 3] lwIP-2.1.2 initialized!
+[37m[  1.122802 0:19 axvisor::virtio_net:474] [33mvirtio-net drops an ingress frame: NotReady[m
+[m[VM 3] [32m[I/sal.skt] Socket Abstraction Layer initialize success.[0m
+[VM 3] [32m[I/rtdm.mnt] File system initialization done[0m
+[VM 3] Axvisor RT-Thread guest ready
+[37m[  1.150156 0:19 axvm::runtime::hvc:272] [32mVM[1] PSCI_CPU_ON target=0x1 entry=0x81e3f570 context=0x0[m
+[m[37m[  1.150773 0:19 axvm::runtime::vcpus:343] [32mSpawning task for VM[1] VCpu[1][m
+[m[37m[  1.150970 0:19 axvm::runtime::vcpus:360] [32mVCpu task Task(24, "VM[1]-VCpu[1]") created cpumask: [0, 1, ][m
+[m[37m[  1.151426 0:24 axvm::runtime::vcpus:414] [32mVM[1] VCpu[1] waiting for running[m
+[m[37m[  1.151843 0:24 axvm::runtime::vcpus:456] [32mVM[1] VCpu[1] running...[m
+[m[VM 1] [    0.000000] Booting Linux on physical CPU 0x0000000000 [0x410fd083]
+[VM 1] [    0.000000] Linux version 6.18.0-rc6-gfd95357fd8c6-dirty (runner@s1lqc) (aarch64-linux-gnu-gcc (Ubuntu 13.3.0-6ubuntu2~24.04) 13.3.0, GNU ld (GNU Binutils for Ubuntu) 2.42) #25 SMP PREEMPT Fri Mar 20 11:22:05 CST 2026
+[VM 1] [    0.000000] KASLR disabled due to lack of seed
+[VM 1] [    0.000000] Machine model: linux,dummy-virt
+[VM 1] [    0.000000] efi: UEFI not found.
+[VM 1] [    0.000000] OF: reserved mem: Reserved memory: No reserved-memory node in the DT
+[VM 1] [    0.000000] NUMA: Faking a node at [mem 0x0000000080000000-0x000000009fffffff]
+[VM 1] [    0.000000] NODE_DATA(0) allocated [mem 0x9ff06f40-0x9ff095bf]
+[VM 1] [    0.000000] Zone ranges:
+[VM 1] [    0.000000]   DMA      [mem 0x0000000080000000-0x000000009fffffff]
+[VM 1] [    0.000000]   DMA32    empty
+[VM 1] [    0.000000]   Normal   empty
+[VM 1] [    0.000000] Movable zone start for each node
+[VM 1] [    0.000000] Early memory node ranges
+[VM 1] [    0.000000]   node   0: [mem 0x0000000080000000-0x000000009fffffff]
+[VM 1] [    0.000000] Initmem setup node 0 [mem 0x0000000080000000-0x000000009fffffff]
+[VM 1] [    0.000000] cma: Reserved 32 MiB at 0x000000009d600000
+[VM 1] [    0.000000] psci: probing for conduit method from DT.
+[VM 1] [    0.000000] psci: PSCIv1.1 detected in firmware.
+[VM 1] [    0.000000] psci: Using standard PSCI v0.2 function IDs
+[VM 1] [    0.000000] psci: Trusted OS migration not required
+[VM 1] [    0.000000] psci: SMC Calling Convention v65535.65535
+[VM 1] [    0.000000] percpu: Embedded 25 pages/cpu s62488 r8192 d31720 u102400
+[VM 1] [    0.000000] Detected PIPT I-cache on CPU0
+[VM 1] [    0.000000] CPU features: detected: GICv3 CPU interface
+[VM 1] [    0.000000] CPU features: detected: Spectre-v2
+[VM 1] [    0.000000] CPU features: detected: Spectre-v3a
+[VM 1] [    0.000000] CPU features: detected: Spectre-v4
+[VM 1] [    0.000000] CPU features: detected: Spectre-BHB
+[VM 1] [    0.000000] CPU features: detected: ARM erratum 1742098
+[VM 1] [    0.000000] CPU features: detected: ARM errata 1165522, 1319367, or 1530923
+[VM 1] [    0.000000] alternatives: applying boot alternatives
+[VM 1] [    0.000000] Kernel command line: 
+[VM 1] [    0.000000] printk: log buffer data + meta data: 131072 + 458752 = 589824 bytes
+[VM 1] [    0.000000] Dentry cache hash table entries: 65536 (order: 7, 524288 bytes, linear)
+[VM 1] [    0.000000] Inode-cache hash table entries: 32768 (order: 6, 262144 bytes, linear)
+[VM 1] [    0.000000] software IO TLB: SWIOTLB bounce buffer size adjusted to 0MB
+[VM 1] [    0.000000] software IO TLB: area num 2.
+[VM 1] [    0.000000] software IO TLB: mapped [mem 0x000000009d540000-0x000000009d5c0000] (0MB)
+[VM 1] [    0.000000] Fallback order for Node 0: 0 
+[VM 1] [    0.000000] Built 1 zonelists, mobility grouping on.  Total pages: 131072
+[VM 1] [    0.000000] Policy zone: DMA
+[VM 1] [    0.000000] mem auto-init: stack:all(zero), heap alloc:off, heap free:off
+[VM 1] [    0.000000] SLUB: HWalign=64, Order=0-3, MinObjects=0, CPUs=2, Nodes=1
+[VM 1] [    0.000000] rcu: Preemptible hierarchical RCU implementation.
+[VM 1] [    0.000000] rcu: 	RCU event tracing is enabled.
+[VM 1] [    0.000000] rcu: 	RCU restricting CPUs from NR_CPUS=512 to nr_cpu_ids=2.
+[VM 1] [    0.000000] 	Trampoline variant of Tasks RCU enabled.
+[VM 1] [    0.000000] 	Tracing variant of Tasks RCU enabled.
+[VM 1] [    0.000000] rcu: RCU calculated value of scheduler-enlistment delay is 25 jiffies.
+[VM 1] [    0.000000] rcu: Adjusting geometry for rcu_fanout_leaf=16, nr_cpu_ids=2
+[VM 1] [    0.000000] RCU Tasks: Setting shift to 1 and lim to 1 rcu_task_cb_adjust=1 rcu_task_cpu_ids=2.
+[VM 1] [    0.000000] RCU Tasks Trace: Setting shift to 1 and lim to 1 rcu_task_cb_adjust=1 rcu_task_cpu_ids=2.
+[VM 1] [    0.000000] NR_IRQS: 64, nr_irqs: 64, preallocated irqs: 0
+[VM 1] [    0.000000] GICv3: 256 SPIs implemented
+[VM 1] [    0.000000] GICv3: 0 Extended SPIs implemented
+[VM 1] [    0.000000] Root IRQ handler: gic_handle_irq
+[VM 1] [    0.000000] GICv3: GICv3 features: 16 PPIs, RSS
+[VM 1] [    0.000000] GICv3: GICD_CTLR.DS=0, SCR_EL3.FIQ=0
+[VM 1] [    0.000000] GICv3: CPU0: found redistributor 0 region 0:0x00000000080a0000
+[VM 1] [    0.000000] ITS [mem 0x08080000-0x0809ffff]
+[VM 1] [    0.000000] ITS@0x0000000008080000: allocated 8192 Devices @83050000 (indirect, esz 8, psz 64K, shr 1)
+[VM 1] [    0.000000] ITS@0x0000000008080000: allocated 8192 Interrupt Collections @83060000 (flat, esz 8, psz 64K, shr 1)
+[VM 1] [    0.000000] GICv3: using LPI property table @0x0000000083070000
+[VM 1] [    0.000000] GICv3: CPU0: using allocated LPI pending table @0x0000000083080000
+[VM 1] [    0.000000] rcu: srcu_init: Setting srcu_struct sizes based on contention.
+[VM 1] [    0.000000] arch_timer: cp15 timer running at 62.50MHz (virt).
+[VM 1] [    0.000000] clocksource: arch_sys_counter: mask: 0x1ffffffffffffff max_cycles: 0x1cd42e208c, max_idle_ns: 881590405314 ns
+[VM 1] [    0.000039] sched_clock: 57 bits at 63MHz, resolution 16ns, wraps every 4398046511096ns
+[VM 1] [    0.005543] Console: colour dummy device 80x25
+[VM 1] [    0.005823] printk: legacy console [tty0] enabled
+[VM 1] [    0.008483] Calibrating delay loop (skipped), value calculated using timer frequency.. 125.00 BogoMIPS (lpj=250000)
+[VM 1] [    0.008600] pid_max: default: 32768 minimum: 301
+[VM 1] [    0.010273] LSM: initializing lsm=capability
+[VM 1] [    0.012756] Mount-cache hash table entries: 1024 (order: 1, 8192 bytes, linear)
+[VM 1] [    0.012803] Mountpoint-cache hash table entries: 1024 (order: 1, 8192 bytes, linear)
+[VM 1] [    0.029658] /cpus/cpu-map/socket0/cluster0/core2: Can't get CPU for leaf core
+[VM 1] [    0.031749] cacheinfo: Unable to detect cache hierarchy for CPU 0
+[VM 1] [    0.038374] rcu: Hierarchical SRCU implementation.
+[VM 1] [    0.038423] rcu: 	Max phase no-delay instances is 1000.
+[VM 1] [    0.039752] Timer migration: 1 hierarchy levels; 8 children per group; 1 crossnode level
+[VM 3] msh />[32m[I/rtipic.srv] server starting on 192.168.77.30:9876[0m
+[VM 1] [    0.041017] fsl-mc MSI: its@8080000 domain created
+[VM 3] [32m[I/rtipic.srv] listening...[0m
+[VM 1] [    0.041655] EFI services will not be available.
+[VM 1] [    0.042145] smp: Bringing up secondary CPUs ...
+[VM 1] [    0.047275] Detected PIPT I-cache on CPU1
+[VM 1] [    0.048166] GICv3: CPU1: found redistributor 1 region 0:0x00000000080c0000
+
+[Axvisor] attached VM[3] console; use Ctrl+X, then h to return to the shell
+rtbench_stability 300
+RTBENCH_STABILITY_BEGIN seconds=300 expected=299999
+msh />[32m[I/rtipic.srv] client connected[0m
+[32m[I/rtipic.srv] stats: msgs=352 bytes=17KB conn=1[0m
+[32m[I/rtipic.srv] proto: state=3 tx=174 rx=174 retrans=0 timeouts=0 dup=0 reorder=0 errors=0 acks=174[0m
+[32m[I/rtipic.srv] stats: msgs=3887 bytes=196KB conn=1[0m
+[32m[I/rtipic.srv] proto: state=3 tx=1927 rx=1927 retrans=0 timeouts=0 dup=0 reorder=0 errors=0 acks=1926[0m
+[32m[I/rtipic.srv] stats: msgs=7935 bytes=400KB conn=1[0m
+[32m[I/rtipic.srv] proto: state=3 tx=3936 rx=3936 retrans=0 timeouts=0 dup=0 reorder=0 errors=0 acks=3936[0m
+[32m[I/rtipic.srv] stats: msgs=12321 bytes=622KB conn=1[0m
+[32m[I/rtipic.srv] proto: state=3 tx=6114 rx=6114 retrans=0 timeouts=0 dup=0 reorder=0 errors=0 acks=6114[0m
+[32m[I/rtipic.srv] stats: msgs=16030 bytes=810KB conn=1[0m
+[32m[I/rtipic.srv] proto: state=3 tx=7953 rx=7954 retrans=1 timeouts=0 dup=1 reorder=0 errors=0 acks=7953[0m
+[32m[I/rtipic.srv] stats: msgs=19880 bytes=1004KB conn=1[0m
+[32m[I/rtipic.srv] proto: state=3 tx=9863 rx=9864 retrans=1 timeouts=0 dup=1 reorder=0 errors=0 acks=9863[0m
+[32m[I/rtipic.srv] stats: msgs=24013 bytes=1213KB conn=1[0m
+[32m[I/rtipic.srv] proto: state=3 tx=11915 rx=11916 retrans=1 timeouts=0 dup=1 reorder=0 errors=0 acks=11915[0m
+[32m[I/rtipic.srv] stats: msgs=28141 bytes=1422KB conn=1[0m
+[32m[I/rtipic.srv] proto: state=3 tx=13964 rx=13965 retrans=1 timeouts=0 dup=1 reorder=0 errors=0 acks=13964[0m
+[32m[I/rtipic.srv] client connected[0m
+[33m[W/rtipic.srv] client disconnected[0m
+[32m[I/rtipic.srv] stats: msgs=32328 bytes=1634KB conn=1[0m
+[32m[I/rtipic.srv] proto: state=3 tx=16043 rx=16044 retrans=1 timeouts=0 dup=1 reorder=0 errors=0 acks=16043[0m
+[32m[I/rtipic.srv] stats: msgs=36737 bytes=1857KB conn=1[0m
+[32m[I/rtipic.srv] proto: state=3 tx=18233 rx=18234 retrans=1 timeouts=0 dup=1 reorder=0 errors=0 acks=18232[0m
+[32m[I/rtipic.srv] stats: msgs=40867 bytes=2065KB conn=1[0m
+[32m[I/rtipic.srv] proto: state=3 tx=20283 rx=20284 retrans=1 timeouts=0 dup=1 reorder=0 errors=0 acks=20283[0m
+[32m[I/rtipic.srv] stats: msgs=44547 bytes=2251KB conn=1[0m
+[32m[I/rtipic.srv] proto: state=3 tx=22108 rx=22109 retrans=1 timeouts=0 dup=1 reorder=0 errors=0 acks=22108[0m
+[32m[I/rtipic.srv] stats: msgs=47823 bytes=2417KB conn=1[0m
+[32m[I/rtipic.srv] proto: state=3 tx=23731 rx=23732 retrans=1 timeouts=0 dup=1 reorder=0 errors=0 acks=23731[0m
+[32m[I/rtipic.srv] stats: msgs=50921 bytes=2573KB conn=1[0m
+[32m[I/rtipic.srv] proto: state=3 tx=25265 rx=25266 retrans=1 timeouts=0 dup=1 reorder=0 errors=0 acks=25265[0m
+[32m[I/rtipic.srv] stats: msgs=54001 bytes=2729KB conn=1[0m
+[32m[I/rtipic.srv] proto: state=3 tx=26790 rx=26791 retrans=1 timeouts=0 dup=1 reorder=0 errors=0 acks=26790[0m
+[32m[I/rtipic.srv] stats: msgs=57318 bytes=2896KB conn=1[0m
+[32m[I/rtipic.srv] proto: state=3 tx=28434 rx=28435 retrans=1 timeouts=0 dup=1 reorder=0 errors=0 acks=28434[0m
+[32m[I/rtipic.srv] stats: msgs=60486 bytes=3057KB conn=1[0m
+[32m[I/rtipic.srv] proto: state=3 tx=30003 rx=30004 retrans=1 timeouts=0 dup=1 reorder=0 errors=0 acks=30003[0m
+[32m[I/rtipic.srv] stats: msgs=63794 bytes=3531KB conn=1[0m
+[32m[I/rtipic.srv] proto: state=3 tx=31642 rx=31643 retrans=1 timeouts=0 dup=1 reorder=0 errors=0 acks=31642[0m
+[32m[I/rtipic.srv] stats: msgs=66691 bytes=3946KB conn=1[0m
+[32m[I/rtipic.srv] proto: state=3 tx=33075 rx=33077 retrans=2 timeouts=0 dup=2 reorder=0 errors=0 acks=33075[0m
+[32m[I/rtipic.srv] stats: msgs=70238 bytes=4455KB conn=1[0m
+[32m[I/rtipic.srv] proto: state=3 tx=34834 rx=34836 retrans=2 timeouts=0 dup=2 reorder=0 errors=0 acks=34833[0m
+[32m[I/rtipic.srv] stats: msgs=73562 bytes=4932KB conn=1[0m
+[32m[I/rtipic.srv] proto: state=3 tx=36481 rx=36483 retrans=2 timeouts=0 dup=2 reorder=0 errors=0 acks=36480[0m
+[32m[I/rtipic.srv] stats: msgs=76712 bytes=5383KB conn=1[0m
+[32m[I/rtipic.srv] proto: state=3 tx=38041 rx=38043 retrans=2 timeouts=0 dup=2 reorder=0 errors=0 acks=38041[0m
+[32m[I/rtipic.srv] stats: msgs=79945 bytes=5847KB conn=1[0m
+[32m[I/rtipic.srv] proto: state=3 tx=39643 rx=39645 retrans=2 timeouts=0 dup=2 reorder=0 errors=0 acks=39643[0m
+[32m[I/rtipic.srv] stats: msgs=83189 bytes=6312KB conn=1[0m
+[32m[I/rtipic.srv] proto: state=3 tx=41250 rx=41252 retrans=2 timeouts=0 dup=2 reorder=0 errors=0 acks=41250[0m
+[32m[I/rtipic.srv] stats: msgs=86754 bytes=6824KB conn=1[0m
+[32m[I/rtipic.srv] proto: state=3 tx=43018 rx=43020 retrans=2 timeouts=0 dup=2 reorder=0 errors=0 acks=43017[0m
+[32m[I/rtipic.srv] stats: msgs=90351 bytes=7340KB conn=1[0m
+[32m[I/rtipic.srv] proto: state=3 tx=44802 rx=44804 retrans=2 timeouts=0 dup=2 reorder=0 errors=0 acks=44801[0m
+[32m[I/rtipic.srv] stats: msgs=93577 bytes=7802KB conn=1[0m
+[32m[I/rtipic.srv] proto: state=3 tx=46400 rx=46402 retrans=2 timeouts=0 dup=2 reorder=0 errors=0 acks=46399[0m
+[32m[I/rtipic.srv] stats: msgs=96933 bytes=8284KB conn=1[0m
+[32m[I/rtipic.srv] proto: state=3 tx=48063 rx=48065 retrans=2 timeouts=0 dup=2 reorder=0 errors=0 acks=48062[0m
+[32m[I/rtipic.srv] stats: msgs=100389 bytes=8780KB conn=1[0m
+[32m[I/rtipic.srv] proto: state=3 tx=49776 rx=49778 retrans=2 timeouts=0 dup=2 reorder=0 errors=0 acks=49775[0m
+[32m[I/rtipic.srv] stats: msgs=103731 bytes=9259KB conn=1[0m
+[32m[I/rtipic.srv] proto: state=3 tx=51432 rx=51434 retrans=2 timeouts=0 dup=2 reorder=0 errors=0 acks=51432[0m
+RTBENCH metric=stability_jitter run=1 expected=299999 collected=299999 missing=0 p50_ns=6272 p95_ns=246784 p99_ns=298272 p99_9_ns=359760 max_ns=1429392 miss_100us=61409 miss_500us=32 miss_1ms=2 mean_ns=51096
+RTBENCH metric=callback_exec run=1 expected=299999 collected=299999 missing=0 p50_ns=480 p95_ns=688 p99_ns=1056 p99_9_ns=4704 max_ns=157504 miss_100us=29 miss_500us=0 miss_1ms=0 mean_ns=533
+RTBENCH_STABILITY_END status=FAIL expected=299999 collected=299999 missing=0
+RTBENCH_STABILITY_DONE
+
+[Axvisor] attached VM[1] console; use Ctrl+X, then h to return to the shell
+] DMI not present or invalid.
+[    0.281245] NET: Registered PF_NETLINK/PF_ROUTE protocol family
+[    0.291444] DMA: preallocated 128 KiB GFP_KERNEL pool for atomic allocations
+[    0.293026] DMA: preallocated 128 KiB GFP_KERNEL|GFP_DMA pool for atomic allocations
+[    0.295224] DMA: preallocated 128 KiB GFP_KERNEL|GFP_DMA32 pool for atomic allocations
+[    0.295413] audit: initializing netlink subsys (disabled)
+[    0.302312] thermal_sys: Registered thermal governor 'step_wise'
+[    0.302342] thermal_sys: Registered thermal governor 'power_allocator'
+[    0.302592] cpuidle: using governor menu
+[    0.303270] hw-breakpoint: found 6 breakpoint and 4 watchpoint registers.
+[    0.304532] audit: type=2000 audit(0.200:1): state=initialized audit_enabled=0 res=1
+[    0.305432] ASID allocator initialised with 65536 entries
+[    0.309369] Serial: AMBA PL011 UART driver
+[    0.327083] 9000000.pl011: ttyAMA0 at MMIO 0x9000000 (irq = 13, base_baud = 0) is a PL011 rev1
+[    0.334279] printk: console [ttyAMA0] enabled
+[    0.392893] HugeTLB: registered 1.00 GiB page size, pre-allocated 0 pages
+[    0.392933] HugeTLB: 0 KiB vmemmap can be freed for a 1.00 GiB page
+[    0.392964] HugeTLB: registered 32.0 MiB page size, pre-allocated 0 pages
+[    0.392977] HugeTLB: 0 KiB vmemmap can be freed for a 32.0 MiB page
+[    0.392990] HugeTLB: registered 2.00 MiB page size, pre-allocated 0 pages
+[    0.393002] HugeTLB: 0 KiB vmemmap can be freed for a 2.00 MiB page
+[    0.393014] HugeTLB: registered 64.0 KiB page size, pre-allocated 0 pages
+[    0.393026] HugeTLB: 0 KiB vmemmap can be freed for a 64.0 KiB page
+[    0.641281] ACPI: Interpreter disabled.
+[    0.649887] iommu: Default domain type: Translated
+[    0.649947] iommu: DMA domain TLB invalidation policy: strict mode
+[    0.660964] SCSI subsystem initialized
+[    0.662792] usbcore: registered new interface driver usbfs
+[    0.662990] usbcore: registered new interface driver hub
+[    0.663078] usbcore: registered new device driver usb
+[    0.664228] pps_core: LinuxPPS API ver. 1 registered
+[    0.664252] pps_core: Software ver. 5.3.6 - Copyright 2005-2007 Rodolfo Giometti <giometti@linux.it>
+[    0.664299] PTP clock support registered
+[    0.664445] EDAC MC: Ver: 3.0.0
+[    0.665376] scmi_core: SCMI protocol bus registered
+[    0.666821] FPGA manager framework
+[    0.687157] vgaarb: loaded
+[    0.750270] clocksource: Switched to clocksource arch_sys_counter
+[    0.751333] VFS: Disk quotas dquot_6.6.0
+[    0.751403] VFS: Dquot-cache hash table entries: 512 (order 0, 4096 bytes)
+[    0.803598] pnp: PnP ACPI: disabled
+[    0.959080] NET: Registered PF_INET protocol family
+[    0.991163] IP idents hash table entries: 8192 (order: 4, 65536 bytes, linear)
+[    0.993346] tcp_listen_portaddr_hash hash table entries: 256 (order: 0, 4096 bytes, linear)
+[    0.993422] Table-perturb hash table entries: 65536 (order: 6, 262144 bytes, linear)
+[    0.993473] TCP established hash table entries: 4096 (order: 3, 32768 bytes, linear)
+[    0.993605] TCP bind hash table entries: 4096 (order: 5, 131072 bytes, linear)
+[    0.994266] TCP: Hash tables configured (established 4096 bind 4096)
+LINUX_SMP_READY configured=2 online=0-1 nproc=2[    0.994938] UDP hash table entries: 256 (order: 2, 16384 bytes, linear)
+[    0.995079] UDP-Lite hash table entries: 256 (order: 2, 16384 bytes, linear)
+[    0.995744] NET: Registered PF_UNIX/PF_LOCAL protocol family
+
+[    1.001058] RPC: Registered named UNIX socket transport module.
+[    1.001111] RPC: Registered udp transport module.
+[    1.001126] RPC: Registered tcp transport module.
+[    1.001138] RPC: Registered tcp-with-tls transport module.
+[    1.001150] RPC: Registered tcp NFSv4.1 backchannel transport module.
+[    1.001217] PCI: CLS 0 bytes, default 64
+[    1.003657] Unpacking initramfs...
+[    1.062703] kvm [1]: HYP mode not available
+[    1.064842] Initialise system trusted keyrings
+[    1.079162] workingset: timestamp_bits=42 max_order=17 bucket_order=0
+[    1.080963] squashfs: version 4.0 (2009/01/31) Phillip Lougher
+[    1.082002] NFS: Registering the id_resolver key type
+[    1.082232] Key type id_resolver registered
+[    1.082256] Key type id_legacy registered
+[    1.083717] Freeing initrd memory: 2876K
+[    1.086813] nfs4filelayout_init: NFSv4 File Layout Driver Registering...
+[    1.086887] nfs4flexfilelayout_init: NFSv4 Flexfile Layout Driver Registering...
+[    1.087400] 9p: Installing v9fs 9p2000 file system support
+[    1.251909] Key type asymmetric registered
+Linux network guest ready: 192.168.77.11/24[    1.251974] Asymmetric key parser 'x509' registered
+[    1.252162] Block layer SCSI generic (bsg) driver version 0.4 loaded (major 244)
+
+[    1.252259] io scheduler mq-deadline registered
+[    1.252308] io scheduler kyber registered
+[    1.252725] io scheduler bfq registered
+[    1.314700] ledtrig-cpu: registered to indicate activity on CPUs
+[    1.475692] Serial: 8250/16550 driver, 4 ports, IRQ sharing enabled
+[    1.490886] msm_serial: driver initialized
+PING 192.168.77.30 (192.168.77.30): 56 data bytes[    1.491139] SuperH (H)SCI(F) driver initialized
+[    1.491216] STM32 USART driver initialized
+
+[    1.529264] loop: module loaded
+[    1.551337] megasas: 07.734.00.00-rc1
+[    1.557380] tun: Universal TUN/TAP device driver, 1.6
+[    1.847481] thunder_xcv, ver 1.0
+[    1.847611] thunder_bgx, ver 1.0
+[    1.847698] nicpf, ver 1.0
+[    1.849198] e1000: Intel(R) PRO/1000 Network Driver
+64 bytes from 192.168.77.30: seq=0 ttl=255 time=43.468 ms[    1.849227] e1000: Copyright (c) 1999-2006 Intel Corporation.
+[    1.849321] e1000e: Intel(R) PRO/1000 Network Driver
+
+[    1.849339] e1000e: Copyright(c) 1999 - 2015 Intel Corporation.
+[    1.849413] igb: Intel(R) Gigabit Ethernet Network Driver
+[    1.849429] igb: Copyright (c) 2007-2014 Intel Corporation.
+[    1.870310] igbvf: Intel(R) Gigabit Virtual Function Network Driver
+[    1.870346] igbvf: Copyright (c) 2009 - 2012 Intel Corporation.
+
+[    1.870680] sky2: driver version 1.30
+[    1.879905] VFIO - User Level meta-driver version: 0.3
+--- 192.168.77.30 ping statistics ---[    1.882846] usbcore: registered new interface driver usb-storage
+[    1.885481] i2c_dev: i2c /dev entries driver
+
+[    1.920647] sdhci: Secure Digital Host Controller Interface driver
+[    1.920683] sdhci: Copyright(c) Pierre Ossman
+[    1.921098] Synopsys Designware Multimedia Card Interface Driver
+1 packets transmitted, 1 packets received, 0% packet loss[    1.921630] sdhci-pltfm: SDHCI platform and OF driver helper
+[    1.923959] SMCCC: SOC_ID: ARCH_SOC_ID not implemented, skipping ....
+
+[    1.925428] usbcore: registered new interface driver usbhid
+[    1.925453] usbhid: USB HID core driver
+[    1.963696] NET: Registered PF_PACKET protocol family
+round-trip min/avg/max = 43.468/43.468/43.468 ms[    1.964425] 9pnet: Installing 9P2000 support
+[    1.964607] Key type dns_resolver registered
+
+[    2.000755] registered taskstats version 1
+[    2.003354] Loading compiled-in X.509 certificates
+[    2.054636] Demotion targets for Node 0: null
+[    2.057813] clk: Disabling unused clocks
+Linux reached RT-Thread at 192.168.77.30[    2.057956] PM: genpd: Disabling unused power domains
+[    2.335901] Freeing unused kernel memory: 11648K
+[    2.361929] Run /init as init process
+
+Starting RT-IPC benchmark...
+=== RT-IPC Benchmark Client ===
+Target: 192.168.77.30:9876, count=30000 per size
+
+[client] fault profile: none
+[   10.819926] random: crng init done
+[client] connecting...
+[client] connected!
+
+--- Payload 64B ---
+[progress] size=64 idx=774 sent=775 recv=775 state=3 tx=775 rx=775 retrans=0 timeouts=0 dup=0 reorder=0 errors=0 acks=775 stall=0ms
+[progress] size=64 idx=1661 sent=1662 recv=1662 state=3 tx=1662 rx=1662 retrans=0 timeouts=0 dup=0 reorder=0 errors=0 acks=1662 stall=0ms
+[progress] size=64 idx=2659 sent=2660 recv=2660 state=3 tx=2660 rx=2660 retrans=0 timeouts=0 dup=0 reorder=0 errors=0 acks=2660 stall=0ms
+[progress] size=64 idx=3719 sent=3720 recv=3719 state=3 tx=3720 rx=3719 retrans=0 timeouts=0 dup=0 reorder=0 errors=0 acks=3720 stall=3ms
+[progress] size=64 idx=4782 sent=4783 recv=4782 state=3 tx=4783 rx=4782 retrans=0 timeouts=0 dup=0 reorder=0 errors=0 acks=4783 stall=2ms
+[progress] size=64 idx=5858 sent=5859 recv=5858 state=3 tx=5859 rx=5858 retrans=0 timeouts=0 dup=0 reorder=0 errors=0 acks=5859 stall=2ms
+[progress] size=64 idx=6890 sent=6891 recv=6890 state=3 tx=6891 rx=6890 retrans=0 timeouts=0 dup=0 reorder=0 errors=0 acks=6891 stall=2ms
+[progress] size=64 idx=7727 sent=7728 recv=7727 state=3 tx=7728 rx=7727 retrans=1 timeouts=0 dup=0 reorder=0 errors=0 acks=7727 stall=902ms
+[progress] size=64 idx=8720 sent=8721 recv=8721 state=3 tx=8721 rx=8722 retrans=1 timeouts=0 dup=1 reorder=0 errors=0 acks=8721 stall=0ms
+[progress] size=64 idx=9659 sent=9660 recv=9659 state=3 tx=9660 rx=9660 retrans=1 timeouts=0 dup=1 reorder=0 errors=0 acks=9660 stall=3ms
+[progress] size=64 idx=10616 sent=10617 recv=10616 state=3 tx=10617 rx=10617 retrans=1 timeouts=0 dup=1 reorder=0 errors=0 acks=10617 stall=2ms
+[progress] size=64 idx=11678 sent=11679 recv=11678 state=3 tx=11679 rx=11679 retrans=1 timeouts=0 dup=1 reorder=0 errors=0 acks=11679 stall=2ms
+[progress] size=64 idx=12724 sent=12725 recv=12724 state=3 tx=12725 rx=12725 retrans=1 timeouts=0 dup=1 reorder=0 errors=0 acks=12725 stall=2ms
+[progress] size=64 idx=13720 sent=13721 recv=13720 state=3 tx=13721 rx=13721 retrans=1 timeouts=0 dup=1 reorder=0 errors=0 acks=13721 stall=2ms
+[progress] size=64 idx=14739 sent=14740 recv=14739 state=3 tx=14740 rx=14740 retrans=1 timeouts=0 dup=1 reorder=0 errors=0 acks=14740 stall=2ms
+[client] fault injection: force disconnect at request=15000
+[client] reconnect complete recovery_ms=204 attempts=1
+[progress] size=64 idx=15832 sent=15833 recv=15832 state=3 tx=15833 rx=15833 retrans=1 timeouts=0 dup=1 reorder=0 errors=0 acks=15833 stall=3ms
+[progress] size=64 idx=16917 sent=16918 recv=16917 state=3 tx=16918 rx=16918 retrans=1 timeouts=0 dup=1 reorder=0 errors=0 acks=16918 stall=3ms
+[progress] size=64 idx=18009 sent=18010 recv=18010 state=3 tx=18010 rx=18011 retrans=1 timeouts=0 dup=1 reorder=0 errors=0 acks=18010 stall=0ms
+[progress] size=64 idx=19025 sent=19026 recv=19025 state=3 tx=19026 rx=19026 retrans=1 timeouts=0 dup=1 reorder=0 errors=0 acks=19026 stall=2ms
+[progress] size=64 idx=20079 sent=20080 recv=20080 state=3 tx=20080 rx=20081 retrans=1 timeouts=0 dup=1 reorder=0 errors=0 acks=20080 stall=0ms
+[progress] size=64 idx=21101 sent=21102 recv=21102 state=3 tx=21102 rx=21103 retrans=1 timeouts=0 dup=1 reorder=0 errors=0 acks=21102 stall=0ms
+[progress] size=64 idx=21956 sent=21957 recv=21957 state=3 tx=21957 rx=21958 retrans=1 timeouts=0 dup=1 reorder=0 errors=0 acks=21957 stall=0ms
+[progress] size=64 idx=22768 sent=22769 recv=22769 state=3 tx=22769 rx=22770 retrans=1 timeouts=0 dup=1 reorder=0 errors=0 acks=22769 stall=0ms
+[progress] size=64 idx=23546 sent=23547 recv=23547 state=3 tx=23547 rx=23548 retrans=1 timeouts=0 dup=1 reorder=0 errors=0 acks=23547 stall=0ms
+[progress] size=64 idx=24328 sent=24329 recv=24328 state=3 tx=24329 rx=24329 retrans=1 timeouts=0 dup=1 reorder=0 errors=0 acks=24329 stall=13ms
+[progress] size=64 idx=25104 sent=25105 recv=25104 state=3 tx=25105 rx=25105 retrans=1 timeouts=0 dup=1 reorder=0 errors=0 acks=25105 stall=3ms
+[progress] size=64 idx=25871 sent=25872 recv=25871 state=3 tx=25872 rx=25872 retrans=1 timeouts=0 dup=1 reorder=0 errors=0 acks=25872 stall=2ms
+[progress] size=64 idx=26651 sent=26652 recv=26652 state=3 tx=26652 rx=26653 retrans=1 timeouts=0 dup=1 reorder=0 errors=0 acks=26652 stall=0ms
+[progress] size=64 idx=27448 sent=27449 recv=27449 state=3 tx=27449 rx=27450 retrans=1 timeouts=0 dup=1 reorder=0 errors=0 acks=27449 stall=0ms
+[progress] size=64 idx=28246 sent=28247 recv=28246 state=3 tx=28247 rx=28247 retrans=1 timeouts=0 dup=1 reorder=0 errors=0 acks=28247 stall=2ms
+[progress] size=64 idx=29074 sent=29075 recv=29075 state=3 tx=29075 rx=29076 retrans=1 timeouts=0 dup=1 reorder=0 errors=0 acks=29075 stall=0ms
+[progress] size=64 idx=29832 sent=29833 recv=29832 state=3 tx=29833 rx=29833 retrans=1 timeouts=0 dup=1 reorder=0 errors=0 acks=29833 stall=2ms
+  sent=30000  recv=30000  loss=0%
+  RTT: min=0ms avg=5ms max=951ms P50=3ms P95=24ms P99=24ms P99.9=30ms
+  throughput=11.63KiB/s
+  request_timeouts=0 protocol_errors=0 reconnects=1
+  transport: retrans=1 timeouts=0 dup=1 reorder=0 errors=0
+
+--- Payload 256B ---
+[progress] size=256 idx=846 sent=847 recv=847 state=3 tx=30847 rx=30848 retrans=1 timeouts=0 dup=1 reorder=0 errors=0 acks=30847 stall=0ms
+[progress] size=256 idx=1640 sent=1641 recv=1640 state=3 tx=31641 rx=31641 retrans=1 timeouts=0 dup=1 reorder=0 errors=0 acks=31641 stall=2ms
+[progress] size=256 idx=2389 sent=2390 recv=2389 state=3 tx=32390 rx=32390 retrans=1 timeouts=0 dup=1 reorder=0 errors=0 acks=32390 stall=2ms
+[progress] size=256 idx=3073 sent=3074 recv=3074 state=3 tx=33074 rx=33076 retrans=2 timeouts=0 dup=2 reorder=0 errors=0 acks=33074 stall=0ms
+[progress] size=256 idx=3835 sent=3836 recv=3836 state=3 tx=33836 rx=33838 retrans=2 timeouts=0 dup=2 reorder=0 errors=0 acks=33836 stall=0ms
+[progress] size=256 idx=4832 sent=4833 recv=4833 state=3 tx=34833 rx=34835 retrans=2 timeouts=0 dup=2 reorder=0 errors=0 acks=34833 stall=0ms
+[progress] size=256 idx=5608 sent=5609 recv=5608 state=3 tx=35609 rx=35610 retrans=2 timeouts=0 dup=2 reorder=0 errors=0 acks=35609 stall=2ms
+[progress] size=256 idx=6479 sent=6480 recv=6480 state=3 tx=36480 rx=36482 retrans=2 timeouts=0 dup=2 reorder=0 errors=0 acks=36480 stall=0ms
+[progress] size=256 idx=7287 sent=7288 recv=7287 state=3 tx=37288 rx=37289 retrans=2 timeouts=0 dup=2 reorder=0 errors=0 acks=37288 stall=3ms
+[progress] size=256 idx=8040 sent=8041 recv=8040 state=3 tx=38041 rx=38042 retrans=2 timeouts=0 dup=2 reorder=0 errors=0 acks=38041 stall=2ms
+[progress] size=256 idx=8856 sent=8857 recv=8856 state=3 tx=38857 rx=38858 retrans=2 timeouts=0 dup=2 reorder=0 errors=0 acks=38857 stall=2ms
+[progress] size=256 idx=9641 sent=9642 recv=9642 state=3 tx=39642 rx=39644 retrans=2 timeouts=0 dup=2 reorder=0 errors=0 acks=39642 stall=1ms
+[progress] size=256 idx=10470 sent=10471 recv=10470 state=3 tx=40471 rx=40472 retrans=2 timeouts=0 dup=2 reorder=0 errors=0 acks=40471 stall=2ms
+[progress] size=256 idx=11248 sent=11249 recv=11248 state=3 tx=41249 rx=41250 retrans=2 timeouts=0 dup=2 reorder=0 errors=0 acks=41249 stall=2ms
+[progress] size=256 idx=12130 sent=12131 recv=12130 state=3 tx=42131 rx=42132 retrans=2 timeouts=0 dup=2 reorder=0 errors=0 acks=42131 stall=2ms
+[progress] size=256 idx=13016 sent=13017 recv=13017 state=3 tx=43017 rx=43019 retrans=2 timeouts=0 dup=2 reorder=0 errors=0 acks=43017 stall=0ms
+[progress] size=256 idx=13953 sent=13954 recv=13953 state=3 tx=43954 rx=43955 retrans=2 timeouts=0 dup=2 reorder=0 errors=0 acks=43954 stall=3ms
+[progress] size=256 idx=14800 sent=14801 recv=14801 state=3 tx=44801 rx=44803 retrans=2 timeouts=0 dup=2 reorder=0 errors=0 acks=44801 stall=0ms
+[progress] size=256 idx=15576 sent=15577 recv=15576 state=3 tx=45577 rx=45578 retrans=2 timeouts=0 dup=2 reorder=0 errors=0 acks=45577 stall=2ms
+[progress] size=256 idx=16398 sent=16399 recv=16399 state=3 tx=46399 rx=46401 retrans=2 timeouts=0 dup=2 reorder=0 errors=0 acks=46399 stall=0ms
+[progress] size=256 idx=17231 sent=17232 recv=17232 state=3 tx=47232 rx=47234 retrans=2 timeouts=0 dup=2 reorder=0 errors=0 acks=47232 stall=0ms
+[progress] size=256 idx=18061 sent=18062 recv=18061 state=3 tx=48062 rx=48063 retrans=2 timeouts=0 dup=2 reorder=0 errors=0 acks=48062 stall=3ms
+[progress] size=256 idx=18965 sent=18966 recv=18966 state=3 tx=48966 rx=48968 retrans=2 timeouts=0 dup=2 reorder=0 errors=0 acks=48966 stall=0ms
+[progress] size=256 idx=19774 sent=19775 recv=19775 state=3 tx=49775 rx=49777 retrans=2 timeouts=0 dup=2 reorder=0 errors=0 acks=49775 stall=0ms
+[progress] size=256 idx=20649 sent=20650 recv=20649 state=3 tx=50650 rx=50651 retrans=2 timeouts=0 dup=2 reorder=0 errors=0 acks=50650 stall=2ms
+[progress] size=256 idx=21430 sent=21431 recv=21430 state=3 tx=51431 rx=51432 retrans=2 timeouts=0 dup=2 reorder=0 errors=0 acks=51431 stall=2ms
+[progress] size=256 idx=21936 sent=21937 recv=21937 state=3 tx=51937 rx=51939 retrans=5 timeouts=0 dup=2 reorder=0 errors=0 acks=51937 stall=0ms
+[progress] size=256 idx=22755 sent=22756 recv=22756 state=3 tx=52756 rx=52758 retrans=5 timeouts=0 dup=2 reorder=0 errors=0 acks=52756 stall=0ms
+[progress] size=256 idx=23633 sent=23634 recv=23633 state=3 tx=53634 rx=53635 retrans=5 timeouts=0 dup=2 reorder=0 errors=0 acks=53634 stall=2ms
+[progress] size=256 idx=24521 sent=24522 recv=24522 state=3 tx=54522 rx=54524 retrans=5 timeouts=0 dup=2 reorder=0 errors=0 acks=54522 stall=0ms
+[progress] size=256 idx=25363 sent=25364 recv=25364 state=3 tx=55364 rx=55366 retrans=5 timeouts=0 dup=2 reorder=0 errors=0 acks=55364 stall=0ms
+[progress] size=256 idx=26206 sent=26207 recv=26207 state=3 tx=56207 rx=56209 retrans=5 timeouts=0 dup=2 reorder=0 errors=0 acks=56207 stall=0ms
+[progress] size=256 idx=27016 sent=27017 recv=27017 state=3 tx=57017 rx=57019 retrans=5 timeouts=0 dup=2 reorder=0 errors=0 acks=57017 stall=0ms
+[progress] size=256 idx=27804 sent=27805 recv=27805 state=3 tx=57805 rx=57807 retrans=5 timeouts=0 dup=2 reorder=0 errors=0 acks=57805 stall=1ms
+[progress] size=256 idx=28642 sent=28643 recv=28643 state=3 tx=58643 rx=58645 retrans=5 timeouts=0 dup=2 reorder=0 errors=0 acks=58643 stall=0ms
+[progress] size=256 idx=29525 sent=29526 recv=29526 state=3 tx=59526 rx=59528 retrans=5 timeouts=0 dup=2 reorder=0 errors=0 acks=59526 stall=0ms
+  sent=30000  recv=30000  loss=0%
+  RTT: min=0ms avg=5ms max=1579ms P50=3ms P95=24ms P99=24ms P99.9=28ms
+  throughput=40.96KiB/s
+  request_timeouts=0 protocol_errors=0 reconnects=0
+  transport: retrans=4 timeouts=0 dup=1 reorder=0 errors=0
+
+--- Payload 1024B ---
+[progress] size=1024 idx=934 sent=935 recv=935 state=3 tx=60935 rx=60937 retrans=5 timeouts=0 dup=2 reorder=0 errors=0 acks=60935 stall=0ms
+[progress] size=1024 idx=1843 sent=1844 recv=1843 state=3 tx=61844 rx=61845 retrans=5 timeouts=0 dup=2 reorder=0 errors=0 acks=61844 stall=2ms
+[progress] size=1024 idx=2780 sent=2781 recv=2781 state=3 tx=62781 rx=62783 retrans=5 timeouts=0 dup=2 reorder=0 errors=0 acks=62781 stall=0ms
+[progress] size=1024 idx=3664 sent=3665 recv=3665 state=3 tx=63665 rx=63667 retrans=5 timeouts=0 dup=2 reorder=0 errors=0 acks=63665 stall=0ms
+[progress] size=1024 idx=4575 sent=4576 recv=4575 state=3 tx=64576 rx=64577 retrans=5 timeouts=0 dup=2 reorder=0 errors=0 acks=64576 stall=2ms
+[progress] size=1024 idx=5615 sent=5616 recv=5616 state=3 tx=65616 rx=65618 retrans=5 timeouts=0 dup=2 reorder=0 errors=0 acks=65616 stall=0ms
+[progress] size=1024 idx=6610 sent=6611 recv=6610 state=3 tx=66611 rx=66612 retrans=5 timeouts=0 dup=2 reorder=0 errors=0 acks=66611 stall=3ms
+[progress] size=1024 idx=7579 sent=7580 recv=7579 state=3 tx=67580 rx=67581 retrans=5 timeouts=0 dup=2 reorder=0 errors=0 acks=67580 stall=13ms
+[progress] size=1024 idx=8556 sent=8557 recv=8556 state=3 tx=68557 rx=68558 retrans=5 timeouts=0 dup=2 reorder=0 errors=0 acks=68557 stall=2ms
+[progress] size=1024 idx=9524 sent=9525 recv=9525 state=3 tx=69525 rx=69527 retrans=5 timeouts=0 dup=2 reorder=0 errors=0 acks=69525 stall=0ms
+[progress] size=1024 idx=10383 sent=10384 recv=10384 state=3 tx=70384 rx=70386 retrans=5 timeouts=0 dup=2 reorder=0 errors=0 acks=70384 stall=0ms
+[progress] size=1024 idx=11324 sent=11325 recv=11325 state=3 tx=71325 rx=71327 retrans=5 timeouts=0 dup=2 reorder=0 errors=0 acks=71325 stall=0ms
+[progress] size=1024 idx=12360 sent=12361 recv=12360 state=3 tx=72361 rx=72362 retrans=5 timeouts=0 dup=2 reorder=0 errors=0 acks=72361 stall=3ms
+[progress] size=1024 idx=13260 sent=13261 recv=13260 state=3 tx=73261 rx=73262 retrans=5 timeouts=0 dup=2 reorder=0 errors=0 acks=73261 stall=2ms
+[progress] size=1024 idx=14186 sent=14187 recv=14186 state=3 tx=74187 rx=74188 retrans=5 timeouts=0 dup=2 reorder=0 errors=0 acks=74187 stall=2ms
+[progress] size=1024 idx=15245 sent=15246 recv=15246 state=3 tx=75246 rx=75248 retrans=5 timeouts=0 dup=2 reorder=0 errors=0 acks=75246 stall=0ms
+[progress] size=1024 idx=16415 sent=16416 recv=16415 state=3 tx=76416 rx=76417 retrans=5 timeouts=0 dup=2 reorder=0 errors=0 acks=76416 stall=1ms
+[progress] size=1024 idx=17588 sent=17589 recv=17588 state=3 tx=77589 rx=77590 retrans=5 timeouts=0 dup=2 reorder=0 errors=0 acks=77589 stall=2ms
+[progress] size=1024 idx=18769 sent=18770 recv=18769 state=3 tx=78770 rx=78771 retrans=5 timeouts=0 dup=2 reorder=0 errors=0 acks=78770 stall=1ms
+[progress] size=1024 idx=19895 sent=19896 recv=19896 state=3 tx=79896 rx=79898 retrans=5 timeouts=0 dup=2 reorder=0 errors=0 acks=79896 stall=0ms
+[progress] size=1024 idx=21020 sent=21021 recv=21020 state=3 tx=81021 rx=81022 retrans=5 timeouts=0 dup=2 reorder=0 errors=0 acks=81021 stall=2ms
+[progress] size=1024 idx=22123 sent=22124 recv=22123 state=3 tx=82124 rx=82125 retrans=5 timeouts=0 dup=2 reorder=0 errors=0 acks=82123 stall=13ms
+[progress] size=1024 idx=23248 sent=23249 recv=23249 state=3 tx=83249 rx=83251 retrans=5 timeouts=0 dup=2 reorder=0 errors=0 acks=83249 stall=0ms
+[progress] size=1024 idx=24398 sent=24399 recv=24399 state=3 tx=84399 rx=84401 retrans=5 timeouts=0 dup=2 reorder=0 errors=0 acks=84399 stall=0ms

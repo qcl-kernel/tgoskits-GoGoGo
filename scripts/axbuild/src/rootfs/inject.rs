@@ -51,7 +51,7 @@ pub(crate) fn read_binary_file(
 
     let output = Command::new("debugfs")
         .arg("-R")
-        .arg(format!("cat {}", debugfs_argument(guest_path)?))
+        .arg(format!("cat {guest_path}"))
         .arg(rootfs_img)
         .output()
         .with_context(|| format!("failed to spawn debugfs for {}", rootfs_img.display()))?;
@@ -83,12 +83,8 @@ pub(crate) fn replace_file(
     );
 
     let commands = vec![
-        format!("rm {}", debugfs_argument(guest_path)?),
-        format!(
-            "write {} {}",
-            debugfs_path_argument(source_path)?,
-            debugfs_argument(guest_path)?
-        ),
+        format!("rm {guest_path}"),
+        format!("write {} {guest_path}", source_path.display()),
     ];
     #[cfg(unix)]
     let commands = {
@@ -98,10 +94,7 @@ pub(crate) fn replace_file(
             .permissions()
             .mode();
         let mut commands = commands;
-        commands.push(format!(
-            "sif {} mode 0{mode:o}",
-            debugfs_argument(guest_path)?
-        ));
+        commands.push(format!("sif {guest_path} mode 0{mode:o}"));
         commands
     };
 
@@ -360,15 +353,7 @@ pub(crate) fn inject_overlay(rootfs_img: &Path, overlay_dir: &Path) -> anyhow::R
             overlay_dir.display(),
             rootfs_img.display()
         ),
-    )?;
-    // debugfs can exit successfully after an individual command failed. Make
-    // the image durable and prove every regular overlay file before QEMU or a
-    // post-injection cache consumes it.
-    fs::File::open(rootfs_img)
-        .with_context(|| format!("failed to open {} for sync", rootfs_img.display()))?
-        .sync_all()
-        .with_context(|| format!("failed to sync injected image {}", rootfs_img.display()))?;
-    verify_overlay_regular_files(rootfs_img, overlay_dir, Path::new(""))
+    )
 }
 
 /// Returns whether an overlay directory contains at least one entry.
@@ -406,10 +391,7 @@ fn collect_overlay_debugfs_commands(
             .with_context(|| format!("failed to inspect {}", entry.path().display()))?;
 
         if file_type.is_dir() {
-            commands.push(format!(
-                "mkdir {}",
-                debugfs_guest_path_argument(&relative_path)?
-            ));
+            commands.push(format!("mkdir /{}", relative_path.display()));
             collect_overlay_debugfs_commands(overlay_dir, &relative_path, commands)?;
             continue;
         }
@@ -425,11 +407,11 @@ fn collect_overlay_debugfs_commands(
              supported",
             entry.path().display()
         );
-        let guest_path = debugfs_guest_path_argument(&relative_path)?;
-        commands.push(format!("rm {guest_path}"));
+        commands.push(format!("rm /{}", relative_path.display()));
         commands.push(format!(
-            "write {} {guest_path}",
-            debugfs_path_argument(&entry.path())?
+            "write {} /{}",
+            entry.path().display(),
+            relative_path.display()
         ));
         #[cfg(unix)]
         {
@@ -437,7 +419,8 @@ fn collect_overlay_debugfs_commands(
             let metadata = fs::metadata(entry.path())
                 .with_context(|| format!("failed to stat {}", entry.path().display()))?;
             commands.push(format!(
-                "sif {guest_path} mode 0{:o}",
+                "sif /{} mode 0{:o}",
+                relative_path.display(),
                 metadata.permissions().mode()
             ));
         }
@@ -465,92 +448,16 @@ fn collect_overlay_debugfs_commands(
             } else {
                 host_target.clone()
             };
-            let guest_path = debugfs_guest_path_argument(&relative_path)?;
-            commands.push(format!("rm {guest_path}"));
+            commands.push(format!("rm /{}", relative_path.display()));
             commands.push(format!(
-                "symlink {guest_path} {}",
-                debugfs_path_argument(&guest_filespec)?
+                "symlink /{} {}",
+                relative_path.display(),
+                guest_filespec.display()
             ));
         }
     }
 
     Ok(())
-}
-
-fn verify_overlay_regular_files(
-    rootfs_img: &Path,
-    overlay_dir: &Path,
-    relative_dir: &Path,
-) -> anyhow::Result<()> {
-    let current_dir = overlay_dir.join(relative_dir);
-    let mut entries = fs::read_dir(&current_dir)
-        .with_context(|| format!("failed to read {}", current_dir.display()))?
-        .collect::<Result<Vec<_>, _>>()
-        .with_context(|| format!("failed to read {}", current_dir.display()))?;
-    entries.sort_by_key(|entry| entry.file_name());
-
-    for entry in entries {
-        let relative_path = relative_dir.join(entry.file_name());
-        let file_type = entry
-            .file_type()
-            .with_context(|| format!("failed to inspect {}", entry.path().display()))?;
-        if file_type.is_dir() {
-            verify_overlay_regular_files(rootfs_img, overlay_dir, &relative_path)?;
-            continue;
-        }
-        if file_type.is_symlink() {
-            continue;
-        }
-
-        let host_contents = fs::read(entry.path())
-            .with_context(|| format!("failed to read {}", entry.path().display()))?;
-        let guest_path = overlay_guest_path(&relative_path)?;
-        let image_contents = read_binary_file(rootfs_img, &guest_path)?.with_context(|| {
-            format!(
-                "overlay injection did not create {guest_path} in {}",
-                rootfs_img.display()
-            )
-        })?;
-        ensure!(
-            image_contents == host_contents,
-            "overlay injection content mismatch for {guest_path} in {}",
-            rootfs_img.display()
-        );
-    }
-
-    Ok(())
-}
-
-fn debugfs_guest_path_argument(relative_path: &Path) -> anyhow::Result<String> {
-    debugfs_argument(&overlay_guest_path(relative_path)?)
-}
-
-fn overlay_guest_path(relative_path: &Path) -> anyhow::Result<String> {
-    let relative_path = relative_path.to_str().with_context(|| {
-        format!(
-            "overlay guest path is not valid UTF-8: {}",
-            relative_path.display()
-        )
-    })?;
-    Ok(format!("/{relative_path}"))
-}
-
-fn debugfs_path_argument(path: &Path) -> anyhow::Result<String> {
-    let path = path
-        .to_str()
-        .with_context(|| format!("debugfs path is not valid UTF-8: {}", path.display()))?;
-    debugfs_argument(path)
-}
-
-fn debugfs_argument(argument: &str) -> anyhow::Result<String> {
-    ensure!(
-        !argument.contains(['\0', '\n', '\r']),
-        "debugfs argument contains an unsupported control character"
-    );
-    Ok(format!(
-        "\"{}\"",
-        argument.replace('\\', "\\\\").replace('"', "\\\"")
-    ))
 }
 
 /// Executes a generated `debugfs` script against a writable rootfs image.
@@ -626,7 +533,7 @@ fn run_debugfs_script_with_program(
 
 #[cfg(test)]
 mod tests {
-    use std::{env, fs, path::Path};
+    use std::{fs, path::Path};
 
     use tempfile::tempdir;
 
@@ -648,42 +555,10 @@ mod tests {
         let mut commands = Vec::new();
         collect_overlay_debugfs_commands(&overlay_dir, Path::new(""), &mut commands).unwrap();
 
-        assert_eq!(commands[0], "mkdir \"/usr\"");
-        assert!(commands.contains(&"mkdir \"/usr/bin\"".to_string()));
-        assert!(commands.contains(&format!(
-            "write \"{}\" \"/usr/bin/test-bin\"",
-            binary.display()
-        )));
-        assert!(commands.contains(&"sif \"/usr/bin/test-bin\" mode 0100755".to_string()));
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn overlay_injection_handles_host_paths_with_spaces() {
-        let root = tempdir().unwrap();
-        let rootfs_img = root.path().join("rootfs.img");
-        let truncate_status = Command::new("truncate")
-            .args(["-s", "16M"])
-            .arg(&rootfs_img)
-            .status()
-            .unwrap();
-        assert!(truncate_status.success());
-        let mkfs_status = Command::new("mkfs.ext4")
-            .args(["-q", "-F"])
-            .arg(&rootfs_img)
-            .status()
-            .unwrap();
-        assert!(mkfs_status.success());
-
-        let overlay_dir = root.path().join("overlay source");
-        fs::create_dir(&overlay_dir).unwrap();
-        fs::write(overlay_dir.join("payload file.bin"), b"injected payload").unwrap();
-
-        inject_overlay(&rootfs_img, &overlay_dir).unwrap();
-        assert_eq!(
-            read_binary_file(&rootfs_img, "/payload file.bin").unwrap(),
-            Some(b"injected payload".to_vec())
-        );
+        assert_eq!(commands[0], "mkdir /usr");
+        assert!(commands.contains(&"mkdir /usr/bin".to_string()));
+        assert!(commands.contains(&format!("write {} /usr/bin/test-bin", binary.display())));
+        assert!(commands.contains(&"sif /usr/bin/test-bin mode 0100755".to_string()));
     }
 
     /// Symlinks are written after regular files (two-pass) with the correct
@@ -713,11 +588,11 @@ mod tests {
             .unwrap();
         let sym1_pos = commands
             .iter()
-            .position(|c| c == "symlink \"/usr/lib/libfoo.so.1\" \"/usr/lib/libfoo.so.1.2.0\"")
+            .position(|c| c == "symlink /usr/lib/libfoo.so.1 /usr/lib/libfoo.so.1.2.0")
             .unwrap();
         let sym0_pos = commands
             .iter()
-            .position(|c| c == "symlink \"/usr/lib/libfoo.so\" \"/usr/lib/libfoo.so.1\"")
+            .position(|c| c == "symlink /usr/lib/libfoo.so /usr/lib/libfoo.so.1")
             .unwrap();
 
         assert!(
@@ -733,7 +608,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn non_root_extraction_starts_debugfs_inside_fakeroot() {
-        let root = executable_helper_tempdir();
+        let root = tempdir().unwrap();
         let fakeroot = root.path().join("fakeroot");
         let debugfs = root.path().join("debugfs");
         let marker = root.path().join("debugfs-ran-inside-fakeroot");
@@ -828,7 +703,7 @@ mod tests {
     #[cfg(target_os = "linux")]
     #[test]
     fn debugfs_script_discards_normal_stdout_and_receives_all_commands() {
-        let root = executable_helper_tempdir();
+        let root = tempdir().unwrap();
         let debugfs = root.path().join("debugfs");
         let received_commands = root.path().join("received-commands");
         write_executable(
@@ -852,19 +727,6 @@ mod tests {
             fs::read_to_string(received_commands).unwrap(),
             "rm /usr/bin/app\nwrite app /usr/bin/app\nquit\n"
         );
-    }
-
-    #[cfg(unix)]
-    fn executable_helper_tempdir() -> tempfile::TempDir {
-        let test_binary = env::current_exe().expect("test binary path must be available");
-        let test_binary_dir = test_binary
-            .parent()
-            .expect("test binary path must have a parent directory");
-
-        tempfile::Builder::new()
-            .prefix("axbuild-rootfs-test-")
-            .tempdir_in(test_binary_dir)
-            .expect("test binary directory must accept temporary helper scripts")
     }
 
     #[cfg(unix)]

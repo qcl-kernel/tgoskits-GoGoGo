@@ -1,0 +1,88 @@
+/dts-v1/;
+
+#include <mem.h>
+#include <arm64/armv8-a.dtsi>
+#include <zephyr/dt-bindings/interrupt-controller/arm-gic.h>
+
+/ {
+	model = "AxVisor ROCK 4D guest";
+	compatible = "axvisor,rock-4d";
+	#address-cells = <2>;
+	#size-cells = <2>;
+
+	chosen {
+		zephyr,sram = &sram0;
+		zephyr,console = &uart0;
+		zephyr,shell-uart = &uart0;
+	};
+
+	cpus {
+		#address-cells = <1>;
+		#size-cells = <0>;
+
+		cpu@0 {
+			device_type = "cpu";
+			compatible = "arm,cortex-a53";
+			reg = <0>;
+			i-cache-line-size = <64>;
+			d-cache-line-size = <64>;
+		};
+	};
+
+	timer {
+		compatible = "arm,armv8-timer";
+		interrupt-parent = <&gic>;
+		interrupts = <GIC_PPI 13 IRQ_TYPE_LEVEL IRQ_DEFAULT_PRIORITY>,
+				     <GIC_PPI 14 IRQ_TYPE_LEVEL IRQ_DEFAULT_PRIORITY>,
+				     <GIC_PPI 11 IRQ_TYPE_LEVEL IRQ_DEFAULT_PRIORITY>,
+				     <GIC_PPI 10 IRQ_TYPE_LEVEL IRQ_DEFAULT_PRIORITY>;
+	};
+
+	uartclk: apb-pclk {
+		compatible = "fixed-clock";
+		clock-frequency = <24000000>;
+		#clock-cells = <0>;
+	};
+
+	soc {
+		#address-cells = <2>;
+		#size-cells = <2>;
+		compatible = "simple-bus";
+		ranges;
+		interrupt-parent = <&gic>;
+
+		gic: interrupt-controller@2a701000 {
+			compatible = "arm,gic-v2", "arm,gic";
+			reg = <0x0 0x2a701000 0x0 0x1000>,
+			      <0x0 0x2a702000 0x0 0x2000>;
+			interrupt-controller;
+			#interrupt-cells = <4>;
+			status = "okay";
+		};
+
+		uart0: serial@2ad40000 {
+			compatible = "ns16550";
+			reg = <0x0 0x2ad40000 0x0 0x100>;
+			reg-shift = <2>;
+			clock-frequency = <24000000>;
+			interrupts = <GIC_SPI 76 IRQ_TYPE_LEVEL IRQ_DEFAULT_PRIORITY>;
+			status = "okay";
+		};
+
+		sram0: memory@40000000 {
+			compatible = "mmio-sram";
+			reg = <0x0 0x40000000 0x0 DT_SIZE_M(128)>;
+		};
+
+		virtio_mmio0: virtio_mmio@a000000 {
+			compatible = "virtio,mmio";
+			reg = <0x0 0xa000000 0x0 0x200>;
+			interrupts = <GIC_SPI 16 IRQ_TYPE_LEVEL IRQ_DEFAULT_PRIORITY>;
+			status = "disabled";
+		};
+
+		eth0: ethernet {
+			status = "disabled";
+		};
+	};
+};

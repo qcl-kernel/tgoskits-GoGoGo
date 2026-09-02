@@ -1,0 +1,336 @@
+diff --git a/target/arm/cpu.h b/target/arm/cpu.h
+--- a/target/arm/cpu.h
++++ b/target/arm/cpu.h
+@@ -965,6 +965,32 @@
+ 
+     /* GPIO outputs for generic timer */
+     qemu_irq gt_timer_outputs[NUM_GTIMERS];
++
++    /* AxVisor/RT-Thread low-rate timer boundary diagnostics. */
++    uint64_t ax_diag_virt_program_host_ns;
++    uint64_t ax_diag_virt_program_thread_cpu_ns;
++    uint64_t ax_diag_virt_program_tid;
++    uint64_t ax_diag_virt_program_cval;
++    uint64_t ax_diag_virt_assert_host_ns;
++    uint64_t ax_diag_virt_assert_thread_cpu_ns;
++    uint64_t ax_diag_virt_assert_tid;
++    uint64_t ax_diag_virt_assert_raw_count;
++    uint64_t ax_diag_virt_assert_offset;
++    uint64_t ax_diag_virt_assert_cval;
++    uint32_t ax_diag_virt_in_cb;
++    uint32_t ax_diag_virt_assert_from_cb;
++    uint64_t ax_diag_virt_assert_pc;
++    uint32_t ax_diag_virt_assert_daif;
++    uint32_t ax_diag_virt_assert_el;
++    uint64_t ax_diag_outer_irq_entry_host_ns;
++    uint64_t ax_diag_outer_irq_entry_thread_cpu_ns;
++    uint64_t ax_diag_outer_irq_entry_tid;
++    uint64_t ax_diag_outer_irq_entry_raw_count;
++    uint64_t ax_diag_outer_irq_entry_cval;
++    uint64_t ax_diag_outer_irq_entry_pc;
++    uint32_t ax_diag_outer_irq_entry_daif;
++    uint32_t ax_diag_outer_irq_entry_el;
++
+     /* GPIO output for GICv3 maintenance interrupt signal */
+     qemu_irq gicv3_maintenance_interrupt;
+     /* GPIO output for the PMU interrupt */
+diff --git a/target/arm/internals.h b/target/arm/internals.h
+--- a/target/arm/internals.h
++++ b/target/arm/internals.h
+@@ -1902,6 +1902,7 @@
+ 
+ /* Return the current value of the system counter in ticks */
+ uint64_t gt_get_countervalue(CPUARMState *env);
++uint64_t arm_ax_diag_thread_cpu_ns(void);
+ /*
+  * Return the currently applicable offset between the system counter
+  * and the counter for the specified timer, as used for direct register
+diff --git a/target/arm/helper.c b/target/arm/helper.c
+--- a/target/arm/helper.c
++++ b/target/arm/helper.c
+@@ -1343,6 +1343,33 @@
+     return qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL) / gt_cntfrq_period_ns(cpu);
+ }
+ 
++uint64_t arm_ax_diag_thread_cpu_ns(void)
++{
++    struct timespec ts;
++
++    if (clock_gettime(CLOCK_THREAD_CPUTIME_ID, &ts) != 0) {
++        return 0;
++    }
++    return (uint64_t)ts.tv_sec * NANOSECONDS_PER_SECOND + ts.tv_nsec;
++}
++
++static void ax_diag_record_virt_program(ARMCPU *cpu, int timeridx)
++{
++    uint64_t cval = cpu->env.cp15.c14_timer[timeridx].cval;
++
++    if (CPU(cpu)->cpu_index != 2 || timeridx != GTIMER_VIRT ||
++        qatomic_read(&cpu->ax_diag_virt_program_cval) == cval) {
++        return;
++    }
++
++    qatomic_set(&cpu->ax_diag_virt_program_host_ns,
++                qemu_clock_get_ns(QEMU_CLOCK_REALTIME));
++    qatomic_set(&cpu->ax_diag_virt_program_thread_cpu_ns,
++                arm_ax_diag_thread_cpu_ns());
++    qatomic_set(&cpu->ax_diag_virt_program_tid, qemu_get_thread_id());
++    qatomic_set(&cpu->ax_diag_virt_program_cval, cval);
++}
++
+ static void gt_update_irq(ARMCPU *cpu, int timeridx)
+ {
+     CPUARMState *env = &cpu->env;
+@@ -1361,6 +1388,32 @@
+         irqstate = 0;
+     }
+ 
++    if (CPU(cpu)->cpu_index == 2 && timeridx == GTIMER_VIRT && irqstate) {
++        uint64_t cval = env->cp15.c14_timer[timeridx].cval;
++
++        /* Preserve the first assertion for each deadline. */
++        if (qatomic_read(&cpu->ax_diag_virt_assert_cval) != cval) {
++            uint64_t raw_count = gt_get_countervalue(env);
++
++            qatomic_set(&cpu->ax_diag_virt_assert_host_ns,
++                        qemu_clock_get_ns(QEMU_CLOCK_REALTIME));
++            qatomic_set(&cpu->ax_diag_virt_assert_thread_cpu_ns,
++                        arm_ax_diag_thread_cpu_ns());
++            qatomic_set(&cpu->ax_diag_virt_assert_tid,
++                        qemu_get_thread_id());
++            qatomic_set(&cpu->ax_diag_virt_assert_raw_count, raw_count);
++            qatomic_set(&cpu->ax_diag_virt_assert_offset,
++                        env->cp15.cntvoff_el2);
++            qatomic_set(&cpu->ax_diag_virt_assert_from_cb,
++                        qatomic_read(&cpu->ax_diag_virt_in_cb));
++            qatomic_set(&cpu->ax_diag_virt_assert_pc, env->pc);
++            qatomic_set(&cpu->ax_diag_virt_assert_daif, env->daif);
++            qatomic_set(&cpu->ax_diag_virt_assert_el, arm_current_el(env));
++            qatomic_set(&cpu->ax_diag_outer_irq_entry_cval, 0);
++            qatomic_set(&cpu->ax_diag_virt_assert_cval, cval);
++        }
++    }
++
+     qemu_set_irq(cpu->gt_timer_outputs[timeridx], irqstate);
+     trace_arm_gt_update_irq(timeridx, irqstate);
+ }
+@@ -1551,6 +1604,7 @@
+ {
+     trace_arm_gt_cval_write(timeridx, value);
+     env->cp15.c14_timer[timeridx].cval = value;
++    ax_diag_record_virt_program(env_archcpu(env), timeridx);
+     gt_recalc_timer(env_archcpu(env), timeridx);
+ }
+ 
+@@ -1574,6 +1628,7 @@
+     trace_arm_gt_tval_write(timeridx, value);
+     env->cp15.c14_timer[timeridx].cval = gt_get_countervalue(env) - offset +
+                                          sextract64(value, 0, 32);
++    ax_diag_record_virt_program(env_archcpu(env), timeridx);
+     gt_recalc_timer(env_archcpu(env), timeridx);
+ }
+ 
+@@ -1984,7 +2039,9 @@
+ {
+     ARMCPU *cpu = opaque;
+ 
++    qatomic_set(&cpu->ax_diag_virt_in_cb, 1);
+     gt_recalc_timer(cpu, GTIMER_VIRT);
++    qatomic_set(&cpu->ax_diag_virt_in_cb, 0);
+ }
+ 
+ void arm_gt_htimer_cb(void *opaque)
+diff --git a/target/arm/cpu-irq.c b/target/arm/cpu-irq.c
+--- a/target/arm/cpu-irq.c
++++ b/target/arm/cpu-irq.c
+@@ -7,6 +7,7 @@
+  */
+ 
+ #include "qemu/osdep.h"
++#include "qemu/timer.h"
+ #include "cpu.h"
+ #include "accel/tcg/cpu-ops.h"
+ #include "internals.h"
+@@ -267,6 +268,27 @@
+     return false;
+ 
+  found:
++    if (cs->cpu_index == 2 && excp_idx == EXCP_IRQ) {
++        ARMCPU *cpu = ARM_CPU(cs);
++        uint64_t cval = env->cp15.c14_timer[GTIMER_VIRT].cval;
++
++        if (qatomic_read(&cpu->ax_diag_virt_assert_cval) == cval &&
++            qatomic_read(&cpu->ax_diag_outer_irq_entry_cval) != cval) {
++            qatomic_set(&cpu->ax_diag_outer_irq_entry_host_ns,
++                        qemu_clock_get_ns(QEMU_CLOCK_REALTIME));
++            qatomic_set(&cpu->ax_diag_outer_irq_entry_thread_cpu_ns,
++                        arm_ax_diag_thread_cpu_ns());
++            qatomic_set(&cpu->ax_diag_outer_irq_entry_tid,
++                        qemu_get_thread_id());
++            qatomic_set(&cpu->ax_diag_outer_irq_entry_raw_count,
++                        gt_get_countervalue(env));
++            qatomic_set(&cpu->ax_diag_outer_irq_entry_pc, env->pc);
++            qatomic_set(&cpu->ax_diag_outer_irq_entry_daif, env->daif);
++            qatomic_set(&cpu->ax_diag_outer_irq_entry_el, cur_el);
++            qatomic_set(&cpu->ax_diag_outer_irq_entry_cval, cval);
++        }
++    }
++
+     cs->exception_index = excp_idx;
+     env->exception.target_el = target_el;
+     cs->cc->tcg_ops->do_interrupt(cs);
+@@ -378,4 +400,3 @@
+         }
+     }
+ }
+-
+diff --git a/hw/intc/arm_gicv3_cpuif.c b/hw/intc/arm_gicv3_cpuif.c
+--- a/hw/intc/arm_gicv3_cpuif.c
++++ b/hw/intc/arm_gicv3_cpuif.c
+@@ -16,6 +16,7 @@
+ #include "qemu/bitops.h"
+ #include "qemu/log.h"
+ #include "qemu/main-loop.h"
++#include "qemu/timer.h"
+ #include "trace.h"
+ #include "gicv3_internal.h"
+ #include "hw/core/irq.h"
+@@ -1298,6 +1299,137 @@
+         intid = icc_hppir1_value(cs, env);
+     }
+ 
++    if (cs->cpu->cpu_index == 2 && intid != 27) {
++        ARMCPU *cpu = ARM_CPU(cs->cpu);
++
++        qatomic_set(&cpu->ax_diag_outer_irq_entry_cval, 0);
++    }
++
++    if (cs->cpu->cpu_index == 2 && intid == 27) {
++        ARMCPU *cpu = ARM_CPU(cs->cpu);
++        uint64_t raw_count = gt_get_countervalue(env);
++        uint64_t offset = env->cp15.cntvoff_el2;
++        uint64_t cval = env->cp15.c14_timer[GTIMER_VIRT].cval;
++        uint64_t period_ns = gt_cntfrq_period_ns(cpu);
++        int64_t iar_late_ns =
++            (int64_t)((raw_count - offset) - cval) * (int64_t)period_ns;
++        uint64_t assert_cval =
++            qatomic_read(&cpu->ax_diag_virt_assert_cval);
++        uint64_t assert_host_ns =
++            qatomic_read(&cpu->ax_diag_virt_assert_host_ns);
++        uint64_t assert_thread_cpu_ns =
++            qatomic_read(&cpu->ax_diag_virt_assert_thread_cpu_ns);
++        uint64_t assert_tid = qatomic_read(&cpu->ax_diag_virt_assert_tid);
++        uint64_t assert_raw_count =
++            qatomic_read(&cpu->ax_diag_virt_assert_raw_count);
++        uint64_t assert_offset =
++            qatomic_read(&cpu->ax_diag_virt_assert_offset);
++        uint32_t assert_from_cb =
++            qatomic_read(&cpu->ax_diag_virt_assert_from_cb);
++        uint64_t assert_pc = qatomic_read(&cpu->ax_diag_virt_assert_pc);
++        uint32_t assert_daif = qatomic_read(&cpu->ax_diag_virt_assert_daif);
++        uint32_t assert_el = qatomic_read(&cpu->ax_diag_virt_assert_el);
++        uint64_t program_cval =
++            qatomic_read(&cpu->ax_diag_virt_program_cval);
++        uint64_t program_host_ns =
++            qatomic_read(&cpu->ax_diag_virt_program_host_ns);
++        uint64_t program_thread_cpu_ns =
++            qatomic_read(&cpu->ax_diag_virt_program_thread_cpu_ns);
++        uint64_t program_tid = qatomic_read(&cpu->ax_diag_virt_program_tid);
++        uint64_t entry_cval =
++            qatomic_read(&cpu->ax_diag_outer_irq_entry_cval);
++        uint64_t entry_host_ns =
++            qatomic_read(&cpu->ax_diag_outer_irq_entry_host_ns);
++        uint64_t entry_thread_cpu_ns =
++            qatomic_read(&cpu->ax_diag_outer_irq_entry_thread_cpu_ns);
++        uint64_t entry_tid =
++            qatomic_read(&cpu->ax_diag_outer_irq_entry_tid);
++        uint64_t entry_raw_count =
++            qatomic_read(&cpu->ax_diag_outer_irq_entry_raw_count);
++        uint64_t entry_pc = qatomic_read(&cpu->ax_diag_outer_irq_entry_pc);
++        uint32_t entry_daif =
++            qatomic_read(&cpu->ax_diag_outer_irq_entry_daif);
++        uint32_t entry_el = qatomic_read(&cpu->ax_diag_outer_irq_entry_el);
++        bool program_match = program_cval == cval;
++        bool assert_match = assert_cval == cval;
++        bool entry_match = entry_cval == cval;
++        int64_t assert_late_ns = assert_match
++            ? (int64_t)((assert_raw_count - assert_offset) - assert_cval) *
++              (int64_t)period_ns
++            : 0;
++        uint64_t iar_host_ns = qemu_clock_get_ns(QEMU_CLOCK_REALTIME);
++        uint64_t iar_thread_cpu_ns = arm_ax_diag_thread_cpu_ns();
++        uint64_t iar_tid = qemu_get_thread_id();
++        uint64_t program_to_assert_wall_ns =
++            program_match && assert_match && assert_host_ns >= program_host_ns
++                ? assert_host_ns - program_host_ns
++                : 0;
++        uint64_t program_to_assert_cpu_ns =
++            program_match && assert_match && program_tid == assert_tid &&
++            assert_thread_cpu_ns >= program_thread_cpu_ns
++                ? assert_thread_cpu_ns - program_thread_cpu_ns
++                : 0;
++        uint64_t assert_to_iar_ns =
++            assert_match && iar_host_ns >= assert_host_ns
++                ? iar_host_ns - assert_host_ns
++                : 0;
++        uint64_t assert_to_entry_ns =
++            assert_match && entry_match && entry_host_ns >= assert_host_ns
++                ? entry_host_ns - assert_host_ns
++                : 0;
++        uint64_t entry_to_iar_ns =
++            entry_match && iar_host_ns >= entry_host_ns
++                ? iar_host_ns - entry_host_ns
++                : 0;
++        uint64_t assert_to_entry_cpu_ns =
++            assert_match && entry_match && assert_tid == entry_tid &&
++            entry_thread_cpu_ns >= assert_thread_cpu_ns
++                ? entry_thread_cpu_ns - assert_thread_cpu_ns
++                : 0;
++        uint64_t entry_to_iar_cpu_ns =
++            entry_match && entry_tid == iar_tid &&
++            iar_thread_cpu_ns >= entry_thread_cpu_ns
++                ? iar_thread_cpu_ns - entry_thread_cpu_ns
++                : 0;
++        int64_t entry_late_ns = entry_match
++            ? (int64_t)((entry_raw_count - offset) - cval) *
++              (int64_t)period_ns
++            : 0;
++
++        if (iar_late_ns > 500000 &&
++            (!assert_match || assert_late_ns > 500000 ||
++             assert_to_iar_ns > 500000)) {
++            fprintf(stderr,
++                    "AX_QEMU_TIMER_BOUNDARY cpu=2 intid=27 cval=0x%" PRIx64
++                    " assert_match=%d assert_from_cb=%u"
++                    " program_match=%d entry_match=%d"
++                    " program_tid=%" PRIu64 " assert_tid=%" PRIu64
++                    " entry_tid=%" PRIu64 " iar_tid=%" PRIu64
++                    " assert_el=%u assert_daif=0x%x assert_pc=0x%" PRIx64
++                    " entry_el=%u entry_daif=0x%x entry_pc=0x%" PRIx64
++                    " assert_late_ns=%" PRId64
++                    " program_to_assert_wall_ns=%" PRIu64
++                    " program_to_assert_cpu_ns=%" PRIu64
++                    " assert_to_entry_ns=%" PRIu64
++                    " assert_to_entry_cpu_ns=%" PRIu64
++                    " entry_to_iar_ns=%" PRIu64
++                    " entry_to_iar_cpu_ns=%" PRIu64
++                    " entry_late_ns=%" PRId64
++                    " assert_to_iar_ns=%" PRIu64
++                    " iar_late_ns=%" PRId64 "\n",
++                    cval, assert_match, assert_from_cb,
++                    program_match, entry_match,
++                    program_tid, assert_tid, entry_tid, iar_tid,
++                    assert_el, assert_daif, assert_pc,
++                    entry_el, entry_daif, entry_pc,
++                    assert_late_ns,
++                    program_to_assert_wall_ns, program_to_assert_cpu_ns,
++                    assert_to_entry_ns, assert_to_entry_cpu_ns,
++                    entry_to_iar_ns, entry_to_iar_cpu_ns,
++                    entry_late_ns, assert_to_iar_ns, iar_late_ns);
++        }
++    }
++
+     if (!gicv3_intid_is_special(intid)) {
+         if (cs->hppi.nmi && env->cp15.sctlr_el[el] & SCTLR_NMI) {
+             intid = INTID_NMI;

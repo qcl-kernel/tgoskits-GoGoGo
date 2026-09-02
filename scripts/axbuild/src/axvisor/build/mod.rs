@@ -2,7 +2,9 @@ mod config;
 mod features;
 mod load;
 mod metadata;
+mod rtthread;
 mod vm_config;
+mod zephyr;
 
 #[cfg(test)]
 mod tests;
@@ -27,32 +29,19 @@ pub use crate::build::LogLevel;
 use crate::context::ResolvedAxvisorRequest;
 
 pub(crate) fn load_cargo_config(request: &ResolvedAxvisorRequest) -> anyhow::Result<Cargo> {
-    let makefile_features = crate::build::makefile_features_from_env();
-    load_cargo_config_with_makefile_features(request, &makefile_features)
-}
-
-fn load_cargo_config_with_makefile_features(
-    request: &ResolvedAxvisorRequest,
-    makefile_features: &[String],
-) -> anyhow::Result<Cargo> {
     let metadata =
         crate::build::cached_workspace_metadata().context("failed to load workspace metadata")?;
-    to_cargo_config(
-        load_build_config(request)?,
-        request,
-        metadata,
-        makefile_features,
-    )
+    to_cargo_config(load_build_config(request)?, request, metadata)
 }
 
 fn to_cargo_config(
     mut config: LoadedAxvisorBuildConfig,
     request: &ResolvedAxvisorRequest,
     metadata: &cargo_metadata::Metadata,
-    makefile_features: &[String],
 ) -> anyhow::Result<Cargo> {
     config.target = request.target.clone();
-    crate::build::apply_makefile_features(&mut config.build_info, makefile_features)?;
+    let makefile_features = crate::build::makefile_features_from_env();
+    crate::build::apply_makefile_features(&mut config.build_info, &makefile_features)?;
     let known_platforms = platform_feature_names(metadata);
     reject_unsupported_nested_platform_features(&config.build_info.features, &known_platforms)?;
     let mut cargo = config
@@ -84,6 +73,16 @@ fn patch_axvisor_cargo_config(
         request.vmconfigs.clone()
     };
     let vmconfigs = vm_config::resolve_vmconfigs(request, &configured_vmconfigs)?;
+    rtthread::inject_prebuild(cargo, request, &vmconfigs)?;
+    let rock4d = request
+        .build_info_path
+        .components()
+        .any(|component| component.as_os_str() == "rock-4d")
+        || config_vmconfigs.iter().any(|path| {
+            path.components()
+                .any(|component| component.as_os_str() == "rock-4d")
+        });
+    zephyr::inject_prebuild(cargo, request, &vmconfigs, rock4d)?;
     if !vmconfigs.is_empty() {
         let joined = std::env::join_paths(&vmconfigs)
             .map_err(|e| anyhow!("failed to join vmconfig paths: {e}"))?;

@@ -51,6 +51,9 @@ fn parses_structured_guest_config() {
     assert_eq!(config.base.cpu_num, 2);
     assert_eq!(config.base.phys_cpu_ids, Some(vec![0x500, 0x501]));
     assert_eq!(config.base.phys_cpu_sets, Some(vec![3, 4]));
+    assert_eq!(config.base.host_vcpu_idle_policy, HostVcpuIdlePolicy::Halt);
+    assert_eq!(config.base.host_timer_policy, HostTimerPolicy::Periodic);
+    assert_eq!(config.base.guest_tlbi_policy, GuestTlbiPolicy::Native);
 
     assert_eq!(config.kernel.entry_point, 0xdeadbeef);
     assert_eq!(config.kernel.configured_memory_region_count, 1);
@@ -71,6 +74,73 @@ fn parses_structured_guest_config() {
             path: "/soc/gpio@2000".into(),
         }]
     );
+}
+
+#[test]
+fn parses_busy_host_vcpu_idle_policy() {
+    let config = GuestConfig::from_toml(
+        r#"
+[base]
+host_vcpu_idle_policy = "busy"
+"#,
+    )
+    .unwrap();
+
+    assert_eq!(config.base.host_vcpu_idle_policy, HostVcpuIdlePolicy::Busy);
+
+    let encoded = toml::to_string(&config).unwrap();
+    assert!(encoded.contains("host_vcpu_idle_policy = \"busy\""));
+}
+
+#[test]
+fn parses_tickless_host_timer_policy() {
+    let config = GuestConfig::from_toml(
+        r#"
+[base]
+host_timer_policy = "tickless"
+"#,
+    )
+    .unwrap();
+
+    assert_eq!(config.base.host_timer_policy, HostTimerPolicy::Tickless);
+
+    let encoded = toml::to_string(&config).unwrap();
+    assert!(encoded.contains("host_timer_policy = \"tickless\""));
+}
+
+#[test]
+fn parses_configured_kernel_load_policy() {
+    let config = GuestConfig::from_toml(
+        r#"
+[kernel]
+load_policy = "keep_configured"
+"#,
+    )
+    .unwrap();
+
+    assert_eq!(config.kernel.load_policy, KernelLoadPolicy::KeepConfigured);
+    assert_eq!(
+        VMKernelConfig::default().load_policy,
+        KernelLoadPolicy::AdjustToMemory
+    );
+    let encoded = toml::to_string(&config).unwrap();
+    assert!(encoded.contains("load_policy = \"keep_configured\""));
+}
+
+#[test]
+fn parses_vm_scoped_guest_tlbi_policy() {
+    let config = GuestConfig::from_toml(
+        r#"
+[base]
+guest_tlbi_policy = "vm_scoped"
+"#,
+    )
+    .unwrap();
+
+    assert_eq!(config.base.guest_tlbi_policy, GuestTlbiPolicy::VmScoped);
+
+    let encoded = toml::to_string(&config).unwrap();
+    assert!(encoded.contains("guest_tlbi_policy = \"vm_scoped\""));
 }
 
 #[test]
@@ -155,15 +225,17 @@ fn guest_type_owns_address_space_policy() {
     assert_eq!(unresolved[0].name, "/soc/net@1000");
     assert!(
         unresolved.iter().all(|device| device.name != "/"),
-        "ordinary device passthrough must not invent a root selector"
+        "the config layer must not invent an unresolved root selector"
     );
 }
 
 #[test]
 fn rejects_removed_configuration_fields() {
     let removed_fields = [
+        ("[base]\n", "vm_type = 1\n"),
         ("", "version = 1\n"),
         ("[devices]\n", "serial = {}\n"),
+        ("[devices]\n", "emu_devices = []\n"),
         ("[devices]\n", "interrupt_mode = \"passthrough\"\n"),
         ("[devices]\n", "passthrough_devices = []\n"),
         ("[devices]\n", "passthrough_addresses = []\n"),
@@ -179,40 +251,6 @@ fn rejects_removed_configuration_fields() {
             "removed field unexpectedly parsed: {field}"
         );
     }
-}
-
-#[test]
-fn parses_virtual_ivc_channel_device() {
-    let config = GuestConfig::from_toml(
-        r#"
-[devices]
-[[devices.virtual]]
-id = "ivc0"
-model = "ivc-channel"
-"#,
-    )
-    .unwrap();
-
-    let [request] = config.devices.virtual_devices.as_slice() else {
-        panic!("expected one virtual device request");
-    };
-    assert_eq!(request.id, "ivc0");
-    assert_eq!(request.model, "ivc-channel");
-    assert!(request.options.is_empty());
-}
-
-#[test]
-fn rejects_legacy_emulated_devices_entry() {
-    let error = GuestConfig::from_toml(
-        r#"
-[devices]
-emu_devices = [
-  ["ivc-channel", 0xbff0_0000, 0x1_0000, 0, 0xA, [60]],
-]
-"#,
-    )
-    .unwrap_err();
-    assert!(matches!(error, AxVmConfigError::TomlParse { .. }));
 }
 
 #[test]

@@ -131,6 +131,12 @@ arm_vgic = { version = "0.6", path = "virtualization/arm_vgic" }
 ax-alloc = { version = "0.8", path = "memory/ax-alloc", default-features = false }
 ax-api = { version = "0.7", path = "os/arceos/api/arceos_api" }
 ax-arm-pl031 = { version = "0.4", path = "drivers/rtc/arm_pl031" }
+ax-errno = { path = "components/axerrno" }
+sdio-host = { version = "0.1.0", package = "sdio-host-cv1800", path = "drivers/blk/sdio-host" }
+sdio-host2 = { version = "0.1.6", path = "drivers/blk/sdio-host2" }
+sdhci-cv1800 = { version = "0.1.1", path = "drivers/blk/sdhci-cv1800" }
+axnsproxy = { version = "0.3.4", path = "os/StarryOS/axnsproxy" }
+starry-process = { version = "0.4.16", path = "components/starry-process" }
 cpu-local = { version = "0.2", path = "components/cpu-local" }
 ax-cpu = { version = "0.8", path = "components/axcpu" }
 ax-cpumask = { version = "0.4", path = "components/cpumask" }

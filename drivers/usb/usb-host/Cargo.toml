@@ -26,6 +26,7 @@ dma-api = {workspace = true}
 anyhow = { workspace = true }
 enum_dispatch = "0.3"
 futures = {workspace = true, features = ["alloc"]}
+id-arena = {version = "2", default-features = false}
 log = "0.4"
 mbarrier = "0.1"
 nb = "1.1"
@@ -38,4 +39,4 @@ xhci = "0.9"
 libusb1-sys = {version = "0.7", optional = true}
 
 [dev-dependencies]
-ax-sync = { path = "../../../os/arceos/modules/axsync", features = ["host-test"] }
+ax-sync = { workspace = true, features = ["host-test"] }

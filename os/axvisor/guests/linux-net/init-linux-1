@@ -1,0 +1,43 @@
+#!/bin/busybox sh
+
+/bin/busybox mkdir -p /proc /sys /dev /dev/pts
+/bin/busybox mount -t proc proc /proc 2>/dev/null || true
+/bin/busybox mount -t sysfs sysfs /sys 2>/dev/null || true
+/bin/busybox mount -t devtmpfs devtmpfs /dev 2>/dev/null || true
+/bin/busybox mount -t devpts devpts /dev/pts 2>/dev/null || true
+
+linux_online_cpus=$(/bin/busybox cat /sys/devices/system/cpu/online 2>/dev/null)
+linux_nproc=$(/bin/busybox nproc 2>/dev/null)
+echo "LINUX_SMP_READY configured=2 online=$linux_online_cpus nproc=$linux_nproc" > /dev/console
+
+/bin/busybox ip addr add 192.168.77.11/24 dev eth0
+/bin/busybox ip link set dev eth0 up
+echo "Linux network guest ready: 192.168.77.11/24" > /dev/console
+
+# Wait for RT-Thread to be reachable
+ping_ok=0
+for attempt in 1 2 3 4 5 6 7 8 9 10; do
+  if /bin/busybox ping -c 1 -W 2 192.168.77.30 > /dev/console 2>&1; then
+    ping_ok=1
+    echo "Linux reached RT-Thread at 192.168.77.30" > /dev/console
+    break
+  fi
+  /bin/busybox sleep 1
+done
+if [ "$ping_ok" -ne 1 ]; then
+  echo "Linux could not reach RT-Thread at 192.168.77.30" > /dev/console
+  /bin/busybox ifconfig eth0 > /dev/console 2>&1
+  /bin/busybox ip neigh > /dev/console 2>&1 || true
+fi
+
+# Run RT-IPC benchmark if client binary is available
+if [ -x /bin/rtipic-client ]; then
+  /bin/busybox sleep 2
+  echo "Starting RT-IPC benchmark..." > /dev/console
+  /bin/rtipic-client --host 192.168.77.30 --port 9876 --count 1000 > /dev/console 2>&1
+  echo "RT-IPC client exited with rc=$?" > /dev/console
+else
+  echo "rtipic-client not found, skipping benchmark" > /dev/console
+fi
+
+exec /bin/busybox sh

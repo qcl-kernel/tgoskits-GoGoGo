@@ -26,7 +26,7 @@
 //! # Locking
 //!
 //! Raw sockets keep their small deferred-packet slots behind IRQ-off spin locks
-//! because packet delivery may be inspected while the protocol executor is
+//! because packet delivery may be inspected while the net poll worker is
 //! servicing device-originated receive work. These locks are only held around
 //! `Option<Vec<u8>>` swaps and never across route lookup, smoltcp polling, or
 //! userspace buffer I/O.
@@ -38,6 +38,7 @@ use core::{
     task::Context,
 };
 
+use ax_errno::{AxError, AxResult, LinuxError, ax_bail};
 use ax_io::prelude::*;
 use ax_sync::{SpinLock as Mutex, SpinRwLock as RwLock};
 use axpoll::{IoEvents, Pollable};
@@ -50,8 +51,7 @@ use smoltcp::{
 };
 
 use crate::{
-    NetError, NetResult, RecvFlags, RecvOptions, SOCKET_SET, SendFlags, SendOptions, Shutdown,
-    SocketAddrEx, SocketOps,
+    RecvFlags, RecvOptions, SOCKET_SET, SendFlags, SendOptions, Shutdown, SocketAddrEx, SocketOps,
     config::{DeviceBinding, InterfaceId},
     consts::{RAW_RX_BUF_LEN, RAW_TX_BUF_LEN},
     general::GeneralOptions,
@@ -163,9 +163,9 @@ impl RawSocket {
     }
 
     /// Restricts this socket to one interface for route selection.
-    pub fn bind_device(&self, interface_id: InterfaceId) -> NetResult {
+    pub fn bind_device(&self, interface_id: InterfaceId) -> AxResult {
         if interface_by_id(interface_id).is_none() {
-            return Err(NetError::NoSuchDevice);
+            return Err(AxError::NoSuchDevice);
         }
         self.general.set_device_binding(DeviceBinding {
             bound_if: Some(interface_id),
@@ -210,28 +210,28 @@ impl RawSocket {
     }
 
     /// Validates that an address belongs to this socket's IP version.
-    fn check_ip_version(&self, addr: IpAddress) -> NetResult<IpAddress> {
+    fn check_ip_version(&self, addr: IpAddress) -> AxResult<IpAddress> {
         match (self.ip_version, addr) {
             (IpVersion::Ipv4, IpAddress::Ipv4(_)) | (IpVersion::Ipv6, IpAddress::Ipv6(_)) => {
                 Ok(addr)
             }
-            _ => Err(NetError::AddressFamilyUnsupported),
+            _ => Err(AxError::from(LinuxError::EAFNOSUPPORT)),
         }
     }
 
     /// Resolves the per-call or connected remote address.
-    fn remote_address(&self, options: &SendOptions) -> NetResult<IpAddress> {
+    fn remote_address(&self, options: &SendOptions) -> AxResult<IpAddress> {
         match &options.to {
             Some(addr) => {
                 let remote = addr.clone().into_ip()?;
                 self.check_ip_version(remote.ip().into())
             }
-            None => (*self.peer_addr.read()).ok_or(NetError::NotConnected),
+            None => (*self.peer_addr.read()).ok_or(AxError::NotConnected),
         }
     }
 
     /// Selects the local source address used for an outgoing raw packet.
-    fn local_address_for(&self, remote: IpAddress) -> NetResult<IpAddress> {
+    fn local_address_for(&self, remote: IpAddress) -> AxResult<IpAddress> {
         if let Some(local) = *self.local_addr.read() {
             return Ok(local);
         }
@@ -251,10 +251,11 @@ impl RawSocket {
     fn split_packet_for_delivery<'a>(
         &self,
         packet: &'a [u8],
-    ) -> NetResult<(IpAddress, &'a [u8], u8)> {
+    ) -> AxResult<(IpAddress, &'a [u8], u8)> {
         match self.ip_version {
             IpVersion::Ipv4 => {
-                let packet = Ipv4Packet::new_checked(packet).map_err(|_| NetError::InvalidInput)?;
+                let packet = Ipv4Packet::new_checked(packet)
+                    .map_err(|_| AxError::from(LinuxError::EINVAL))?;
                 let source = IpAddress::Ipv4(packet.src_addr());
                 let hop_limit = packet.hop_limit();
                 let payload = match self.mode {
@@ -264,7 +265,8 @@ impl RawSocket {
                 Ok((source, payload, hop_limit))
             }
             IpVersion::Ipv6 => {
-                let packet = Ipv6Packet::new_checked(packet).map_err(|_| NetError::InvalidInput)?;
+                let packet = Ipv6Packet::new_checked(packet)
+                    .map_err(|_| AxError::from(LinuxError::EINVAL))?;
                 Ok((
                     IpAddress::Ipv6(packet.src_addr()),
                     packet.payload(),
@@ -287,7 +289,7 @@ impl RawSocket {
         hop_limit: u8,
         dst: &mut (impl Write + IoBufMut),
         options: &mut RecvOptions<'_>,
-    ) -> NetResult<usize> {
+    ) -> AxResult<usize> {
         if let Some(from) = options.from.as_deref_mut() {
             *from = SocketAddrEx::Ip(SocketAddr::new(source.into(), 0));
         }
@@ -344,7 +346,7 @@ fn build_loopback_icmp_reply(packet: &[u8]) -> Option<vec::Vec<u8>> {
 }
 
 impl Configurable for RawSocket {
-    fn get_option_inner(&self, option: &mut GetSocketOption) -> NetResult<bool> {
+    fn get_option_inner(&self, option: &mut GetSocketOption) -> AxResult<bool> {
         use GetSocketOption as O;
 
         if self.general.get_option_inner(option)? {
@@ -369,7 +371,7 @@ impl Configurable for RawSocket {
         Ok(true)
     }
 
-    fn set_option_inner(&self, option: SetSocketOption) -> NetResult<bool> {
+    fn set_option_inner(&self, option: SetSocketOption) -> AxResult<bool> {
         use SetSocketOption as O;
 
         if self.general.set_option_inner(option)? {
@@ -379,7 +381,7 @@ impl Configurable for RawSocket {
         match option {
             O::Ttl(ttl) => {
                 if *ttl == 0 {
-                    return Err(NetError::InvalidInput);
+                    return Err(AxError::InvalidInput);
                 }
                 *self.ttl.write() = Some(*ttl);
             }
@@ -393,7 +395,7 @@ impl Configurable for RawSocket {
 }
 
 impl SocketOps for RawSocket {
-    fn bind(&self, local_addr: SocketAddrEx) -> NetResult {
+    fn bind(&self, local_addr: SocketAddrEx) -> AxResult {
         let local_addr = local_addr.into_ip()?;
         let local = self.check_ip_version(local_addr.ip().into())?;
         *self.local_addr.write() = Some(local);
@@ -409,7 +411,7 @@ impl SocketOps for RawSocket {
         Ok(())
     }
 
-    fn connect(&self, remote_addr: SocketAddrEx) -> NetResult {
+    fn connect(&self, remote_addr: SocketAddrEx) -> AxResult {
         let remote_addr = remote_addr.into_ip()?;
         let remote = self.check_ip_version(remote_addr.ip().into())?;
         if self.local_addr.read().is_none() {
@@ -429,13 +431,13 @@ impl SocketOps for RawSocket {
         Ok(())
     }
 
-    fn send(&self, mut src: impl Read + IoBuf, options: SendOptions) -> NetResult<usize> {
+    fn send(&self, mut src: impl Read + IoBuf, options: SendOptions) -> AxResult<usize> {
         // TODO: MSG_DONTROUTE should bypass the routing table for this datagram.
         if options.flags.contains(SendFlags::OOB) {
-            return Err(NetError::OperationNotSupported);
+            ax_bail!(OperationNotSupported);
         }
         if self.tx_closed.load(Ordering::Acquire) {
-            return Err(NetError::BrokenPipe);
+            return Err(AxError::BrokenPipe);
         }
 
         let remote = self.remote_address(&options)?;
@@ -448,7 +450,7 @@ impl SocketOps for RawSocket {
             request_poll();
             let written = self.with_smol_socket(|socket| {
                 if !socket.can_send() {
-                    return Err(NetError::WouldBlock);
+                    return Err(AxError::WouldBlock);
                 }
                 let next_header = socket.ip_protocol().expect("raw socket protocol");
                 let hop_limit = (*self.ttl.read()).unwrap_or(64);
@@ -459,7 +461,7 @@ impl SocketOps for RawSocket {
 
                 let buf = socket
                     .send(header_len + payload_len)
-                    .map_err(|_| NetError::WouldBlock)?;
+                    .map_err(|_| AxError::WouldBlock)?;
                 header.emit(&mut *buf);
                 let ip_tos = self.general.ip_tos();
                 if ip_tos != 0 {
@@ -488,9 +490,9 @@ impl SocketOps for RawSocket {
         })
     }
 
-    fn recv(&self, mut dst: impl Write + IoBufMut, options: RecvOptions<'_>) -> NetResult<usize> {
+    fn recv(&self, mut dst: impl Write + IoBufMut, options: RecvOptions<'_>) -> AxResult<usize> {
         if self.rx_closed.load(Ordering::Acquire) {
-            return Err(NetError::NotConnected);
+            return Err(AxError::NotConnected);
         }
         let extra_nb = options.flags.contains(RecvFlags::DONTWAIT);
         let mut options = options;
@@ -505,7 +507,7 @@ impl SocketOps for RawSocket {
                 } {
                     if !self.source_matches_peer(source) {
                         *self.deferred_rx.lock_irqsave() = Some((source, packet));
-                        return Err(NetError::WouldBlock);
+                        return Err(AxError::WouldBlock);
                     }
                     let (_, payload, hop_limit) = self.split_packet_for_delivery(&packet)?;
                     return self.deliver_packet(source, payload, hop_limit, &mut dst, &mut options);
@@ -518,28 +520,28 @@ impl SocketOps for RawSocket {
                 } {
                     if !self.source_matches_peer(source) {
                         *self.loopback_rx.lock_irqsave() = Some((source, packet));
-                        return Err(NetError::WouldBlock);
+                        return Err(AxError::WouldBlock);
                     }
                     return self.deliver_packet(source, &packet, 64, &mut dst, &mut options);
                 }
 
                 let wire_packet = if options.flags.contains(RecvFlags::PEEK) {
-                    let packet = socket.peek().map_err(|_| NetError::WouldBlock)?;
+                    let packet = socket.peek().map_err(|_| AxError::WouldBlock)?;
                     let (source, ..) = self.split_packet_for_delivery(packet)?;
                     if let Some(peer) = *self.peer_addr.read()
                         && source != peer
                     {
-                        return Err(NetError::WouldBlock);
+                        return Err(AxError::WouldBlock);
                     }
                     packet
                 } else {
-                    socket.recv().map_err(|_| NetError::WouldBlock)?
+                    socket.recv().map_err(|_| AxError::WouldBlock)?
                 };
                 let (source, packet, hop_limit) = self.split_packet_for_delivery(wire_packet)?;
 
                 if !self.source_matches_peer(source) {
                     *self.deferred_rx.lock_irqsave() = Some((source, wire_packet.to_vec()));
-                    return Err(NetError::WouldBlock);
+                    return Err(AxError::WouldBlock);
                 }
 
                 self.deliver_packet(source, packet, hop_limit, &mut dst, &mut options)
@@ -547,7 +549,7 @@ impl SocketOps for RawSocket {
         })
     }
 
-    fn local_addr(&self) -> NetResult<SocketAddrEx> {
+    fn local_addr(&self) -> AxResult<SocketAddrEx> {
         let local = (*self.local_addr.read()).unwrap_or(match self.ip_version {
             IpVersion::Ipv4 => IpAddress::Ipv4(Ipv4Addr::UNSPECIFIED),
             IpVersion::Ipv6 => IpAddress::Ipv6(Ipv6Addr::UNSPECIFIED),
@@ -555,12 +557,12 @@ impl SocketOps for RawSocket {
         Ok(SocketAddrEx::Ip(SocketAddr::new(local.into(), 0)))
     }
 
-    fn peer_addr(&self) -> NetResult<SocketAddrEx> {
-        let peer = (*self.peer_addr.read()).ok_or(NetError::NotConnected)?;
+    fn peer_addr(&self) -> AxResult<SocketAddrEx> {
+        let peer = (*self.peer_addr.read()).ok_or(AxError::NotConnected)?;
         Ok(SocketAddrEx::Ip(SocketAddr::new(peer.into(), 0)))
     }
 
-    fn shutdown(&self, how: Shutdown) -> NetResult {
+    fn shutdown(&self, how: Shutdown) -> AxResult {
         if how.has_read() {
             self.rx_closed.store(true, Ordering::Release);
         }

@@ -1,8 +1,9 @@
 use core::ffi::c_int;
 
+use ax_errno::LinuxError;
 use ax_hal::time::wall_time;
 
-use crate::{PosixError, ctypes, imp::fd_ops::get_file_like};
+use crate::{ctypes, imp::fd_ops::get_file_like};
 
 const POLLIN_EVENT: i16 = ctypes::POLLIN as i16;
 const POLLOUT_EVENT: i16 = ctypes::POLLOUT as i16;
@@ -20,7 +21,7 @@ pub fn sys_poll(fds: *mut ctypes::pollfd, nfds: ctypes::nfds_t, timeout: c_int) 
     );
     syscall_body!(sys_poll, {
         if fds.is_null() && nfds > 0 {
-            return Err(PosixError::EFAULT);
+            return Err(LinuxError::EFAULT);
         }
 
         let fds_slice = if nfds > 0 {

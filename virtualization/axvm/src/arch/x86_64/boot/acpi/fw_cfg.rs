@@ -271,9 +271,7 @@ mod tests {
     fn decode_loader(bytes: &[u8]) -> Vec<DecodedLoaderCommand> {
         assert_eq!(bytes.len() % LOADER_ENTRY_SIZE, 0);
         bytes
-            .as_chunks::<LOADER_ENTRY_SIZE>()
-            .0
-            .iter()
+            .chunks_exact(LOADER_ENTRY_SIZE)
             .map(|entry| match read_u32(entry, 0) {
                 1 => DecodedLoaderCommand::Allocate {
                     file: read_file(&entry[4..60]),

@@ -79,7 +79,7 @@ impl fmt::Debug for HctxStartError {
 }
 
 struct HctxState {
-    queue_info: IrqMutex<QueueInfoEpoch>,
+    info: IrqMutex<QueueInfo>,
     submission_channels: IrqMutex<Vec<Arc<BoundedChannel<Submission>>>>,
     notification: Arc<dyn BlockNotification>,
     lifecycle_notification: Arc<dyn BlockNotification>,
@@ -127,7 +127,7 @@ impl Hctx {
         };
         let notification = ops.notification();
         let state = Arc::new(HctxState {
-            queue_info: IrqMutex::new(QueueInfoEpoch::new(info)),
+            info: IrqMutex::new(info),
             submission_channels: IrqMutex::new(Vec::new()),
             notification,
             lifecycle_notification: ops.notification(),
@@ -190,11 +190,7 @@ impl Hctx {
     }
 
     pub(super) fn info(&self) -> QueueInfo {
-        self.state.queue_info.lock().published()
-    }
-
-    pub(super) fn freeze_queue_info(&self) {
-        self.state.queue_info.lock().freeze();
+        *self.state.info.lock()
     }
 
     pub(super) fn add_submission_channel(
@@ -213,11 +209,6 @@ impl Hctx {
             .push(Arc::clone(&channel));
         self.state.notification.notify();
         Ok(channel)
-    }
-
-    #[cfg(test)]
-    pub(super) fn submission_channel_count(&self) -> usize {
-        self.state.submission_channels.lock().len()
     }
 
     pub(super) fn irq_target(&self, source_id: usize) -> IrqTarget {
@@ -297,9 +288,6 @@ fn run_hctx(
             &mut fatal_error,
             &mut irq_events,
         );
-        if fatal_error.is_some() {
-            break;
-        }
         if irq_progress {
             // An acknowledged device event supersedes a timer selected from
             // the prior queue state. Reconcile with the state produced by the
@@ -326,9 +314,6 @@ fn run_hctx(
                 fatal_error: &mut fatal_error,
             },
         );
-        if fatal_error.is_some() {
-            break;
-        }
         if irq_progress || register_progress {
             submission_blocked = false;
         }
@@ -493,9 +478,6 @@ fn advance_register_retry_if_due(
     now: Duration,
     context: &mut RegisterRetryContext<'_>,
 ) -> bool {
-    if context.fatal_error.is_some() {
-        return false;
-    }
     if context.deadline.is_some_and(|deadline| deadline <= now) {
         set_hctx_fatal(context.state, context.fatal_error, BlkError::TimedOut);
         return true;
@@ -582,12 +564,6 @@ fn drain_latched_irqs(
         // Queue-owned state must observe the acknowledged hardware event
         // before the controller reacts to the same IRQ. Initialization uses
         // this ordering to publish discovered geometry before Ready.
-        // A terminal queue result owns teardown from this point onward. Do not
-        // let the failed IRQ race its Watchdog by advancing or rearming the
-        // controller after queue state has already declared the device dead.
-        if fatal_error.is_some() {
-            continue;
-        }
         if !event.control.is_empty() {
             controller.post(ControllerEvent::Irq(event.control));
             progressed = true;
@@ -604,64 +580,22 @@ fn drain_latched_irqs(
 
 fn refresh_queue_info(queue: &dyn HardwareQueue, state: &HctxState) -> Result<(), BlkError> {
     let observed = queue.info();
-    state.queue_info.lock().observe(observed)
+    let mut published = state.info.lock();
+    // Channel capacity and preallocated submission scratch are fixed when the
+    // hctx starts. Identification may shrink a conservatively provisioned
+    // queue to the device's negotiated depth, but it must never grow beyond
+    // that allocation or change the queue identity.
+    if !queue_info_fits_provisioned(*published, observed) {
+        return Err(BlkError::InvalidRequest);
+    }
+    *published = observed;
+    Ok(())
 }
 
 fn queue_info_fits_provisioned(provisioned: QueueInfo, observed: QueueInfo) -> bool {
     observed.id == provisioned.id
-        && observed.limits.max_inflight > 0
-        && observed.limits.max_submit_batch > 0
         && observed.limits.max_inflight <= provisioned.limits.max_inflight
         && observed.limits.max_submit_batch <= provisioned.limits.max_submit_batch
-        && observed.limits.max_submit_batch <= observed.limits.max_inflight
-}
-
-struct QueueInfoEpoch {
-    published: QueueInfo,
-    provisioned_max_inflight: usize,
-    provisioned_max_submit_batch: usize,
-    frozen: bool,
-}
-
-impl QueueInfoEpoch {
-    const fn new(published: QueueInfo) -> Self {
-        Self {
-            provisioned_max_inflight: published.limits.max_inflight,
-            provisioned_max_submit_batch: published.limits.max_submit_batch,
-            published,
-            frozen: false,
-        }
-    }
-
-    const fn published(&self) -> QueueInfo {
-        self.published
-    }
-
-    fn observe(&mut self, observed: QueueInfo) -> Result<(), BlkError> {
-        if self.frozen {
-            if observed == self.published {
-                return Ok(());
-            }
-            return Err(BlkError::InvalidRequest);
-        }
-        let provisioned = QueueInfo {
-            limits: rdif_block::QueueLimits {
-                max_inflight: self.provisioned_max_inflight,
-                max_submit_batch: self.provisioned_max_submit_batch,
-                ..self.published.limits
-            },
-            ..self.published
-        };
-        if !queue_info_fits_provisioned(provisioned, observed) {
-            return Err(BlkError::InvalidRequest);
-        }
-        self.published = observed;
-        Ok(())
-    }
-
-    fn freeze(&mut self) {
-        self.frozen = true;
-    }
 }
 
 fn set_hctx_fatal(state: &HctxState, fatal_error: &mut Option<BlkError>, error: BlkError) {

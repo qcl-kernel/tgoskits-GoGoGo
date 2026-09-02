@@ -1,0 +1,7 @@
+features = [
+  "ax-driver/virtio-net",
+  "axvisor-guest",
+]
+log = "Info"
+max_cpu_num = 2
+target = "aarch64-unknown-none-softfloat"

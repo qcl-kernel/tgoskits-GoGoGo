@@ -2,7 +2,6 @@
 use alloc::vec;
 use alloc::{
     borrow::{Cow, ToOwned},
-    boxed::Box,
     collections::vec_deque::VecDeque,
     string::String,
     sync::{Arc, Weak},
@@ -18,8 +17,7 @@ use ax_lazyinit::OnceLock;
 #[cfg(feature = "vfs")]
 use axfs_ng_vfs::Mountpoint;
 use axfs_ng_vfs::{
-    DirectoryCursor, DirectoryReadState, Location, Metadata, NodePermission, NodeType,
-    RenameOptions, VfsError, VfsResult,
+    Location, Metadata, NodePermission, NodeType, VfsError, VfsResult,
     path::{Component, Components, Path, PathBuf},
 };
 
@@ -42,7 +40,6 @@ pub static ROOT_FS_CONTEXT: OnceLock<FsContext> = OnceLock::new();
 /// filesystem context and apply the same root / cwd fixup that Linux
 /// performs in `chroot_fs_refs()` after `pivot_root(2)`.
 static FS_REGISTRY: IrqMutex<Vec<Weak<Mutex<FsContext>>>> = IrqMutex::new(Vec::new());
-
 #[cfg(feature = "vfs")]
 static MOUNT_NAMESPACE_ID: AtomicU64 = AtomicU64::new(1);
 
@@ -297,9 +294,7 @@ impl FsContext {
             match comp {
                 Component::CurDir => {}
                 Component::ParentDir => {
-                    if !dir.ptr_eq(&self.root_dir) {
-                        dir = dir.parent().unwrap_or_else(|| self.root_dir.clone());
-                    }
+                    dir = dir.parent().unwrap_or_else(|| self.root_dir.clone());
                 }
                 Component::RootDir => {
                     dir = self.root_dir.clone();
@@ -408,14 +403,10 @@ impl FsContext {
         let (dir, name) = self.resolve_inner(path, &mut 0)?;
         if let Some(name) = name {
             Ok((dir, Cow::Borrowed(name)))
+        } else if let Some(parent) = dir.parent() {
+            Ok((parent, dir.name().into_owned().into()))
         } else {
-            if dir.ptr_eq(&self.root_dir) {
-                Err(VfsError::InvalidInput)
-            } else if let Some(parent) = dir.parent() {
-                Ok((parent, dir.name().into_owned().into()))
-            } else {
-                Err(VfsError::InvalidInput)
-            }
+            Err(VfsError::InvalidInput)
         }
     }
 
@@ -444,9 +435,7 @@ impl FsContext {
     pub fn read(&self, path: impl AsRef<Path>) -> VfsResult<Vec<u8>> {
         let mut buf = Vec::new();
         let file = File::open(self, path.as_ref())?;
-        (&file)
-            .read_to_end(&mut buf)
-            .map_err(crate::io_error_to_vfs_error)?;
+        (&file).read_to_end(&mut buf)?;
         Ok(buf)
     }
 
@@ -461,21 +450,17 @@ impl FsContext {
     /// replace its contents if it does.
     pub fn write(&self, path: impl AsRef<Path>, buf: impl AsRef<[u8]>) -> VfsResult<()> {
         let file = File::create(self, path.as_ref())?;
-        (&file)
-            .write_all(buf.as_ref())
-            .map_err(crate::io_error_to_vfs_error)?;
+        (&file).write_all(buf.as_ref())?;
         Ok(())
     }
 
     /// Returns an iterator over the entries in a directory.
     pub fn read_dir(&self, path: impl AsRef<Path>) -> VfsResult<ReadDir> {
         let dir = self.resolve(path)?;
-        let state = dir.open_directory_read_state()?;
         Ok(ReadDir {
             dir,
-            state,
             buf: VecDeque::new(),
-            cursor: DirectoryCursor::START,
+            offset: 0,
             ended: false,
         })
     }
@@ -483,9 +468,6 @@ impl FsContext {
     /// Removes a file from the filesystem.
     pub fn remove_file(&self, path: impl AsRef<Path>) -> VfsResult<()> {
         let entry = self.resolve_no_follow(path.as_ref())?;
-        if entry.ptr_eq(&self.root_dir) {
-            return Err(VfsError::IsADirectory);
-        }
         entry
             .parent()
             .ok_or(VfsError::IsADirectory)?
@@ -495,9 +477,6 @@ impl FsContext {
     /// Removes a directory from the filesystem.
     pub fn remove_dir(&self, path: impl AsRef<Path>) -> VfsResult<()> {
         let entry = self.resolve_no_follow(path.as_ref())?;
-        if entry.ptr_eq(&self.root_dir) {
-            return Err(VfsError::ResourceBusy);
-        }
         let dir = entry.entry().as_dir()?;
         if dir.has_children()? {
             return Err(VfsError::DirectoryNotEmpty);
@@ -511,21 +490,12 @@ impl FsContext {
     /// Renames a file or directory to a new name, replacing the original file
     /// if `to` already exists.
     pub fn rename(&self, from: impl AsRef<Path>, to: impl AsRef<Path>) -> VfsResult<()> {
-        self.rename_with_options(from, to, RenameOptions::REPLACE)
-    }
-
-    /// Renames a path with typed `renameat2` behavior.
-    pub fn rename_with_options(
-        &self,
-        from: impl AsRef<Path>,
-        to: impl AsRef<Path>,
-        options: RenameOptions,
-    ) -> VfsResult<()> {
         let (src_dir, src_name) = self.resolve_parent(from.as_ref())?;
         let (dst_dir, dst_name) = self.resolve_parent(to.as_ref())?;
-        src_dir.rename_with_options(&src_name, &dst_dir, &dst_name, options)
+        src_dir.rename(&src_name, &dst_dir, &dst_name)
     }
 
+    /// Creates a new, empty directory at the provided path.
     /// Creates a new, empty directory at the provided path.
     pub fn create_dir(
         &self,
@@ -538,14 +508,19 @@ impl FsContext {
         if path.as_str().is_empty() {
             return Err(VfsError::NotFound);
         }
-        // Check through the visible mount tree before asking the parent
-        // filesystem to create the entry. A static pseudo-filesystem may
-        // reject mutations with EPERM even though the mounted or generated
-        // destination already exists; mkdir(2) must report EEXIST instead.
-        if self.resolve_no_follow(path).is_ok() {
-            return Err(VfsError::AlreadyExists);
-        }
-        let (dir, name) = self.resolve_nonexistent(path)?;
+        let (dir, name) = match self.resolve_nonexistent(path) {
+            Ok(pair) => pair,
+            Err(VfsError::InvalidInput) => {
+                return match self.resolve(path) {
+                    Ok(loc) if loc.node_type() == NodeType::Directory => {
+                        Err(VfsError::AlreadyExists)
+                    }
+                    Ok(_) => Err(VfsError::NotADirectory),
+                    Err(e) => Err(e),
+                };
+            }
+            Err(e) => return Err(e),
+        };
         dir.create(name, NodeType::Directory, mode, uid, gid)
     }
 
@@ -569,7 +544,12 @@ impl FsContext {
         gid: u32,
     ) -> VfsResult<Location> {
         let (dir, name) = self.resolve_nonexistent(link_path.as_ref())?;
-        dir.create_symlink(name, target.as_ref(), NodePermission::default(), uid, gid)
+        if dir.lookup_no_follow(name).is_ok() {
+            return Err(VfsError::AlreadyExists);
+        }
+        let symlink = dir.create(name, NodeType::Symlink, NodePermission::default(), uid, gid)?;
+        symlink.entry().as_file()?.set_symlink(target.as_ref())?;
+        Ok(symlink)
     }
 
     /// Returns the canonical, absolute form of a path.
@@ -667,9 +647,8 @@ impl FsContext {
 /// Iterator returned by [`FsContext::read_dir`].
 pub struct ReadDir {
     dir: Location,
-    state: Box<dyn DirectoryReadState>,
     buf: VecDeque<ReadDirEntry>,
-    cursor: DirectoryCursor,
+    offset: u64,
     ended: bool,
 }
 
@@ -689,31 +668,22 @@ impl Iterator for ReadDir {
 
         if self.buf.is_empty() {
             self.buf.clear();
-            let mut invalid_name = false;
-            let result = self.dir.read_dir_with_state(
-                &mut *self.state,
-                self.cursor,
-                &mut |name: &[u8], ino: u64, node_type: NodeType, cursor: DirectoryCursor| {
-                    let Ok(name) = core::str::from_utf8(name) else {
-                        invalid_name = true;
-                        return false;
-                    };
+            let result = self.dir.read_dir(
+                self.offset,
+                &mut |name: &str, ino: u64, node_type: NodeType, offset: u64| {
                     self.buf.push_back(ReadDirEntry {
                         name: name.to_owned(),
                         ino,
                         node_type,
-                        offset: cursor.offset(),
+                        offset,
                     });
-                    self.cursor = cursor;
+                    self.offset = offset;
                     self.buf.len() < Self::BUF_SIZE
                 },
             );
 
             // We handle errors only if we didn't get any entries
             if self.buf.is_empty() {
-                if invalid_name {
-                    return Some(Err(VfsError::InvalidData));
-                }
                 if let Err(err) = result {
                     return Some(Err(err));
                 }

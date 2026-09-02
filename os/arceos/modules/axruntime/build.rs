@@ -119,9 +119,10 @@ fn build_info_source_from(arch: &str, target: &str, mode: &str, config: RuntimeC
         #[cfg(feature = "smp")]
         pub const CPU_CAPACITY: usize = #cpu_capacity;
 
-        #[cfg(feature = "fs")]
+        #[cfg(any(feature = "fs", feature = "embedded-rootfs"))]
         pub const TASK_STACK_SIZE: usize = #task_stack_size;
 
+        #[cfg(feature = "irq")]
         pub const TICKS_PER_SEC: usize = #ticks_per_sec;
     }
     .to_string()
@@ -222,6 +223,7 @@ mod tests {
                 "pub const CPU_CAPACITY: usize = 16usize;\n",
                 "#[cfg(feature = \"fs\")]\n",
                 "pub const TASK_STACK_SIZE: usize = 262144usize;\n",
+                "#[cfg(feature = \"irq\")]\n",
                 "pub const TICKS_PER_SEC: usize = 100usize;\n",
             ))
         );

@@ -1,5 +1,4 @@
 features = [
-  "ax-driver/rockchip-dwmmc",
   "ax-driver/rockchip-sdhci",
   "fs",
 ]

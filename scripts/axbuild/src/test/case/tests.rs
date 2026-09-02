@@ -103,7 +103,7 @@ fn resolve_target_dir_uses_workspace_target_directory() {
 }
 
 #[tokio::test]
-async fn prepare_case_assets_plain_case_uses_shared_rootfs() {
+async fn prepare_case_assets_plain_case_uses_shared_rootfs_with_snapshot() {
     let root = tempdir().unwrap();
     let target_dir = root.path().join("target/x86_64-unknown-none");
     let rootfs_dir = root.path().join("tmp/axbuild/rootfs");
@@ -128,6 +128,9 @@ async fn prepare_case_assets_plain_case_uses_shared_rootfs() {
     // directly -- no per-case copy is created.
     assert_eq!(assets.rootfs_path, shared_img);
     assert!(assets.rootfs_copy_to_remove.is_none());
+    // -snapshot must always be present so QEMU guest writes never dirty the
+    // shared image.
+    assert!(assets.extra_qemu_args.contains(&"-snapshot".to_string()));
     // The shared image must be unmodified.
     assert_eq!(fs::read(&shared_img).unwrap(), b"rootfs");
 }
@@ -146,6 +149,7 @@ fn grouped_runner_script_runs_all_commands_and_reports_summary() {
 
     let runner = overlay.join("usr/bin/suite-run-case-tests");
     let content = fs::read_to_string(&runner).unwrap();
+    assert!(content.contains("total=2"));
     assert!(content.contains("step=$((step + 1))"));
     assert!(content.contains("'SUITE_GROUPED_TEST_BEGIN'"));
     assert!(content.contains("'SUITE_GROUPED_TEST_PASSED'"));
@@ -318,4 +322,5 @@ fn save_rootfs_cache_image_writes_when_enabled() {
 
     save_rootfs_cache_image(&src, &dst).unwrap();
     assert!(dst.is_file());
+    assert_eq!(fs::read(&dst).unwrap().len(), 1024 * 1024);
 }

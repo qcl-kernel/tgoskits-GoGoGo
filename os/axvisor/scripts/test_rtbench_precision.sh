@@ -1,0 +1,1573 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SOURCE="${SCRIPT_DIR}/../guests/zephyr-net/src/main.c"
+CMAKE_SOURCE="${SCRIPT_DIR}/../guests/zephyr-net/CMakeLists.txt"
+SETUP_SOURCE="${SCRIPT_DIR}/setup_qemu_three_guest_net.sh"
+AXVISOR_CONFIG_SOURCE="${SCRIPT_DIR}/../src/config.rs"
+ARTIFACT_VALIDATOR="${SCRIPT_DIR}/validate_qemu_artifact.sh"
+ZEPHYR_VM_CONFIG="${SCRIPT_DIR}/../configs/vms/qemu/aarch64/zephyr-net.toml"
+GENERIC_BOARD_CONFIG="${SCRIPT_DIR}/../configs/board/qemu-aarch64.toml"
+THREE_GUEST_BOARD_CONFIG="${SCRIPT_DIR}/../configs/board/qemu-aarch64-three-guest-net.toml"
+
+require_source() {
+  local pattern="$1"
+  local description="$2"
+  rg -q --fixed-strings "$pattern" "$SOURCE" || {
+    echo "[rtbench-precision] missing ${description}: ${pattern}" >&2
+    exit 1
+  }
+}
+
+require_source "rtbench_phase_error_cycles" "raw phase-error storage"
+require_source "rtbench_interval_error_cycles" "raw interval-error storage"
+require_source "rtbench_tick_gap" "timer tick-gap storage"
+require_source "k_uptime_ticks()" "timer tick observation"
+require_source "rtbench_cycles_to_ns" "nanosecond conversion"
+require_source "phase_p99_9_ns" "nanosecond percentile reporting"
+require_source "phase_p99_99_ns" "nanosecond p99.99 reporting"
+require_source "interval_max_abs_ns" "interval-error reporting"
+require_source "callback_duration_max_ns" "callback duration reporting"
+require_source "tick_gap_max" "timer tick-gap reporting"
+require_source "AXVISOR_RT_IRQ_TRACE" "optional timer IRQ trace switch"
+require_source "__wrap_arm_gic_get_active" "GIC activity trace wrapper"
+require_source "CNTVCT_EL0" "virtual counter trace"
+require_source "CNTV_CVAL_EL0" "virtual compare trace"
+require_source "CNTV_CTL_EL0" "virtual timer control trace"
+require_source "rtbench_irq_entry_to_callback" "timer IRQ-to-callback trace"
+require_source "rtbench_irq_trace_report" "timer IRQ trace report"
+require_source "overdue_max_sample" "worst overdue sample index"
+require_source "overdue_max_compare" "worst overdue compare anchor"
+require_source "overdue_max_entry" "worst overdue IRQ-entry anchor"
+require_source "trace_start_counter" "benchmark-start counter anchor"
+require_source "report_counter" "benchmark-report counter anchor"
+rg -q --fixed-strings -- "zephyr_link_libraries(-Wl,--wrap=arm_gic_get_active)" "$CMAKE_SOURCE" || {
+	echo "[rtbench-precision] missing final-link GIC wrapper option" >&2
+	exit 1
+}
+rg -q --fixed-strings "AXVISOR_THREE_GUEST_BUSYBOX" "$SETUP_SOURCE" || {
+	echo "[rtbench-precision] missing static BusyBox override" >&2
+	exit 1
+}
+rg -q --fixed-strings "statically linked" "$SETUP_SOURCE" || {
+	echo "[rtbench-precision] missing static BusyBox validation" >&2
+	exit 1
+}
+rg -q --fixed-strings "AXVISOR_THREE_GUEST_RTOS_PCPU" "$SETUP_SOURCE" || {
+	echo "[rtbench-precision] missing RTOS vCPU placement override" >&2
+	exit 1
+}
+rg -q --fixed-strings "AXVISOR_THREE_GUEST_HOST_TIMER_POLICY" "$SETUP_SOURCE" || {
+	echo "[rtbench-precision] missing host timer policy override" >&2
+	exit 1
+}
+rg -q --fixed-strings "AXVISOR_THREE_GUEST_HOST_VCPU_YIELD" "$SETUP_SOURCE" || {
+	echo "[rtbench-precision] missing vCPU yield override" >&2
+	exit 1
+}
+rg -q --fixed-strings \
+  'HOST_VCPU_IDLE_POLICY="${AXVISOR_THREE_GUEST_HOST_VCPU_IDLE_POLICY:-halt}"' \
+  "$SETUP_SOURCE" || {
+	echo "[rtbench-precision] missing safe-default host vCPU idle policy override" >&2
+	exit 1
+}
+rg -q -U --fixed-strings \
+  $'host_vcpu_yield = false\nhost_vcpu_idle_policy = "halt"' \
+  "$ZEPHYR_VM_CONFIG" || {
+  echo "[rtbench-precision] checked-in Zephyr VM must default to halt immediately after vCPU yield" >&2
+  exit 1
+}
+rg -q --fixed-strings "host_timer_policy" "$SETUP_SOURCE" || {
+  echo "[rtbench-precision] missing per-VM host timer policy" >&2
+  exit 1
+}
+for debug_pattern in \
+  'configured host policy: timer={:?}, vcpu_yield={}, vcpu_idle={:?}' \
+  'axvisor_log_configured_host_policy' \
+  'HOST_POLICY_DIAGNOSTIC_MARKER' \
+  'log_configured_host_policy(&vm_config)'; do
+  for debug_source in "$AXVISOR_CONFIG_SOURCE" "$ARTIFACT_VALIDATOR"; do
+    debug_scan_status=0
+    rg -q --fixed-strings "$debug_pattern" "$debug_source" || debug_scan_status=$?
+    case "$debug_scan_status" in
+      0)
+        echo "[rtbench-precision] stale host-policy debug code remains in ${debug_source}: ${debug_pattern}" >&2
+        exit 1
+        ;;
+      1) ;;
+      *)
+        echo "[rtbench-precision] host-policy debug scan failed for ${debug_source}: rg status ${debug_scan_status}" >&2
+        exit 1
+        ;;
+    esac
+  done
+done
+require_source "late_cycles * 1000000LL" "cycle-based deadline thresholds"
+require_source "K_SEM_DEFINE(rtbench_done" "benchmark completion semaphore"
+require_source "k_sem_give(&rtbench_done)" "benchmark completion signal"
+require_source "k_sem_take(&rtbench_done, K_FOREVER)" "benchmark wait path"
+
+callback_block="$(awk '/static void rtbench_expiry\(/,/^}/' "$SOURCE")"
+for pattern in \
+	"rtbench_cycles_to_us" \
+	"rtbench_late_hist" \
+	"rtbench_miss_100us" \
+	"rtbench_miss_500us" \
+	"rtbench_miss_1ms"; do
+	if printf '%s\n' "$callback_block" | rg -q --fixed-strings "$pattern"; then
+		echo "[rtbench-precision] callback must only record raw timing samples: ${pattern}" >&2
+		exit 1
+	fi
+done
+
+if rg -q --fixed-strings "k_sleep(K_MSEC(1))" "$SOURCE"; then
+	echo "[rtbench-precision] benchmark main loop must not wake every millisecond" >&2
+	exit 1
+fi
+
+# The interrupt-path experiment must be able to disable the polling fallback
+# without changing the checked-in benchmark source between runs.
+require_source "AXVISOR_DISABLE_VIRTIO_IRQ_POLL" "virtio polling diagnostic switch"
+require_source "#if !defined(AXVISOR_DISABLE_VIRTIO_IRQ_POLL)" "polling fallback guard"
+
+rg -q -U --fixed-strings \
+  $'#if !defined(AXVISOR_DISABLE_VIRTIO_IRQ_POLL)\n\tconst struct device *vdev' \
+  "$SOURCE" || {
+  echo "[rtbench-precision] virtio device handle must be conditional with polling" >&2
+  exit 1
+}
+
+rg -q --fixed-strings \
+  "target_compile_definitions(app PRIVATE AXVISOR_DISABLE_VIRTIO_IRQ_POLL)" \
+  "$CMAKE_SOURCE" || {
+  echo "[rtbench-precision] checked-in Zephyr build must disable virtio polling" >&2
+  exit 1
+}
+
+functional_root="$(mktemp -d "${TMPDIR:-/tmp}/rtbench-precision.XXXXXX")"
+trap 'rm -rf -- "$functional_root"' EXIT INT TERM
+
+fail_test() {
+  echo "[rtbench-precision] functional test failed: $*" >&2
+  exit 1
+}
+
+require_validator_error() {
+  local output="$1"
+  local pattern="$2"
+  local description="$3"
+  local scan_status=0
+  printf '%s\n' "$output" | rg -q --fixed-strings "$pattern" || scan_status=$?
+  case "$scan_status" in
+    0) ;;
+    1) fail_test "${description} lacked the expected diagnostic: ${pattern}" ;;
+    *) fail_test "${description} diagnostic scan failed: rg status ${scan_status}" ;;
+  esac
+}
+
+validator_fixture_root="${functional_root}/artifact-validator"
+validator_copy_bin="${validator_fixture_root}/copy-bin"
+validator_mutate_bin="${validator_fixture_root}/mutate-bin"
+mkdir -p "$validator_copy_bin" "$validator_mutate_bin"
+printf '%s\n' \
+  '#!/usr/bin/env bash' \
+  'set -euo pipefail' \
+  '[ "$#" -eq 4 ]' \
+  '[ "$1" = "-O" ]' \
+  '[ "$2" = "binary" ]' \
+  'cp -- "$3" "$4"' \
+  >"${validator_copy_bin}/rust-objcopy"
+printf '%s\n' \
+  '#!/usr/bin/env bash' \
+  'set -euo pipefail' \
+  '[ "$#" -eq 4 ]' \
+  '[ "$1" = "-O" ]' \
+  '[ "$2" = "binary" ]' \
+  'cp -- "$3" "$4"' \
+  'printf "%s\n" "fixture mutation" >>"$3"' \
+  >"${validator_mutate_bin}/rust-objcopy"
+chmod +x \
+  "${validator_copy_bin}/rust-objcopy" \
+  "${validator_mutate_bin}/rust-objcopy"
+
+write_embedded_validator_fixture() {
+  local fixture_root="$1"
+  mkdir -p "$fixture_root"
+  printf '%s\n' \
+    '[base]' \
+    'id = 7' \
+    'name = "validator fixture"' \
+    >"${fixture_root}/vm-config.toml"
+  {
+    printf '%s\n' 'fixture artifact prefix'
+    command cat -- "${fixture_root}/vm-config.toml"
+    printf '%s\n' 'fixture artifact suffix'
+  } >"${fixture_root}/axvisor.elf"
+  cp -- "${fixture_root}/axvisor.elf" "${fixture_root}/axvisor.bin"
+}
+
+validator_success_root="${validator_fixture_root}/success"
+write_embedded_validator_fixture "$validator_success_root"
+set +e
+validator_success_output="$(
+  PATH="${validator_copy_bin}:${PATH}" \
+    bash "$ARTIFACT_VALIDATOR" \
+      "${validator_success_root}/manifest.tsv" \
+      "${validator_success_root}/axvisor.elf" \
+      "${validator_success_root}/axvisor.bin" \
+      "${validator_success_root}/vm-config.toml" 2>&1
+)"
+validator_success_status=$?
+set -e
+[ "$validator_success_status" -eq 0 ] \
+  || fail_test "artifact validator rejected embedded VM config fixture: ${validator_success_output}"
+python3 - \
+  "${validator_success_root}/manifest.tsv" \
+  "${validator_success_root}/axvisor.elf" \
+  "${validator_success_root}/axvisor.bin" \
+  "${validator_success_root}/vm-config.toml" <<'PY' \
+  || fail_test "artifact validator manifest did not describe canonical inputs and hashes"
+import hashlib
+import pathlib
+import sys
+
+manifest_path, elf_path, raw_path, config_path = map(pathlib.Path, sys.argv[1:])
+expected = [
+    ("version", "1"),
+    ("elf", str(elf_path.resolve()), hashlib.sha256(elf_path.read_bytes()).hexdigest()),
+    ("raw", str(raw_path.resolve()), hashlib.sha256(raw_path.read_bytes()).hexdigest()),
+    (
+        "vm-config",
+        str(config_path.resolve()),
+        hashlib.sha256(config_path.read_bytes()).hexdigest(),
+    ),
+]
+actual = [tuple(line.split("\t")) for line in manifest_path.read_text().splitlines()]
+assert actual == expected
+PY
+
+validator_mismatch_root="${validator_fixture_root}/raw-mismatch"
+write_embedded_validator_fixture "$validator_mismatch_root"
+printf '%s\n' 'raw mismatch' >>"${validator_mismatch_root}/axvisor.bin"
+printf '%s\n' 'existing raw mismatch manifest' >"${validator_mismatch_root}/manifest.tsv"
+validator_mismatch_manifest_before="$(sha256sum -- "${validator_mismatch_root}/manifest.tsv")"
+set +e
+validator_mismatch_error="$(
+  PATH="${validator_copy_bin}:${PATH}" \
+    bash "$ARTIFACT_VALIDATOR" \
+      "${validator_mismatch_root}/manifest.tsv" \
+      "${validator_mismatch_root}/axvisor.elf" \
+      "${validator_mismatch_root}/axvisor.bin" \
+      "${validator_mismatch_root}/vm-config.toml" 2>&1
+)"
+validator_mismatch_status=$?
+set -e
+[ "$validator_mismatch_status" -ne 0 ] \
+  || fail_test "artifact validator accepted raw bytes that differ from objcopy output"
+require_validator_error \
+  "$validator_mismatch_error" \
+  "regenerated raw binary does not match supplied raw binary" \
+  "raw mismatch failure"
+[ "$(sha256sum -- "${validator_mismatch_root}/manifest.tsv")" = "$validator_mismatch_manifest_before" ] \
+  || fail_test "raw mismatch failure replaced the existing manifest"
+
+validator_missing_root="${validator_fixture_root}/missing-config"
+mkdir -p "$validator_missing_root"
+printf '%s\n' '[base]' 'id = 8' >"${validator_missing_root}/vm-config.toml"
+printf '%s\n' 'artifact without VM config bytes' >"${validator_missing_root}/axvisor.elf"
+cp -- "${validator_missing_root}/axvisor.elf" "${validator_missing_root}/axvisor.bin"
+set +e
+validator_missing_error="$(
+  PATH="${validator_copy_bin}:${PATH}" \
+    bash "$ARTIFACT_VALIDATOR" \
+      "${validator_missing_root}/manifest.tsv" \
+      "${validator_missing_root}/axvisor.elf" \
+      "${validator_missing_root}/axvisor.bin" \
+      "${validator_missing_root}/vm-config.toml" 2>&1
+)"
+validator_missing_status=$?
+set -e
+[ "$validator_missing_status" -ne 0 ] \
+  || fail_test "artifact validator accepted artifacts without embedded VM config bytes"
+require_validator_error \
+  "$validator_missing_error" \
+  "required VM config bytes are absent from Axvisor artifacts" \
+  "missing VM config failure"
+[ ! -e "${validator_missing_root}/manifest.tsv" ] \
+  || fail_test "missing VM config failure published a manifest"
+
+validator_changed_root="${validator_fixture_root}/input-changed"
+write_embedded_validator_fixture "$validator_changed_root"
+printf '%s\n' 'existing input changed manifest' >"${validator_changed_root}/manifest.tsv"
+validator_changed_manifest_before="$(sha256sum -- "${validator_changed_root}/manifest.tsv")"
+set +e
+validator_changed_error="$(
+  PATH="${validator_mutate_bin}:${PATH}" \
+    bash "$ARTIFACT_VALIDATOR" \
+      "${validator_changed_root}/manifest.tsv" \
+      "${validator_changed_root}/axvisor.elf" \
+      "${validator_changed_root}/axvisor.bin" \
+      "${validator_changed_root}/vm-config.toml" 2>&1
+)"
+validator_changed_status=$?
+set -e
+[ "$validator_changed_status" -ne 0 ] \
+  || fail_test "artifact validator accepted an ELF changed during validation"
+require_validator_error \
+  "$validator_changed_error" \
+  "input changed during validation: elf:" \
+  "input changed failure"
+[ "$(sha256sum -- "${validator_changed_root}/manifest.tsv")" = "$validator_changed_manifest_before" ] \
+  || fail_test "input changed failure replaced the existing manifest"
+
+write_vm_fixture() {
+  local output="$1"
+  local include_idle_policy="$2"
+  {
+    printf '%s\n' \
+      '[base]' \
+      'id = 3' \
+      'name = "fixture"' \
+      'vm_type = 1' \
+      'cpu_num = 1' \
+      'phys_cpu_ids = [2]' \
+      'host_timer_policy = "periodic"' \
+      'host_vcpu_yield = false'
+    if [ "$include_idle_policy" = true ]; then
+      printf '%s\n' 'host_vcpu_idle_policy = "halt"'
+    fi
+    printf '%s\n' \
+      '' \
+      '[kernel]' \
+      'entry_point = 0xa000_1000' \
+      'image_location = "memory"' \
+      'kernel_path = "/old/kernel"' \
+      'kernel_load_addr = 0xa000_0000' \
+      'dtb_load_addr = 0xaf00_0000' \
+      'ramdisk_path = "/old/initramfs"' \
+      'ramdisk_load_addr = 0xac00_0000' \
+      'memory_regions = [[0xa000_0000, 0x1000_0000, 0x7, 2]]' \
+      '' \
+      '[devices]' \
+      'interrupt_mode = "passthrough"' \
+      'passthrough_devices = [["/virtio_mmio@a000400"]]' \
+      'passthrough_addresses = []' \
+      'excluded_devices = []' \
+      'emu_devices = [[' \
+      '  "gppt-gicr", 0x080a_0000, 0x2_0000, 0, 0x20, [1, 0x2_0000, 2]' \
+      ']]'
+  } >"$output"
+}
+
+run_patch_fixture() {
+  local policy="$1"
+  local template="$2"
+  local output="$3"
+  local kernel="$4"
+  local idle_policy="${5:-}"
+  AXVISOR_THREE_GUEST_HOST_VCPU_IDLE_POLICY="$policy" \
+  AXVISOR_THREE_GUEST_LINUX_IMAGE="${functional_root}/must-not-be-read" \
+    bash -c '
+      set -euo pipefail
+      source "$1"
+      patch_vm_config "$2" "$3" "$4" "" "" "" "" "" "" "$5"
+    ' bash "$SETUP_SOURCE" "$template" "$output" "$kernel" "$idle_policy"
+}
+
+linux_template="${functional_root}/linux.toml"
+zephyr_template="${functional_root}/zephyr.toml"
+write_vm_fixture "$linux_template" false
+write_vm_fixture "$zephyr_template" true
+special_kernel="${functional_root}/kernel & back\\slash space \"quoted\""
+
+for policy in halt busy; do
+  policy_root="${functional_root}/${policy}"
+  mkdir -p "$policy_root"
+  run_patch_fixture "$policy" "$linux_template" "${policy_root}/linux-1.toml" "$special_kernel"
+  run_patch_fixture "$policy" "$linux_template" "${policy_root}/linux-2.toml" "$special_kernel"
+  run_patch_fixture "$policy" "$zephyr_template" "${policy_root}/zephyr.toml" "$special_kernel" "$policy"
+  python3 - "$policy_root" "$policy" "$special_kernel" <<'PY' \
+    || fail_test "generated ${policy} fixture contracts"
+import pathlib
+import sys
+import tomllib
+
+root = pathlib.Path(sys.argv[1])
+expected_policy = sys.argv[2]
+expected_kernel = sys.argv[3]
+linux_configs = [tomllib.loads((root / f"linux-{index}.toml").read_text()) for index in (1, 2)]
+zephyr = tomllib.loads((root / "zephyr.toml").read_text())
+assert all("host_vcpu_idle_policy" not in config["base"] for config in linux_configs)
+assert zephyr["base"]["host_vcpu_idle_policy"] == expected_policy
+assert sum(
+    line.startswith("host_vcpu_idle_policy =")
+    for line in (root / "zephyr.toml").read_text().splitlines()
+) == 1
+assert all(config["kernel"]["kernel_path"] == expected_kernel for config in linux_configs)
+assert zephyr["kernel"]["kernel_path"] == expected_kernel
+PY
+done
+
+missing_key_template="${functional_root}/missing-key.toml"
+missing_key_output="${functional_root}/must-remain.toml"
+cp "$zephyr_template" "$missing_key_template"
+python3 - "$missing_key_template" <<'PY'
+import pathlib
+import sys
+
+path = pathlib.Path(sys.argv[1])
+path.write_text("\n".join(
+    line for line in path.read_text().splitlines() if not line.startswith("kernel_path =")
+) + "\n")
+PY
+printf '%s\n' 'previous valid output' >"$missing_key_output"
+missing_key_before="$(sha256sum -- "$missing_key_output")"
+set +e
+missing_key_error="$(
+  run_patch_fixture halt "$missing_key_template" "$missing_key_output" "$special_kernel" halt 2>&1
+)"
+missing_key_status=$?
+set -e
+[ "$missing_key_status" -ne 0 ] || fail_test "missing requested TOML key was accepted"
+printf '%s\n' "$missing_key_error" | rg -q 'requested TOML key.*kernel_path' \
+  || fail_test "missing-key failure lacked a contextual diagnostic"
+[ "$(sha256sum -- "$missing_key_output")" = "$missing_key_before" ] \
+  || fail_test "failed patch replaced the previous output"
+
+invalid_sentinel="${functional_root}/invalid-policy-external-action"
+set +e
+invalid_error="$(
+  AXVISOR_THREE_GUEST_IMAGE_ROOT="$invalid_sentinel" \
+  AXVISOR_THREE_GUEST_HOST_VCPU_IDLE_POLICY=invalid \
+    bash "$SETUP_SOURCE" 2>&1
+)"
+invalid_status=$?
+set -e
+[ "$invalid_status" -ne 0 ] || fail_test "invalid host vCPU idle policy was accepted"
+printf '%s\n' "$invalid_error" \
+  | rg -q --fixed-strings 'AXVISOR_THREE_GUEST_HOST_VCPU_IDLE_POLICY must be halt or busy' \
+  || fail_test "invalid policy failure lacked the expected diagnostic"
+[ ! -e "$invalid_sentinel" ] || fail_test "invalid policy reached external setup work"
+
+initramfs_root="${functional_root}/initramfs-fixture"
+fixture_axvisor_root="${initramfs_root}/axvisor"
+fixture_image_root="${initramfs_root}/images"
+fixture_bin="${initramfs_root}/bin"
+mkdir -p \
+  "${fixture_axvisor_root}/guests/linux-net" \
+  "${fixture_image_root}/linux-net-initramfs" \
+  "$fixture_bin"
+printf '%s\n' '#!/bin/sh' 'exit 0' \
+  >"${fixture_axvisor_root}/guests/linux-net/init-linux-1"
+printf '%s\n' '#!/bin/sh' 'exit 0' \
+  >"${fixture_axvisor_root}/guests/linux-net/init-linux-2"
+printf '%s\n' 'fixture busybox' >"${initramfs_root}/busybox"
+printf '%s\n' 'must never be packaged' \
+  >"${fixture_image_root}/linux-net-initramfs/stale"
+printf '%s\n' \
+  '#!/bin/sh' \
+  'for target do :; done' \
+  'case "$target" in' \
+  '  *dynamic-busybox) printf "%s: ELF fixture, dynamically linked\\n" "$target" ;;' \
+  '  *) printf "%s: ELF fixture, statically linked\\n" "$target" ;;' \
+  'esac' \
+  >"${fixture_bin}/file"
+chmod +x \
+  "${fixture_axvisor_root}/guests/linux-net/init-linux-1" \
+  "${fixture_axvisor_root}/guests/linux-net/init-linux-2" \
+  "${initramfs_root}/busybox" \
+  "${fixture_bin}/file"
+
+mapfile -t prepared_initramfs < <(
+  PATH="${fixture_bin}:${PATH}" \
+  AXVISOR_THREE_GUEST_IMAGE_ROOT="$fixture_image_root" \
+  AXVISOR_THREE_GUEST_BUSYBOX="${initramfs_root}/busybox" \
+    bash -c '
+      set -euo pipefail
+      source "$1"
+      AXVISOR_ROOT="$2"
+      prepare_linux_initramfs
+    ' bash "$SETUP_SOURCE" "$fixture_axvisor_root"
+)
+for archive in "${prepared_initramfs[@]}"; do
+  case "$archive" in
+    *-initramfs.cpio)
+      if cpio --quiet -it <"$archive" | rg -q '(^|/)stale$'; then
+        fail_test "persistent initramfs staging leaked a stale file into $(basename "$archive")"
+      fi
+      ;;
+  esac
+done
+[ "${#prepared_initramfs[@]}" -eq 3 ] \
+  || fail_test "initramfs preparation must report selected BusyBox and two archives"
+[ "${prepared_initramfs[0]}" = "${fixture_image_root}/linux-net-busybox.selected" ] \
+  || fail_test "initramfs preparation did not report its immutable BusyBox snapshot"
+cmp -s -- "${prepared_initramfs[0]}" "${initramfs_root}/busybox" \
+  || fail_test "selected BusyBox snapshot does not match the packaged bytes"
+for archive in "${prepared_initramfs[@]:1}"; do
+  archive_members="$(cpio --quiet -it <"$archive" | LC_ALL=C sort)"
+  [ "$archive_members" = $'.\nbin\nbin/busybox\nbin/sh\ninit' ] \
+    || fail_test "initramfs contains undeclared members: ${archive_members}"
+done
+if find "$fixture_image_root" -maxdepth 1 -type d -name 'linux-net-initramfs.*' | rg -q .; then
+  fail_test "private initramfs staging directory was not cleaned"
+fi
+
+dynamic_source="${initramfs_root}/dynamic-busybox"
+dynamic_archive_root="${initramfs_root}/dynamic-archive"
+mkdir -p \
+  "${dynamic_archive_root}/bin" \
+  "${fixture_image_root}/qemu_aarch64_linux"
+printf '%s\n' 'dynamic busybox fixture' >"$dynamic_source"
+printf '%s\n' 'fallback static busybox fixture' >"${dynamic_archive_root}/bin/busybox"
+chmod +x "$dynamic_source" "${dynamic_archive_root}/bin/busybox"
+(cd "$dynamic_archive_root" && find . -print0 | cpio --null --quiet -o -H newc) \
+  | gzip -n >"${fixture_image_root}/qemu_aarch64_linux/initramfs.cpio.gz"
+mapfile -t dynamic_initramfs < <(
+  PATH="${fixture_bin}:${PATH}" \
+  AXVISOR_THREE_GUEST_IMAGE_ROOT="$fixture_image_root" \
+  AXVISOR_THREE_GUEST_BUSYBOX="$dynamic_source" \
+    bash -c '
+      set -euo pipefail
+      source "$1"
+      AXVISOR_ROOT="$2"
+      prepare_linux_initramfs
+    ' bash "$SETUP_SOURCE" "$fixture_axvisor_root"
+)
+[ "${#dynamic_initramfs[@]}" -eq 3 ] \
+  || fail_test "dynamic BusyBox fallback must report selected BusyBox and two archives"
+for archive in "${dynamic_initramfs[@]:1}"; do
+  archive_members="$(cpio --quiet -it <"$archive" | LC_ALL=C sort)"
+  [ "$archive_members" = $'.\nbin\nbin/busybox\nbin/sh\ninit' ] \
+    || fail_test "dynamic BusyBox scratch files leaked into initramfs: ${archive_members}"
+done
+
+manifest_root="${functional_root}/manifest-fixture"
+mkdir -p "$manifest_root"
+printf '%s\n' 'linux kernel bytes' >"${manifest_root}/linux-kernel"
+printf '%s\n' 'rtos kernel bytes' >"${manifest_root}/rtos-kernel"
+printf '%s\n' 'rootfs bytes' >"${manifest_root}/rootfs.img"
+manifest_path="${manifest_root}/artifacts.tsv"
+manifest_inputs=(
+  linux-kernel "${manifest_root}/linux-kernel"
+  rtos-kernel "${manifest_root}/rtos-kernel"
+  rootfs "${manifest_root}/rootfs.img"
+  busybox "${prepared_initramfs[0]}"
+  linux-1-initramfs "${prepared_initramfs[1]}"
+  linux-2-initramfs "${prepared_initramfs[2]}"
+  linux-1-vm-config "${functional_root}/halt/linux-1.toml"
+  linux-2-vm-config "${functional_root}/halt/linux-2.toml"
+  zephyr-vm-config "${functional_root}/halt/zephyr.toml"
+)
+
+write_fixture_manifest() {
+  bash -c '
+    set -euo pipefail
+    source "$1"
+    shift
+    write_artifact_manifest "$@"
+  ' bash "$SETUP_SOURCE" "$manifest_path" "${manifest_inputs[@]}"
+}
+
+write_fixture_manifest
+manifest_first_sha="$(sha256sum -- "$manifest_path")"
+write_fixture_manifest
+[ "$(sha256sum -- "$manifest_path")" = "$manifest_first_sha" ] \
+  || fail_test "artifact manifest is not deterministic"
+python3 - "$manifest_path" "${manifest_inputs[@]}" <<'PY' \
+  || fail_test "artifact manifest hashes do not match selected bytes"
+import hashlib
+import pathlib
+import sys
+
+manifest = pathlib.Path(sys.argv[1])
+arguments = sys.argv[2:]
+expected = []
+for label, raw_path in zip(arguments[0::2], arguments[1::2]):
+    path = pathlib.Path(raw_path).resolve()
+    expected.append((label, str(path), hashlib.sha256(path.read_bytes()).hexdigest()))
+
+lines = manifest.read_text().splitlines()
+assert lines[0] == "version\t1"
+actual = [tuple(line.split("\t")) for line in lines[1:]]
+assert actual == expected
+PY
+
+manifest_before_missing="$(sha256sum -- "$manifest_path")"
+missing_manifest_inputs=("${manifest_inputs[@]}")
+missing_manifest_inputs[1]="${manifest_root}/missing-linux-kernel"
+set +e
+missing_manifest_error="$(
+  bash -c '
+    set -euo pipefail
+    source "$1"
+    shift
+    write_artifact_manifest "$@"
+  ' bash "$SETUP_SOURCE" "$manifest_path" "${missing_manifest_inputs[@]}" 2>&1
+)"
+missing_manifest_status=$?
+set -e
+[ "$missing_manifest_status" -ne 0 ] || fail_test "manifest accepted a missing artifact"
+printf '%s\n' "$missing_manifest_error" | rg -q 'artifact does not exist.*missing-linux-kernel' \
+  || fail_test "missing manifest artifact lacked a contextual diagnostic"
+[ "$(sha256sum -- "$manifest_path")" = "$manifest_before_missing" ] \
+  || fail_test "failed manifest generation replaced the previous manifest"
+
+expected_guest_registry='https://raw.githubusercontent.com/arceos-hypervisor/axvisor-guest/504cabb5e07e506e2692b010e01204d20587f030/registry/v0.0.26.toml'
+actual_guest_registry="$(
+  env -u AXVISOR_THREE_GUEST_REGISTRY \
+    bash -c 'source "$1"; printf "%s" "$GUEST_REGISTRY"' bash "$SETUP_SOURCE"
+)"
+[ "$actual_guest_registry" = "$expected_guest_registry" ] \
+  || fail_test "default guest registry is not pinned to the resolved immutable commit"
+
+provenance_root="${functional_root}/provenance-fixture"
+provenance_bin="${provenance_root}/bin"
+provenance_images="${provenance_root}/images"
+provenance_repo="${provenance_root}/repo"
+provenance_log="${provenance_root}/cargo.log"
+mkdir -p \
+  "$provenance_bin" \
+  "${provenance_images}/qemu_aarch64_linux" \
+  "$provenance_repo"
+printf '%s\n' 'unverified cached kernel' \
+  >"${provenance_images}/qemu_aarch64_linux/qemu-aarch64"
+printf '%s\n' \
+  '#!/usr/bin/env bash' \
+  'set -euo pipefail' \
+  'printf "%s\\t%s\\n" "${TGOS_IMAGE_REGISTRY_FALLBACK_URL:-}" "$*" >>"$FAKE_CARGO_LOG"' \
+  'output_dir=""' \
+  'previous=""' \
+  'for argument in "$@"; do' \
+  '  if [ "$previous" = --output-dir ]; then output_dir="$argument"; fi' \
+  '  previous="$argument"' \
+  'done' \
+  'if [ -n "$output_dir" ]; then' \
+  '  image_name="${!#}"' \
+  '  mkdir -p "${output_dir}/${image_name}"' \
+  '  printf "%s\\n" "registry-verified kernel" >"${output_dir}/${image_name}/qemu-aarch64"' \
+  'elif printf "%s\\n" "$*" | grep -q -- "--arch aarch64"; then' \
+  '  printf "%s\\n" "image pull: fetched rootfs-aarch64-alpine.img"' \
+  '  mkdir -p "$TGOS_IMAGE_LOCAL_STORAGE"' \
+  '  printf "%s\\n" "registry-verified rootfs" >"${TGOS_IMAGE_LOCAL_STORAGE}/rootfs-aarch64-alpine.img"' \
+  'fi' \
+  >"${provenance_bin}/cargo"
+chmod +x "${provenance_bin}/cargo"
+
+PATH="${provenance_bin}:${PATH}" \
+FAKE_CARGO_LOG="$provenance_log" \
+  bash -c '
+    set -euo pipefail
+    source "$1"
+    IMAGE_ROOT="$2"
+    REPO_ROOT="$3"
+    pull_guest_image qemu_aarch64_linux >/dev/null
+  ' bash "$SETUP_SOURCE" "$provenance_images" "$provenance_repo"
+[ -s "$provenance_log" ] \
+  || fail_test "seeded guest cache bypassed the image-tool checksum boundary"
+IFS=$'\t' read -r observed_fallback observed_pull <"$provenance_log"
+[ "$observed_fallback" = "$expected_guest_registry" ] \
+  || fail_test "guest image pull did not pin its fallback registry"
+printf '%s\n' "$observed_pull" \
+  | rg -q --fixed-strings -- "--registry ${expected_guest_registry}" \
+  || fail_test "guest image pull did not use the pinned registry"
+
+rootfs_target="${provenance_root}/rootfs-target.img"
+rootfs_pull_stderr="${provenance_root}/rootfs-pull.stderr"
+expected_registry_rootfs="${provenance_images}/rootfs-managed/rootfs-aarch64-alpine.img"
+printf '%s\n' 'blind cached rootfs' >"$rootfs_target"
+rootfs_log_lines_before="$(wc -l <"$provenance_log")"
+selected_registry_rootfs="$(PATH="${provenance_bin}:${PATH}" \
+FAKE_CARGO_LOG="$provenance_log" \
+  bash -c '
+    set -euo pipefail
+    source "$1"
+    IMAGE_ROOT="$2"
+    REPO_ROOT="$3"
+    ROOTFS_TARGET="$4"
+    unset AXVISOR_THREE_GUEST_ROOTFS
+    prepare_rootfs
+  ' bash "$SETUP_SOURCE" "$provenance_images" "$provenance_repo" "$rootfs_target" \
+    2>"$rootfs_pull_stderr"
+)"
+[ "$(wc -l <"$provenance_log")" -eq "$((rootfs_log_lines_before + 1))" ] \
+  || fail_test "non-explicit rootfs cache bypassed the image-tool checksum boundary"
+[ "$(printf '%s\n' "$selected_registry_rootfs" | wc -l)" -eq 1 ] \
+  || fail_test "default rootfs selection wrote image-pull status into its path result"
+[ "$selected_registry_rootfs" = "$expected_registry_rootfs" ] \
+  || fail_test "default rootfs selection did not return exactly the created rootfs path"
+rg -q --fixed-strings 'image pull: fetched rootfs-aarch64-alpine.img' "$rootfs_pull_stderr" \
+  || fail_test "default rootfs selection discarded image-pull diagnostics"
+rg -q --fixed-strings 'registry-verified rootfs' "$expected_registry_rootfs" \
+  || fail_test "rootfs selection did not use image-tool-validated bytes"
+rg -q --fixed-strings 'blind cached rootfs' "$rootfs_target" \
+  || fail_test "rootfs selection mutated the stable destination before publication"
+
+rootfs_atomic_root="${functional_root}/rootfs-atomic-fixture"
+rootfs_atomic_bin="${rootfs_atomic_root}/bin"
+mkdir -p "$rootfs_atomic_bin"
+printf '%s\n' \
+  '#!/bin/sh' \
+  'exit 1' \
+  >"${rootfs_atomic_bin}/mv"
+chmod +x "${rootfs_atomic_bin}/mv"
+mkdir -p "${rootfs_atomic_root}/published/run-a"
+printf '%s\n' 'immutable run A rootfs' >"${rootfs_atomic_root}/published/run-a/rootfs.img"
+ln -s run-a "${rootfs_atomic_root}/published/current"
+printf '%s\n' 'old complete rootfs' >"${rootfs_atomic_root}/target.img"
+rootfs_before_failure="$(sha256sum -- "${rootfs_atomic_root}/target.img")"
+set +e
+rootfs_atomic_error="$(
+  PATH="${rootfs_atomic_bin}:${PATH}" \
+    bash -c '
+      set -euo pipefail
+      source "$1"
+      GENERATED_ROOT="$2/published/current"
+      ROOTFS_TARGET="$2/target.img"
+      publish_rootfs_compatibility
+    ' bash "$SETUP_SOURCE" "$rootfs_atomic_root" 2>&1
+)"
+rootfs_atomic_status=$?
+set -e
+[ "$rootfs_atomic_status" -ne 0 ] || fail_test "failed rootfs compatibility publication was accepted"
+[ "$(sha256sum -- "${rootfs_atomic_root}/target.img")" = "$rootfs_before_failure" ] \
+  || fail_test "failed rootfs compatibility publication changed the existing regular file"
+if find "$rootfs_atomic_root" -maxdepth 1 -name '.target.img.tmp.*' -o -name '.target.img.link.*' | rg -q .; then
+  fail_test "failed rootfs compatibility publication left a destination-side temporary"
+fi
+bash -c '
+  set -euo pipefail
+  source "$1"
+  GENERATED_ROOT="$2/published/current"
+  ROOTFS_TARGET="$2/target.img"
+  publish_rootfs_compatibility
+' bash "$SETUP_SOURCE" "$rootfs_atomic_root"
+[ -L "${rootfs_atomic_root}/target.img" ] \
+  || fail_test "rootfs compatibility migration did not replace the regular file with a symlink"
+[ "$(readlink "${rootfs_atomic_root}/target.img")" = "${rootfs_atomic_root}/published/current/rootfs.img" ] \
+  || fail_test "rootfs compatibility symlink does not resolve through the atomic current switch"
+rg -q --fixed-strings 'immutable run A rootfs' "${rootfs_atomic_root}/target.img" \
+  || fail_test "rootfs compatibility symlink does not expose current immutable bytes"
+
+topology_fixture_root="${functional_root}/topology-fixture"
+topology_vm_root="${topology_fixture_root}/vms"
+topology_qemu_config="${topology_fixture_root}/qemu.toml"
+topology_board_config="${topology_fixture_root}/board.toml"
+mkdir -p "$topology_vm_root"
+cp "${SCRIPT_DIR}/../configs/vms/qemu/aarch64/linux-net-1.toml" "$topology_vm_root/"
+cp "${SCRIPT_DIR}/../configs/vms/qemu/aarch64/linux-net-2.toml" "$topology_vm_root/"
+cp "${SCRIPT_DIR}/../configs/vms/qemu/aarch64/zephyr-net.toml" "$topology_vm_root/"
+cp "${SCRIPT_DIR}/../configs/qemu/qemu-aarch64-three-guest-net.toml" "$topology_qemu_config"
+printf '%s\n' \
+  'features = ["ax-driver/nvme", "fs", "qemu-aarch64-three-guest-net"]' \
+  'log = "Info"' \
+  'target = "aarch64-unknown-none-softfloat"' \
+  'vm_configs = []' \
+  >"$topology_board_config"
+
+run_topology_fixture() {
+  local vm_root="$1"
+  local qemu_config="$2"
+  local board_config="${3:-$topology_board_config}"
+  AXVISOR_THREE_GUEST_VERIFY_VM_ROOT="$vm_root" \
+  AXVISOR_THREE_GUEST_VERIFY_QEMU_CONFIG="$qemu_config" \
+  AXVISOR_THREE_GUEST_VERIFY_BOARD_CONFIG="$board_config" \
+  AXVISOR_THREE_GUEST_VERIFY_EXPECTED_IDLE_POLICY=halt \
+  AXVISOR_THREE_GUEST_VERIFY_TOPOLOGY_ONLY=1 \
+    bash "${SCRIPT_DIR}/verify_three_guest_net.sh"
+}
+
+python3 - \
+  "$THREE_GUEST_BOARD_CONFIG" \
+  "$GENERIC_BOARD_CONFIG" <<'PY' \
+  || fail_test "checked-in QEMU board feature contracts"
+import collections
+import pathlib
+import sys
+import tomllib
+
+reservation_feature = "qemu-aarch64-three-guest-net"
+three_guest_path = pathlib.Path(sys.argv[1])
+three_guest = tomllib.loads(three_guest_path.read_text())
+three_guest_features = three_guest.get("features")
+assert isinstance(three_guest_features, list), (
+    f"{three_guest_path}: expected features type=list, "
+    f"actual type={type(three_guest_features).__name__}, value={three_guest_features!r}"
+)
+three_guest_non_string_features = [
+    feature for feature in three_guest_features if not isinstance(feature, str)
+]
+assert not three_guest_non_string_features, (
+    f"{three_guest_path}: expected every feature type=str, "
+    f"actual non-string elements={three_guest_non_string_features!r}, "
+    f"features={three_guest_features!r}"
+)
+expected_three_guest_features = collections.Counter({
+    "ax-driver/nvme": 1,
+    "fs": 1,
+    reservation_feature: 1,
+})
+assert collections.Counter(three_guest_features) == expected_three_guest_features, (
+    f"{three_guest_path}: expected feature multiset={dict(expected_three_guest_features)!r}, "
+    f"actual={dict(collections.Counter(three_guest_features))!r}"
+)
+
+generic_path = pathlib.Path(sys.argv[2])
+generic = tomllib.loads(generic_path.read_text())
+generic_features = generic.get("features")
+assert isinstance(generic_features, list), (
+    f"{generic_path}: expected features type=list, "
+    f"actual type={type(generic_features).__name__}, value={generic_features!r}"
+)
+generic_non_string_features = [
+    feature for feature in generic_features if not isinstance(feature, str)
+]
+assert not generic_non_string_features, (
+    f"{generic_path}: expected every feature type=str, "
+    f"actual non-string elements={generic_non_string_features!r}, "
+    f"features={generic_features!r}"
+)
+generic_reservation_count = generic_features.count(reservation_feature)
+assert generic_reservation_count == 0, (
+    f"{generic_path}: expected {reservation_feature!r} feature count=0, "
+    f"actual={generic_reservation_count}, features={generic_features!r}"
+)
+PY
+
+for invalid_board_case in missing dependency-qualified duplicate; do
+  invalid_board_root="${functional_root}/topology-board-${invalid_board_case}"
+  cp -a "$topology_fixture_root" "$invalid_board_root"
+  python3 - "${invalid_board_root}/board.toml" "$invalid_board_case" <<'PY'
+import pathlib
+import sys
+
+path = pathlib.Path(sys.argv[1])
+case = sys.argv[2]
+text = path.read_text()
+feature = '"qemu-aarch64-three-guest-net"'
+if case == "missing":
+    replacement = ""
+elif case == "dependency-qualified":
+    replacement = '"axplat-dyn/qemu-aarch64-three-guest-net"'
+elif case == "duplicate":
+    replacement = f"{feature}, {feature}"
+else:
+    raise AssertionError(f"unexpected invalid board fixture case: {case}")
+path.write_text(text.replace(feature, replacement, 1))
+PY
+  set +e
+  invalid_board_error="$(
+    run_topology_fixture \
+      "${invalid_board_root}/vms" \
+      "${invalid_board_root}/qemu.toml" \
+      "${invalid_board_root}/board.toml" 2>&1
+  )"
+  invalid_board_status=$?
+  set -e
+  [ "$invalid_board_status" -ne 0 ] \
+    || fail_test "${invalid_board_case} three-guest board reservation feature was accepted"
+  printf '%s\n' "$invalid_board_error" | rg -q 'qemu-aarch64-three-guest-net' \
+    || fail_test "${invalid_board_case} board reservation failure lacked a contextual diagnostic"
+done
+
+for topology_input in "$topology_vm_root"/*.toml "$topology_qemu_config"; do
+  printf '%s\n' \
+    '# comments mentioning ivc, shared_memory, virtio,vsock, and vhost-user-vsock-pci are inert' \
+    >>"$topology_input"
+done
+run_topology_fixture "$topology_vm_root" "$topology_qemu_config" >/dev/null \
+  || fail_test "topology comments triggered a forbidden-transport false positive"
+
+comments_only_root="${functional_root}/topology-comments-only"
+cp -a "$topology_fixture_root" "$comments_only_root"
+python3 - "${comments_only_root}/vms/linux-net-1.toml" "${comments_only_root}/qemu.toml" <<'PY'
+import pathlib
+import sys
+
+vm_path = pathlib.Path(sys.argv[1])
+vm_text = vm_path.read_text().replace("id = 1\n", "id = 11\n", 1)
+vm_path.write_text(vm_text + "# id = 1\n")
+
+qemu_path = pathlib.Path(sys.argv[2])
+required = "virtio-net-device,netdev=net0,bus=virtio-mmio-bus.0,mac=52:54:00:77:00:01"
+qemu_text = qemu_path.read_text().replace(required, "disabled-net-device", 1)
+qemu_path.write_text(qemu_text + f"# {required}\n")
+PY
+set +e
+comments_only_error="$(
+  run_topology_fixture "${comments_only_root}/vms" "${comments_only_root}/qemu.toml" 2>&1
+)"
+comments_only_status=$?
+set -e
+[ "$comments_only_status" -ne 0 ] \
+  || fail_test "comments satisfied missing live VM/QEMU topology"
+printf '%s\n' "$comments_only_error" | rg -q 'VM 1|QEMU network topology' \
+  || fail_test "missing live topology lacked a contextual diagnostic"
+
+artifact_paths_root="${functional_root}/topology-artifact-paths"
+cp -a "$topology_fixture_root" "$artifact_paths_root"
+python3 - \
+  "${artifact_paths_root}/vms/linux-net-1.toml" \
+  "${artifact_paths_root}/vms/linux-net-2.toml" \
+  "${artifact_paths_root}/vms/zephyr-net.toml" \
+  "${artifact_paths_root}/qemu.toml" <<'PY'
+import pathlib
+import re
+import sys
+
+linux_1, linux_2, zephyr, qemu = map(pathlib.Path, sys.argv[1:])
+linux_1.write_text(re.sub(
+    r'^kernel_path = .*$',
+    'kernel_path = "/artifacts/shared_mem_backend/linux-kernel"',
+    linux_1.read_text(),
+    count=1,
+    flags=re.MULTILINE,
+))
+linux_2.write_text(re.sub(
+    r'^ramdisk_path = .*$',
+    'ramdisk_path = "/artifacts/ivc/linux-initramfs"',
+    linux_2.read_text(),
+    count=1,
+    flags=re.MULTILINE,
+))
+zephyr.write_text(re.sub(
+    r'^kernel_path = .*$',
+    'kernel_path = "/artifacts/vsock/zephyr-kernel"',
+    zephyr.read_text(),
+    count=1,
+    flags=re.MULTILINE,
+))
+qemu.write_text(qemu.read_text().replace(
+    'id=disk0,if=none,format=raw,file=${workspace}/tmp/rootfs.img',
+    'id=disk0,if=none,format=raw,file=/artifacts/shared-mem/rootfs-vsock.img',
+    1,
+))
+PY
+run_topology_fixture "${artifact_paths_root}/vms" "${artifact_paths_root}/qemu.toml" >/dev/null \
+  || fail_test "forbidden-looking artifact paths were treated as live transports"
+
+for forbidden_live_value in \
+  'virtio,vsock' \
+  'vhost-user-vsock-pci' \
+  'shared_mem_backend' \
+  'shared-mem-backend' \
+  'shared-memory-backend' \
+  'shmem-device' \
+  'ivc-channel'; do
+  forbidden_fixture="${functional_root}/topology-forbidden-${forbidden_live_value//[^a-zA-Z0-9]/-}"
+  cp -a "$topology_fixture_root" "$forbidden_fixture"
+  python3 - "${forbidden_fixture}/qemu.toml" "$forbidden_live_value" <<'PY'
+import json
+import pathlib
+import sys
+
+path = pathlib.Path(sys.argv[1])
+value = sys.argv[2]
+text = path.read_text()
+marker = "]\nfail_regex"
+path.write_text(text.replace(
+    marker,
+    f"  \"-device\",\n  {json.dumps(value)},\n]\nfail_regex",
+    1,
+))
+PY
+  set +e
+  forbidden_error="$(
+    run_topology_fixture "${forbidden_fixture}/vms" "${forbidden_fixture}/qemu.toml" 2>&1
+  )"
+  forbidden_status=$?
+  set -e
+  [ "$forbidden_status" -ne 0 ] \
+    || fail_test "live forbidden topology value was accepted: ${forbidden_live_value}"
+  printf '%s\n' "$forbidden_error" | rg -qi 'virtio-net only|forbidden' \
+    || fail_test "forbidden topology lacked a contextual diagnostic: ${forbidden_live_value}"
+done
+
+full_verify_root="${functional_root}/setup-full-verify"
+full_verify_bin="${full_verify_root}/bin"
+full_verify_sentinel="${full_verify_root}/source-validation-requested"
+real_rg="$(command -v rg)"
+mkdir -p "$full_verify_bin" "${full_verify_root}/images"
+printf '%s\n' \
+  '#!/usr/bin/env bash' \
+  'set -euo pipefail' \
+  'for argument in "$@"; do' \
+  '  case "$argument" in' \
+  '    */guests/zephyr-net/prj.conf)' \
+  '      : >"$FULL_VERIFY_SENTINEL"' \
+  '      exit 1' \
+  '      ;;' \
+  '  esac' \
+  'done' \
+  'exec "$REAL_RG" "$@"' \
+  >"${full_verify_bin}/rg"
+printf '%s\n' \
+  '#!/bin/sh' \
+  'for target do :; done' \
+  'printf "%s: ELF fixture, statically linked\\n" "$target"' \
+  >"${full_verify_bin}/file"
+chmod +x "${full_verify_bin}/rg" "${full_verify_bin}/file"
+printf '%s\n' 'local Linux kernel' >"${full_verify_root}/linux-kernel"
+printf '%s\n' 'local RTOS kernel' >"${full_verify_root}/rtos-kernel"
+printf '%s\n' 'local rootfs' >"${full_verify_root}/rootfs.img"
+printf '%s\n' 'local static BusyBox' >"${full_verify_root}/busybox"
+chmod +x "${full_verify_root}/busybox"
+
+set +e
+full_verify_error="$(
+  PATH="${full_verify_bin}:${PATH}" \
+  REAL_RG="$real_rg" \
+  FULL_VERIFY_SENTINEL="$full_verify_sentinel" \
+  AXVISOR_THREE_GUEST_VERIFY_TOPOLOGY_ONLY=1 \
+  AXVISOR_THREE_GUEST_IMAGE_ROOT="${full_verify_root}/images" \
+  AXVISOR_THREE_GUEST_LINUX_IMAGE="${full_verify_root}/linux-kernel" \
+  AXVISOR_THREE_GUEST_RTOS_IMAGE="${full_verify_root}/rtos-kernel" \
+  AXVISOR_THREE_GUEST_RTOS_ENTRY_POINT=0xa0001114 \
+  AXVISOR_THREE_GUEST_BUSYBOX="${full_verify_root}/busybox" \
+  AXVISOR_THREE_GUEST_ROOTFS="${full_verify_root}/rootfs.img" \
+    bash -c '
+      set -euo pipefail
+      source "$1"
+      IMAGE_ROOT="$2/images"
+      GENERATED_ROOT="$2/generated"
+      ROOTFS_TARGET="$2/rootfs-target.img"
+      main
+    ' bash "$SETUP_SOURCE" "$full_verify_root" 2>&1
+)"
+full_verify_status=$?
+set -e
+[ "$full_verify_status" -ne 0 ] \
+  || fail_test "setup inherited topology-only mode and skipped full verification"
+[ -f "$full_verify_sentinel" ] \
+  || fail_test "setup did not request mandatory source verification"
+printf '%s\n' "$full_verify_error" | rg -q 'Zephyr must configure networking from main' \
+  || fail_test "full setup verification failure lacked the expected source diagnostic"
+
+canonical_qemu_root="${functional_root}/canonical-qemu-fixture"
+canonical_qemu_bin="${canonical_qemu_root}/bin"
+canonical_qemu_config="${canonical_qemu_root}/qemu-aarch64-three-guest-net.toml"
+mkdir -p "$canonical_qemu_bin" "${canonical_qemu_root}/images"
+cp "${full_verify_bin}/file" "${canonical_qemu_bin}/file"
+cp "$topology_qemu_config" "$canonical_qemu_config"
+python3 - "$canonical_qemu_config" <<'PY'
+import pathlib
+
+path = pathlib.Path(__import__("sys").argv[1])
+text = path.read_text()
+marker = "]\nfail_regex"
+path.write_text(text.replace(
+    marker,
+    '  "-device",\n  "shared_mem_backend",\n]\nfail_regex',
+    1,
+))
+PY
+set +e
+canonical_qemu_error="$(
+  PATH="${canonical_qemu_bin}:${PATH}" \
+  AXVISOR_THREE_GUEST_VERIFY_QEMU_CONFIG="$topology_qemu_config" \
+  AXVISOR_THREE_GUEST_IMAGE_ROOT="${canonical_qemu_root}/images" \
+  AXVISOR_THREE_GUEST_LINUX_IMAGE="${full_verify_root}/linux-kernel" \
+  AXVISOR_THREE_GUEST_RTOS_IMAGE="${full_verify_root}/rtos-kernel" \
+  AXVISOR_THREE_GUEST_RTOS_ENTRY_POINT=0xa0001114 \
+  AXVISOR_THREE_GUEST_BUSYBOX="${full_verify_root}/busybox" \
+  AXVISOR_THREE_GUEST_ROOTFS="${full_verify_root}/rootfs.img" \
+    bash -c '
+      set -euo pipefail
+      source "$1"
+      IMAGE_ROOT="$2/images"
+      GENERATED_ROOT="$2/generated"
+      ROOTFS_TARGET="$2/rootfs-target.img"
+      QEMU_CONFIG="$2/qemu-aarch64-three-guest-net.toml"
+      main
+    ' bash "$SETUP_SOURCE" "$canonical_qemu_root" 2>&1
+)"
+canonical_qemu_status=$?
+set -e
+[ "$canonical_qemu_status" -ne 0 ] \
+  || fail_test "inherited verifier QEMU override hid forbidden canonical topology"
+printf '%s\n' "$canonical_qemu_error" | rg -q 'virtio-net only.*shared_mem_backend' \
+  || fail_test "canonical QEMU topology failure lacked the forbidden live value"
+
+complete_publication_root="${functional_root}/complete-publication-fixture"
+complete_publication_bin="${complete_publication_root}/bin"
+mkdir -p "$complete_publication_bin"
+cp "${full_verify_bin}/file" "${complete_publication_bin}/file"
+complete_publication_real_ln="$(command -v ln)"
+complete_publication_real_mv="$(command -v mv)"
+printf '%s\n' \
+  '#!/usr/bin/env bash' \
+  'set -euo pipefail' \
+  'destination="${!#}"' \
+  'if [ "${AXVISOR_TEST_PUBLICATION_FAILURE:-}" = rootfs-link ]; then' \
+  '  case "$destination" in */.rootfs-target.img.link.*/rootfs-target.img) exit 1 ;; esac' \
+  'fi' \
+  'exec "$AXVISOR_TEST_REAL_LN" "$@"' \
+  >"${complete_publication_bin}/ln"
+printf '%s\n' \
+  '#!/usr/bin/env bash' \
+  'set -euo pipefail' \
+  'destination="${!#}"' \
+  'source_path="${@: -2:1}"' \
+  'if [ "${AXVISOR_TEST_PUBLICATION_FAILURE:-}" = rootfs-replace ] && [ "$destination" = "$AXVISOR_TEST_ROOTFS_TARGET" ]; then' \
+  '  case "$source_path" in */.rootfs-target.img.link.*/rootfs-target.img) exit 1 ;; esac' \
+  'fi' \
+  'exec "$AXVISOR_TEST_REAL_MV" "$@"' \
+  >"${complete_publication_bin}/mv"
+chmod +x "${complete_publication_bin}/ln" "${complete_publication_bin}/mv"
+
+validated_manifest_snapshot() {
+  python3 - "$1" <<'PY'
+import hashlib
+import pathlib
+import sys
+import tomllib
+
+published = pathlib.Path(sys.argv[1])
+run = published.resolve()
+manifest = run / "artifacts.tsv"
+lines = manifest.read_text().splitlines()
+assert lines[0] == "version\t1" and len(lines) == 10
+expected_names = {
+    "linux-kernel": "linux-kernel",
+    "rtos-kernel": "rtos-kernel",
+    "rootfs": "rootfs.img",
+    "busybox": "busybox",
+    "linux-1-initramfs": "linux-1-initramfs.cpio",
+    "linux-2-initramfs": "linux-2-initramfs.cpio",
+    "linux-1-vm-config": "linux-net-1.toml",
+    "linux-2-vm-config": "linux-net-2.toml",
+    "zephyr-vm-config": "zephyr-net.toml",
+}
+digest = hashlib.sha256()
+records = {}
+for line in lines[1:]:
+    label, raw_path, expected = line.split("\t")
+    path = pathlib.Path(raw_path)
+    assert label in expected_names and label not in records, label
+    assert path == run / expected_names[label], (label, path, run)
+    assert path.is_file(), (label, path)
+    actual = hashlib.sha256(path.read_bytes()).hexdigest()
+    assert actual == expected, (label, expected, actual)
+    records[label] = path
+    digest.update(label.encode())
+    digest.update(expected.encode())
+assert set(records) == set(expected_names)
+linux_1 = tomllib.loads(records["linux-1-vm-config"].read_text())
+linux_2 = tomllib.loads(records["linux-2-vm-config"].read_text())
+zephyr = tomllib.loads(records["zephyr-vm-config"].read_text())
+assert linux_1["kernel"]["kernel_path"] == str(run / "linux-kernel")
+assert linux_2["kernel"]["kernel_path"] == str(run / "linux-kernel")
+assert linux_1["kernel"]["ramdisk_path"] == str(run / "linux-1-initramfs.cpio")
+assert linux_2["kernel"]["ramdisk_path"] == str(run / "linux-2-initramfs.cpio")
+assert zephyr["kernel"]["kernel_path"] == str(run / "rtos-kernel")
+print(digest.hexdigest())
+PY
+}
+
+manifest_semantic_snapshot() {
+  python3 - "$1" <<'PY'
+import hashlib
+import pathlib
+import sys
+
+run = pathlib.Path(sys.argv[1]).resolve()
+lines = (run / "artifacts.tsv").read_text().splitlines()
+digest = hashlib.sha256()
+for line in lines[1:]:
+    label, raw_path, _ = line.split("\t")
+    path = pathlib.Path(raw_path)
+    content = path.read_bytes()
+    if label.endswith("vm-config"):
+        content = content.replace(str(run).encode(), b"<IMMUTABLE-RUN>")
+    digest.update(label.encode())
+    digest.update(path.name.encode())
+    digest.update(hashlib.sha256(content).digest())
+print(digest.hexdigest())
+PY
+}
+
+run_complete_publication_fixture() {
+  local fixture_root="$1"
+  local failure_step="${2:-}"
+  local idle_policy="${3:-halt}"
+  PATH="${complete_publication_bin}:${PATH}" \
+  AXVISOR_THREE_GUEST_IMAGE_ROOT="${fixture_root}/images" \
+  AXVISOR_THREE_GUEST_LINUX_IMAGE="${fixture_root}/selected-linux-kernel" \
+  AXVISOR_THREE_GUEST_RTOS_IMAGE="${fixture_root}/selected-rtos-kernel" \
+  AXVISOR_THREE_GUEST_RTOS_ENTRY_POINT=0xa0001114 \
+  AXVISOR_THREE_GUEST_BUSYBOX="${fixture_root}/selected-busybox" \
+  AXVISOR_THREE_GUEST_ROOTFS="${fixture_root}/selected-rootfs.img" \
+  AXVISOR_THREE_GUEST_HOST_VCPU_IDLE_POLICY="$idle_policy" \
+  AXVISOR_TEST_PUBLICATION_FAILURE="$failure_step" \
+  AXVISOR_TEST_REAL_LN="$complete_publication_real_ln" \
+  AXVISOR_TEST_REAL_MV="$complete_publication_real_mv" \
+  AXVISOR_TEST_ROOTFS_TARGET="${fixture_root}/rootfs-target.img" \
+    bash -c '
+      set -euo pipefail
+      source "$1"
+      IMAGE_ROOT="$2/images"
+      GENERATED_BASE="$2/published"
+      GENERATED_ROOT="$GENERATED_BASE/current"
+      ROOTFS_TARGET="$2/rootfs-target.img"
+      QEMU_CONFIG="$3"
+      publication_failure="$4"
+      verify_generated_set() { return 0; }
+      case "$4" in
+        config)
+          patch_calls=0
+          patch_vm_config() {
+            patch_calls=$((patch_calls + 1))
+            if [ "$patch_calls" -eq 3 ]; then return 1; fi
+            printf "run B partial config %s\n" "$patch_calls" >"$2"
+          }
+          ;;
+        verification)
+          verify_generated_set() { return 1; }
+          ;;
+        manifest)
+          write_artifact_manifest() { return 1; }
+          ;;
+        current-link|current-replace|fsync-after-replace)
+          eval "$(declare -f publish_generated_set | sed '1s/publish_generated_set/publish_generated_set_injected/')"
+          publish_generated_set() {
+            publish_generated_set_injected "$1" "$publication_failure"
+          }
+          ;;
+        summary-output)
+          report_setup_summary() { return 1; }
+          ;;
+      esac
+      main
+    ' bash "$SETUP_SOURCE" "$fixture_root" "$topology_qemu_config" "$failure_step"
+}
+
+for failure_step in config verification manifest; do
+  complete_failure_root="${complete_publication_root}/${failure_step}"
+  mkdir -p "${complete_failure_root}/images"
+  printf '%s\n' "run A Linux kernel" >"${complete_failure_root}/selected-linux-kernel"
+  printf '%s\n' "run A RTOS kernel" >"${complete_failure_root}/selected-rtos-kernel"
+  printf '%s\n' "run A rootfs" >"${complete_failure_root}/selected-rootfs.img"
+  printf '%s\n' "run A BusyBox" >"${complete_failure_root}/selected-busybox"
+  chmod +x "${complete_failure_root}/selected-busybox"
+  printf '%s\n' "legacy rootfs before run A" >"${complete_failure_root}/rootfs-target.img"
+  run_complete_publication_fixture "$complete_failure_root" >/dev/null \
+    || fail_test "run A setup failed for ${failure_step} failure fixture"
+  run_a_target="$(readlink "${complete_failure_root}/published/current")"
+  run_a_snapshot="$(validated_manifest_snapshot "${complete_failure_root}/published/current")" \
+    || fail_test "run A manifest was invalid before ${failure_step} failure"
+
+  printf '%s\n' "run B different Linux kernel" >"${complete_failure_root}/selected-linux-kernel"
+  printf '%s\n' "run B different RTOS kernel" >"${complete_failure_root}/selected-rtos-kernel"
+  printf '%s\n' "run B different rootfs" >"${complete_failure_root}/selected-rootfs.img"
+  printf '%s\n' "run B different BusyBox" >"${complete_failure_root}/selected-busybox"
+  set +e
+  run_complete_publication_fixture "$complete_failure_root" "$failure_step" >/dev/null 2>&1
+  run_b_status=$?
+  set -e
+  [ "$run_b_status" -ne 0 ] || fail_test "run B ${failure_step} failure was accepted"
+  [ "$(readlink "${complete_failure_root}/published/current")" = "$run_a_target" ] \
+    || fail_test "run B ${failure_step} failure changed current from run A"
+  [ "$(validated_manifest_snapshot "${complete_failure_root}/published/current")" = "$run_a_snapshot" ] \
+    || fail_test "run B ${failure_step} failure invalidated run A artifact hashes"
+done
+
+published_runs_snapshot() {
+  find "$1" -mindepth 1 -maxdepth 1 -type d -name 'run.*' -printf '%f\n' \
+    | LC_ALL=C sort
+}
+
+assert_no_publication_temporaries() {
+  local fixture_root="$1"
+  if find "$fixture_root" -mindepth 1 -maxdepth 1 -type d \
+    \( -name '.rootfs-target.img.link.*' -o -name '.rootfs-target.img.backup.*' \) \
+    | rg -q .; then
+    fail_test "publication failure left rootfs compatibility staging under ${fixture_root}"
+  fi
+  if find "${fixture_root}/published" -mindepth 1 -maxdepth 1 -type d -name '.publish.*' \
+    | rg -q .; then
+    fail_test "publication failure left current-link staging under ${fixture_root}/published"
+  fi
+}
+
+first_publication_root="${complete_publication_root}/first-publication"
+for failure_step in current-link current-replace; do
+  first_failure_root="${first_publication_root}/${failure_step}"
+  mkdir -p "${first_failure_root}/images"
+  printf '%s\n' 'first Linux kernel' >"${first_failure_root}/selected-linux-kernel"
+  printf '%s\n' 'first RTOS kernel' >"${first_failure_root}/selected-rtos-kernel"
+  printf '%s\n' 'first selected rootfs' >"${first_failure_root}/selected-rootfs.img"
+  printf '%s\n' 'first BusyBox' >"${first_failure_root}/selected-busybox"
+  chmod +x "${first_failure_root}/selected-busybox"
+  printf '%s\n' 'legacy regular compatibility bytes' >"${first_failure_root}/rootfs-target.img"
+  chmod 0640 "${first_failure_root}/rootfs-target.img"
+  legacy_rootfs_hash="$(sha256sum -- "${first_failure_root}/rootfs-target.img")"
+  legacy_rootfs_mode="$(stat -c '%a' "${first_failure_root}/rootfs-target.img")"
+
+  set +e
+  first_failure_error="$(
+    run_complete_publication_fixture "$first_failure_root" "$failure_step" 2>&1
+  )"
+  first_failure_status=$?
+  set -e
+  [ "$first_failure_status" -ne 0 ] \
+    || fail_test "first-publication ${failure_step} injection was accepted"
+  [ ! -e "${first_failure_root}/published/current" ] \
+    && [ ! -L "${first_failure_root}/published/current" ] \
+    || fail_test "first-publication ${failure_step} failure created current"
+  [ -f "${first_failure_root}/rootfs-target.img" ] \
+    && [ ! -L "${first_failure_root}/rootfs-target.img" ] \
+    || fail_test "first-publication ${failure_step} failure did not restore the legacy regular rootfs"
+  [ "$(sha256sum -- "${first_failure_root}/rootfs-target.img")" = "$legacy_rootfs_hash" ] \
+    || fail_test "first-publication ${failure_step} failure changed legacy rootfs bytes"
+  [ "$(stat -c '%a' "${first_failure_root}/rootfs-target.img")" = "$legacy_rootfs_mode" ] \
+    || fail_test "first-publication ${failure_step} failure changed legacy rootfs mode"
+  [ -z "$(published_runs_snapshot "${first_failure_root}/published")" ] \
+    || fail_test "first-publication ${failure_step} failure left an unpublished run"
+  assert_no_publication_temporaries "$first_failure_root"
+done
+
+first_absent_root="${first_publication_root}/absent-current-link"
+mkdir -p "${first_absent_root}/images"
+printf '%s\n' 'absent Linux kernel' >"${first_absent_root}/selected-linux-kernel"
+printf '%s\n' 'absent RTOS kernel' >"${first_absent_root}/selected-rtos-kernel"
+printf '%s\n' 'absent selected rootfs' >"${first_absent_root}/selected-rootfs.img"
+printf '%s\n' 'absent BusyBox' >"${first_absent_root}/selected-busybox"
+chmod +x "${first_absent_root}/selected-busybox"
+set +e
+run_complete_publication_fixture "$first_absent_root" current-link >/dev/null 2>&1
+first_absent_status=$?
+set -e
+[ "$first_absent_status" -ne 0 ] || fail_test "first-publication absent-state failure was accepted"
+[ ! -e "${first_absent_root}/rootfs-target.img" ] && [ ! -L "${first_absent_root}/rootfs-target.img" ] \
+  || fail_test "first-publication failure did not restore absent compatibility state"
+[ ! -e "${first_absent_root}/published/current" ] && [ ! -L "${first_absent_root}/published/current" ] \
+  || fail_test "first-publication absent-state failure created current"
+[ -z "$(published_runs_snapshot "${first_absent_root}/published")" ] \
+  || fail_test "first-publication absent-state failure left an unpublished run"
+assert_no_publication_temporaries "$first_absent_root"
+
+commit_point_root="${complete_publication_root}/commit-point"
+mkdir -p "${commit_point_root}/images"
+printf '%s\n' 'commit A Linux kernel' >"${commit_point_root}/selected-linux-kernel"
+printf '%s\n' 'commit A RTOS kernel' >"${commit_point_root}/selected-rtos-kernel"
+printf '%s\n' 'commit A rootfs' >"${commit_point_root}/selected-rootfs.img"
+printf '%s\n' 'commit A BusyBox' >"${commit_point_root}/selected-busybox"
+chmod +x "${commit_point_root}/selected-busybox"
+printf '%s\n' 'legacy compatibility rootfs' >"${commit_point_root}/rootfs-target.img"
+run_complete_publication_fixture "$commit_point_root" >/dev/null \
+  || fail_test "commit-point run A setup failed"
+commit_a_target="$(readlink "${commit_point_root}/published/current")"
+commit_a_hashes="$(validated_manifest_snapshot "${commit_point_root}/published/current")" \
+  || fail_test "commit-point run A manifest was invalid"
+commit_a_compat_target="$(readlink "${commit_point_root}/rootfs-target.img")"
+commit_a_compat_hash="$(sha256sum -- "${commit_point_root}/rootfs-target.img")"
+commit_a_runs="$(published_runs_snapshot "${commit_point_root}/published")"
+
+printf '%s\n' 'commit B different Linux kernel' >"${commit_point_root}/selected-linux-kernel"
+printf '%s\n' 'commit B different RTOS kernel' >"${commit_point_root}/selected-rtos-kernel"
+printf '%s\n' 'commit B different rootfs' >"${commit_point_root}/selected-rootfs.img"
+printf '%s\n' 'commit B different BusyBox' >"${commit_point_root}/selected-busybox"
+
+for failure_step in rootfs-link rootfs-replace current-link current-replace fsync-after-replace; do
+  set +e
+  commit_failure_error="$(
+    run_complete_publication_fixture "$commit_point_root" "$failure_step" 2>&1
+  )"
+  commit_failure_status=$?
+  set -e
+  if [ "$failure_step" = fsync-after-replace ]; then
+    [ "$commit_failure_status" -eq 0 ] \
+      || fail_test "post-commit fsync injection returned failure after switching current"
+    printf '%s\n' "$commit_failure_error" | rg -q 'WARNING:.*durability' \
+      || fail_test "post-commit fsync injection did not report a durability warning"
+    break
+  fi
+  [ "$commit_failure_status" -ne 0 ] \
+    || fail_test "injected ${failure_step} publication failure was accepted"
+  [ "$(readlink "${commit_point_root}/published/current")" = "$commit_a_target" ] \
+    || fail_test "injected ${failure_step} failure changed current from run A"
+  [ "$(validated_manifest_snapshot "${commit_point_root}/published/current")" = "$commit_a_hashes" ] \
+    || fail_test "injected ${failure_step} failure invalidated run A hashes"
+  [ "$(readlink "${commit_point_root}/rootfs-target.img")" = "$commit_a_compat_target" ] \
+    || fail_test "injected ${failure_step} failure changed the compatibility link target"
+  [ "$(sha256sum -- "${commit_point_root}/rootfs-target.img")" = "$commit_a_compat_hash" ] \
+    || fail_test "injected ${failure_step} failure changed compatibility content"
+  [ "$(published_runs_snapshot "${commit_point_root}/published")" = "$commit_a_runs" ] \
+    || fail_test "injected ${failure_step} failure left an unpublished run"
+done
+
+commit_b_target="$(readlink "${commit_point_root}/published/current")"
+[ "$commit_b_target" != "$commit_a_target" ] \
+  || fail_test "post-commit fsync warning did not leave the new run committed"
+validated_manifest_snapshot "${commit_point_root}/published/current" >/dev/null \
+  || fail_test "post-commit fsync warning left an invalid new manifest"
+[ "$(validated_manifest_snapshot "${commit_point_root}/published/${commit_a_target}")" = "$commit_a_hashes" ] \
+  || fail_test "post-commit fsync warning invalidated old run A"
+[ "$(readlink "${commit_point_root}/rootfs-target.img")" = "$commit_a_compat_target" ] \
+  || fail_test "post-commit fsync warning changed the stable compatibility link target"
+cmp -s -- "${commit_point_root}/rootfs-target.img" "${commit_point_root}/selected-rootfs.img" \
+  || fail_test "post-commit fsync warning did not expose committed rootfs content"
+expected_commit_runs="$(printf '%s\n%s\n' "$commit_a_target" "$commit_b_target" | LC_ALL=C sort)"
+[ "$(published_runs_snapshot "${commit_point_root}/published")" = "$expected_commit_runs" ] \
+  || fail_test "post-commit fsync warning left unexpected staged runs"
+
+commit_b_hashes="$(validated_manifest_snapshot "${commit_point_root}/published/current")"
+set +e
+summary_failure_error="$(
+  run_complete_publication_fixture "$commit_point_root" summary-output 2>&1
+)"
+summary_failure_status=$?
+set -e
+[ "$summary_failure_status" -eq 0 ] \
+  || fail_test "summary output failure returned nonzero after committing current"
+printf '%s\n' "$summary_failure_error" | rg -q 'WARNING:.*summary' \
+  || fail_test "summary output failure lacked a post-commit warning"
+summary_target="$(readlink "${commit_point_root}/published/current")"
+[ "$summary_target" != "$commit_b_target" ] \
+  || fail_test "summary output failure did not commit a new current run"
+validated_manifest_snapshot "${commit_point_root}/published/current" >/dev/null \
+  || fail_test "summary output failure left an invalid current manifest"
+[ "$(validated_manifest_snapshot "${commit_point_root}/published/${commit_b_target}")" = "$commit_b_hashes" ] \
+  || fail_test "summary output failure invalidated the prior run"
+[ "$(readlink "${commit_point_root}/rootfs-target.img")" = "$commit_a_compat_target" ] \
+  || fail_test "summary output failure changed the stable compatibility target"
+cmp -s -- "${commit_point_root}/rootfs-target.img" "${commit_point_root}/selected-rootfs.img" \
+  || fail_test "summary output failure left invalid compatibility content"
+assert_no_publication_temporaries "$commit_point_root"
+
+switch_root="${complete_publication_root}/halt-busy-halt"
+mkdir -p "${switch_root}/images"
+printf '%s\n' 'stable Linux kernel' >"${switch_root}/selected-linux-kernel"
+printf '%s\n' 'stable RTOS kernel' >"${switch_root}/selected-rtos-kernel"
+printf '%s\n' 'stable rootfs' >"${switch_root}/selected-rootfs.img"
+printf '%s\n' 'stable BusyBox' >"${switch_root}/selected-busybox"
+chmod +x "${switch_root}/selected-busybox"
+printf '%s\n' 'legacy compatibility rootfs' >"${switch_root}/rootfs-target.img"
+
+halt_a_output="$(run_complete_publication_fixture "$switch_root" "" halt)" \
+  || fail_test "first halt immutable publication failed"
+halt_a_target="$(readlink "${switch_root}/published/current")"
+halt_a_run="${switch_root}/published/${halt_a_target}"
+halt_a_hashes="$(validated_manifest_snapshot "$halt_a_run")" \
+  || fail_test "first halt immutable manifest was invalid"
+halt_a_semantics="$(manifest_semantic_snapshot "$halt_a_run")"
+[ -L "${switch_root}/rootfs-target.img" ] \
+  || fail_test "successful setup did not migrate the compatibility rootfs to a symlink"
+[ "$(readlink "${switch_root}/rootfs-target.img")" = "${switch_root}/published/current/rootfs.img" ] \
+  || fail_test "successful setup compatibility rootfs does not resolve through current"
+printf '%s\n' "$halt_a_output" | rg -q --fixed-strings "Linux kernel: ${switch_root}/published/current/linux-kernel" \
+  || fail_test "setup summary did not expose the current immutable Linux kernel path"
+printf '%s\n' "$halt_a_output" | rg -q --fixed-strings "RTOS kernel:  ${switch_root}/published/current/rtos-kernel" \
+  || fail_test "setup summary did not expose the current immutable RTOS kernel path"
+printf '%s\n' "$halt_a_output" \
+  | rg -q --fixed-strings -- '--config os/axvisor/configs/board/qemu-aarch64-three-guest-net.toml' \
+  || fail_test "setup command did not select the dedicated three-guest board"
+
+run_complete_publication_fixture "$switch_root" "" busy >/dev/null \
+  || fail_test "busy immutable publication failed"
+busy_target="$(readlink "${switch_root}/published/current")"
+busy_run="${switch_root}/published/${busy_target}"
+[ "$busy_target" != "$halt_a_target" ] \
+  || fail_test "busy setup reused the first halt immutable run"
+busy_hashes="$(validated_manifest_snapshot "$busy_run")" \
+  || fail_test "busy immutable manifest was invalid"
+[ "$(validated_manifest_snapshot "$halt_a_run")" = "$halt_a_hashes" ] \
+  || fail_test "busy switch invalidated the first halt run"
+python3 - "$busy_run" <<'PY'
+import pathlib
+import tomllib
+import sys
+
+run = pathlib.Path(sys.argv[1])
+assert tomllib.loads((run / "zephyr-net.toml").read_text())["base"]["host_vcpu_idle_policy"] == "busy"
+PY
+
+run_complete_publication_fixture "$switch_root" "" halt >/dev/null \
+  || fail_test "second halt immutable publication failed"
+halt_b_target="$(readlink "${switch_root}/published/current")"
+halt_b_run="${switch_root}/published/${halt_b_target}"
+[ "$halt_b_target" != "$halt_a_target" ] && [ "$halt_b_target" != "$busy_target" ] \
+  || fail_test "halt/busy/halt setup did not create three independent immutable runs"
+validated_manifest_snapshot "$halt_b_run" >/dev/null \
+  || fail_test "second halt immutable manifest was invalid"
+[ "$(validated_manifest_snapshot "$halt_a_run")" = "$halt_a_hashes" ] \
+  || fail_test "second halt switch invalidated the first halt run"
+[ "$(validated_manifest_snapshot "$busy_run")" = "$busy_hashes" ] \
+  || fail_test "second halt switch invalidated the busy run"
+[ "$(manifest_semantic_snapshot "$halt_b_run")" = "$halt_a_semantics" ] \
+  || fail_test "repeated halt runs were not deterministic after normalizing immutable paths"
+
+preflight_root="${functional_root}/preflight-fixture"
+preflight_bin="${preflight_root}/bin"
+mkdir -p "$preflight_bin"
+for required_command in python3 cpio file mktemp sort touch; do
+  required_path="$(command -v "$required_command")"
+  ln -s "$required_path" "${preflight_bin}/${required_command}"
+done
+set +e
+preflight_error="$(
+  bash -c '
+    set -euo pipefail
+    source "$1"
+    PATH="$2"
+    preflight_common
+  ' bash "$SETUP_SOURCE" "$preflight_bin" 2>&1
+)"
+preflight_status=$?
+set -e
+[ "$preflight_status" -ne 0 ] || fail_test "common preflight accepted a missing rg"
+printf '%s\n' "$preflight_error" | rg -q 'rg is required.*three-guest' \
+  || fail_test "missing common command lacked a contextual preflight diagnostic"
+
+readlink_preflight_bin="${preflight_root}/without-readlink"
+mkdir -p "$readlink_preflight_bin"
+for required_command in \
+  python3 rg cpio file mktemp sort touch find cp chmod mv rm mkdir ln; do
+  required_path="$(command -v "$required_command")"
+  ln -s "$required_path" "${readlink_preflight_bin}/${required_command}"
+done
+set +e
+readlink_preflight_error="$(
+  bash -c '
+    set -euo pipefail
+    source "$1"
+    PATH="$2"
+    preflight_common
+  ' bash "$SETUP_SOURCE" "$readlink_preflight_bin" 2>&1
+)"
+readlink_preflight_status=$?
+set -e
+[ "$readlink_preflight_status" -ne 0 ] \
+  || fail_test "common preflight accepted a missing readlink"
+printf '%s\n' "$readlink_preflight_error" | rg -q 'readlink is required.*immutable artifact' \
+  || fail_test "missing readlink lacked a contextual preflight diagnostic"
+
+rtos_preflight_bin="${preflight_root}/rtos-bin"
+mkdir -p "$rtos_preflight_bin"
+for build_command in cmake ninja readelf; do
+  printf '%s\n' '#!/bin/sh' 'exit 0' >"${rtos_preflight_bin}/${build_command}"
+  chmod +x "${rtos_preflight_bin}/${build_command}"
+done
+for missing_build_command in ninja readelf; do
+  disabled_command="${rtos_preflight_bin}/${missing_build_command}"
+  mv "$disabled_command" "${disabled_command}.disabled"
+  set +e
+  build_preflight_error="$(
+    bash -c '
+      set -euo pipefail
+      source "$1"
+      PATH="$2"
+      preflight_rtos_build
+    ' bash "$SETUP_SOURCE" "$rtos_preflight_bin" 2>&1
+  )"
+  build_preflight_status=$?
+  set -e
+  mv "${disabled_command}.disabled" "$disabled_command"
+  [ "$build_preflight_status" -ne 0 ] \
+    || fail_test "RTOS build preflight accepted missing ${missing_build_command}"
+  printf '%s\n' "$build_preflight_error" | rg -q "${missing_build_command} is required.*Zephyr" \
+    || fail_test "missing ${missing_build_command} lacked a contextual build preflight diagnostic"
+done
+
+echo "[rtbench-precision] source contract passed"

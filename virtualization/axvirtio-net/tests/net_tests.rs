@@ -1,13 +1,15 @@
 //! Integration tests for axvirtio-net (plan sections 13.3-13.6).
 
-use std::sync::{Arc, Mutex};
+use std::sync::{
+    Arc, Mutex,
+    atomic::{AtomicUsize, Ordering},
+};
 
 use ax_memory_addr::PhysAddr;
 use axaddrspace::GuestMemoryAccessor;
 use axdevice_base::{
-    BusKind, ControllerInputId, Device, DeviceAccess, DeviceId, DeviceVcpuId,
-    InterruptControllerId, InterruptTriggerMode, IrqResult, NoopDeviceContext, Resource,
-    WiredIrqInput, WiredIrqSink,
+    BusAccess, BusKind, BusResponse, ControllerInputId, Device, DeviceId, InterruptControllerId,
+    InterruptTriggerMode, IrqResult, NoopDeviceAccess, Resource, WiredIrqInput, WiredIrqSink,
 };
 // Re-export the MMIO register offsets from the common constants.
 use axvirtio_common::constants as vc;
@@ -68,11 +70,12 @@ impl GuestMemoryAccessor for SharedMem {
     }
 }
 
-/// Recording TX backend shared between the device and the test.
+/// Recording network backend shared between the device and the test.
 #[derive(Clone)]
 struct RecordBackend {
     frames: Arc<Mutex<Vec<Vec<u8>>>>,
     fail_next: Arc<Mutex<bool>>,
+    rx_notification_calls: Arc<AtomicUsize>,
 }
 
 impl RecordBackend {
@@ -82,6 +85,7 @@ impl RecordBackend {
             Self {
                 frames: frames.clone(),
                 fail_next: Arc::new(Mutex::new(false)),
+                rx_notification_calls: Arc::new(AtomicUsize::new(0)),
             },
             frames,
         )
@@ -92,6 +96,9 @@ impl RecordBackend {
     fn calls(&self) -> usize {
         self.frames.lock().unwrap().len()
     }
+    fn rx_notification_calls(&self) -> usize {
+        self.rx_notification_calls.load(Ordering::Relaxed)
+    }
 }
 
 impl NetworkBackend for RecordBackend {
@@ -101,6 +108,10 @@ impl NetworkBackend for RecordBackend {
         }
         self.frames.lock().unwrap().push(frame.to_vec());
         Ok(())
+    }
+
+    fn rx_queue_notified(&self) {
+        self.rx_notification_calls.fetch_add(1, Ordering::Relaxed);
     }
 }
 
@@ -282,6 +293,30 @@ fn device_identity_and_features() {
 }
 
 #[test]
+fn device_identity_can_use_qemu_virtio_mmio_vendor_id() {
+    let mem = Arc::new(MockMem::new(0x3000));
+    let (backend, _) = RecordBackend::new();
+    let dev = VirtioMmioNetDevice::new_with_vendor_id(
+        GuestPhysAddr::from(BASE_IPA),
+        REGION_LEN,
+        backend,
+        VirtioNetConfig::default(),
+        SharedMem(mem),
+        0x554d_4551,
+    )
+    .unwrap();
+
+    assert_eq!(
+        dev.mmio_read(
+            GuestPhysAddr::from(BASE_IPA + vc::VIRTIO_MMIO_VENDOR_ID),
+            AccessWidth::Dword,
+        )
+        .unwrap(),
+        0x554d_4551
+    );
+}
+
+#[test]
 fn mac_and_status_config_reads() {
     let mem = Arc::new(MockMem::new(0x3000));
     let cfg = VirtioNetConfig::new([0x00, 0x11, 0x22, 0x33, 0x44, 0x55]);
@@ -351,6 +386,19 @@ fn feature_negotiation_rejects_unsupported_bits() {
         "FEATURES_OK must be cleared"
     );
     assert_ne!(status & vc::VIRTIO_STATUS_FAILED, 0, "FAILED must be set");
+}
+
+#[test]
+fn queue_notify_routes_only_rx_queue_to_rx_backend_hook() {
+    let h = Harness::new();
+    h.bring_up();
+
+    assert_eq!(h.backend.rx_notification_calls(), 0);
+    assert_eq!(h.w(vc::VIRTIO_MMIO_QUEUE_NOTIFY, 0), DeviceEvent::None);
+    assert_eq!(h.backend.rx_notification_calls(), 1);
+
+    assert_eq!(h.w(vc::VIRTIO_MMIO_QUEUE_NOTIFY, 1), DeviceEvent::None);
+    assert_eq!(h.backend.rx_notification_calls(), 1);
 }
 
 // ---------------------------------------------------------------------------
@@ -481,66 +529,6 @@ fn tx_backend_error_still_completes_used() {
     assert_eq!(h.used_idx(h.tx_used), 1);
 }
 
-#[test]
-fn tx_avail_pre_read_failure_faults_queue_and_stops_drain() {
-    let h = Harness::new();
-    h.bring_up();
-    // Post one valid TX frame first so the TX queue has a non-zero last-consumed
-    // index: a silent "empty queue" fallback could otherwise mask the failure
-    // by reporting pending == 0.
-    let payload = [1, 2, 3, 4];
-    let mut frame = vec![0u8; NEGOTIATED_HEADER_SIZE];
-    frame.extend_from_slice(&payload);
-    h.write_desc(h.tx_desc, 0, h.tx_desc + 0x100, frame.len() as u32, 0, 0);
-    h.mem.put(h.tx_desc + 0x100, &frame);
-    h.set_avail(h.tx_avail, 0, 0, 1);
-    assert_eq!(
-        h.w(vc::VIRTIO_MMIO_QUEUE_NOTIFY, 1),
-        DeviceEvent::InterruptPending
-    );
-    assert_eq!(h.backend.calls(), 1, "sanity: one TX frame is transmitted");
-    assert_eq!(
-        h.used_idx(h.tx_used),
-        1,
-        "sanity: the TX frame is completed"
-    );
-    // A second request is now visible (avail.idx ahead of last-consumed index 1).
-    h.set_avail(h.tx_avail, 0, 0, 2);
-    // Rewrite the TX avail-ring address to a region whose `idx` field (base + 2)
-    // is unmapped (well beyond the mock backing). The address write alone keeps
-    // the queue ready; the layout check runs on QUEUE_READY, not on address
-    // writes.
-    h.w(vc::VIRTIO_MMIO_QUEUE_SEL, 1);
-    h.w(vc::VIRTIO_MMIO_QUEUE_AVAIL_LOW, 0xffff_fffe);
-    h.w(vc::VIRTIO_MMIO_QUEUE_AVAIL_HIGH, 0);
-
-    // The pre-read fails: the queue is faulted and the drain must not silently
-    // treat the queue as empty.
-    let ev = h.w(vc::VIRTIO_MMIO_QUEUE_NOTIFY, 1);
-    assert_eq!(ev, DeviceEvent::None);
-    assert_eq!(
-        h.backend.calls(),
-        1,
-        "no TX may be transmitted from a faulted queue"
-    );
-    // No completion is written and the queue is not consumed.
-    assert_eq!(h.used_idx(h.tx_used), 1);
-    // The queue is latched into the faulted state until the guest resets the
-    // device; the TX path observes it.
-    assert!(
-        h.device.is_queue_faulted(1),
-        "the unreadable avail ring must latch the queue faulted"
-    );
-    // Every later kick repeats the same rejection instead of re-failing per
-    // entry: the queue stays faulted until the guest resets the device.
-    assert_eq!(h.w(vc::VIRTIO_MMIO_QUEUE_NOTIFY, 1), DeviceEvent::None);
-    assert_eq!(h.used_idx(h.tx_used), 1);
-    assert_eq!(h.backend.calls(), 1);
-    // A guest reset clears the fault and the queue serves requests again.
-    h.w(vc::VIRTIO_MMIO_STATUS, 0);
-    assert!(!h.device.is_queue_faulted(1));
-}
-
 // ---------------------------------------------------------------------------
 // RX (13.5, subset)
 // ---------------------------------------------------------------------------
@@ -657,44 +645,6 @@ fn rx_readable_descriptor_rejected() {
     let err = h.device.receive_frame(&[0; 4]).unwrap_err();
     assert!(matches!(err, NetError::InvalidDescriptor), "got {err:?}");
     assert_eq!(h.used_idx(h.rx_used), 0);
-}
-
-#[test]
-fn rx_avail_pre_read_failure_faults_queue_and_rejects_frames() {
-    let h = Harness::new();
-    h.bring_up();
-    // Rewrite the RX avail-ring address to a region whose `idx` field (base + 2)
-    // is unmapped. The address write alone keeps the queue ready; the layout
-    // check runs on QUEUE_READY, not on address writes.
-    h.w(vc::VIRTIO_MMIO_QUEUE_SEL, 0);
-    h.w(vc::VIRTIO_MMIO_QUEUE_AVAIL_LOW, 0xffff_fffe);
-    h.w(vc::VIRTIO_MMIO_QUEUE_AVAIL_HIGH, 0);
-    // The queue stays faulted: `receive_frame` must return an error instead of
-    // silently treating the unreadable ring as empty. (The exact variant is the
-    // pre-existing `VirtioError -> NetError` mapping; the guarantee under test
-    // is the error itself plus the latch.)
-    let err = h.device.receive_frame(&[1, 2, 3]).unwrap_err();
-    assert!(
-        matches!(err, NetError::Queue(_) | NetError::GuestMemoryFault),
-        "got {err:?}"
-    );
-    assert_eq!(h.used_idx(h.rx_used), 0, "no RX completion may be written");
-    // The unreadable avail ring latches the queue faulted; the RX path observes
-    // it (the old behavior never latched and only reported flow control).
-    assert!(
-        h.device.is_queue_faulted(0),
-        "the unreadable avail ring must latch the queue faulted"
-    );
-    // Every later delivery repeats the same rejection.
-    let err = h.device.receive_frame(&[4, 5, 6]).unwrap_err();
-    assert!(
-        matches!(err, NetError::Queue(_) | NetError::GuestMemoryFault),
-        "got {err:?}"
-    );
-    assert_eq!(h.used_idx(h.rx_used), 0);
-    // A guest reset clears the fault and the queue accepts deliveries again.
-    h.w(vc::VIRTIO_MMIO_STATUS, 0);
-    assert!(!h.device.is_queue_faulted(0));
 }
 
 // ---------------------------------------------------------------------------
@@ -831,17 +781,21 @@ fn managed_device_declares_resources_and_routes_mmio() {
             },
         ]
     );
-    let mut context = NoopDeviceContext::new(DeviceId::new(0));
-    let value = device
-        .read(
-            &DeviceAccess::new(
-                DeviceVcpuId::new(0),
-                BusKind::Mmio,
-                BASE_IPA as u64,
-                AccessWidth::Dword,
-            ),
+    let mut context = NoopDeviceAccess::new(DeviceId::new(0));
+    let response = device
+        .access(
+            &BusAccess {
+                kind: BusKind::Mmio,
+                is_read: true,
+                addr: BASE_IPA as u64,
+                width: AccessWidth::Dword,
+                data: 0,
+            },
             &mut context,
         )
         .unwrap();
-    assert_eq!(value, vc::MMIO_MAGIC_VALUE as u64);
+    assert!(matches!(
+        response,
+        BusResponse::Read { value } if value == vc::MMIO_MAGIC_VALUE as u64
+    ));
 }

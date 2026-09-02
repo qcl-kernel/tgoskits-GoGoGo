@@ -1,8 +1,10 @@
 //! Native ArceOS lock facade and `ax-sync` bridge provider.
 
+#[cfg(feature = "multitask")]
+use core::sync::atomic::{AtomicPtr, AtomicU64};
 use core::{
     panic::Location,
-    sync::atomic::{AtomicBool, AtomicPtr, AtomicU64, AtomicUsize},
+    sync::atomic::{AtomicBool, AtomicUsize},
 };
 
 pub use ax_task::sync::api::*;
@@ -17,10 +19,6 @@ impl ax_sync::interface::ContextOps for RuntimeContextOps {
 
     fn exit(context: u8, state: usize) {
         ax_task::sync::bridge::context_exit(context, state);
-    }
-
-    fn exit_preempt_from_irq_return(state: usize) {
-        ax_task::sync::bridge::preempt_exit_from_irq_return(state);
     }
 }
 
@@ -104,8 +102,10 @@ impl ax_sync::interface::RwLockOps for RuntimeRwLockOps {
     }
 }
 
+#[cfg(feature = "multitask")]
 struct RuntimeMutexOps;
 
+#[cfg(feature = "multitask")]
 #[ax_crate_interface::impl_interface]
 impl ax_sync::interface::MutexOps for RuntimeMutexOps {
     fn acquire(

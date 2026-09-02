@@ -14,13 +14,14 @@ pub(crate) mod stream;
 
 use core::task::Context;
 
+use ax_errno::{AxError, AxResult};
 use ax_io::{IoBuf, IoBufMut, Read, Write};
 use axpoll::{IoEvents, Pollable};
 pub use rdif_vsock::{VsockAddr, VsockConnId};
 
 pub use self::stream::VsockStreamTransport;
 use crate::{
-    NetError, NetResult, RecvOptions, SendOptions, Shutdown, Socket, SocketAddrEx, SocketOps,
+    RecvOptions, SendOptions, Shutdown, Socket, SocketAddrEx, SocketOps,
     options::{Configurable, GetSocketOption, SetSocketOption},
 };
 
@@ -50,58 +51,58 @@ impl Default for VsockSocket {
 }
 
 impl Configurable for VsockSocket {
-    fn get_option_inner(&self, opt: &mut GetSocketOption) -> NetResult<bool> {
+    fn get_option_inner(&self, opt: &mut GetSocketOption) -> AxResult<bool> {
         self.transport.get_option_inner(opt)
     }
 
-    fn set_option_inner(&self, opt: SetSocketOption) -> NetResult<bool> {
+    fn set_option_inner(&self, opt: SetSocketOption) -> AxResult<bool> {
         self.transport.set_option_inner(opt)
     }
 }
 
 impl SocketOps for VsockSocket {
-    fn bind(&self, local_addr: SocketAddrEx) -> NetResult {
+    fn bind(&self, local_addr: SocketAddrEx) -> AxResult {
         let local_addr = local_addr.into_vsock()?;
         self.transport.bind(local_addr)
     }
 
-    fn connect(&self, remote_addr: SocketAddrEx) -> NetResult {
+    fn connect(&self, remote_addr: SocketAddrEx) -> AxResult {
         let remote_addr = remote_addr.into_vsock()?;
         self.transport.connect(remote_addr)
     }
 
-    fn listen(&self, _backlog: usize) -> NetResult {
+    fn listen(&self, _backlog: usize) -> AxResult {
         self.transport.listen()
     }
 
-    fn accept(&self) -> NetResult<Socket> {
+    fn accept(&self) -> AxResult<Socket> {
         self.transport.accept().map(|(transport, _addr)| {
             let socket = VsockSocket::from_transport(transport);
             socket.into()
         })
     }
 
-    fn send(&self, src: impl Read + IoBuf, options: SendOptions) -> NetResult<usize> {
+    fn send(&self, src: impl Read + IoBuf, options: SendOptions) -> AxResult<usize> {
         self.transport.send(src, options)
     }
 
-    fn recv(&self, dst: impl Write + IoBufMut, options: RecvOptions<'_>) -> NetResult<usize> {
+    fn recv(&self, dst: impl Write + IoBufMut, options: RecvOptions<'_>) -> AxResult<usize> {
         self.transport.recv(dst, options)
     }
 
-    fn local_addr(&self) -> NetResult<SocketAddrEx> {
+    fn local_addr(&self) -> AxResult<SocketAddrEx> {
         Ok(SocketAddrEx::Vsock(
-            self.transport.local_addr()?.ok_or(NetError::NotFound)?,
+            self.transport.local_addr()?.ok_or(AxError::NotFound)?,
         ))
     }
 
-    fn peer_addr(&self) -> NetResult<SocketAddrEx> {
+    fn peer_addr(&self) -> AxResult<SocketAddrEx> {
         Ok(SocketAddrEx::Vsock(
-            self.transport.peer_addr()?.ok_or(NetError::NotFound)?,
+            self.transport.peer_addr()?.ok_or(AxError::NotFound)?,
         ))
     }
 
-    fn shutdown(&self, how: Shutdown) -> NetResult {
+    fn shutdown(&self, how: Shutdown) -> AxResult {
         self.transport.shutdown(how)
     }
 }

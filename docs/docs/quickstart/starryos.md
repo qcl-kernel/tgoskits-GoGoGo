@@ -129,7 +129,7 @@ LS2K1000 启动链路由早期引导、动态平台、中断控制器、设备�
 | --- | --- | --- | --- |
 | 早期启动 | `someboot` | `platforms/someboot/src/arch/loongarch64/` | 解析 U-Boot 传入的 FDT，建立页表并启动 SMP |
 | CPU 与动态平台 | `ax-cpu`、`axplat-dyn`、`ax-hal` | `components/axcpu/src/loongarch64/`、`platforms/axplat-dyn/` | 提供 LoongArch64 上下文、陷阱和动态平台接口 |
-| 中断控制器 | `loongarch-intc-driver`、`somehal`、`rdif-intc`、`irq-framework` | `drivers/intc/loongarch-intc-driver/`；`platforms/somehal/src/arch/loongarch64/` | OS 无关 crate 驱动 EIOINTC、PCH-PIC 与 LIOINTC；`somehal` 负责 FDT/ACPI、映射、domain、注册和级联 |
+| 中断控制器 | `somehal`、`rdif-intc`、`irq-framework` | `platforms/somehal/src/arch/loongarch64/liointc.rs` | 探测并驱动 LS2K1000 LIOINTC |
 | 驱动发现 | `rdrive`、`ax-driver` | `drivers/ax-driver/` | 根据 FDT 探测并注册板载设备 |
 | 用户地址空间 | `starry-kernel` | `starry-kernel` feature `loongarch64-low-va` | 使用符合 2K1000 40-bit VA 限制的用户地址布局 |
 | 串口 | `ax-driver`、`some-serial`、`rdif-serial` | `ax-driver` feature `serial`；`drivers/ax-driver/src/serial/ns16550.rs` | 驱动 NS16550，并注册运行期 `ttyS0` |
@@ -138,7 +138,7 @@ LS2K1000 启动链路由早期引导、动态平台、中断控制器、设备�
 | 网络 | `ax-driver`、`rd-net`、`ax-net` | `ax-driver` feature `ls2k1000-gmac`；`drivers/ax-driver/src/net/loongson_gmac.rs` | 驱动板载 GMAC 并注册 `eth0` |
 | 根文件系统 | `ax-fs-ng`、`rsext4` | — | 扫描 SATA 分区并挂载 ext4 rootfs |
 
-板卡配置位于 `os/StarryOS/configs/board/ls2k1000.toml`。LS2K1000 AHCI 的 FDT/MMIO、寄存器状态机、owned-DMA 队列和最小 IRQ top-half 位于 `drivers/ax-driver/src/block/ahci/`。EIOINTC、PCH-PIC 与 LIOINTC 的寄存器核心位于 `loongarch-intc-driver`，`somehal` 只保留平台 glue；GMAC、RTC 和 NS16550 的 FDT 适配也位于 `ax-driver`。
+板卡配置位于 `os/StarryOS/configs/board/ls2k1000.toml`。LS2K1000 AHCI 的 FDT/MMIO、寄存器状态机、owned-DMA 队列和最小 IRQ top-half 位于 `drivers/ax-driver/src/block/ahci/`。LIOINTC 实现在 `somehal`；GMAC、RTC 和 NS16550 的 FDT 适配也位于 `ax-driver`。
 
 #### 3.1.2 构建镜像
 
@@ -212,29 +212,7 @@ saveenv
 run boot_starry
 ```
 
-仓库提供 JL-LSGD2K10（LS2K1000）板卡配置和 Starry test-suit。写盘测试会复用 Linux ext4 rootfs，因此测试前后都必须正常启动 Linux，确认能够进入 shell 且没有 `UNEXPECTED INCONSISTENCY`、目录损坏或要求人工 fsck 的错误。先取得串口会话并检查 Linux：
-
-```bash
-cargo xtask board connect -b JL-LSGD2K10
-```
-
-然后运行启动与真实 AHCI IRQ 写测：
-
-```bash
-cargo xtask starry test board --board jl-lsgd2k10
-cargo xtask starry app board -t block-rw-bench \
-  --board-config board-jl-lsgd2k10.toml -b JL-LSGD2K10
-```
-
-启动用例必须输出 `STARRY_JL_LSGD2K10_BOOT_OK`，写测必须输出 `JL_LSGD2K10_BLOCK_RW_BENCH_PASSED`。LS2K1000 AHCI 没有 polling fallback，因此后一个标志同时覆盖真实 LIOINTC 中断链。写测结束后再次正常启动 Linux并检查 ext4；若发现损坏，应保存串口日志、释放板卡租约并停止验证，不得把 OrangePi-5-Plus 专用的 U-Boot `fsckfix` 流程套到 JL-LSGD2K10。
-
-若静态 musl 程序在 `__malloc_allzerop` 内访问低地址失败，不应在 axstd 或应用中
-补同名接口。该符号是 musl mallocng 的内部实现；应先用同一 ELF 对照 QEMU、板端
-Linux 与板端 StarryOS，并检查 LoongArch TLB refill 是否把空目录项正确转换为
-全零无效 EntryLo。仓库的 `qemu/system/test-calloc-mallocng` 同时检查匿名页首次
-写入和静态 musl `calloc`。
-
-普通 QEMU 没有 LS2K1000/2K1000 machine，不能覆盖 LIOINTC、AHCI 和 GMAC 实板路径；`qemu-loongarch64` 只验证 LoongArch64 通用 EIOINTC/PCH-PIC 路径，不能替代上述板卡验证。
+仓库目前也没有 `ls2k1000-board.toml` 或 `test-suit/starryos/board-ls2k1000`，所以 `cargo starry board` 和 `cargo starry test board` 还不是 2K1000 的维护入口。普通 QEMU 同样没有 LS2K1000/2K1000 machine，无法覆盖 LIOINTC、AHCI 和 GMAC 实板路径。因此 `qemu-loongarch64` 只能验证 LoongArch64 通用路径，不能替代上面的手工物理板验证。
 
 ### 3.2 LicheeRV-Nano-SG2002
 
@@ -360,3 +338,94 @@ cargo starry test board --board visionfive2 --server "${OSTOOL_SERVER:?set OSTOO
 ```
 
 详细说明见：[StarryOS 测试套件设计](/docs/build/starry/test)
+
+## 5. AxVisor Task123 StarryOS 替换 Linux
+
+`starryos-replace` worktree 中提供了一个 AxVisor 双 guest 配置：StarryOS
+作为原 Linux 应用 guest 的替代品，RT-Thread 保持为独立的 RTOS guest。StarryOS
+使用 2 个 vCPU，运行在物理 CPU 0/1；RT-Thread 使用 1 个 vCPU，固定到物理 CPU 2。
+两个 guest 之间只使用 AxVisor 提供的 `virtio-net` 网络链路，地址分别为
+`192.168.77.11` 和 `192.168.77.30`。
+
+构建 StarryOS guest：
+
+```bash
+os/axvisor/guests/starryos-task123/build.sh \
+  --source-cpio /path/to/task123-linux/rootfs.cpio
+```
+
+构建 AxVisor：
+
+```bash
+cargo xtask axvisor build \
+  --config os/axvisor/configs/board/qemu-aarch64-starryos-task123.toml \
+  --vmconfigs os/axvisor/configs/vms/qemu/aarch64/starryos-task123.toml \
+  --vmconfigs /path/to/rtthread-net.toml
+```
+
+QEMU 启动时需要两个连接到同一个 hub 的 `virtio-net` 端点，具体参数见
+`os/axvisor/configs/qemu/qemu-aarch64-starryos-task123.toml`。运行期间，
+StarryOS 的 `/init` 会从 `/proc/cmdline` 读取 AxVisor guest bootargs；该接口由
+`os/StarryOS/kernel/src/pseudofs/proc.rs` 提供。
+
+最近一次实际 QEMU 验证使用 `task2.count=1000 task3.frames=3 task3.fault=normal`，
+日志保存在：
+
+```text
+tmp/starryos-task123/run/axvisor-cmdline-console.log
+```
+
+结果摘要：
+
+- StarryOS 两个 vCPU 均上线：`online=0-1 nproc=2`。
+- StarryOS virtio-net 初始化成功：`192.168.77.11`。
+- Task2 通过 RT-Thread `192.168.77.30:9876` 完成 `1000/1000` 请求响应，包含一次故障注入后的 TCP 重连恢复。
+- Task3 通过 UDP `9877` 完成 `FIXED 3 + AI 3` 共 6 条控制事务，应用层成功率为 `1.0`，RT-Thread 报告 `errors=0`。
+- 日志出现 `TASK3_STARRY_END status=PASS`、`TASK123_STARRY_END status=PASS` 和 `TASK123_STARRY_EXIT status=0`。
+
+本次验证证明 StarryOS 已替代 Linux 完成 Task123 的启动、网络通信和 AI 控制闭环。
+实时性长时间稳定性测试以及完整 600 帧结果仍应使用专门的测试入口单独执行，不能由这次 3 帧 smoke 结果代替。
+
+### 5.1 Linux/StarryOS 稳定性对比
+
+在 `starryos-replace` worktree 的仓库根目录执行下面的命令。脚本会依次使用相同的
+AxVisor、QEMU、RT-Thread 镜像、协议源码和模型运行 Linux 与 StarryOS，并在最后生成
+机器可读的 `comparison.json` 和 Markdown 汇总。
+
+```bash
+# 300 秒快速回归：每种 Task2 载荷 30000 次
+os/axvisor/scripts/run_task123_guest_comparison.sh \
+  --quick \
+  --allow-qemu-timer-limit \
+  --output "$PWD/tmp/task123-guest-comparison-quick"
+
+# 3600 秒正式运行：每种 Task2 载荷 240000 次
+os/axvisor/scripts/run_task123_guest_comparison.sh \
+  --full \
+  --allow-qemu-timer-limit \
+  --cache "$PWD/tmp/task123-comparison-cache" \
+  --output "$PWD/tmp/task123-guest-comparison-full"
+```
+
+`--cache` 保存可复用的 AxVisor、guest 和测试输入构建产物，避免 Linux 与 StarryOS
+两次运行分别重建输入。`--output` 必须为空目录；运行完成后重点查看：
+
+```text
+tmp/task123-guest-comparison-*/comparison/comparison.json
+tmp/task123-guest-comparison-*/comparison/comparison-report.md
+tmp/task123-guest-comparison-*/linux/summary.json
+tmp/task123-guest-comparison-*/starryos/summary.json
+tmp/task123-guest-comparison-*/linux/rtthread.log
+tmp/task123-guest-comparison-*/starryos/rtthread.log
+```
+
+结果状态分为两类：严格模式要求 RTBench `miss_1ms=0`；`--allow-qemu-timer-limit` 只
+允许在普通 x86_64 主机上的 AArch64 QEMU TCG 长测出现周期定时器超限时保留其余证据，
+并将结果标记为 `PASS_WITH_QEMU_TIMER_LIMIT`。该状态不等价于物理硬实时通过，报告中
+必须同时保留 `miss_1ms`、最大延迟、宿主 CPU/RSS 和原始日志。
+
+比较结果包含以下指标：64/256/1024 字节 Task2 请求的成功数、RTT 分位数、有效吞吐量、
+应用层错误、超时、重传、重复包和乱序包；Task3 推理、控制往返、RTOS 处理时延和成功率；
+RT-Thread 稳定性 jitter 与 callback execution 的 P50/P95/P99/P99.9/max；以及 QEMU
+墙钟、CPU 时间、峰值 RSS、最大线程数和采样数。完整测试报告见
+`docs/reports/starryos-linux-stability-comparison.md`。

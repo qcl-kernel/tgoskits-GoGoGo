@@ -66,15 +66,15 @@ impl Transfer {
         }
     }
 
-    pub fn complete_for_cpu(&self) {
+    pub fn complete_for_cpu_all(&self) {
         if let Some(ref mapping) = self.mapping {
-            mapping.complete_for_cpu(0..mapping.bytes_len());
+            mapping.complete_for_cpu_all();
         }
     }
 
-    pub fn prepare_for_device(&self) {
+    pub fn prepare_for_device_all(&self) {
         if let Some(ref mapping) = self.mapping {
-            mapping.prepare_for_device(0..mapping.bytes_len());
+            mapping.prepare_for_device_all();
         }
     }
 }

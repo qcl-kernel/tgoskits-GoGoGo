@@ -7,7 +7,7 @@ use axvm_types::VMId;
 
 use crate::{
     AxVmError, AxVmResult,
-    arch::current::ArchVCpu,
+    arch::ArchVCpu,
     ax_err,
     host::{HostPlatform, default_host},
     vcpu::with_current_vcpu,
@@ -32,15 +32,12 @@ pub(crate) fn push_existing_vm(vm: AxVMRef) -> bool {
         warn!("VM[{vm_id}] already exists, push VM failed");
         return false;
     }
-    registry.insert(vm_id, vm.clone());
-    drop(registry);
-    crate::arch::current::register_vm_platform_resources(&vm);
+    registry.insert(vm_id, vm);
     true
 }
 
 /// Remove a VM from the process-wide AxVM runtime registry.
 pub(crate) fn remove_existing_vm(vm_id: VMId) -> Option<AxVMRef> {
-    crate::arch::current::unregister_vm_platform_resources(vm_id);
     crate::runtime::vcpus::cleanup_vm_vcpus(vm_id);
     VM_REGISTRY.lock().remove(&vm_id)
 }
@@ -169,11 +166,6 @@ impl AxvmRuntime {
         crate::runtime::stop_vm(vm_id)
     }
 
-    /// Pause a VM selected from the runtime registry.
-    pub fn pause_vm(vm_id: VMId) -> AxVmResult {
-        crate::runtime::pause_vm(vm_id)
-    }
-
     /// Resume a VM selected from the runtime registry.
     pub fn resume_vm(vm_id: VMId) -> AxVmResult {
         crate::runtime::resume_vm(vm_id)
@@ -187,6 +179,11 @@ impl AxvmRuntime {
     /// Wake the primary vCPU of a VM.
     pub fn notify_vm(vm_id: VMId) -> AxVmResult {
         crate::runtime::notify_vm(vm_id)
+    }
+
+    /// Ask the VM's primary vCPU to poll DMA devices from its own run loop.
+    pub fn request_vm_device_poll(vm_id: VMId) -> AxVmResult {
+        crate::runtime::request_vm_device_poll(vm_id)
     }
 
     /// Remove a VM selected from the runtime registry.

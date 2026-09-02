@@ -1,0 +1,185 @@
+#!/bin/busybox sh
+set -u
+
+console() {
+    printf '%s\n' "$*" > /dev/console
+}
+
+invalid_control() {
+    console "TASK123_LINUX_INVALID $1"
+    console 'TASK123_LINUX_END status=FAIL'
+    finish 2
+}
+
+is_decimal() {
+    case "$1" in
+        ''|*[!0-9]*) return 1 ;;
+        *) return 0 ;;
+    esac
+}
+
+parse_command_line() {
+    task2_count=1000
+    task2_fault=none
+    task3_frames=600
+    task3_fault=normal
+    rtbench_net_count=0
+
+    for argument in $(/bin/busybox cat /proc/cmdline); do
+        case "$argument" in
+            task2.count=*)
+                value=${argument#*=}
+                is_decimal "$value" || invalid_control 'task2.count'
+                [ "$value" -gt 0 ] 2>/dev/null || invalid_control 'task2.count'
+                [ "$value" -le 2147483647 ] 2>/dev/null || invalid_control 'task2.count'
+                task2_count=$value
+                ;;
+            task2.fault=*)
+                value=${argument#*=}
+                case "$value" in
+                    none|reliability) task2_fault=$value ;;
+                    *) invalid_control 'task2.fault' ;;
+                esac
+                ;;
+            task3.frames=*)
+                value=${argument#*=}
+                is_decimal "$value" || invalid_control 'task3.frames'
+                [ "$value" -ge 1 ] 2>/dev/null || invalid_control 'task3.frames'
+                [ "$value" -le 600 ] 2>/dev/null || invalid_control 'task3.frames'
+                task3_frames=$value
+                ;;
+            task3.fault=*)
+                value=${argument#*=}
+                case "$value" in
+                    normal|drop-control|drop-status|duplicate-frame|delayed-server|malformed)
+                        task3_fault=$value
+                        ;;
+                        *) invalid_control 'task3.fault' ;;
+                        esac
+                        ;;
+            rtbench.net.count=*)
+                value=${argument#*=}
+                is_decimal "$value" || invalid_control 'rtbench.net.count'
+                [ "$value" -gt 0 ] 2>/dev/null || invalid_control 'rtbench.net.count'
+                [ "$value" -le 100000 ] 2>/dev/null || invalid_control 'rtbench.net.count'
+                rtbench_net_count=$value
+                ;;
+            task2.*|task3.*)
+                invalid_control "${argument%%=*}"
+                ;;
+            esac
+    done
+    if [ "$task2_fault" = reliability ] && [ "$task2_count" -lt 2 ]; then
+        invalid_control 'task2.count'
+    fi
+}
+
+main() {
+    /bin/busybox mkdir -p /proc /sys /dev /dev/pts
+    /bin/busybox mount -t proc proc /proc 2>/dev/null || true
+    /bin/busybox mount -t sysfs sysfs /sys 2>/dev/null || true
+    /bin/busybox mount -t devtmpfs devtmpfs /dev 2>/dev/null || true
+    /bin/busybox mount -t devpts devpts /dev/pts 2>/dev/null || true
+
+    parse_command_line
+
+    linux_online_cpus=$(/bin/busybox cat /sys/devices/system/cpu/online 2>/dev/null)
+    linux_nproc=$(/bin/busybox nproc 2>/dev/null)
+    printf 'LINUX_SMP_READY configured=2 online=%s nproc=%s\n' \
+        "$linux_online_cpus" "$linux_nproc" > /dev/console
+    if [ "$linux_online_cpus" != 0-1 ] || [ "$linux_nproc" != 2 ]; then
+        console 'TASK123_LINUX_END status=FAIL'
+        finish 1
+    fi
+
+    if ! /bin/busybox ip addr flush dev eth0 ||
+        ! /bin/busybox ip addr add 192.168.77.11/24 dev eth0 ||
+        ! /bin/busybox ip link set dev eth0 up; then
+        console 'TASK123_LINUX_END status=FAIL'
+        finish 1
+    fi
+    console 'TASK123_LINUX_NET_READY ip=192.168.77.11 peer=192.168.77.30'
+
+    net_probe_pid=
+    if [ "$rtbench_net_count" -gt 0 ]; then
+        /usr/bin/rtbench-net-probe \
+            --listen 9879 \
+            --target 192.168.77.30 \
+            --port 9878 \
+            --count "$rtbench_net_count" \
+            --interval-us 2000 > /dev/console 2>&1 &
+        net_probe_pid=$!
+        console "TASK3_LINUX_NET_PROBE_READY count=$rtbench_net_count"
+    fi
+
+    console 'TASK2_LINUX_BEGIN port=9876'
+    /bin/rtipic-client \
+        --host 192.168.77.30 \
+        --port 9876 \
+        --count "$task2_count" \
+        --fault-profile "$task2_fault" > /dev/console 2>&1
+    task2_status=$?
+    printf 'RT-IPC client exited with rc=%s\n' \
+        "$task2_status" > /dev/console
+    if [ "$task2_status" -eq 0 ]; then
+        console 'TASK2_LINUX_END status=PASS'
+    else
+        printf 'TASK2_LINUX_END status=FAIL exit_status=%s\n' \
+            "$task2_status" > /dev/console
+    fi
+
+    set -- \
+        --video /opt/task3/line-follow.y4m \
+        --truth /opt/task3/truth.csv \
+        --peer 192.168.77.30 \
+        --port 9877 \
+        --frames "$task3_frames" \
+        --csv /tmp/task3-frames.csv
+    case "$task3_fault" in
+        drop-control) set -- "$@" --drop-tx-seq 2 ;;
+        duplicate-frame) set -- "$@" --duplicate-frame-once ;;
+        malformed) set -- "$@" --malformed-once ;;
+        normal|drop-status|delayed-server) ;;
+    esac
+
+    console 'TASK3_LINUX_READY ip=192.168.77.11 peer=192.168.77.30:9877'
+    /usr/bin/task3-linux "$@" > /dev/console 2>&1
+    task3_status=$?
+    if [ "$task3_status" -eq 0 ]; then
+        console 'TASK3_LINUX_END status=PASS'
+    else
+        printf 'TASK3_LINUX_END status=FAIL exit_status=%s\n' \
+            "$task3_status" > /dev/console
+    fi
+
+    if [ "$task2_status" -eq 0 ] && [ "$task3_status" -eq 0 ]; then
+        console 'TASK123_LINUX_END status=PASS'
+        if [ -n "$net_probe_pid" ]; then
+            if wait "$net_probe_pid"; then
+                console 'TASK123_LINUX_RTBENCH_END status=PASS'
+            else
+                console 'TASK123_LINUX_RTBENCH_END status=FAIL'
+                finish 1
+            fi
+        fi
+        finish 0
+    fi
+    console 'TASK123_LINUX_END status=FAIL'
+    if [ "$task2_status" -ne 0 ]; then
+        finish "$task2_status"
+    fi
+    finish "$task3_status"
+}
+
+finish() {
+    status=$1
+    if ! /bin/busybox sync; then
+        [ "$status" -ne 0 ] || status=1
+    fi
+    if ! /bin/busybox poweroff -f; then
+        [ "$status" -ne 0 ] || status=1
+    fi
+    exit "$status"
+}
+
+main "$@"

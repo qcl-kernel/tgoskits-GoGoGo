@@ -1,9 +1,7 @@
+use ax_errno::{AxError, AxResult};
 use usb_serial::{ControlTransfer, UsbSerialChip, UsbSerialPort, probe_supported_port};
 
-use crate::{
-    StarryError, StarryResult,
-    pseudofs::usbfs::{self, UsbDeviceHandle, UsbDeviceSnapshotInfo},
-};
+use crate::pseudofs::usbfs::{self, UsbDeviceHandle, UsbDeviceSnapshotInfo};
 
 #[derive(Clone, Copy)]
 pub(super) struct UsbSerialPortInfo {
@@ -39,11 +37,11 @@ impl UsbSerialPortInfo {
         self.port.bulk_out
     }
 
-    pub(super) fn init(&self, handle: &UsbDeviceHandle, baud: u32) -> StarryResult<()> {
+    pub(super) fn init(&self, handle: &UsbDeviceHandle, baud: u32) -> AxResult<()> {
         self.chip.init(&StarryControl(handle), &self.port, baud)
     }
 
-    pub(super) fn set_baud(&self, handle: &UsbDeviceHandle, baud: u32) -> StarryResult<()> {
+    pub(super) fn set_baud(&self, handle: &UsbDeviceHandle, baud: u32) -> AxResult<()> {
         self.chip.set_baud(&StarryControl(handle), &self.port, baud)
     }
 }
@@ -51,7 +49,7 @@ impl UsbSerialPortInfo {
 struct StarryControl<'a>(&'a UsbDeviceHandle);
 
 impl ControlTransfer for StarryControl<'_> {
-    type Error = StarryError;
+    type Error = AxError;
 
     fn control_out(
         &self,

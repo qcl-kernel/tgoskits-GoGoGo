@@ -9,10 +9,11 @@
 use alloc::sync::Arc;
 use core::ffi::{c_int, c_uint};
 
+use ax_errno::{LinuxError, LinuxResult};
 use ax_io::PollState;
 
 use super::fd_ops::{FileLike, add_file_like};
-use crate::{PosixError, PosixResult, ctypes, sync::Mutex};
+use crate::{ctypes, sync::Mutex};
 
 const EFD_SUPPORTED_FLAGS: u32 = ctypes::EFD_SEMAPHORE | ctypes::EFD_CLOEXEC | ctypes::EFD_NONBLOCK;
 
@@ -41,15 +42,15 @@ impl EventFd {
 }
 
 impl FileLike for EventFd {
-    fn read(&self, buf: &mut [u8]) -> PosixResult<usize> {
+    fn read(&self, buf: &mut [u8]) -> LinuxResult<usize> {
         if buf.len() < 8 {
-            return Err(PosixError::EINVAL);
+            return Err(LinuxError::EINVAL);
         }
         loop {
             let mut inner = self.inner.lock();
             if inner.counter == 0 {
                 if inner.nonblocking {
-                    return Err(PosixError::EAGAIN);
+                    return Err(LinuxError::EAGAIN);
                 }
                 // Busy-wait: there is no wait queue to park on, so a blocking
                 // reader just yields to the cooperative scheduler and re-checks.
@@ -78,17 +79,17 @@ impl FileLike for EventFd {
         }
     }
 
-    fn write(&self, buf: &[u8]) -> PosixResult<usize> {
+    fn write(&self, buf: &[u8]) -> LinuxResult<usize> {
         // Linux requires the write buffer to be exactly 8 bytes (fs/eventfd.c:
         // `if (count != sizeof(ucnt)) return -EINVAL;`). Unlike read, which
         // accepts any buffer of at least 8 bytes, a longer write fails too.
         if buf.len() != 8 {
-            return Err(PosixError::EINVAL);
+            return Err(LinuxError::EINVAL);
         }
         let value = u64::from_ne_bytes(buf[..8].try_into().unwrap());
         // A write of UINT64_MAX always fails with EINVAL (fs/eventfd.c).
         if value == u64::MAX {
-            return Err(PosixError::EINVAL);
+            return Err(LinuxError::EINVAL);
         }
         loop {
             let mut inner = self.inner.lock();
@@ -99,7 +100,7 @@ impl FileLike for EventFd {
             // `value` is at most UINT64_MAX - 1.
             if inner.counter >= u64::MAX - value {
                 if inner.nonblocking {
-                    return Err(PosixError::EAGAIN);
+                    return Err(LinuxError::EAGAIN);
                 }
                 // Busy-wait, same as read(): TODO park on a wait queue.
                 drop(inner);
@@ -115,7 +116,7 @@ impl FileLike for EventFd {
         }
     }
 
-    fn stat(&self) -> PosixResult<ctypes::stat> {
+    fn stat(&self) -> LinuxResult<ctypes::stat> {
         let st_mode = 0o100000 | 0o600u32; // S_IFREG | rw-------
         Ok(ctypes::stat {
             st_ino: 1,
@@ -129,7 +130,7 @@ impl FileLike for EventFd {
         self
     }
 
-    fn poll(&self) -> PosixResult<PollState> {
+    fn poll(&self) -> LinuxResult<PollState> {
         let inner = self.inner.lock();
         // Matches Linux `eventfd_poll`: writable only while
         // `count < ULLONG_MAX - 1`, i.e. while a 1-unit write can still
@@ -143,7 +144,7 @@ impl FileLike for EventFd {
         })
     }
 
-    fn set_nonblocking(&self, nonblocking: bool) -> PosixResult {
+    fn set_nonblocking(&self, nonblocking: bool) -> LinuxResult {
         self.inner.lock().nonblocking = nonblocking;
         Ok(())
     }
@@ -155,7 +156,7 @@ pub fn sys_eventfd(initval: c_uint, flags: c_int) -> c_int {
     syscall_body!(sys_eventfd, {
         let flags = flags as u32;
         if flags & !EFD_SUPPORTED_FLAGS != 0 {
-            return Err(PosixError::EINVAL);
+            return Err(LinuxError::EINVAL);
         }
         // `EFD_CLOEXEC` is validated above but deliberately not stored: ArceOS
         // has no `exec`, so there is no child fd table to close it from.

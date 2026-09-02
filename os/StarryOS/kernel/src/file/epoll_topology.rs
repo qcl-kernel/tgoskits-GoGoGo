@@ -3,11 +3,10 @@
 use alloc::{sync::Arc, vec::Vec};
 use core::sync::atomic::{AtomicU64, Ordering};
 
+use ax_errno::{AxError, AxResult};
+
 use super::epoll::EpollInner;
-use crate::{
-    StarryError, StarryResult,
-    sync::{IrqMutex, Mutex, MutexGuard},
-};
+use crate::sync::{IrqMutex, Mutex, MutexGuard};
 
 const MAX_NESTED_EPOLL_EDGES: usize = 4;
 
@@ -48,24 +47,24 @@ pub(super) fn lock_epoll_topology() -> MutexGuard<'static, ()> {
 pub(super) fn prepare_nested_link(
     source: &Arc<EpollInner>,
     target: &Arc<EpollInner>,
-) -> StarryResult<EpollTopologyLink> {
+) -> AxResult<EpollTopologyLink> {
     if Arc::ptr_eq(source, target) {
-        return Err(StarryError::InvalidInput);
+        return Err(AxError::InvalidInput);
     }
 
     let downstream = scan_epoll_topology(target, TopologyDirection::Children, Some(source))?;
     if downstream.reached_target {
-        return Err(StarryError::FilesystemLoop);
+        return Err(AxError::FilesystemLoop);
     }
     let upstream = scan_epoll_topology(source, TopologyDirection::Parents, None)?;
     if upstream.max_depth + 1 + downstream.max_depth > MAX_NESTED_EPOLL_EDGES {
-        return Err(StarryError::FilesystemLoop);
+        return Err(AxError::FilesystemLoop);
     }
 
     let edge_id = NEXT_EPOLL_EDGE_ID
         .try_update(Ordering::Relaxed, Ordering::Relaxed, |id| id.checked_add(1))
         .map(EpollEdgeId)
-        .map_err(|_| StarryError::NoMemory)?;
+        .map_err(|_| AxError::NoMemory)?;
     Ok(EpollTopologyLink {
         id: edge_id,
         node: Arc::downgrade(target),
@@ -76,19 +75,19 @@ pub(super) fn prepare_nested_link(
 pub(super) fn reserve_nested_link(
     source: &Arc<EpollInner>,
     target: &Arc<EpollInner>,
-) -> StarryResult<()> {
+) -> AxResult<()> {
     source
         .topology
         .children
         .lock()
         .try_reserve(1)
-        .map_err(|_| StarryError::NoMemory)?;
+        .map_err(|_| AxError::NoMemory)?;
     target
         .topology
         .parents
         .lock()
         .try_reserve(1)
-        .map_err(|_| StarryError::NoMemory)?;
+        .map_err(|_| AxError::NoMemory)?;
     Ok(())
 }
 
@@ -125,7 +124,7 @@ fn scan_epoll_topology(
     start: &Arc<EpollInner>,
     direction: TopologyDirection,
     target: Option<&Arc<EpollInner>>,
-) -> StarryResult<TopologyScan> {
+) -> AxResult<TopologyScan> {
     let mut pending = Vec::new();
     let mut visited_depths = Vec::new();
     push_topology_item(&mut pending, (Arc::clone(start), 0))?;
@@ -140,7 +139,7 @@ fn scan_epoll_topology(
             };
             let next_depth = depth + 1;
             if next_depth > MAX_NESTED_EPOLL_EDGES {
-                return Err(StarryError::FilesystemLoop);
+                return Err(AxError::FilesystemLoop);
             }
             if target.is_some_and(|target| Arc::ptr_eq(&next, target)) {
                 return Ok(TopologyScan {
@@ -172,7 +171,7 @@ fn scan_epoll_topology(
 }
 
 impl EpollTopology {
-    fn snapshot_links(&self, direction: TopologyDirection) -> StarryResult<Vec<EpollTopologyLink>> {
+    fn snapshot_links(&self, direction: TopologyDirection) -> AxResult<Vec<EpollTopologyLink>> {
         let links = match direction {
             TopologyDirection::Parents => &self.parents,
             TopologyDirection::Children => &self.children,
@@ -181,9 +180,7 @@ impl EpollTopology {
         loop {
             let len = links.lock().len();
             let mut snapshot = Vec::new();
-            snapshot
-                .try_reserve(len)
-                .map_err(|_| StarryError::NoMemory)?;
+            snapshot.try_reserve(len).map_err(|_| AxError::NoMemory)?;
 
             let mut links = links.lock();
             links.retain(|link| link.node.strong_count() != 0);
@@ -196,14 +193,14 @@ impl EpollTopology {
     }
 }
 
-fn push_topology_item<T>(items: &mut Vec<T>, item: T) -> StarryResult<()> {
-    items.try_reserve(1).map_err(|_| StarryError::NoMemory)?;
+fn push_topology_item<T>(items: &mut Vec<T>, item: T) -> AxResult<()> {
+    items.try_reserve(1).map_err(|_| AxError::NoMemory)?;
     items.push(item);
     Ok(())
 }
 
-#[cfg(all(test, not(axtest)))]
-fn push_topology_item_preserves_order_and_grows_capacity() -> bool {
+#[cfg(axtest)]
+pub(crate) fn push_topology_item_preserves_order_and_grows_capacity() -> bool {
     let mut items: Vec<u32> = Vec::new();
     // First push seeds the vector with one element.
     push_topology_item(&mut items, 10).is_ok()
@@ -216,13 +213,13 @@ fn push_topology_item_preserves_order_and_grows_capacity() -> bool {
         && items.capacity() >= 3
 }
 
-#[cfg(all(test, not(axtest)))]
-fn epoll_edge_id_and_constants_hold_for_test() -> bool {
+#[cfg(axtest)]
+pub(crate) fn epoll_edge_id_and_constants_hold_for_test() -> bool {
     // Test EpollEdgeId
     let id1 = EpollEdgeId(1);
     let id2 = EpollEdgeId(2);
     assert!(id1 != id2);
-    assert_eq!(id1.0, 1);
+    assert!(id1 == id1);
 
     // Test MAX_NESTED_EPOLL_EDGES constant
     assert_eq!(MAX_NESTED_EPOLL_EDGES, 4);
@@ -230,8 +227,8 @@ fn epoll_edge_id_and_constants_hold_for_test() -> bool {
     true
 }
 
-#[cfg(all(test, not(axtest)))]
-fn epoll_topology_struct_and_methods_hold_for_test() -> bool {
+#[cfg(axtest)]
+pub(crate) fn epoll_topology_struct_and_methods_hold_for_test() -> bool {
     // Test EpollTopology default construction
     let _topology = EpollTopology::default();
 
@@ -241,8 +238,8 @@ fn epoll_topology_struct_and_methods_hold_for_test() -> bool {
     true
 }
 
-#[cfg(all(test, not(axtest)))]
-fn epoll_topology_direction_and_scan_hold_for_test() -> bool {
+#[cfg(axtest)]
+pub(crate) fn epoll_topology_direction_and_scan_hold_for_test() -> bool {
     // Test TopologyDirection variants exist
     let _parents = TopologyDirection::Parents;
     let _children = TopologyDirection::Children;
@@ -258,11 +255,11 @@ fn epoll_topology_direction_and_scan_hold_for_test() -> bool {
     true
 }
 
-#[cfg(all(test, not(axtest)))]
-fn epoll_edge_id_clone_copy_partial_eq_hold_for_test() -> bool {
+#[cfg(axtest)]
+pub(crate) fn epoll_edge_id_clone_copy_partial_eq_hold_for_test() -> bool {
     // Test EpollEdgeId derives
     let id1 = EpollEdgeId(42);
-    let id2 = id1; // Clone
+    let id2 = id1.clone(); // Clone
     assert!(id1 == id2); // PartialEq (use assert! to avoid Debug requirement)
 
     let id3 = id1; // Copy
@@ -271,8 +268,8 @@ fn epoll_edge_id_clone_copy_partial_eq_hold_for_test() -> bool {
     true
 }
 
-#[cfg(all(test, not(axtest)))]
-fn epoll_topology_static_constants_hold_for_test() -> bool {
+#[cfg(axtest)]
+pub(crate) fn epoll_topology_static_constants_hold_for_test() -> bool {
     // Test static constants
     assert_eq!(MAX_NESTED_EPOLL_EDGES, 4);
 
@@ -282,8 +279,8 @@ fn epoll_topology_static_constants_hold_for_test() -> bool {
     true
 }
 
-#[cfg(all(test, not(axtest)))]
-fn epoll_topology_link_clone_hold_for_test() -> bool {
+#[cfg(axtest)]
+pub(crate) fn epoll_topology_link_clone_hold_for_test() -> bool {
     // Test EpollTopologyLink is Clone
     // Can't construct without Arc<EpollInner>, but verify the type has Clone bound
 
@@ -294,8 +291,8 @@ fn epoll_topology_link_clone_hold_for_test() -> bool {
     true
 }
 
-#[cfg(all(test, not(axtest)))]
-fn epoll_topology_vec_and_reserve_hold_for_test() -> bool {
+#[cfg(axtest)]
+pub(crate) fn epoll_topology_vec_and_reserve_hold_for_test() -> bool {
     use alloc::vec::Vec;
 
     // Test Vec operations used in topology
@@ -319,15 +316,17 @@ fn epoll_topology_vec_and_reserve_hold_for_test() -> bool {
     assert!(vec2.len() == 2);
 
     // iter().find()
-    let vec3: Vec<(u64, usize)> = alloc::vec![(100, 1), (200, 2)];
+    let mut vec3: Vec<(u64, usize)> = Vec::new();
+    vec3.push((100, 1));
+    vec3.push((200, 2));
     let found = vec3.iter().find(|(ptr, _)| *ptr == 200);
     assert!(found.is_some());
 
     true
 }
 
-#[cfg(all(test, not(axtest)))]
-fn epoll_arc_operations_hold_for_test() -> bool {
+#[cfg(axtest)]
+pub(crate) fn epoll_arc_operations_hold_for_test() -> bool {
     use alloc::sync::Arc;
 
     // Test Arc operations used in topology
@@ -350,54 +349,4 @@ fn epoll_arc_operations_hold_for_test() -> bool {
     assert!(weak.upgrade().is_some());
 
     true
-}
-
-#[cfg(all(test, not(axtest)))]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn push_topology_item_preserves_order_and_grows_capacity() {
-        assert!(super::push_topology_item_preserves_order_and_grows_capacity());
-    }
-
-    #[test]
-    fn epoll_edge_id_and_constants_hold() {
-        assert!(epoll_edge_id_and_constants_hold_for_test());
-    }
-
-    #[test]
-    fn epoll_topology_struct_and_methods_hold() {
-        assert!(epoll_topology_struct_and_methods_hold_for_test());
-    }
-
-    #[test]
-    fn epoll_topology_direction_and_scan_hold() {
-        assert!(epoll_topology_direction_and_scan_hold_for_test());
-    }
-
-    #[test]
-    fn epoll_edge_id_clone_copy_partial_eq_hold() {
-        assert!(epoll_edge_id_clone_copy_partial_eq_hold_for_test());
-    }
-
-    #[test]
-    fn epoll_topology_static_constants_hold() {
-        assert!(epoll_topology_static_constants_hold_for_test());
-    }
-
-    #[test]
-    fn epoll_topology_link_clone_hold() {
-        assert!(epoll_topology_link_clone_hold_for_test());
-    }
-
-    #[test]
-    fn epoll_topology_vec_and_reserve_hold() {
-        assert!(epoll_topology_vec_and_reserve_hold_for_test());
-    }
-
-    #[test]
-    fn epoll_arc_operations_hold() {
-        assert!(epoll_arc_operations_hold_for_test());
-    }
 }

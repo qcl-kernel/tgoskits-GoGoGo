@@ -107,7 +107,7 @@ impl GuardState for PreemptIrqSaveState {
 /// require_send::<ax_sync::PreemptGuard>();
 /// ```
 pub struct PreemptGuard {
-    state: Option<usize>,
+    state: usize,
     _not_send: PhantomData<*mut ()>,
 }
 
@@ -115,19 +115,9 @@ impl PreemptGuard {
     /// Disables preemption until the returned guard is dropped.
     pub fn new() -> Self {
         Self {
-            state: Some(PreemptState::acquire()),
+            state: PreemptState::acquire(),
             _not_send: PhantomData,
         }
-    }
-
-    /// Finishes this preemption scope at the final IRQ-return boundary.
-    #[doc(hidden)]
-    pub fn finish_irq_return(mut self) {
-        let state = self
-            .state
-            .take()
-            .expect("IRQ-return preemption state must be present");
-        crate::interface::preempt_exit_from_irq_return(state);
     }
 }
 
@@ -139,9 +129,7 @@ impl Default for PreemptGuard {
 
 impl Drop for PreemptGuard {
     fn drop(&mut self) {
-        if let Some(state) = self.state.take() {
-            PreemptState::release(state);
-        }
+        PreemptState::release(self.state);
     }
 }
 

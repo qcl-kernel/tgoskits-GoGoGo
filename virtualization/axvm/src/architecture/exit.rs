@@ -1,9 +1,8 @@
 //! Architecture-neutral handlers for exits shared by every guest architecture.
 
-use axdevice_base::{BusKind, DeviceAccess, DeviceVcpuId};
 use axvm_types::VmArchVcpuOps;
 
-use super::{BoundVcpuExit, HypercallExit, MmioReadExit, MmioWriteExit, VcpuRunAction};
+use super::{ArchOps, BoundVcpuExit, HypercallExit, MmioReadExit, MmioWriteExit, VcpuRunAction};
 use crate::{AxVmError, AxVmResult, StopReason};
 
 pub(crate) fn handle_mmio_read<V: VmArchVcpuOps, D>(
@@ -12,7 +11,13 @@ pub(crate) fn handle_mmio_read<V: VmArchVcpuOps, D>(
     exit: MmioReadExit,
 ) -> AxVmResult<BoundVcpuExit<D>> {
     if !try_handle_mmio_read(vm, vcpu, exit)? {
-        return Err(missing_mmio_error("read", exit.addr, exit.width));
+        // Return 0 for unmapped MMIO reads instead of crashing the VM.
+        // This allows guest drivers to probe device presence (e.g. virtio MMIO scan).
+        warn!(
+            "Unhandled MMIO read at {:#x} width {:?} - returning 0",
+            exit.addr, exit.width
+        );
+        vcpu.set_gpr(exit.reg, 0);
     }
     Ok(BoundVcpuExit::Continue)
 }
@@ -22,10 +27,14 @@ pub(crate) fn try_handle_mmio_read<V: VmArchVcpuOps>(
     vcpu: &crate::vm::AxVCpuRef<V>,
     exit: MmioReadExit,
 ) -> AxVmResult<bool> {
-    let Some(raw) = try_read_mmio_value(vm, vcpu, exit.addr, exit.width)? else {
+    let Some(raw) = vm
+        .get_devices()?
+        .try_handle_mmio_read(exit.addr, exit.width)
+        .map_err(|error| AxVmError::device("read guest MMIO", error))?
+    else {
         return Ok(false);
     };
-    let masked = raw as usize & crate::vm::width_mask(exit.width);
+    let masked = raw & crate::vm::width_mask(exit.width);
     let val = if exit.signed_ext {
         crate::vm::sign_extend_value(masked, exit.width)
     } else {
@@ -35,81 +44,29 @@ pub(crate) fn try_handle_mmio_read<V: VmArchVcpuOps>(
     Ok(true)
 }
 
-#[cfg(target_arch = "x86_64")]
-pub(crate) fn read_mmio_value<V: VmArchVcpuOps>(
-    vm: &crate::AxVM,
-    vcpu: &crate::vm::AxVCpuRef<V>,
-    addr: axvm_types::GuestPhysAddr,
-    width: axvm_types::AccessWidth,
-) -> AxVmResult<usize> {
-    match try_read_mmio_value(vm, vcpu, addr, width)? {
-        Some(raw) => Ok(raw as usize),
-        None => Err(missing_mmio_error("read", addr, width)),
-    }
-}
-
-#[cfg(any(target_arch = "x86_64", target_arch = "loongarch64"))]
-pub(crate) fn finish_external_interrupt(vector: usize) {
-    crate::host::arceos::dispatch_host_irq(vector);
-}
-
-pub(crate) fn try_read_mmio_value<V: VmArchVcpuOps>(
-    vm: &crate::AxVM,
-    vcpu: &crate::vm::AxVCpuRef<V>,
-    addr: axvm_types::GuestPhysAddr,
-    width: axvm_types::AccessWidth,
-) -> AxVmResult<Option<u64>> {
-    let access = DeviceAccess::new(
-        DeviceVcpuId::new(vcpu.id()),
-        BusKind::Mmio,
-        addr.as_usize() as u64,
-        width,
-    );
-    vm.get_devices()?
-        .try_read(&access)
-        .map_err(|error| AxVmError::device("read guest MMIO", error))
-}
-
-pub(crate) fn handle_mmio_write<V: VmArchVcpuOps, D>(
+pub(crate) fn handle_mmio_write<A: ArchOps>(
     vm: &crate::AxVMRef,
-    vcpu: &crate::vm::AxVCpuRef<V>,
     exit: MmioWriteExit,
-) -> AxVmResult<BoundVcpuExit<D>> {
-    if !try_handle_mmio_write(vm, vcpu, exit)? {
-        return Err(missing_mmio_error("write", exit.addr, exit.width));
+) -> AxVmResult<BoundVcpuExit<A::DeferredRunWork>> {
+    if !try_handle_mmio_write::<A>(vm, exit)? {
+        // Silently ignore unmapped MMIO writes instead of crashing the VM.
+        warn!(
+            "Unhandled MMIO write at {:#x} width {:?} data={:#x} - ignoring",
+            exit.addr, exit.width, exit.data
+        );
     }
     Ok(BoundVcpuExit::Continue)
 }
 
-pub(crate) fn try_handle_mmio_write<V: VmArchVcpuOps>(
+pub(crate) fn try_handle_mmio_write<A: ArchOps>(
     vm: &crate::AxVMRef,
-    vcpu: &crate::vm::AxVCpuRef<V>,
     exit: MmioWriteExit,
 ) -> AxVmResult<bool> {
-    let access = DeviceAccess::new(
-        DeviceVcpuId::new(vcpu.id()),
-        BusKind::Mmio,
-        exit.addr.as_usize() as u64,
-        exit.width,
-    );
-    vm.try_write_device(&access, exit.data)
-}
-
-fn missing_mmio_error(
-    operation: &'static str,
-    addr: axvm_types::GuestPhysAddr,
-    width: axvm_types::AccessWidth,
-) -> AxVmError {
-    AxVmError::device(
-        "access guest MMIO",
-        axdevice::DeviceManagerError::Access {
-            operation,
-            bus: axdevice_base::BusKind::Mmio,
-            addr: addr.as_usize() as u64,
-            width,
-            source: axdevice_base::DeviceError::NotFound,
-        },
-    )
+    let handled = vm.try_handle_mmio_write(exit.addr, exit.width, exit.data as usize)?;
+    if handled {
+        A::after_mmio_write(vm);
+    }
+    Ok(handled)
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -135,7 +92,7 @@ fn is_aarch64_psci_function_id(raw_code: u64, abi: crate::runtime::hvc::HyperCal
 }
 
 fn complete_hypercall_decode_error<V: VmArchVcpuOps>(
-    vcpu: &crate::vcpu::AxVCpu<V>,
+    vcpu: &crate::vm::AxVCpuRef<V>,
     raw_code: u64,
     abi: crate::runtime::hvc::HyperCallAbi,
 ) {
@@ -299,7 +256,9 @@ mod tests {
 
     #[test]
     fn hvc_unknown_aarch64_psci_id_returns_not_supported() {
-        let vcpu = crate::vcpu::AxVCpu::<UnknownPsciVcpu>::new(99, 0, None, ()).unwrap();
+        let vcpu = crate::vm::AxVCpuRef::new(
+            crate::vcpu::AxVCpu::<UnknownPsciVcpu>::new(99, 0, None, ()).unwrap(),
+        );
 
         complete_hypercall_decode_error(
             &vcpu,
@@ -312,7 +271,9 @@ mod tests {
 
     #[test]
     fn hvc_unknown_non_aarch64_psci_id_does_not_clobber_return_value() {
-        let vcpu = crate::vcpu::AxVCpu::<UnknownPsciVcpu>::new(99, 0, None, ()).unwrap();
+        let vcpu = crate::vm::AxVCpuRef::new(
+            crate::vcpu::AxVCpu::<UnknownPsciVcpu>::new(99, 0, None, ()).unwrap(),
+        );
         vcpu.set_return_value(0x8400_000c);
 
         complete_hypercall_decode_error(

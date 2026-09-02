@@ -1,0 +1,65 @@
+[base]
+id = 1
+name = "starryos-task123"
+guest_type = "virtualized"
+cpu_num = 2
+guest_tlbi_policy = "vm_scoped"
+phys_cpu_ids = [0, 1]
+phys_cpu_sets = [0b1011, 0b1011]
+
+[kernel]
+entry_point = 0x8020_0000
+image_location = "memory"
+kernel_path = "../../../../../../target/aarch64-unknown-none-softfloat/release/starryos-task123.bin"
+kernel_load_addr = 0x8020_0000
+dtb_load_addr = 0x9f00_0000
+cmdline = "task2.count=1000 task3.frames=3 task3.fault=normal"
+memory_regions = [
+  [0x8000_0000, 0x2000_0000, 0x7, 2],
+]
+
+[devices]
+passthrough = []
+disabled = [
+  { path = "/virtio_mmio@a000000" },
+  { path = "/virtio_mmio@a000200" },
+  { path = "/virtio_mmio@a000400" },
+  { path = "/virtio_mmio@a000600" },
+  { path = "/virtio_mmio@a000800" },
+  { path = "/virtio_mmio@a000a00" },
+  { path = "/virtio_mmio@a000c00" },
+  { path = "/virtio_mmio@a000e00" },
+  { path = "/virtio_mmio@a001000" },
+  { path = "/virtio_mmio@a001200" },
+  { path = "/virtio_mmio@a001400" },
+  { path = "/virtio_mmio@a001600" },
+  { path = "/virtio_mmio@a001800" },
+  { path = "/virtio_mmio@a001a00" },
+  { path = "/virtio_mmio@a001c00" },
+  { path = "/virtio_mmio@a001e00" },
+  { path = "/virtio_mmio@a002000" },
+  { path = "/virtio_mmio@a002200" },
+  { path = "/virtio_mmio@a002400" },
+  { path = "/virtio_mmio@a002600" },
+  { path = "/virtio_mmio@a002800" },
+  { path = "/virtio_mmio@a002a00" },
+  { path = "/virtio_mmio@a002c00" },
+  { path = "/virtio_mmio@a002e00" },
+  { path = "/virtio_mmio@a003000" },
+  { path = "/virtio_mmio@a003200" },
+  { path = "/virtio_mmio@a003400" },
+  { path = "/virtio_mmio@a003600" },
+  { path = "/virtio_mmio@a003800" },
+  { path = "/virtio_mmio@a003a00" },
+  { path = "/virtio_mmio@a003c00" },
+  { path = "/virtio_mmio@a003e00" },
+  { path = "/pcie@10000000" },
+  { path = "/pl061@9030000" },
+  { path = "/pl031@9010000" },
+  { path = "/gpio-key-poweroff" },
+]
+
+[[devices.virtual]]
+id = "net0"
+model = "virtio-net"
+guest_mac = [0x52, 0x54, 0x00, 0x77, 0x00, 0x01]

@@ -1,13 +1,13 @@
 use alloc::{boxed::Box, sync::Arc};
-use core::time::Duration;
+use core::{cell::UnsafeCell, time::Duration};
 
 use ::xhci::{
     extended_capabilities::usb_legacy_support_capability::UsbLegacySupport,
     registers::doorbell,
     ring::trb::{command, event::CommandCompletion},
 };
-use ax_sync::{SpinLock, SpinRwLock as RwLock};
-use dma_api::{DmaCoherency, DmaDirection};
+use ax_sync::SpinRwLock as RwLock;
+use dma_api::DmaDirection;
 use futures::{FutureExt, future::BoxFuture};
 use mbarrier::mb;
 use usb_if::err::{TransferError, USBError};
@@ -43,6 +43,9 @@ pub struct Xhci {
     pub(crate) transfer_result_handler: TransferResultHandler,
     root_hub: Option<XhciRootHub>,
 }
+
+unsafe impl Send for Xhci {}
+unsafe impl Sync for Xhci {}
 
 impl CoreOp for Xhci {
     fn root_hub(&mut self) -> Box<dyn HubOp> {
@@ -88,7 +91,7 @@ impl CoreOp for Xhci {
 }
 
 impl Xhci {
-    pub fn new(mmio: Mmio, coherency: DmaCoherency, kernel: &'static dyn KernelOp) -> Result<Self> {
+    pub fn new(mmio: Mmio, kernel: &'static dyn KernelOp) -> Result<Self> {
         let reg = XhciRegisters::new(mmio);
 
         // 检查 xHCI 控制器的寻址能力（HCCPARAMS1 寄存器）
@@ -109,14 +112,7 @@ impl Xhci {
             u32::MAX as usize
         };
 
-        let kernel = Kernel::new(
-            dma_api::DmaDeviceInfo::new(
-                dma_api::DmaDomainId::Direct,
-                coherency,
-                dma_api::DmaConstraints::new(dma_mask as _),
-            ),
-            kernel,
-        );
+        let kernel = Kernel::new(dma_mask as _, kernel);
 
         let reg_shared = Arc::new(RwLock::new(reg.clone()));
 
@@ -349,10 +345,10 @@ impl Xhci {
     }
 
     fn setup_dcbaap(&mut self) -> Result {
-        let dcbaa_addr = self.dev()?.bus_addr();
+        let dcbaa_addr = self.dev()?.dcbaa.dma_addr();
         debug!("DCBAAP: {dcbaa_addr}");
         self.reg.write().operational.dcbaap.update_volatile(|r| {
-            r.set(dcbaa_addr);
+            r.set(dcbaa_addr.as_u64());
         });
         Ok(())
     }
@@ -445,7 +441,7 @@ impl Xhci {
 
             let bus_addr = scratchpad_buf_arr.bus_addr();
 
-            self.dev_mut()?.set_scratchpad_array(bus_addr);
+            self.dev_mut()?.dcbaa.set_cpu(0, bus_addr);
 
             debug!("Setting up {buf_count} scratchpads, at {bus_addr:#0x}");
             scratchpad_buf_arr
@@ -516,16 +512,15 @@ impl Xhci {
 }
 
 pub struct EventHandler {
-    state: SpinLock<EventHandlerState>,
+    reg: UnsafeCell<XhciRegisters>,
     cmd_finished: Finished<CommandCompletion>,
+    event_ring: UnsafeCell<EventRing>,
     transfer_result_handler: TransferResultHandler,
     ports: PortChangeWaker,
 }
 
-struct EventHandlerState {
-    reg: XhciRegisters,
-    event_ring: EventRing,
-}
+unsafe impl Send for EventHandler {}
+unsafe impl Sync for EventHandler {}
 
 impl EventHandler {
     fn new(
@@ -536,18 +531,28 @@ impl EventHandler {
         ports: PortChangeWaker,
     ) -> Self {
         Self {
-            state: SpinLock::new(EventHandlerState { reg, event_ring }),
+            reg: UnsafeCell::new(reg),
             cmd_finished,
+            event_ring: UnsafeCell::new(event_ring),
             transfer_result_handler,
             ports,
         }
     }
 
-    fn update_erdp(state: &mut EventHandlerState, clear_ehb: bool) {
-        let erdp = state.event_ring.erdp();
-        let segment_index = state.event_ring.segment_index();
-        state
-            .reg
+    #[allow(clippy::mut_from_ref)]
+    fn event_ring(&self) -> &mut EventRing {
+        unsafe { &mut *self.event_ring.get() }
+    }
+
+    #[allow(clippy::mut_from_ref)]
+    fn reg(&self) -> &mut XhciRegisters {
+        unsafe { &mut *self.reg.get() }
+    }
+
+    fn update_erdp(&self, clear_ehb: bool) {
+        let erdp = self.event_ring().erdp();
+        let segment_index = self.event_ring().segment_index();
+        self.reg()
             .interrupter_register_set
             .interrupter_mut(0)
             .erdp
@@ -562,17 +567,16 @@ impl EventHandler {
             });
     }
 
-    fn clean_event_ring(&self, state: &mut EventHandlerState) -> Event {
+    fn clean_event_ring(&self) -> Event {
         use xhci::ring::trb::event::Allowed;
         let mut event = Event::Nothing;
         let mut command_events = 0usize;
         let mut port_events = 0usize;
         let mut transfer_events = 0usize;
         let mut other_events = 0usize;
-        let mut controller_fault = false;
         let mut event_loop = 0usize;
 
-        while let Some(allowed) = state.event_ring.next() {
+        while let Some(allowed) = self.event_ring().next() {
             match allowed {
                 Allowed::CommandCompletion(c) => {
                     command_events += 1;
@@ -614,13 +618,10 @@ impl EventHandler {
                     // Interrupts synchronize queue state only. Do not call
                     // into OS glue or take manager/file/device locks here; the
                     // waiter that owns the queue will advance the transfer flow.
-                    let routed = unsafe {
+                    unsafe {
                         self.transfer_result_handler
                             .set_finished(slot_id, ep_id, ptr.into(), c)
                     };
-                    if !routed {
-                        controller_fault = true;
-                    }
                 }
                 _ => {
                     other_events += 1;
@@ -629,7 +630,7 @@ impl EventHandler {
             }
             event_loop += 1;
             if event_loop > super::ring::TRBS_PER_SEGMENT / 2 {
-                Self::update_erdp(state, false);
+                self.update_erdp(false);
                 event_loop = 0;
             }
         }
@@ -639,11 +640,9 @@ impl EventHandler {
             port_events,
             transfer_events,
             other_events,
-            state.event_ring.erst_dequeue_pointer()
+            self.event_ring().erst_dequeue_pointer()
         );
-        if controller_fault {
-            event = Event::Stopped;
-        } else if matches!(event, Event::Nothing) && transfer_events > 0 {
+        if matches!(event, Event::Nothing) && transfer_events > 0 {
             event = Event::TransferActivity {
                 count: transfer_events,
             };
@@ -655,17 +654,16 @@ impl EventHandler {
 impl EventHandlerOp for EventHandler {
     fn handle_event(&self) -> Event {
         let mut res = Event::Nothing;
-        let mut state = self.state.lock();
-        let sts = state.reg.operational.usbsts.read_volatile();
+        let sts = self.reg().operational.usbsts.read_volatile();
         let has_event_interrupt = sts.event_interrupt();
-        let has_pending_event = state.event_ring.has_pending_event();
+        let has_pending_event = self.event_ring().has_pending_event();
 
         if !has_event_interrupt && !has_pending_event {
             return res;
         }
 
         {
-            let irq = state.reg.interrupter_register_set.interrupter_mut(0);
+            let irq = self.reg().interrupter_register_set.interrupter_mut(0);
             let iman = irq.iman.read_volatile();
             let erdp = irq.erdp.read_volatile();
             if has_event_interrupt {
@@ -676,7 +674,7 @@ impl EventHandlerOp for EventHandler {
                     iman.interrupt_enable(),
                     erdp.event_handler_busy(),
                     erdp.event_ring_dequeue_pointer(),
-                    state.event_ring.erst_dequeue_pointer()
+                    self.event_ring().erst_dequeue_pointer()
                 );
             } else {
                 trace!(
@@ -686,26 +684,26 @@ impl EventHandlerOp for EventHandler {
                     iman.interrupt_enable(),
                     erdp.event_handler_busy(),
                     erdp.event_ring_dequeue_pointer(),
-                    state.event_ring.erst_dequeue_pointer()
+                    self.event_ring().erst_dequeue_pointer()
                 );
             }
         }
 
         if has_event_interrupt {
-            state.reg.operational.usbsts.update_volatile(|r| {
+            self.reg().operational.usbsts.update_volatile(|r| {
                 r.clear_event_interrupt();
             });
         }
 
         // 【关键】GIC 中断模式下，需要手动清除 IMAN.IP
         // 参考: Linux xhci_irq() in xhci-ring.c:3054-3059
-        let mut irq = state.reg.interrupter_register_set.interrupter_mut(0);
+        let mut irq = self.reg().interrupter_register_set.interrupter_mut(0);
         irq.iman.update_volatile(|r| {
             r.clear_interrupt_pending();
         });
 
-        res = self.clean_event_ring(&mut state);
-        Self::update_erdp(&mut state, true);
+        res = self.clean_event_ring();
+        self.update_erdp(true);
 
         res
     }

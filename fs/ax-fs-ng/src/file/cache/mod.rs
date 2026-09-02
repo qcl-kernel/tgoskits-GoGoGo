@@ -9,7 +9,7 @@ use alloc::{boxed::Box, sync::Arc, vec::Vec};
 use alloc::{collections::BTreeMap, sync::Weak};
 use core::{
     num::NonZeroUsize,
-    sync::atomic::{AtomicBool, AtomicU64, Ordering},
+    sync::atomic::{AtomicU64, Ordering},
 };
 
 use ax_io::prelude::*;
@@ -55,7 +55,6 @@ struct CachedFileShared {
     evict_listeners: Mutex<LinkedList<EvictListenerAdapter>>,
     backing: Option<FileNode>,
     len: AtomicU64,
-    unlinked: AtomicBool,
 }
 
 impl CachedFileShared {
@@ -68,7 +67,6 @@ impl CachedFileShared {
             evict_listeners: Mutex::new(LinkedList::default()),
             backing: Some(backing),
             len: AtomicU64::new(len),
-            unlinked: AtomicBool::new(false),
         }
     }
 
@@ -79,7 +77,6 @@ impl CachedFileShared {
             evict_listeners: Mutex::new(LinkedList::default()),
             backing: None,
             len: AtomicU64::new(len),
-            unlinked: AtomicBool::new(false),
         }
     }
 
@@ -108,11 +105,6 @@ impl CachedFileShared {
         self.backing.as_ref().ok_or(VfsError::InvalidInput)
     }
 
-    #[cfg(all(feature = "ext4", feature = "vfs"))]
-    fn mark_unlinked(&self) {
-        self.unlinked.store(true, Ordering::Release);
-    }
-
     #[cfg(test)]
     fn invoke_writeback_protect_for_test(&self, pns: &[u32]) -> VfsResult<()> {
         self.protect_dirty_pages_before_writeback(pns)
@@ -131,17 +123,6 @@ impl CachedFileShared {
     #[cfg(test)]
     fn page_cache_lock_is_free_for_test(&self) -> bool {
         self.page_cache.try_lock().is_some()
-    }
-}
-
-impl Drop for CachedFileShared {
-    fn drop(&mut self) {
-        if !self.unlinked.load(Ordering::Acquire) {
-            return;
-        }
-        for (_, page) in self.page_cache.lock().iter_mut() {
-            page.dirty = false;
-        }
     }
 }
 
@@ -515,8 +496,7 @@ impl CachedFile {
             // `dst` may point at user memory. Copy after releasing cached-file
             // locks so a user page fault can take AddrSpace without creating a
             // cached-I/O -> AddrSpace lock order.
-            dst.write_all(&scratch.data()[..chunk_len])
-                .map_err(crate::io_error_to_vfs_error)?;
+            dst.write_all(&scratch.data()[..chunk_len])?;
             read += chunk_len;
             current += chunk_len as u64;
         }
@@ -552,9 +532,7 @@ impl CachedFile {
             let page_offset = (current - page_start) as usize;
             let chunk_len =
                 ((PAGE_SIZE - page_offset).min(buf.remaining())).min((end - current) as usize);
-            let n = buf
-                .read(&mut scratch.data()[..chunk_len])
-                .map_err(crate::io_error_to_vfs_error)?;
+            let n = buf.read(&mut scratch.data()[..chunk_len])?;
             if n == 0 {
                 break;
             }
@@ -682,17 +660,9 @@ fn insert_inode_cached_file(key: CachedFileKey, shared: &Arc<CachedFileShared>) 
 #[cfg(feature = "ext4")]
 pub(crate) fn forget_cached_file_key(filesystem: &dyn FilesystemOps, inode: u64) {
     if filesystem.name() == "ext4" {
-        let cached = CACHED_FILE_BY_INODE
+        CACHED_FILE_BY_INODE
             .lock()
-            .remove(&(filesystem_key(filesystem), inode))
-            .and_then(|cached| cached.upgrade());
-        #[cfg(feature = "vfs")]
-        if let Some(cached) = cached {
-            cached.mark_unlinked();
-            reclaim::release_unlinked_cached_file(&cached);
-        }
-        #[cfg(not(feature = "vfs"))]
-        let _ = cached;
+            .remove(&(filesystem_key(filesystem), inode));
     }
 }
 

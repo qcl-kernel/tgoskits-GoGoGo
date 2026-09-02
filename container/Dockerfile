@@ -15,7 +15,6 @@ RUN apt-get update \
         build-essential \
         clang \
         cmake \
-        cpio \
         curl \
         dosfstools \
         e2fsprogs \
@@ -40,7 +39,6 @@ RUN apt-get update \
         python3 \
         python3-venv \
         qemu-user-static \
-        ripgrep \
         wget \
         xz-utils \
         zlib1g-dev \
@@ -84,7 +82,6 @@ RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
 
 RUN set -eux; \
     cd /tmp/rust-toolchain; \
-    rg --version; \
     rustc --version; \
     cargo --version; \
     cargo install cargo-binutils

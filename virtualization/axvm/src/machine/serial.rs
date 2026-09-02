@@ -5,8 +5,7 @@ use std::{string::String, vec::Vec};
 #[cfg(target_arch = "loongarch64")]
 use ax_std::os::arceos::driver as ax_driver;
 use axdevice::{
-    DeviceFirmwareBinding, DeviceFirmwareProperty, DeviceFirmwareSpec, FdtContributionSpec,
-    FdtNodeSpec, ResolvedDeviceGraph,
+    DeviceFirmwareBinding, DeviceFirmwareProperty, DeviceFirmwareSpec, ResolvedDeviceGraph,
 };
 use axdevice_base::AccessWidth;
 
@@ -234,11 +233,11 @@ pub(crate) fn resolved_serial_devices(
         .nodes()
         .filter_map(|node| {
             let firmware = node.firmware();
-            serial_fdt(firmware).and_then(|fdt| serial_model(fdt).map(|model| (node, fdt, model)))
+            serial_model(&firmware).map(|model| (node, firmware, model))
         })
-        .map(|(node, fdt, model)| {
-            let registers = single_slot(fdt, fdt.register_slots(), "register")?;
-            let interrupt = single_slot(fdt, fdt.interrupt_slots(), "interrupt")?;
+        .map(|(node, firmware, model)| {
+            let registers = single_slot(&firmware, firmware.register_slots(), "register")?;
+            let interrupt = single_slot(&firmware, firmware.interrupt_slots(), "interrupt")?;
             let resources = graph.resources_for(node.id())?;
             let transport = if let Some((_, base, length)) =
                 resources.pio_ranges().find(|(slot, ..)| *slot == registers)
@@ -251,12 +250,13 @@ pub(crate) fn resolved_serial_devices(
                         .map_err(|_| serial_range_error(node.id().as_str()))?,
                     length: usize::try_from(length)
                         .map_err(|_| serial_range_error(node.id().as_str()))?,
-                    register_shift: u8::try_from(u32_property(fdt, "reg-shift").unwrap_or(0))
+                    register_shift: u8::try_from(u32_property(&firmware, "reg-shift").unwrap_or(0))
                         .map_err(|_| serial_property_error(node.id().as_str(), "reg-shift"))?,
                     register_width: AccessWidth::try_from(
-                        usize::try_from(u32_property(fdt, "reg-io-width").unwrap_or(1)).map_err(
-                            |_| serial_property_error(node.id().as_str(), "reg-io-width"),
-                        )?,
+                        usize::try_from(u32_property(&firmware, "reg-io-width").unwrap_or(1))
+                            .map_err(|_| {
+                                serial_property_error(node.id().as_str(), "reg-io-width")
+                            })?,
                     )
                     .map_err(|()| serial_property_error(node.id().as_str(), "reg-io-width"))?,
                 }
@@ -268,7 +268,7 @@ pub(crate) fn resolved_serial_devices(
                     model,
                     transport,
                     irq,
-                    clock_hz: u32_property(fdt, "clock-frequency").unwrap_or(1_843_200),
+                    clock_hz: u32_property(&firmware, "clock-frequency").unwrap_or(1_843_200),
                 },
                 firmware_binding: node.firmware_binding().clone(),
             })
@@ -276,28 +276,22 @@ pub(crate) fn resolved_serial_devices(
         .collect()
 }
 
-fn serial_fdt(firmware: &DeviceFirmwareSpec) -> Option<&FdtNodeSpec> {
-    firmware
-        .fdt()?
-        .iter()
-        .find_map(|contribution| match contribution {
-            FdtContributionSpec::Console(node) => Some(node),
-            _ => None,
-        })
-}
-
-fn serial_model(firmware: &FdtNodeSpec) -> Option<GuestSerialModel> {
+fn serial_model(firmware: &DeviceFirmwareSpec) -> Option<GuestSerialModel> {
     if firmware
         .compatible()
         .iter()
         .any(|compatible| compatible == "arm,pl011")
     {
         Some(GuestSerialModel::Pl011)
-    } else if firmware
-        .compatible()
-        .iter()
-        .any(|compatible| matches!(compatible.as_str(), "ns16550" | "ns16550a"))
-    {
+    } else if firmware.compatible().iter().any(|compatible| {
+        // The DesignWare APB UART (dw-apb-uart) used by Rockchip RK3576 is a
+        // 16550-compatible 8250 core; Linux drives it through the same 8250
+        // driver as ns16550a. Treat it as a 16550 guest model.
+        matches!(
+            compatible.as_str(),
+            "ns16550" | "ns16550a" | "snps,dw-apb-uart"
+        )
+    }) {
         Some(GuestSerialModel::Uart16550)
     } else {
         None
@@ -305,7 +299,7 @@ fn serial_model(firmware: &FdtNodeSpec) -> Option<GuestSerialModel> {
 }
 
 fn single_slot<'a>(
-    firmware: &FdtNodeSpec,
+    firmware: &DeviceFirmwareSpec,
     slots: &'a [axdevice::ResourceSlot],
     kind: &'static str,
 ) -> AxVmResult<&'a axdevice::ResourceSlot> {
@@ -318,7 +312,7 @@ fn single_slot<'a>(
     Ok(slot)
 }
 
-fn u32_property(firmware: &FdtNodeSpec, name: &str) -> Option<u32> {
+fn u32_property(firmware: &DeviceFirmwareSpec, name: &str) -> Option<u32> {
     firmware
         .properties()
         .iter()

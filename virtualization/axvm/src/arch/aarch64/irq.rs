@@ -1,44 +1,50 @@
-//! AArch64 VM-local interrupt backend.
+//! AArch64 platform IRQ routing used by AxVM.
 
-use axdevice_base::{IrqError, IrqLineId, IrqResult, IrqSink};
-use axvm_types::{VMId, VMInterruptMode};
-
-use crate::{AxVmResult, irq::InterruptFabric};
-
-struct Aarch64VmIrqSink {
-    vm_id: VMId,
-    target_vcpu_id: usize,
+pub(crate) fn register_platform_irq_injector() {
+    ax_plat::irq::aarch64_hv::register_virtual_irq_injector(inject_platform_irq);
 }
 
-impl IrqSink for Aarch64VmIrqSink {
-    fn set_level(&self, line: IrqLineId, asserted: bool) -> IrqResult {
-        if asserted {
-            self.pulse(line)?;
+pub fn register_guest_irq_route(
+    physical_intid: usize,
+    vm_id: usize,
+    vcpu_id: usize,
+    guest_intid: usize,
+    target_cpu: usize,
+) {
+    ax_plat::irq::aarch64_hv::register_guest_irq_route(
+        physical_intid,
+        vm_id,
+        vcpu_id,
+        guest_intid,
+        target_cpu,
+    );
+}
+
+pub fn unregister_guest_irq_routes(vm_id: usize) {
+    ax_plat::irq::aarch64_hv::unregister_guest_irq_routes(vm_id);
+}
+
+fn inject_platform_irq(
+    vm_id: usize,
+    vcpu_id: usize,
+    guest_intid: usize,
+    physical_intid: usize,
+) -> bool {
+    match crate::runtime::vcpus::queue_pending_interrupt(
+        vm_id,
+        vcpu_id,
+        crate::vm::PendingInterrupt::External {
+            vector: guest_intid,
+            physical_irq: physical_intid,
+        },
+    ) {
+        Ok(()) => true,
+        Err(error) => {
+            warn!(
+                "failed to queue AArch64 routed SPI {physical_intid} as guest INTID \
+                 {guest_intid} for VM[{vm_id}] VCpu[{vcpu_id}]: {error:?}"
+            );
+            false
         }
-        Ok(())
     }
-
-    fn pulse(&self, line: IrqLineId) -> IrqResult {
-        crate::manager::inject_interrupt(self.vm_id, self.target_vcpu_id, line.0).map_err(|error| {
-            IrqError::Backend {
-                line,
-                operation: "pulse AArch64 VM IRQ line",
-                detail: alloc::format!("{error}"),
-            }
-        })
-    }
-}
-
-pub(crate) fn configure(vm_id: VMId, mode: VMInterruptMode) -> AxVmResult<InterruptFabric> {
-    if mode == VMInterruptMode::NoIrq {
-        return Ok(InterruptFabric::new(mode));
-    }
-
-    InterruptFabric::with_sink(
-        mode,
-        alloc::sync::Arc::new(Aarch64VmIrqSink {
-            vm_id,
-            target_vcpu_id: 0,
-        }),
-    )
 }

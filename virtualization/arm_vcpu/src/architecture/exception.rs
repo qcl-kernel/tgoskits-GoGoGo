@@ -12,9 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use aarch64_cpu::registers::{
-    ELR_EL2, ESR_EL2, FAR_EL2, HCR_EL2, Readable, SCTLR_EL1, SPSR_EL2, VTCR_EL2, VTTBR_EL2,
-};
+use aarch64_cpu::registers::{ESR_EL2, HCR_EL2, Readable, SCTLR_EL1, VTCR_EL2, VTTBR_EL2};
+use log::error;
 
 use super::{
     TrapFrame,
@@ -27,7 +26,10 @@ use super::{
         exception_sysreg_addr, exception_sysreg_direction_write, exception_sysreg_gpr,
     },
 };
-use crate::{ArmAccessWidth, ArmSysRegAddr, ArmVcpuError, ArmVcpuResult, ArmVmExit};
+use crate::{
+    ArmAccessWidth, ArmSysRegAddr, ArmVcpuError, ArmVcpuResult, ArmVmExit, TlbiClassification,
+    classify_tlbi,
+};
 
 numeric_enum_macro::numeric_enum! {
 #[repr(u8)]
@@ -66,6 +68,11 @@ core::arch::global_asm!(
     host_irq_cpu_interface_base_offset =
         const super::vcpu::ARM_VCPU_HOST_IRQ_CPU_INTERFACE_BASE_OFFSET,
     host_pending_irq_ack_offset = const super::vcpu::ARM_VCPU_HOST_PENDING_IRQ_ACK_OFFSET,
+    host_busy_wfi_fastpath_delta = const super::vcpu::ARM_VCPU_HOST_BUSY_WFI_FASTPATH_OFFSET
+        - super::vcpu::ARM_VCPU_HOST_STACK_TOP_OFFSET,
+    host_fp_simd_offset = const super::vcpu::ARM_VCPU_HOST_FP_SIMD_OFFSET,
+    guest_fp_simd_offset = const super::vcpu::ARM_VCPU_GUEST_FP_SIMD_OFFSET,
+    fp_control_delta = const super::vcpu::FP_SIMD_CONTROL_DELTA,
     host_irq_interface_gicv2_mmio = const super::host::HOST_IRQ_INTERFACE_GICV2_MMIO,
     host_irq_interface_gicv3_sysreg = const super::host::HOST_IRQ_INTERFACE_GICV3_SYSREG,
     timer_virtual_offset_offset = const super::vcpu::ARM_VCPU_TIMER_VIRTUAL_OFFSET_OFFSET,
@@ -169,8 +176,6 @@ fn handle_hvc_psci_version(ctx: &mut TrapFrame) -> Option<ArmVcpuResult<ArmVmExi
 }
 
 fn handle_hvc64_exception(ctx: &mut TrapFrame) -> ArmVcpuResult<ArmVmExit> {
-    // The low-level AArch64 trap entry already saves the guest return PC for
-    // HVC exits. Advancing it here would skip the instruction after `hvc`.
     // Is this a psci call?
     //
     // By convention, a psci call can use either the `hvc` or the `smc` instruction.
@@ -258,6 +263,21 @@ fn handle_system_register(context_frame: &mut TrapFrame) -> ArmVcpuResult<ArmVmE
     let val = elr + exception_next_instruction_step();
     let write = exception_sysreg_direction_write(iss);
     let reg = exception_sysreg_gpr(iss) as usize;
+
+    if write && HCR_EL2.read(HCR_EL2::TTLB) != 0 {
+        match classify_tlbi(addr) {
+            TlbiClassification::Supported => {
+                context_frame.set_exception_pc(val);
+                return Ok(ArmVmExit::TlbInvalidate {
+                    addr: ArmSysRegAddr::new(addr),
+                    value: context_frame.gpr(reg) as u64,
+                });
+            }
+            TlbiClassification::Unsupported => return Err(ArmVcpuError::Unsupported),
+            TlbiClassification::NotTlbi => {}
+        }
+    }
+
     context_frame.set_exception_pc(val);
     if write {
         return Ok(ArmVmExit::SysRegWrite {
@@ -334,15 +354,12 @@ fn current_el_sync_handler(tf: &mut TrapFrame) {
     let ec = ESR_EL2.read(ESR_EL2::EC);
     let iss = ESR_EL2.read(ESR_EL2::ISS);
 
+    error!("ESR_EL2: {:#x}", esr.get());
+    error!("Exception Class: {ec:#x}");
+    error!("Instruction Specific Syndrome: {iss:#x}");
+
     panic!(
-        "Unhandled synchronous exception from current EL:\nESR_EL2: {:#x}\nException Class: \
-         {ec:#x}\nInstruction Specific Syndrome: {iss:#x}\nFAR_EL2: {:#x}\nELR_EL2: \
-         {:#x}\nSPSR_EL2: {:#x}\nHCR_EL2: {:#x}\nTrap frame: {:#x?}",
-        esr.get(),
-        FAR_EL2.get(),
-        ELR_EL2.get(),
-        SPSR_EL2.get(),
-        HCR_EL2.get(),
+        "Unhandled synchronous exception from current EL: {:#x?}",
         tf
     );
 }

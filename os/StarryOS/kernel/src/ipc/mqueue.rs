@@ -11,7 +11,6 @@
 use alloc::{
     borrow::Cow,
     collections::{BTreeMap, VecDeque},
-    format,
     string::String,
     sync::Arc,
     vec::Vec,
@@ -22,7 +21,7 @@ use core::{
     time::Duration,
 };
 
-use ax_io::SeekFrom;
+use ax_errno::{AxError, AxResult, LinuxError};
 use ax_runtime::hal::time::wall_time;
 use ax_task::future::{block_on, poll_io, timeout_at_wall};
 use axpoll::{IoEvents, PollSet, Pollable};
@@ -30,16 +29,13 @@ use linux_raw_sys::general::{
     O_ACCMODE, O_NONBLOCK, O_RDONLY, O_RDWR, O_WRONLY, S_IFREG, SIGEV_NONE, SIGEV_SIGNAL,
     SIGEV_THREAD,
 };
+use starry_process::Pid;
 use starry_signal::{SignalInfo, Signo};
 
 use crate::{
-    Errno, StarryError, StarryResult,
     file::{FileLike, IoDst, IoSrc, Kstat},
     sync::{IrqMutex, Mutex},
-    task::{
-        AsThread, PidIdentity, PidIdentityId, PidNumber, current_pid_view,
-        send_signal_to_process_data,
-    },
+    task::{AsThread, send_signal_to_process},
 };
 
 /// Hard ceiling for `mq_maxmsg` a privileged (`CAP_SYS_RESOURCE`) caller may
@@ -168,15 +164,15 @@ static MQ_USER_BYTES: Mutex<BTreeMap<u32, u64>> = Mutex::new(BTreeMap::new());
 /// soft limit). Returns `EMFILE` without mutating state when the charge would
 /// exceed the limit or overflow, mirroring `mqueue_get_inode`
 /// (ipc/mqueue.c:373-381): the increment is rolled back and `-EMFILE` returned.
-fn charge_user_bytes(uid: u32, bytes: u64, limit: u64) -> StarryResult<()> {
+fn charge_user_bytes(uid: u32, bytes: u64, limit: u64) -> AxResult<()> {
     let mut map = MQ_USER_BYTES.lock();
     let cur = map.get(&uid).copied().unwrap_or(0);
-    let next = cur.checked_add(bytes).ok_or(Errno::EMFILE)?;
+    let next = cur.checked_add(bytes).ok_or(LinuxError::EMFILE)?;
     // Linux fails when the post-increment total hits LONG_MAX or exceeds the
     // rlimit; here `next > limit` covers the rlimit test and the checked_add
     // above covers the wrap.
     if next > limit {
-        return Err(Errno::EMFILE.into());
+        return Err(LinuxError::EMFILE.into());
     }
     map.insert(uid, next);
     Ok(())
@@ -200,13 +196,8 @@ fn refund_user_bytes(uid: u32, bytes: u64) {
 /// refunded on drop). Returns `EMFILE` when the charge would exceed the limit
 /// or overflow, exactly as Linux `mqueue_get_inode` does before allocating the
 /// inode (ipc/mqueue.c:367-381).
-pub fn charge_open_bytes(
-    uid: u32,
-    limit: u64,
-    max_msg: usize,
-    msg_size: usize,
-) -> StarryResult<u64> {
-    let bytes = mq_bytes(max_msg, msg_size).ok_or(Errno::EMFILE)?;
+pub fn charge_open_bytes(uid: u32, limit: u64, max_msg: usize, msg_size: usize) -> AxResult<u64> {
+    let bytes = mq_bytes(max_msg, msg_size).ok_or(LinuxError::EMFILE)?;
     charge_user_bytes(uid, bytes, limit)?;
     Ok(bytes)
 }
@@ -303,10 +294,8 @@ struct Notification {
     notify: u32,
     /// Signal to deliver for `SIGEV_SIGNAL`.
     signo: u32,
-    /// Stable process generation that owns the registration.
-    owner: Arc<PidIdentity>,
-    /// TGID captured in the registrant's active PID view for mqueuefs output.
-    owner_number: PidNumber,
+    /// Process that owns the registration and receives the signal.
+    pid: Pid,
     /// The `sigev_value` the registrant passed to `mq_notify`, delivered as
     /// `si_value` in the `SI_MESGQ` signal. Linux stores this in
     /// `info->notify.sigev_value` (ipc/mqueue.c) and copies it to `sig_i.si_value`
@@ -467,7 +456,7 @@ impl MessageQueue {
         access_mode: u32,
         fsuid: u32,
         is_group_member: impl Fn(u32) -> bool,
-    ) -> StarryResult<()> {
+    ) -> AxResult<()> {
         // Select the permission triad: owner (fsuid == queue uid), then group
         // (fsgid or a supplementary group == queue gid), else other. Linux
         // walks the same order in `acl_permission_check`.
@@ -483,7 +472,7 @@ impl MessageQueue {
         let need_read = access_mode == O_RDONLY || access_mode == O_RDWR;
         let need_write = access_mode == O_WRONLY || access_mode == O_RDWR;
         if (need_read && granted & 0o4 == 0) || (need_write && granted & 0o2 == 0) {
-            return Err(Errno::EACCES.into());
+            return Err(LinuxError::EACCES.into());
         }
         Ok(())
     }
@@ -502,17 +491,6 @@ impl MessageQueue {
         }
     }
 
-    /// Reject a send larger than this queue's fixed `mq_msgsize` before its
-    /// caller copies the user payload. Linux performs this check before
-    /// `load_msg()` in `do_mq_timedsend` so an oversize send is `EMSGSIZE`, even
-    /// when its user pointer is otherwise invalid.
-    pub fn check_send_len(&self, msg_len: usize) -> StarryResult<()> {
-        if msg_len > self.inner.lock().msg_size {
-            return Err(Errno::EMSGSIZE.into());
-        }
-        Ok(())
-    }
-
     /// Send a message. Blocks while full unless `O_NONBLOCK`, honoring the
     /// optional absolute `CLOCK_REALTIME` deadline.
     ///
@@ -524,16 +502,21 @@ impl MessageQueue {
         priority: u32,
         deadline: Option<core::time::Duration>,
         non_blocking: bool,
-    ) -> StarryResult<()> {
+    ) -> AxResult<()> {
         if priority >= MQ_PRIO_MAX {
-            return Err(Errno::EINVAL.into());
+            return Err(LinuxError::EINVAL.into());
         }
-        self.check_send_len(data.len())?;
+        {
+            let inner = self.inner.lock();
+            if data.len() > inner.msg_size {
+                return Err(LinuxError::EMSGSIZE.into());
+            }
+        }
 
         let op = || {
             let mut inner = self.inner.lock();
             if inner.len >= inner.max_msg {
-                return Err(StarryError::WouldBlock);
+                return Err(AxError::WouldBlock);
             }
             let msg = Message {
                 priority,
@@ -578,7 +561,7 @@ impl MessageQueue {
             deadline,
             poll_io(self, IoEvents::OUT, non_blocking, op),
         ))
-        .map_err(|_| StarryError::from(Errno::ETIMEDOUT))?
+        .map_err(|_| AxError::from(LinuxError::ETIMEDOUT))?
     }
 
     /// Receive the highest-priority, earliest message. Blocks while empty
@@ -592,11 +575,11 @@ impl MessageQueue {
         max_len: usize,
         deadline: Option<core::time::Duration>,
         non_blocking: bool,
-    ) -> StarryResult<(Vec<u8>, u32)> {
+    ) -> AxResult<(Vec<u8>, u32)> {
         {
             let inner = self.inner.lock();
             if max_len < inner.msg_size {
-                return Err(Errno::EMSGSIZE.into());
+                return Err(LinuxError::EMSGSIZE.into());
             }
         }
 
@@ -632,7 +615,7 @@ impl MessageQueue {
                     if !inner.recv_waiters.iter().any(|w| Arc::ptr_eq(w, &waiter)) {
                         inner.recv_waiters.push_back(waiter.clone());
                     }
-                    Err(StarryError::WouldBlock)
+                    Err(AxError::WouldBlock)
                 }
             }
         };
@@ -645,7 +628,7 @@ impl MessageQueue {
             poll_io(self, IoEvents::IN, non_blocking, op),
         )) {
             Ok(inner_result) => inner_result,
-            Err(_) => Err(StarryError::from(Errno::ETIMEDOUT)),
+            Err(_) => Err(AxError::from(LinuxError::ETIMEDOUT)),
         };
 
         match result {
@@ -676,12 +659,7 @@ impl MessageQueue {
     /// register and return `EBUSY` if the slot is already taken. Registering on
     /// an already non-empty queue is allowed; Linux only fires on the empty →
     /// non-empty edge, so it simply waits for the next such transition.
-    pub fn register_notify(
-        &self,
-        req: NotifyRequest,
-        owner: Arc<PidIdentity>,
-        owner_number: PidNumber,
-    ) -> StarryResult<()> {
+    pub fn register_notify(&self, req: NotifyRequest, pid: Pid) -> AxResult<()> {
         let mut inner = self.inner.lock();
         match req {
             NotifyRequest::Unregister => {
@@ -691,11 +669,7 @@ impl MessageQueue {
                 // removal bumps atime+ctime (ipc/mqueue.c:1339) and, for a
                 // `SIGEV_THREAD` registration, sends NOTIFY_REMOVED so the libc
                 // helper thread exits (`remove_notification`, ipc/mqueue.c:850).
-                if inner
-                    .notify
-                    .as_ref()
-                    .is_some_and(|notification| Arc::ptr_eq(&notification.owner, &owner))
-                {
+                if inner.notify.as_ref().is_some_and(|n| n.pid == pid) {
                     let removed = inner.notify.take();
                     let now = wall_time();
                     inner.atime = now;
@@ -709,13 +683,12 @@ impl MessageQueue {
             }
             NotifyRequest::Signal { signo, sigev_value } => {
                 if inner.notify.is_some() {
-                    return Err(Errno::EBUSY.into());
+                    return Err(LinuxError::EBUSY.into());
                 }
                 inner.notify = Some(Notification {
                     notify: SIGEV_SIGNAL,
                     signo,
-                    owner,
-                    owner_number,
+                    pid,
                     sigev_value,
                     thread: None,
                 });
@@ -724,13 +697,12 @@ impl MessageQueue {
             }
             NotifyRequest::None => {
                 if inner.notify.is_some() {
-                    return Err(Errno::EBUSY.into());
+                    return Err(LinuxError::EBUSY.into());
                 }
                 inner.notify = Some(Notification {
                     notify: SIGEV_NONE,
                     signo: 0,
-                    owner,
-                    owner_number,
+                    pid,
                     sigev_value: 0,
                     thread: None,
                 });
@@ -739,13 +711,12 @@ impl MessageQueue {
             }
             NotifyRequest::Thread { sock, cookie } => {
                 if inner.notify.is_some() {
-                    return Err(Errno::EBUSY.into());
+                    return Err(LinuxError::EBUSY.into());
                 }
                 inner.notify = Some(Notification {
                     notify: SIGEV_THREAD,
                     signo: 0,
-                    owner,
-                    owner_number,
+                    pid,
                     sigev_value: 0,
                     thread: Some(ThreadNotify { sock, cookie }),
                 });
@@ -762,8 +733,7 @@ impl MessageQueue {
         inner.ctime = now;
     }
 
-    /// Drop the `mq_notify` registration if it is owned by this stable process
-    /// identity generation. Linux clears
+    /// Drop the `mq_notify` registration if it is owned by `pid`. Linux clears
     /// it in `mqueue_flush_file` -> `remove_notification` (ipc/mqueue.c:658),
     /// which `filp_flush` runs on *every* fd-closing path: explicit `close`,
     /// `close_range`, `dup2`/`dup3` replacement, exec CLOEXEC and process exit.
@@ -771,13 +741,9 @@ impl MessageQueue {
     /// calls this via the `FileLike::on_close` hook, so the coverage matches.
     /// A `SIGEV_THREAD` registration also gets a `NOTIFY_REMOVED` cookie so its
     /// helper thread exits.
-    pub fn clear_notify_owner(&self, owner: PidIdentityId) {
+    pub fn clear_notify_owner(&self, pid: Pid) {
         let mut inner = self.inner.lock();
-        if inner
-            .notify
-            .as_ref()
-            .is_some_and(|notification| notification.owner.id() == owner)
-        {
+        if inner.notify.as_ref().is_some_and(|n| n.pid == pid) {
             let removed = inner.notify.take();
             drop(inner);
             if let Some(n) = removed {
@@ -794,32 +760,16 @@ impl MessageQueue {
         let now = wall_time();
         inner.atime = now;
         inner.ctime = now;
-        Self::status_fields(&inner)
-    }
-
-    /// Render the status line exposed through `/dev/mqueue/<name>`. The
-    /// padded columns match Linux's `mqueue_read_file` format exactly.
-    pub fn status_line(&self) -> String {
-        let (qsize, notify, signo, notify_pid) = self.report();
-        format_status_line(qsize, notify, signo, notify_pid)
-    }
-
-    /// Render one status-line snapshot without changing timestamps. An mqueue
-    /// descriptor updates atime+ctime only after a successful non-empty
-    /// `read(2)`, so it uses this before writing the caller's buffer.
-    fn status_line_snapshot(&self) -> String {
-        let inner = self.inner.lock();
-        let (qsize, notify, signo, notify_pid) = Self::status_fields(&inner);
-        format_status_line(qsize, notify, signo, notify_pid)
-    }
-
-    /// Record a successful status-file read, corresponding to Linux's
-    /// `inode_set_atime_to_ts(inode, inode_set_ctime_current(inode))`.
-    fn touch_status_read(&self) {
-        let now = wall_time();
-        let mut inner = self.inner.lock();
-        inner.atime = now;
-        inner.ctime = now;
+        let qsize = Self::qsize_of(&inner);
+        match &inner.notify {
+            // Linux prints SIGNO only for a `SIGEV_SIGNAL` registration; any
+            // other kind reports 0 (ipc/mqueue.c `mqueue_read_file`).
+            Some(n) => {
+                let signo = if n.notify == SIGEV_SIGNAL { n.signo } else { 0 };
+                (qsize, n.notify, signo, n.pid)
+            }
+            None => (qsize, 0, 0, 0),
+        }
     }
 
     /// The queue's owner uid (creator `fsuid`), for `/dev/mqueue` stat.
@@ -879,19 +829,6 @@ impl MessageQueue {
             .sum()
     }
 
-    /// The four Linux `mqueue_read_file` fields, in printed order. `SIGNO` is
-    /// reported only for `SIGEV_SIGNAL` registrations.
-    fn status_fields(inner: &Inner) -> (usize, u32, u32, u32) {
-        let qsize = Self::qsize_of(inner);
-        match &inner.notify {
-            Some(n) => {
-                let signo = if n.notify == SIGEV_SIGNAL { n.signo } else { 0 };
-                (qsize, n.notify, signo, n.owner_number.get())
-            }
-            None => (qsize, 0, 0, 0),
-        }
-    }
-
     /// Bump atime+ctime to now, for the `mq_setattr` path which Linux
     /// timestamps with `inode_set_atime_to_ts(inode,
     /// inode_set_ctime_current(inode))` (ipc/mqueue.c:1420).
@@ -932,12 +869,6 @@ impl Inner {
     }
 }
 
-/// Linux's `mqueue_read_file` uses these minimum field widths. Values wider
-/// than a field are intentionally not truncated, just as `snprintf` does.
-fn format_status_line(qsize: usize, notify: u32, signo: u32, notify_pid: u32) -> String {
-    format!("QSIZE:{qsize:<10} NOTIFY:{notify:<5} SIGNO:{signo:<5} NOTIFY_PID:{notify_pid:<6}\n")
-}
-
 /// Fire an `mq_notify` delivery on the empty -> non-empty edge, per
 /// `__do_notify` (ipc/mqueue.c:777). `SIGEV_SIGNAL` raises a signal,
 /// `SIGEV_THREAD` pushes the `NOTIFY_WOKENUP` cookie over the netlink socket,
@@ -953,18 +884,12 @@ fn deliver_notification(n: &Notification) {
             // si_value to the registrant's `sigev_value`. This runs in the
             // sender's context (`send` drives it on the current task).
             let sender = ax_task::current();
-            let sender_identity = sender.as_thread().proc_data.identity();
-            let sender_pid = current_pid_view()
-                .visible_number(&sender_identity)
-                .expect("message sender is visible in its active PID namespace")
-                .get();
+            let sender_pid = sender.as_thread().proc_data.proc.pid();
             let sender_uid = sender.as_thread().cred().uid;
             let info = SignalInfo::new_mqueue(signo, sender_pid, sender_uid, n.sigev_value);
             // Best-effort: a dead registrant just means no delivery, mirroring
             // Linux which silently drops the notification in that case.
-            if let Some(owner) = n.owner.live_data() {
-                let _ = send_signal_to_process_data(&owner, Some(info));
-            }
+            let _ = send_signal_to_process(n.pid, Some(info));
         }
         SIGEV_THREAD => {
             if let Some(thread) = &n.thread {
@@ -995,16 +920,16 @@ fn notify_thread_teardown(n: &Notification) {
 }
 
 impl FileLike for MessageQueue {
-    fn read(&self, _dst: &mut IoDst) -> StarryResult<usize> {
+    fn read(&self, _dst: &mut IoDst) -> AxResult<usize> {
         // Message queues are not read via read(2); mq_timedreceive is used.
-        Err(StarryError::InvalidInput)
+        Err(AxError::InvalidInput)
     }
 
-    fn write(&self, _src: &mut IoSrc) -> StarryResult<usize> {
-        Err(StarryError::InvalidInput)
+    fn write(&self, _src: &mut IoSrc) -> AxResult<usize> {
+        Err(AxError::InvalidInput)
     }
 
-    fn stat(&self) -> StarryResult<Kstat> {
+    fn stat(&self) -> AxResult<Kstat> {
         Ok(self.kstat())
     }
 
@@ -1014,7 +939,7 @@ impl FileLike for MessageQueue {
         false
     }
 
-    fn set_nonblocking(&self, _non_blocking: bool) -> StarryResult {
+    fn set_nonblocking(&self, _non_blocking: bool) -> AxResult {
         // No-op: `O_NONBLOCK` is applied to the descriptor, not the shared queue.
         Ok(())
     }
@@ -1056,10 +981,6 @@ pub struct MqDescriptor {
     /// `O_NONBLOCK` is the only bit `mq_setattr` may toggle. Atomic so a
     /// `mq_setattr` here never disturbs a sibling descriptor of the same queue.
     flags: AtomicU32,
-    /// The status-file read offset carried by this open file description. Linux
-    /// backs `mqd_t` with an mqueuefs file, whose `read(2)` and `lseek(2)` share
-    /// `file->f_pos`; sibling `mq_open` descriptors must not share it.
-    read_offset: Mutex<u64>,
 }
 
 impl MqDescriptor {
@@ -1067,7 +988,6 @@ impl MqDescriptor {
         Self {
             queue,
             flags: AtomicU32::new(flags),
-            read_offset: Mutex::new(0),
         }
     }
 
@@ -1105,60 +1025,10 @@ impl MqDescriptor {
     pub fn flags(&self) -> u32 {
         self.flags.load(Ordering::Acquire)
     }
-
-    /// Seek the mqueue status-file offset, matching Linux's `default_llseek`
-    /// attached to `mqueue_file_operations`. `SEEK_END` is relative to the
-    /// mqueue inode's fixed `FILENT_SIZE`, not the rendered line length.
-    pub fn seek_status(&self, pos: SeekFrom) -> StarryResult<u64> {
-        let mut offset = self.read_offset.lock();
-        let next = match pos {
-            SeekFrom::Start(next) => next,
-            SeekFrom::Current(delta) => offset.checked_add_signed(delta).ok_or(Errno::EINVAL)?,
-            SeekFrom::End(delta) => self
-                .queue
-                .inode_size()
-                .checked_add_signed(delta)
-                .ok_or(Errno::EINVAL)?,
-        };
-        if next > i64::MAX as u64 {
-            return Err(Errno::EOVERFLOW.into());
-        }
-        *offset = next;
-        Ok(next)
-    }
 }
 
 impl FileLike for MqDescriptor {
-    fn read(&self, dst: &mut IoDst) -> StarryResult<usize> {
-        // The VFS rejects reads through an O_WRONLY file before dispatching to
-        // `mqueue_read_file`; StarryOS's generic `sys_read` dispatches directly
-        // to FileLike, so the descriptor must provide that gate itself.
-        if self.access() == O_WRONLY {
-            return Err(Errno::EBADF.into());
-        }
-
-        // Linux rebuilds the status line for each `mqueue_read_file` call, then
-        // `simple_read_from_buffer` copies from the current file offset. Take
-        // the queue snapshot before touching user memory and hold only this
-        // descriptor's offset lock across the copy; never hold `inner` while a
-        // user-buffer write can fault.
-        let status = self.queue.status_line_snapshot();
-        let copied = {
-            let mut offset = self.read_offset.lock();
-            let start = (*offset as usize).min(status.len());
-            let copied = dst.write(&status.as_bytes()[start..])?;
-            *offset += copied as u64;
-            copied
-        };
-        if copied != 0 {
-            // Linux updates atime+ctime only after `simple_read_from_buffer`
-            // copied at least one byte successfully.
-            self.queue.touch_status_read();
-        }
-        Ok(copied)
-    }
-
-    fn stat(&self) -> StarryResult<Kstat> {
+    fn stat(&self) -> AxResult<Kstat> {
         // `fstat(mqd)` reports the underlying mqueue inode (Linux returns the
         // mqueuefs inode's mode/uid/gid/size/times).
         Ok(self.queue.kstat())
@@ -1168,7 +1038,7 @@ impl FileLike for MqDescriptor {
         self.is_nonblocking()
     }
 
-    fn set_nonblocking(&self, non_blocking: bool) -> StarryResult {
+    fn set_nonblocking(&self, non_blocking: bool) -> AxResult {
         self.set_nonblocking_flag(non_blocking);
         Ok(())
     }
@@ -1177,7 +1047,7 @@ impl FileLike for MqDescriptor {
         self.flags.load(Ordering::Acquire)
     }
 
-    fn on_close(&self, owner: PidIdentityId) {
+    fn on_close(&self, owner: Pid) {
         // Linux `mqueue_flush_file` clears the notification owned by the
         // closing task's tgid on every fd-closing path (ipc/mqueue.c:658).
         self.queue.clear_notify_owner(owner);
@@ -1207,15 +1077,15 @@ pub static MQ_REGISTRY: Mutex<BTreeMap<String, Arc<MessageQueue>>> = Mutex::new(
 /// Per `mq_overview(7)`: a name is a leading `/` followed by one or more
 /// characters, none of which is `/`, up to `NAME_MAX`. `EINVAL` for a bad
 /// shape, `ENAMETOOLONG` for an overlong name.
-pub fn validate_name(name: &str) -> StarryResult<&str> {
+pub fn validate_name(name: &str) -> AxResult<&str> {
     // glibc/musl strip the leading '/' before the mq_open syscall (`name + 1`),
     // so the kernel receives a bare single-component name — matching Linux
     // mqueuefs, which treats the argument as a filename under the mount.
     if name.is_empty() || name.contains('/') {
-        return Err(Errno::EINVAL.into());
+        return Err(LinuxError::EINVAL.into());
     }
     if name.len() > MQ_NAME_MAX {
-        return Err(Errno::ENAMETOOLONG.into());
+        return Err(LinuxError::ENAMETOOLONG.into());
     }
     Ok(name)
 }

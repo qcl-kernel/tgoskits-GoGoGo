@@ -124,7 +124,7 @@ pub fn init_guest_vm(raw_cfg: &str) -> Result<usize> {
         );
     }
 
-    let mut vm_config = build_axvm_config(&vm_create_config)?;
+    let mut vm_config = build_axvm_config(&vm_create_config);
     let prepared_boot = prepare_guest_boot(&mut vm_config, vm_create_config, &image_provider)
         .with_context(|| format!("prepare boot resources for VM[{configured_vm_id}]"))?;
     let prepared_config = prepared_boot.config();
@@ -155,9 +155,12 @@ pub fn init_guest_vm(raw_cfg: &str) -> Result<usize> {
     vm.prepare()
         .with_context(|| format!("prepare devices and vCPUs for VM[{vm_id}]"))?;
 
+    // Keep the local `Arc` for architecture-specific post-registration setup.
     if !axvm::register_vm(vm.clone()) {
         bail!("register VM[{vm_id}]: a VM with this ID already exists");
     }
+    #[cfg(target_arch = "loongarch64")]
+    crate::manager::register_loongarch_passthrough_irq_routes(vm_id);
 
     #[cfg(all(
         feature = "fs",
@@ -168,20 +171,20 @@ pub fn init_guest_vm(raw_cfg: &str) -> Result<usize> {
         )
     ))]
     if release_host_filesystem {
-        axvm::host::register_block_passthrough_irq(&vm)
-            .context("register host block passthrough IRQ route")?;
+        #[cfg(target_arch = "x86_64")]
+        axvm::host::x86::register_qemu_block_passthrough_irq(&vm)
+            .context("register x86 QEMU block passthrough IRQ route")?;
         HOST_FILESYSTEM_RELEASE_REQUIRED.store(true, Ordering::Release);
     }
 
     Ok(vm_id)
 }
 
-pub(crate) fn build_axvm_config(cfg: &GuestConfig) -> Result<AxVMConfig> {
+pub(crate) fn build_axvm_config(cfg: &GuestConfig) -> AxVMConfig {
     let machine = axvm::machine::current_machine_profile(cfg.base.cpu_num);
     let serial_profile = machine.serial;
     let mut passthrough_devices = cfg.devices.unresolved_host_devices();
     if cfg.base.guest_type == GuestType::Passthrough
-        && passthrough_devices.is_empty()
         && let Some(path) = machine.default_passthrough_device_path
     {
         passthrough_devices.insert(
@@ -193,9 +196,10 @@ pub(crate) fn build_axvm_config(cfg: &GuestConfig) -> Result<AxVMConfig> {
         );
     }
     let mut virtual_device_catalog = axvm::ConfiguredDeviceCatalog::new();
-    axvm::machine::register_devices(&mut virtual_device_catalog)
-        .context("register AxVM virtual-device models")?;
-    Ok(AxVMConfig::new(AxVMConfigParams {
+    virtual_device_catalog
+        .register(crate::virtio_net::REGISTRATION)
+        .expect("the static virtio-net model registration is valid and unique");
+    AxVMConfig::new(AxVMConfigParams {
         id: cfg.base.id,
         name: cfg.base.name.clone(),
         phys_cpu_ls: PhysCpuList::new(
@@ -223,13 +227,16 @@ pub(crate) fn build_axvm_config(cfg: &GuestConfig) -> Result<AxVMConfig> {
         reserved_address_ranges: Vec::new(),
         pass_through_ports: Vec::new(),
         address_space_policy: cfg.base.guest_type.address_space_policy(),
+        host_timer_policy: cfg.base.host_timer_policy,
+        host_vcpu_idle_policy: cfg.base.host_vcpu_idle_policy,
+        guest_tlbi_policy: cfg.base.guest_tlbi_policy,
         memory_regions: cfg.kernel.memory_regions.clone(),
         boot_policy: GuestBootPolicy::KeepConfigured,
         serial_profile: Some(serial_profile),
         serial_backend_factory: Some(crate::guest_console::serial_backend_factory(cfg.base.id)),
-        virtual_device_requests: cfg.devices.virtual_device_requests().to_vec(),
-        virtual_device_catalog: alloc::sync::Arc::new(virtual_device_catalog),
-    }))
+        virtual_device_requests: cfg.devices.virtual_devices.clone(),
+        virtual_device_catalog: Some(alloc::sync::Arc::new(virtual_device_catalog)),
+    })
 }
 
 fn sync_axvm_config_from_crate_config(vm_config: &mut AxVMConfig, cfg: &GuestConfig) {
@@ -308,7 +315,7 @@ fn boot_file_error(operation: &'static str, file_name: &str, error: anyhow::Erro
 #[cfg(test)]
 mod tests {
     use super::*;
-    use axvmconfig::{VmMemConfig, VmMemMappingType};
+    use axvmconfig::{GuestTlbiPolicy, HostVcpuIdlePolicy, VmMemConfig, VmMemMappingType};
 
     fn memory_region(gpa: usize, size: usize, map_type: VmMemMappingType) -> VmMemConfig {
         VmMemConfig {
@@ -327,7 +334,7 @@ mod tests {
             0x200000,
             VmMemMappingType::MapIdentical,
         ));
-        let mut vm_config = build_axvm_config(&crate_config).unwrap();
+        let mut vm_config = build_axvm_config(&crate_config);
 
         crate_config.kernel.memory_regions.push(memory_region(
             0x110000,
@@ -343,5 +350,19 @@ mod tests {
         assert_eq!(regions[1].gpa, 0x110000);
         assert_eq!(regions[1].size, 0x10000);
         assert_eq!(regions[1].map_type, VmMemMappingType::MapReserved);
+    }
+
+    #[test]
+    fn build_axvm_config_preserves_host_vcpu_idle_policy() {
+        let mut crate_config = GuestConfig::default();
+        crate_config.base.host_timer_policy = HostTimerPolicy::Tickless;
+        crate_config.base.host_vcpu_idle_policy = HostVcpuIdlePolicy::Busy;
+        crate_config.base.guest_tlbi_policy = GuestTlbiPolicy::VmScoped;
+
+        let vm_config = build_axvm_config(&crate_config);
+
+        assert_eq!(vm_config.host_vcpu_idle_policy(), HostVcpuIdlePolicy::Busy);
+        assert_eq!(vm_config.host_timer_policy(), HostTimerPolicy::Tickless);
+        assert_eq!(vm_config.guest_tlbi_policy(), GuestTlbiPolicy::VmScoped);
     }
 }

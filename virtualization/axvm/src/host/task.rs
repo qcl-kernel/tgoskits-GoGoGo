@@ -38,7 +38,6 @@ pub(crate) fn wait_queue_wake(queue: &WaitQueueHandle, count: u32) {
     arceos::wait_queue_wake(queue, count);
 }
 
-#[cfg(target_arch = "aarch64")]
 pub(crate) fn run_on_cpu_sync(
     cpu_id: usize,
     f: unsafe fn(*mut ()),
@@ -49,4 +48,8 @@ pub(crate) fn run_on_cpu_sync(
 
 pub(crate) fn send_ipi(cpu_id: usize) {
     arceos::send_ipi(cpu_id);
+}
+
+pub(crate) fn set_current_cpu_periodic_timer_enabled(enabled: bool) {
+    arceos::set_current_cpu_periodic_timer_enabled(enabled);
 }

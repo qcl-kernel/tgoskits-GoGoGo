@@ -55,7 +55,6 @@
               curl
               dosfstools
               e2fsprogs
-              fakeroot
               file
               git
               gnumake

@@ -23,8 +23,9 @@ pub use axvm_types::{
     HostPortAssignment, ReservedAddressConfig, VMBootProtocol, VmMemConfig, VmMemMappingType,
 };
 use axvmconfig::VirtualDeviceRequest;
+pub use axvmconfig::{GuestTlbiPolicy, HostTimerPolicy, HostVcpuIdlePolicy};
 
-use crate::{arch::current::CurrentArch, architecture::MachinePlatform, machine::*};
+use crate::{arch::*, machine::*};
 
 /// Policy used by AxVM when deriving runtime guest boot image addresses.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -95,11 +96,13 @@ pub struct AxVMConfig {
     reserved_address_ranges: Vec<ReservedAddressConfig>,
     pass_through_ports: Vec<HostPortAssignment>,
     address_space_policy: AddressSpacePolicy,
+    host_timer_policy: HostTimerPolicy,
+    host_vcpu_idle_policy: HostVcpuIdlePolicy,
+    guest_tlbi_policy: GuestTlbiPolicy,
     memory_regions: Vec<VmMemConfig>,
     boot_policy: GuestBootPolicy,
     // Physical interrupt sources forwarded to the guest in passthrough mode.
     passthrough_irq_list: Vec<PassthroughInterrupt>,
-    excluded_passthrough_irq_sources: Vec<u32>,
     serial_profile: GuestSerialProfile,
     serial_firmware_identity: Option<GuestSerialFirmwareIdentity>,
     gic_profile: Option<GuestGicProfile>,
@@ -124,6 +127,9 @@ pub struct AxVMConfigParams {
     pub reserved_address_ranges: Vec<ReservedAddressConfig>,
     pub pass_through_ports: Vec<HostPortAssignment>,
     pub address_space_policy: AddressSpacePolicy,
+    pub host_timer_policy: HostTimerPolicy,
+    pub host_vcpu_idle_policy: HostVcpuIdlePolicy,
+    pub guest_tlbi_policy: GuestTlbiPolicy,
     pub memory_regions: Vec<VmMemConfig>,
     pub boot_policy: GuestBootPolicy,
     /// Machine-owned virtual serial resources.
@@ -133,7 +139,7 @@ pub struct AxVMConfigParams {
     /// Open-ended virtual-device requests parsed from guest configuration.
     pub virtual_device_requests: Vec<VirtualDeviceRequest>,
     /// Code-registered factories available to this VM.
-    pub virtual_device_catalog: Arc<crate::ConfiguredDeviceCatalog>,
+    pub virtual_device_catalog: Option<Arc<crate::ConfiguredDeviceCatalog>>,
 }
 
 impl AxVMConfig {
@@ -152,10 +158,12 @@ impl AxVMConfig {
             reserved_address_ranges: params.reserved_address_ranges,
             pass_through_ports: params.pass_through_ports,
             address_space_policy: params.address_space_policy,
+            host_timer_policy: params.host_timer_policy,
+            host_vcpu_idle_policy: params.host_vcpu_idle_policy,
+            guest_tlbi_policy: params.guest_tlbi_policy,
             memory_regions: params.memory_regions,
             boot_policy: params.boot_policy,
             passthrough_irq_list: Vec::new(),
-            excluded_passthrough_irq_sources: Vec::new(),
             serial_profile,
             serial_firmware_identity: None,
             gic_profile: machine.gic,
@@ -165,7 +173,9 @@ impl AxVMConfig {
                 .serial_backend_factory
                 .unwrap_or_else(|| Arc::new(NullSerialBackendFactory)),
             virtual_device_requests: params.virtual_device_requests,
-            virtual_device_catalog: params.virtual_device_catalog,
+            virtual_device_catalog: params
+                .virtual_device_catalog
+                .unwrap_or_else(|| Arc::new(crate::ConfiguredDeviceCatalog::new())),
         }
     }
 
@@ -268,6 +278,21 @@ impl AxVMConfig {
         self.address_space_policy
     }
 
+    /// Returns the host behavior selected for trapped guest WFI exits.
+    pub const fn host_vcpu_idle_policy(&self) -> HostVcpuIdlePolicy {
+        self.host_vcpu_idle_policy
+    }
+
+    /// Returns the host timer policy applied while this VM's vCPU executes.
+    pub const fn host_timer_policy(&self) -> HostTimerPolicy {
+        self.host_timer_policy
+    }
+
+    /// Returns the guest EL1 TLB-maintenance policy.
+    pub const fn guest_tlbi_policy(&self) -> GuestTlbiPolicy {
+        self.guest_tlbi_policy
+    }
+
     /// Returns configurations related to VM memory regions.
     pub fn memory_regions(&self) -> &[VmMemConfig] {
         &self.memory_regions
@@ -310,9 +335,6 @@ impl AxVMConfig {
 
     /// Adds a physical interrupt source forwarded to the guest.
     pub fn add_pass_through_irq(&mut self, source: u32, trigger: InterruptTriggerMode) {
-        if self.excluded_passthrough_irq_sources.contains(&source) {
-            return;
-        }
         let route = PassthroughInterrupt { source, trigger };
         if let Some(existing) = self
             .passthrough_irq_list
@@ -328,20 +350,6 @@ impl AxVMConfig {
     /// Returns the physical interrupt sources forwarded to the guest.
     pub fn pass_through_irqs(&self) -> &[PassthroughInterrupt] {
         &self.passthrough_irq_list
-    }
-
-    /// Removes a physical interrupt source from passthrough assignment.
-    pub fn exclude_pass_through_irq_source(&mut self, source: u32) {
-        if !self.excluded_passthrough_irq_sources.contains(&source) {
-            self.excluded_passthrough_irq_sources.push(source);
-        }
-        self.passthrough_irq_list
-            .retain(|interrupt| interrupt.source != source);
-    }
-
-    /// Returns physical interrupt sources removed from passthrough assignment.
-    pub fn excluded_passthrough_irq_sources(&self) -> &[u32] {
-        &self.excluded_passthrough_irq_sources
     }
 
     /// Returns whether the guest address space starts from host identity mappings.
@@ -572,6 +580,52 @@ mod tests {
         assert_eq!(regions[1].map_type, VmMemMappingType::MapReserved);
     }
 
+    #[test]
+    fn host_vcpu_idle_policy_is_explicit_and_defaults_to_halt() {
+        let default_config = AxVMConfig::default_for_test(1, "linux");
+        assert_eq!(
+            default_config.host_vcpu_idle_policy(),
+            axvmconfig::HostVcpuIdlePolicy::Halt
+        );
+        assert_eq!(
+            default_config.guest_tlbi_policy(),
+            axvmconfig::GuestTlbiPolicy::Native
+        );
+        assert_eq!(
+            default_config.host_timer_policy(),
+            axvmconfig::HostTimerPolicy::Periodic
+        );
+
+        let busy_config = AxVMConfig::new(AxVMConfigParams {
+            id: 3,
+            name: String::from("rtthread"),
+            phys_cpu_ls: PhysCpuList::new(1, None, Some(vec![1 << 2])),
+            host_timer_policy: axvmconfig::HostTimerPolicy::Tickless,
+            host_vcpu_idle_policy: axvmconfig::HostVcpuIdlePolicy::Busy,
+            ..Default::default()
+        });
+        assert_eq!(
+            busy_config.host_vcpu_idle_policy(),
+            axvmconfig::HostVcpuIdlePolicy::Busy
+        );
+        assert_eq!(
+            busy_config.host_timer_policy(),
+            axvmconfig::HostTimerPolicy::Tickless
+        );
+
+        let vm_scoped_config = AxVMConfig::new(AxVMConfigParams {
+            id: 4,
+            name: String::from("linux-vm-scoped-tlbi"),
+            phys_cpu_ls: PhysCpuList::new(2, None, Some(vec![0b11, 0b11])),
+            guest_tlbi_policy: axvmconfig::GuestTlbiPolicy::VmScoped,
+            ..Default::default()
+        });
+        assert_eq!(
+            vm_scoped_config.guest_tlbi_policy(),
+            axvmconfig::GuestTlbiPolicy::VmScoped
+        );
+    }
+
     #[cfg(target_arch = "x86_64")]
     #[test]
     fn controller_replacements_require_machine_capabilities() {
@@ -610,20 +664,5 @@ mod tests {
             config.replace_machine_plic(plic),
             Err(crate::AxVmError::InvalidConfig { .. })
         ));
-    }
-
-    #[test]
-    fn phys_cpu_list_pins_single_vcpu_to_isolated_core() {
-        // aarch64/riscv64 arceos-smp1.toml: cpu_num=1, phys_cpu_ids=[1] → physical Core 1.
-        let list = PhysCpuList::new(1, Some(vec![1]), None);
-        assert_eq!(list.get_vcpu_affinities_pcpu_ids(), vec![(0, None, 1)]);
-
-        // x86_64 arceos-smp1.toml: phys_cpu_sets=[2] → affinity mask 0b10 (Core 1).
-        let list = PhysCpuList::new(1, None, Some(vec![2]));
-        assert_eq!(list.get_vcpu_affinities_pcpu_ids(), vec![(0, Some(2), 0)]);
-
-        // Default: no pinning, vcpu id equals physical id.
-        let list = PhysCpuList::new(1, None, None);
-        assert_eq!(list.get_vcpu_affinities_pcpu_ids(), vec![(0, None, 0)]);
     }
 }

@@ -1,0 +1,58 @@
+ARG BASE_IMAGE=ghcr.io/rcore-os/tgoskits-container@sha256:d011369e5da7d4d5f4379fafad3d46868c116b9d23bfc6f92ce3846432cad9d4
+ARG UV_IMAGE=ghcr.io/astral-sh/uv@sha256:265d074d08ed8080bc578087ca68a8e94611f9c7be671d40e18b3d3b1ad0dad4
+
+FROM ${UV_IMAGE} AS uv
+
+FROM ${BASE_IMAGE} AS qemu-builder
+ARG QEMU_VERSION=11.0.2
+ARG QEMU_COMMIT=e545d8bb9d63e9dd61542b88463183314cff9482
+RUN set -eux; \
+    git clone --filter=blob:none --no-checkout https://gitlab.com/qemu-project/qemu.git /tmp/qemu; \
+    git -C /tmp/qemu fetch --depth 1 origin "${QEMU_COMMIT}"; \
+    git -C /tmp/qemu checkout --detach "${QEMU_COMMIT}"; \
+    test "$(git -C /tmp/qemu rev-parse HEAD)" = "${QEMU_COMMIT}"; \
+    git -C /tmp/qemu submodule update --init --depth 1; \
+    cd /tmp/qemu; \
+    ./configure \
+        --prefix="/opt/qemu-${QEMU_VERSION}" \
+        --target-list=aarch64-softmmu \
+        --enable-slirp \
+        --disable-docs \
+        --disable-gtk \
+        --disable-sdl \
+        --disable-vte \
+        --disable-werror; \
+    make -j"$(nproc)"; \
+    make install
+
+FROM ${BASE_IMAGE}
+ARG QEMU_VERSION=11.0.2
+ARG QEMU_COMMIT=e545d8bb9d63e9dd61542b88463183314cff9482
+ARG UV_VERSION=0.11.16
+ARG RTTHREAD_COMMIT=ddf52e2cdd977f14fc04035c88672ac204aec713
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        binutils-aarch64-linux-gnu \
+        gcc-aarch64-linux-gnu \
+        libcap2-bin \
+        socat \
+        sysstat \
+        util-linux \
+    && rm -rf /var/lib/apt/lists/*
+COPY --from=qemu-builder /opt/qemu-${QEMU_VERSION} /opt/qemu-${QEMU_VERSION}
+COPY --from=uv /uv /uvx /usr/local/bin/
+COPY container/rtthread-repro-preflight.sh /usr/local/bin/rtthread-repro-preflight
+RUN chmod 0755 /usr/local/bin/rtthread-repro-preflight
+RUN command -v aarch64-linux-gnu-strip >/dev/null 2>&1
+RUN command -v pidstat >/dev/null 2>&1
+RUN command -v socat >/dev/null 2>&1
+RUN command -v uclampset >/dev/null 2>&1
+ENV PATH="/opt/qemu-${QEMU_VERSION}/bin:${PATH}" \
+    QEMU="/opt/qemu-${QEMU_VERSION}/bin/qemu-system-aarch64" \
+    UV_LINK_MODE=copy
+LABEL org.opencontainers.image.title="tgoskits RT-Thread reproduction" \
+      io.tgoskits.qemu.version="${QEMU_VERSION}" \
+      io.tgoskits.qemu.commit="${QEMU_COMMIT}" \
+      io.tgoskits.uv.version="${UV_VERSION}" \
+      io.tgoskits.rtthread.commit="${RTTHREAD_COMMIT}"
+WORKDIR /workspace
+CMD ["bash"]

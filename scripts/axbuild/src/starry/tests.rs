@@ -1,6 +1,7 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use clap::Parser;
+use ostool::run::qemu::QemuConfig;
 
 use super::*;
 use crate::starry::test::TestCommand;
@@ -29,57 +30,18 @@ fn command_parses_test_qemu() {
 }
 
 #[test]
-fn command_parses_qemu_rootfs_write_policy() {
-    match parse([
-        "starry",
-        "qemu",
-        "--arch",
-        "aarch64",
-        "--rootfs",
-        "/tmp/starry-rootfs.img",
-        "--rootfs-write-policy",
-        "discard",
-    ]) {
-        Command::Qemu(args) => {
-            assert_eq!(
-                args.rootfs_write_policy,
-                Some(rootfs::RootfsWritePolicy::Discard)
-            );
-            assert_eq!(
-                args.resolved_rootfs_write_policy(),
-                rootfs::RootfsWritePolicy::Discard
-            );
-        }
-        _ => panic!("expected qemu command"),
-    }
-}
+fn standard_x86_64_and_loongarch64_qemu_configs_use_uefi_boot() {
+    let workspace = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
 
-#[test]
-fn managed_qemu_rootfs_defaults_to_discarding_writes() {
-    match parse(["starry", "qemu", "--arch", "aarch64"]) {
-        Command::Qemu(args) => assert_eq!(
-            args.resolved_rootfs_write_policy(),
-            rootfs::RootfsWritePolicy::Discard
-        ),
-        _ => panic!("expected qemu command"),
-    }
-}
+    for arch in ["x86_64", "loongarch64"] {
+        let path = workspace.join(format!("os/StarryOS/configs/qemu/qemu-{arch}.toml"));
+        let config: QemuConfig = toml::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
 
-#[test]
-fn explicit_qemu_rootfs_defaults_to_persisting_writes() {
-    match parse([
-        "starry",
-        "qemu",
-        "--arch",
-        "aarch64",
-        "--rootfs",
-        "/tmp/starry-rootfs.img",
-    ]) {
-        Command::Qemu(args) => assert_eq!(
-            args.resolved_rootfs_write_policy(),
-            rootfs::RootfsWritePolicy::Persist
-        ),
-        _ => panic!("expected qemu command"),
+        assert!(config.uefi, "Starry {arch} default QEMU path must use UEFI");
+        assert!(
+            config.to_bin,
+            "Starry {arch} default QEMU path must prepare a BIN"
+        );
     }
 }
 

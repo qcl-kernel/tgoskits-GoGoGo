@@ -38,7 +38,8 @@ fn probe(mut probe: ProbePci<'_>) -> Result<(), OnProbeError> {
     let dev = E1000::new(
         bar.start as u64,
         bar.count(),
-        crate::pci::device_dma(probe.info(), u64::MAX),
+        u64::MAX,
+        axklib::dma::op(),
         axklib::mmio::op(),
     )
     .map_err(|err| OnProbeError::other(alloc::format!("failed to create e1000: {err:?}")))?;

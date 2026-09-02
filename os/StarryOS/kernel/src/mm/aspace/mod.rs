@@ -5,6 +5,7 @@ use core::{
     sync::atomic::{AtomicUsize, Ordering},
 };
 
+use ax_errno::{AxError, AxResult, ax_bail};
 use ax_memory_addr::{
     MemoryAddr, PAGE_SIZE_4K, PageIter4K, PhysAddr, VirtAddr, VirtAddrRange, is_aligned_4k,
 };
@@ -16,25 +17,19 @@ use ax_runtime::hal::{
 };
 
 use crate::{
-    StarryError, StarryResult,
-    mm::ProcessVmStat,
+    mm::{ProcessVmStat, paging_error_to_ax_error},
     sync::{LockdepMutexExt, Mutex},
 };
-
-fn complete_page_fault_with(
-    handled: bool,
-    vaddr: VirtAddr,
-    update_mmu_cache: impl FnOnce(VirtAddr),
-) -> bool {
-    if handled {
-        update_mmu_cache(vaddr);
-    }
-    handled
-}
 
 mod accounting;
 mod backend;
 
+#[cfg(axtest)]
+pub(crate) use self::accounting::accounting_edge_cases_and_snapshot_rules_hold_for_test;
+#[cfg(axtest)]
+pub(crate) use self::accounting::accounting_rss_kind_debug_and_default_hold_for_test;
+#[cfg(axtest)]
+pub(crate) use self::accounting::rss_kind_and_accounting_rules_hold_for_test;
 pub use self::{
     accounting::{CloneMapAccounting, MemoryAccounting, RssAccountingGuard},
     backend::*,
@@ -110,11 +105,11 @@ impl AddrSpace {
     }
 
     /// Creates a new empty address space.
-    pub fn new_empty(base: VirtAddr, size: usize) -> StarryResult<Self> {
+    pub fn new_empty(base: VirtAddr, size: usize) -> AxResult<Self> {
         Ok(Self {
             va_range: VirtAddrRange::from_start_size(base, size),
             areas: MemorySet::new(),
-            pt: PageTable::new(PagingAllocator).map_err(|_| StarryError::NoMemory)?,
+            pt: PageTable::new(PagingAllocator).map_err(|_| AxError::NoMemory)?,
             process_slots: AtomicUsize::new(0),
             vm_stat: ProcessVmStat::new(),
             rss: MemoryAccounting::new(),
@@ -125,12 +120,12 @@ impl AddrSpace {
         &self.rss
     }
 
-    fn validate_region(&self, start: VirtAddr, size: usize) -> StarryResult {
+    fn validate_region(&self, start: VirtAddr, size: usize) -> AxResult {
         if !self.contains_range(start, size) {
-            return Err(StarryError::NoMemory);
+            ax_bail!(NoMemory, "address out of range");
         }
         if !start.is_aligned_4k() || !is_aligned_4k(size) {
-            return Err(StarryError::InvalidInput);
+            ax_bail!(InvalidInput, "address is not aligned");
         }
         Ok(())
     }
@@ -170,11 +165,11 @@ impl AddrSpace {
         start_paddr: PhysAddr,
         size: usize,
         flags: MappingFlags,
-    ) -> StarryResult {
+    ) -> AxResult {
         self.validate_region(start_vaddr, size)?;
 
         if !start_paddr.is_aligned_4k() {
-            return Err(StarryError::InvalidInput);
+            ax_bail!(InvalidInput, "address is not aligned");
         }
 
         let _rss = RssAccountingGuard::enter(&self.rss);
@@ -197,7 +192,7 @@ impl AddrSpace {
         flags: MappingFlags,
         populate: bool,
         backend: Backend,
-    ) -> StarryResult {
+    ) -> AxResult {
         self.map_with_reported_flags(start, size, flags, flags, populate, backend)
     }
 
@@ -209,7 +204,7 @@ impl AddrSpace {
         reported_flags: MappingFlags,
         populate: bool,
         backend: Backend,
-    ) -> StarryResult {
+    ) -> AxResult {
         self.validate_region(start, size)?;
 
         {
@@ -233,7 +228,7 @@ impl AddrSpace {
         mut start: VirtAddr,
         size: usize,
         access_flags: MappingFlags,
-    ) -> StarryResult {
+    ) -> AxResult {
         self.validate_region(start, size)?;
         let end = start + size;
 
@@ -270,7 +265,7 @@ impl AddrSpace {
 
         if start < end {
             // If the area is not fully mapped, we return ENOMEM.
-            return Err(StarryError::NoMemory);
+            ax_bail!(NoMemory);
         }
 
         Ok(())
@@ -278,7 +273,7 @@ impl AddrSpace {
 
     /// Discards the physical pages backing `[start, start+size)` while keeping
     /// the VMA metadata intact (Linux `MADV_DONTNEED` / `MADV_FREE` semantics).
-    pub fn discard_range(&mut self, start: VirtAddr, size: usize) -> StarryResult {
+    pub fn discard_range(&mut self, start: VirtAddr, size: usize) -> AxResult {
         self.validate_region(start, size)?;
         let end = start + size;
 
@@ -315,7 +310,7 @@ impl AddrSpace {
     ///
     /// Returns an error if the address range is out of the address space or not
     /// aligned.
-    pub fn unmap(&mut self, start: VirtAddr, size: usize) -> StarryResult {
+    pub fn unmap(&mut self, start: VirtAddr, size: usize) -> AxResult {
         self.validate_region(start, size)?;
 
         // Compute the actual mapped bytes being removed (unmap is already O(n)).
@@ -339,7 +334,7 @@ impl AddrSpace {
     }
 
     /// Removes VMA metadata without touching page-table entries.
-    pub fn unmap_metadata(&mut self, start: VirtAddr, size: usize) -> StarryResult {
+    pub fn unmap_metadata(&mut self, start: VirtAddr, size: usize) -> AxResult {
         self.validate_region(start, size)?;
 
         let end = start + size;
@@ -366,7 +361,7 @@ impl AddrSpace {
         size: usize,
         flags: MappingFlags,
         backend: Backend,
-    ) -> StarryResult {
+    ) -> AxResult {
         self.replace_area_metadata_with_reported_flags(start, size, flags, flags, backend)
     }
 
@@ -377,7 +372,7 @@ impl AddrSpace {
         flags: MappingFlags,
         reported_flags: MappingFlags,
         backend: Backend,
-    ) -> StarryResult {
+    ) -> AxResult {
         self.validate_region(start, size)?;
 
         crate::syscall::memfd_on_aspace_replace_metadata(self, start, size, flags, &backend);
@@ -392,7 +387,7 @@ impl AddrSpace {
     ///
     /// Uses direct PTE map/unmap (not [`BackendOps::unmap`]) so Cow RSS charges
     /// migrate via [`MemoryAccounting::move_charge`] instead of remove+record.
-    pub fn move_pages(&mut self, src: VirtAddr, dst: VirtAddr, size: usize) -> StarryResult {
+    pub fn move_pages(&mut self, src: VirtAddr, dst: VirtAddr, size: usize) -> AxResult {
         let cursor = &mut self.pt;
         let mut mapped_pages = alloc::vec::Vec::new();
         let mut offset = 0;
@@ -413,7 +408,7 @@ impl AddrSpace {
             if cursor.query(dst_va).is_err() {
                 if let Err(err) = cursor.map_page(dst_va, paddr, page_size, flags) {
                     rollback_moved_pages(cursor, &moved_pages);
-                    return Err(err.into());
+                    return Err(paging_error_to_ax_error(err));
                 }
                 dst_newly_mapped = true;
             }
@@ -422,7 +417,7 @@ impl AddrSpace {
                     let _ = cursor.unmap_page(dst_va);
                 }
                 rollback_moved_pages(cursor, &moved_pages);
-                return Err(err.into());
+                return Err(paging_error_to_ax_error(err));
             }
             self.rss.move_charge(src_va, dst_va)?;
             moved_pages.push((src_va, dst_va, paddr, flags, page_size, dst_newly_mapped));
@@ -432,17 +427,17 @@ impl AddrSpace {
     }
 
     /// Grows the mapping containing `addr` by `additional_size` at its end.
-    pub fn extend_area(&mut self, addr: VirtAddr, additional_size: usize) -> StarryResult {
+    pub fn extend_area(&mut self, addr: VirtAddr, additional_size: usize) -> AxResult {
         if additional_size == 0 {
             return Ok(());
         }
-        let area = self.areas.find(addr).ok_or(StarryError::InvalidInput)?;
+        let area = self.areas.find(addr).ok_or(AxError::InvalidInput)?;
         if area
             .end()
             .checked_add(additional_size)
             .is_none_or(|new_end| new_end > self.va_range.end)
         {
-            return Err(StarryError::NoMemory);
+            ax_bail!(NoMemory, "extension exceeds address space");
         }
         let _rss = RssAccountingGuard::enter(&self.rss);
         self.areas
@@ -454,12 +449,12 @@ impl AddrSpace {
     /// To process data in this area with the given function.
     ///
     /// Now it supports reading and writing data in the given interval.
-    fn process_area_data<F>(&self, start: VirtAddr, size: usize, mut f: F) -> StarryResult
+    fn process_area_data<F>(&self, start: VirtAddr, size: usize, mut f: F) -> AxResult
     where
         F: FnMut(VirtAddr, usize, usize),
     {
         if !self.contains_range(start, size) {
-            return Err(StarryError::InvalidInput);
+            ax_bail!(InvalidInput, "address out of range");
         }
         let mut cnt = 0;
         // If start is aligned to 4K, start_align_down will be equal to start_align_up.
@@ -467,7 +462,7 @@ impl AddrSpace {
         for vaddr in PageIter4K::new(start.align_down_4k(), end_align_up)
             .expect("Failed to create page iterator")
         {
-            let (mut paddr, ..) = self.pt.query(vaddr).map_err(|_| StarryError::BadAddress)?;
+            let (mut paddr, ..) = self.pt.query(vaddr).map_err(|_| AxError::BadAddress)?;
 
             let mut copy_size = (size - cnt).min(PAGE_SIZE_4K);
 
@@ -485,7 +480,7 @@ impl AddrSpace {
         Ok(())
     }
 
-    pub fn read(&self, start: VirtAddr, buf: &mut [u8]) -> StarryResult {
+    pub fn read(&self, start: VirtAddr, buf: &mut [u8]) -> AxResult {
         self.process_area_data(start, buf.len(), |src, offset, read_size| unsafe {
             core::ptr::copy_nonoverlapping(src.as_ptr(), buf.as_mut_ptr().add(offset), read_size);
         })
@@ -497,14 +492,14 @@ impl AddrSpace {
     ///
     /// * `start_vaddr` - The start virtual address to write.
     /// * `buf` - The buffer to write to the address space.
-    pub fn write(&self, start: VirtAddr, buf: &[u8]) -> StarryResult {
+    pub fn write(&self, start: VirtAddr, buf: &[u8]) -> AxResult {
         self.process_area_data(start, buf.len(), |dst, offset, write_size| unsafe {
             core::ptr::copy_nonoverlapping(buf.as_ptr().add(offset), dst.as_mut_ptr(), write_size);
         })
     }
 
     /// Synchronizes instruction fetch after modifying executable memory through this address space.
-    pub fn sync_modified_text(&self, start: VirtAddr, size: usize) -> StarryResult {
+    pub fn sync_modified_text(&self, start: VirtAddr, size: usize) -> AxResult {
         if size == 0 {
             return Ok(());
         }
@@ -520,7 +515,7 @@ impl AddrSpace {
     ///
     /// Returns an error if the address range is out of the address space or not
     /// aligned.
-    pub fn protect(&mut self, start: VirtAddr, size: usize, flags: MappingFlags) -> StarryResult {
+    pub fn protect(&mut self, start: VirtAddr, size: usize, flags: MappingFlags) -> AxResult {
         self.protect_with_reported_flags(start, size, flags, flags)
     }
 
@@ -530,7 +525,7 @@ impl AddrSpace {
         size: usize,
         flags: MappingFlags,
         reported_flags: MappingFlags,
-    ) -> StarryResult {
+    ) -> AxResult {
         self.validate_region(start, size)?;
 
         let touched_memfds =
@@ -612,7 +607,7 @@ impl AddrSpace {
                     Some(&self.rss),
                     &mut self.pt,
                 );
-                let handled = match populate_result {
+                return match populate_result {
                     Ok((n, callback)) => {
                         if let Some(cb) = callback {
                             cb(self);
@@ -629,11 +624,6 @@ impl AddrSpace {
                         false
                     }
                 };
-                return complete_page_fault_with(
-                    handled,
-                    vaddr,
-                    ax_runtime::hal::cache::update_mmu_cache,
-                );
             }
         }
         false
@@ -648,7 +638,7 @@ impl AddrSpace {
     /// After each area is mapped, `memfd_on_after_map` runs so each cloned memfd
     /// shared-writable VMA increments the same counter as [`AddrSpace::map`].
     /// (`CLONE_VM` shares one address space and does not duplicate VMAs here.)
-    pub fn try_clone(&mut self) -> StarryResult<Arc<Mutex<Self>>> {
+    pub fn try_clone(&mut self) -> AxResult<Arc<Mutex<Self>>> {
         let new_aspace = Arc::new(Mutex::new(Self::new_empty(self.base(), self.size())?));
         let new_aspace_clone = new_aspace.clone();
 
@@ -743,23 +733,6 @@ impl AddrSpace {
     }
 }
 
-#[cfg(all(test, not(axtest)))]
-fn page_fault_completion_updates_only_success_for_test() -> bool {
-    use core::cell::Cell;
-
-    let calls = Cell::new(0);
-    let observed = Cell::new(VirtAddr::from(0));
-    let success = complete_page_fault_with(true, VirtAddr::from(0x4567), |vaddr| {
-        calls.set(calls.get() + 1);
-        observed.set(vaddr);
-    });
-    let rejected = complete_page_fault_with(false, VirtAddr::from(0x89ab), |_| {
-        calls.set(calls.get() + 1);
-    });
-
-    success && !rejected && calls.get() == 1 && observed.get() == VirtAddr::from(0x4567)
-}
-
 /// Increment how many [`crate::task::ProcessData`] slots refer to `aspace`.
 pub(crate) fn attach_process_slot(aspace: &Arc<Mutex<AddrSpace>>) {
     aspace.lock().process_slots.fetch_add(1, Ordering::AcqRel);
@@ -792,14 +765,5 @@ impl fmt::Debug for AddrSpace {
 impl Drop for AddrSpace {
     fn drop(&mut self) {
         self.clear();
-    }
-}
-
-#[cfg(all(test, not(axtest)))]
-mod tests {
-    #[cfg(all(test, not(axtest)))]
-    #[test]
-    fn page_fault_completion_updates_only_success() {
-        assert!(super::page_fault_completion_updates_only_success_for_test());
     }
 }

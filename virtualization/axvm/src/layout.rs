@@ -493,7 +493,7 @@ pub(crate) fn build_address_layout(
     planner.finish()
 }
 
-fn device_mapping_flags() -> MappingFlags {
+pub(crate) fn device_mapping_flags() -> MappingFlags {
     MappingFlags::DEVICE | MappingFlags::READ | MappingFlags::WRITE | MappingFlags::USER
 }
 

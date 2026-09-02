@@ -1,7 +1,9 @@
 #[cfg(not(test))]
 pub use ax_sync::{Mutex as SleepMutex, MutexGuard as SleepMutexGuard};
+#[cfg(not(test))]
 pub use production::{IrqMutex, IrqMutexGuard};
 
+#[cfg(not(test))]
 mod production {
     /// Filesystem-internal spin mutex for IRQ and completion paths.
     #[repr(transparent)]
@@ -39,7 +41,10 @@ mod production {
     }
 }
 #[cfg(test)]
-pub use tests::{TestMutex as SleepMutex, TestMutexGuard as SleepMutexGuard};
+pub use tests::{
+    TestMutex as IrqMutex, TestMutex as SleepMutex, TestMutexGuard as IrqMutexGuard,
+    TestMutexGuard as SleepMutexGuard,
+};
 
 #[cfg(test)]
 mod tests {

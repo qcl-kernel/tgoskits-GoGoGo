@@ -16,6 +16,7 @@ pub fn input_device_count() -> u32 {
     EVENT_DEVICE_COUNT.load(Ordering::Acquire)
 }
 
+use ax_errno::{AxError, AxResult};
 use ax_input::{
     ErasedInputDevice, Event, EventType, InputDevice, InputDeviceId, InputError,
     input_polling_fallback_should_drain,
@@ -24,7 +25,7 @@ use ax_runtime::hal::{
     irq::IrqId,
     time::{monotonic_time_nanos, wall_time},
 };
-use axfs_ng_vfs::{DeviceId, NodeFlags, NodeType, VfsError, VfsResult};
+use axfs_ng_vfs::{DeviceId, NodeFlags, NodeType, VfsResult};
 use axpoll::{IoEvents, PollSet, Pollable};
 use bitmaps::Bitmap;
 use linux_raw_sys::{
@@ -214,12 +215,12 @@ impl EventDev {
         self.abs_bits[bit / 8] & (1 << (bit % 8)) != 0
     }
 
-    fn get_event_bits(&self, arg: usize, size: usize, ty: u8) -> VfsResult<usize> {
+    fn get_event_bits(&self, arg: usize, size: usize, ty: u8) -> AxResult<usize> {
         if ty == 0 {
             let bits = UserPtr::<u8>::from(arg).get_as_mut_slice(size)?;
             Ok(copy_bytes(self.ev_bits.as_bytes(), bits))
         } else {
-            let ty = EventType::from_repr(ty).ok_or(VfsError::InvalidInput)?;
+            let ty = EventType::from_repr(ty).ok_or(AxError::InvalidInput)?;
             let mut kernel_bits = vec![0; size];
             {
                 let mut inner = self.inner.lock();
@@ -353,24 +354,24 @@ fn copy_bytes(src: &[u8], dst: &mut [u8]) -> usize {
     len
 }
 
-fn return_str(arg: usize, size: usize, s: &str) -> VfsResult<usize> {
+fn return_str(arg: usize, size: usize, s: &str) -> AxResult<usize> {
     let slice = UserPtr::<u8>::from(arg).get_as_mut_slice(size)?;
     Ok(copy_bytes(s.as_bytes(), slice))
 }
 
-fn input_error_to_vfs_error(err: InputError) -> VfsError {
+fn input_error_to_ax_error(err: InputError) -> AxError {
     match err {
-        InputError::AlreadyExists => VfsError::AlreadyExists,
-        InputError::Again => VfsError::WouldBlock,
-        InputError::BadState => VfsError::BadState,
-        InputError::InvalidInput | InputError::Unsupported => VfsError::InvalidInput,
-        InputError::Io => VfsError::Io,
-        InputError::NoMemory => VfsError::NoMemory,
-        InputError::ResourceBusy => VfsError::ResourceBusy,
+        InputError::AlreadyExists => AxError::AlreadyExists,
+        InputError::Again => AxError::WouldBlock,
+        InputError::BadState => AxError::BadState,
+        InputError::InvalidInput | InputError::Unsupported => AxError::InvalidInput,
+        InputError::Io => AxError::Io,
+        InputError::NoMemory => AxError::NoMemory,
+        InputError::ResourceBusy => AxError::ResourceBusy,
     }
 }
 
-fn return_zero_bits(arg: usize, size: usize, bits: usize) -> VfsResult<usize> {
+fn return_zero_bits(arg: usize, size: usize, bits: usize) -> AxResult<usize> {
     let slice = UserPtr::<u8>::from(arg).get_as_mut_slice(size)?;
     let len = bits.div_ceil(8).min(slice.len());
     slice[..len].fill(0);
@@ -405,7 +406,7 @@ impl DeviceOps for EventDev {
             return Ok(0);
         }
         if buf.len() < size_of::<InputEvent>() {
-            return Err(VfsError::InvalidInput);
+            return Err(AxError::InvalidInput);
         }
         self.request_polling();
         let mut read = 0;
@@ -430,14 +431,14 @@ impl DeviceOps for EventDev {
             read += out.len();
         }
         if read == 0 {
-            Err(VfsError::WouldBlock)
+            Err(AxError::WouldBlock)
         } else {
             Ok(read)
         }
     }
 
     fn write_at(&self, _buf: &[u8], _offset: u64) -> VfsResult<usize> {
-        Err(VfsError::InvalidInput)
+        Err(AxError::InvalidInput)
     }
 
     fn flags(&self) -> NodeFlags {
@@ -477,12 +478,12 @@ impl DeviceOps for EventDev {
 
                 if ty != b'E' {
                     warn!("unknown ioctl for evdev: {cmd} {arg}");
-                    return Err(VfsError::InvalidInput);
+                    return Err(AxError::InvalidInput);
                 }
 
                 match dir {
                     // IOC_WRITE
-                    1 => return Err(VfsError::InvalidInput),
+                    1 => return Err(AxError::InvalidInput),
                     // IOC_READ
                     2 => {
                         #[allow(clippy::single_match)]
@@ -549,7 +550,7 @@ impl DeviceOps for EventDev {
                             // screen pixels; without it motion is treated
                             // as noise.
                             if size < size_of::<InputAbsInfo>() {
-                                return Err(VfsError::InvalidInput);
+                                return Err(AxError::InvalidInput);
                             }
                             let axis = nr & (ABS_CNT - 1);
                             // Linux's evdev returns EINVAL for any axis the
@@ -558,11 +559,11 @@ impl DeviceOps for EventDev {
                             // (size==0 selector), so without this pre-check
                             // userspace would see EIO and reject the device.
                             if !self.axis_supported(axis) {
-                                return Err(VfsError::InvalidInput);
+                                return Err(AxError::InvalidInput);
                             }
                             let info = match self.inner.lock().device.get_abs_info(axis) {
                                 Ok(info) => info,
-                                Err(err) => return Err(input_error_to_vfs_error(err)),
+                                Err(err) => return Err(input_error_to_ax_error(err)),
                             };
                             let abs = InputAbsInfo {
                                 value: 0,
@@ -577,12 +578,12 @@ impl DeviceOps for EventDev {
                             slice[..bytes.len()].copy_from_slice(bytes);
                             return Ok(bytes.len());
                         }
-                        return Err(VfsError::InvalidInput);
+                        return Err(AxError::InvalidInput);
                     }
                     _ => {}
                 }
 
-                Err(VfsError::InvalidInput)
+                Err(AxError::InvalidInput)
             }
         }
     }

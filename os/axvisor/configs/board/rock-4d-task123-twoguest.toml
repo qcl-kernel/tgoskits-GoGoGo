@@ -1,0 +1,10 @@
+# Axvisor build config: ROCK 4D board task123 — StarryOS client + RT-Thread
+# server peer, communicating over the internal virtio-net switch.
+features = []
+log = "Info"
+max_cpu_num = 8
+target = "aarch64-unknown-none-softfloat"
+vm_configs = [
+  "os/axvisor/configs/vms/rock-4d/starryos-task123-10.toml",
+  "os/axvisor/configs/vms/rock-4d/rtthread-auto.toml",
+]

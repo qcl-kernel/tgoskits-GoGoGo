@@ -1,0 +1,6 @@
+case,result,transport_retries,duplicates,application_errors,applied_delta
+drop-control,recovered,1,0,0,
+drop-status,recovered,1,0,0,
+duplicate-frame,recovered,0,1,0,0
+delayed-server,recovered,0,0,0,
+malformed,rejected,0,0,2,0

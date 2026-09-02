@@ -112,9 +112,7 @@ impl FilesystemOps for FatFilesystem {
 
     fn flush(&self) -> VfsResult<()> {
         let _state = self.inner.lock();
-        self.disk_flusher
-            .flush()
-            .map_err(crate::block_error_to_vfs_error)
+        self.disk_flusher.flush()
     }
 
     fn shutdown(&self) -> VfsResult<()> {

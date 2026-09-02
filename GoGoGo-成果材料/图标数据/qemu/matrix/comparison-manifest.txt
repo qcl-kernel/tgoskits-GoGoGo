@@ -1,0 +1,15 @@
+schema=1
+mode=realtime-suite
+stability_seconds=0
+task2_count=2
+task3_frames=3
+rtbench_samples=2
+guest_order=linux,starryos
+shared_artifact_cache=/home/yfblock/Code/tgoskits-GoGoGo/tmp/.task123-comparison-cache.task123-qemu-ns-all-2.3159981
+runner=/home/yfblock/Code/tgoskits-GoGoGo/os/axvisor/scripts/run_task123.sh
+analyzer=/home/yfblock/Code/tgoskits-GoGoGo/os/axvisor/scripts/compare_task123_guests.py
+matrix=all
+rtos_order=rtthread,zephyr
+app_guest_order=linux,starryos
+status=COMPLETE
+stability_gate=PASS

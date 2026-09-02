@@ -25,10 +25,9 @@ fn all_qemu_selection_skips_apps_without_matching_arch_config() {
     };
 
     let apps = selected_apps(root.path(), &args, StarryAppKind::Qemu).unwrap();
-    let names = apps.iter().map(|app| app.name.as_str()).collect::<Vec<_>>();
+    let names = apps.into_iter().map(|app| app.name).collect::<Vec<_>>();
 
-    assert!(names.contains(&"qemu/apk-curl"));
-    assert!(!names.contains(&"qemu/apt"));
+    assert_eq!(names, vec!["qemu/apk-curl"]);
 }
 
 #[test]
@@ -51,10 +50,9 @@ fn all_qemu_selection_uses_starry_default_arch_without_an_arch_argument() {
     };
 
     let apps = selected_apps(root.path(), &args, StarryAppKind::Qemu).unwrap();
-    let names = apps.iter().map(|app| app.name.as_str()).collect::<Vec<_>>();
+    let names = apps.into_iter().map(|app| app.name).collect::<Vec<_>>();
 
-    assert!(names.contains(&"qemu/apt"));
-    assert!(!names.contains(&"qemu/apk-curl"));
+    assert_eq!(names, vec!["qemu/apt"]);
 }
 
 #[test]
@@ -83,10 +81,9 @@ fn all_qemu_selection_skips_ignored_nested_app() {
     };
 
     let apps = selected_apps(root.path(), &args, StarryAppKind::Qemu).unwrap();
-    let names = apps.iter().map(|app| app.name.as_str()).collect::<Vec<_>>();
+    let names = apps.into_iter().map(|app| app.name).collect::<Vec<_>>();
 
-    assert!(names.contains(&"apache"));
-    assert!(!names.contains(&"ebpf/kret"));
+    assert_eq!(names, vec!["apache"]);
 }
 
 #[test]
@@ -104,9 +101,9 @@ fn selected_qemu_case_allows_ignored_app_when_explicit() {
     };
 
     let apps = selected_apps(root.path(), &args, StarryAppKind::Qemu).unwrap();
-    let names = apps.iter().map(|app| app.name.as_str()).collect::<Vec<_>>();
+    let names = apps.into_iter().map(|app| app.name).collect::<Vec<_>>();
 
-    assert!(names.contains(&"gdb-smoke"));
+    assert_eq!(names, vec!["gdb-smoke"]);
 }
 
 #[test]
@@ -129,7 +126,7 @@ fn selected_qemu_case_allows_ignored_nested_app_when_explicit() {
     };
 
     let apps = selected_apps(root.path(), &args, StarryAppKind::Qemu).unwrap();
-    let names = apps.iter().map(|app| app.name.as_str()).collect::<Vec<_>>();
+    let names = apps.into_iter().map(|app| app.name).collect::<Vec<_>>();
 
-    assert!(names.contains(&"k230-qemu/qemu-k230/kpu-smoke"));
+    assert_eq!(names, vec!["k230-qemu/qemu-k230/kpu-smoke"]);
 }

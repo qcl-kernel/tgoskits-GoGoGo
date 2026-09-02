@@ -1,6 +1,6 @@
 [package]
 name = "ax-cpu"
-version = "0.8.8"
+version = "0.8.0"
 repository = "https://github.com/rcore-os/tgoskits"
 edition.workspace = true
 authors = [
@@ -56,11 +56,6 @@ riscv.workspace = true
 
 [target.'cfg(target_arch = "loongarch64")'.dependencies]
 loongArch64 = "0.2"
-
-[dev-dependencies]
-aarch64-cpu = "11.0"
-tock-registers = "0.10"
-
 [lints.clippy]
 new_without_default = "allow"
 

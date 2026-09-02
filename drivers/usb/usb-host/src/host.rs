@@ -6,9 +6,7 @@ use alloc::vec::Vec;
 pub use super::backend::kmod::*;
 #[cfg(umod)]
 pub use super::backend::umod::*;
-pub use crate::device::{
-    Device, DeviceInfo, HubDeviceInfo, InterfaceSession, ProbeChanges, ProbedDevice,
-};
+pub use crate::device::{Device, DeviceInfo, HubDeviceInfo, ProbedDevice};
 use crate::{
     backend::{BackendOp, ty::*},
     err::Result,
@@ -32,20 +30,17 @@ impl USBHost {
     }
 
     #[cfg(any(kmod, umod))]
-    pub async fn probe_devices(&mut self) -> Result<ProbeChanges> {
-        let changes = self.backend.device_list().await?;
-        let mut connected = Vec::new();
-        for dev in changes.connected {
+    pub async fn probe_devices(&mut self) -> Result<Vec<ProbedDevice>> {
+        let device_infos = self.backend.device_list().await?;
+        let mut devices = Vec::new();
+        for dev in device_infos {
             let dev_info = match dev {
                 ProbedDeviceInfoOp::Device(inner) => ProbedDevice::Device(DeviceInfo { inner }),
                 ProbedDeviceInfoOp::Hub(inner) => ProbedDevice::Hub(HubDeviceInfo { inner }),
             };
-            connected.push(dev_info);
+            devices.push(dev_info);
         }
-        Ok(ProbeChanges {
-            connected,
-            disconnected: changes.disconnected,
-        })
+        Ok(devices)
     }
 
     #[cfg(kmod)]
@@ -108,7 +103,7 @@ mod tests {
     use super::*;
     use crate::backend::{
         BackendOp,
-        ty::{DeviceOp, ProbeChangesOp},
+        ty::{DeviceOp, ProbedDeviceInfoOp},
     };
 
     #[derive(Default)]
@@ -131,14 +126,8 @@ mod tests {
         #[cfg(any(kmod, umod))]
         fn device_list<'a>(
             &'a mut self,
-        ) -> futures::future::BoxFuture<'a, crate::err::Result<ProbeChangesOp>> {
-            async {
-                Ok(ProbeChangesOp {
-                    connected: Vec::new(),
-                    disconnected: Vec::new(),
-                })
-            }
-            .boxed()
+        ) -> futures::future::BoxFuture<'a, crate::err::Result<Vec<ProbedDeviceInfoOp>>> {
+            async { Ok(Vec::new()) }.boxed()
         }
 
         fn open_device<'a>(

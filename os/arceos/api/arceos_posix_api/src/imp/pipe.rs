@@ -1,10 +1,11 @@
 use alloc::sync::Arc;
 use core::ffi::c_int;
 
+use ax_errno::{LinuxError, LinuxResult};
 use ax_io::PollState;
 
 use super::fd_ops::{FileLike, add_file_like, close_file_like};
-use crate::{PosixError, PosixResult, ctypes, sync::Mutex};
+use crate::{ctypes, sync::Mutex};
 
 #[derive(Copy, Clone, PartialEq)]
 enum RingBufferStatus {
@@ -138,9 +139,9 @@ impl Pipe {
 }
 
 impl FileLike for Pipe {
-    fn read(&self, buf: &mut [u8]) -> PosixResult<usize> {
+    fn read(&self, buf: &mut [u8]) -> LinuxResult<usize> {
         if !self.readable() {
-            return Err(PosixError::EPERM);
+            return Err(LinuxError::EPERM);
         }
         if buf.is_empty() {
             return Ok(0);
@@ -175,9 +176,9 @@ impl FileLike for Pipe {
         }
     }
 
-    fn write(&self, buf: &[u8]) -> PosixResult<usize> {
+    fn write(&self, buf: &[u8]) -> LinuxResult<usize> {
         if !self.writable() {
-            return Err(PosixError::EPERM);
+            return Err(LinuxError::EPERM);
         }
         if buf.is_empty() {
             return Ok(0);
@@ -206,7 +207,7 @@ impl FileLike for Pipe {
         }
     }
 
-    fn stat(&self) -> PosixResult<ctypes::stat> {
+    fn stat(&self) -> LinuxResult<ctypes::stat> {
         let st_mode = 0o10000 | 0o600u32; // S_IFIFO | rw-------
         Ok(ctypes::stat {
             st_ino: 1,
@@ -223,7 +224,7 @@ impl FileLike for Pipe {
         self
     }
 
-    fn poll(&self) -> PosixResult<PollState> {
+    fn poll(&self) -> LinuxResult<PollState> {
         let buf = self.buffer.lock();
         Ok(PollState {
             readable: self.readable() && buf.available_read() > 0,
@@ -232,7 +233,7 @@ impl FileLike for Pipe {
         })
     }
 
-    fn set_nonblocking(&self, _nonblocking: bool) -> PosixResult {
+    fn set_nonblocking(&self, _nonblocking: bool) -> LinuxResult {
         Ok(())
     }
 }
@@ -244,7 +245,7 @@ pub fn sys_pipe(fds: &mut [c_int]) -> c_int {
     debug!("sys_pipe <= {:#x}", fds.as_ptr() as usize);
     syscall_body!(sys_pipe, {
         if fds.len() != 2 {
-            return Err(PosixError::EFAULT);
+            return Err(LinuxError::EFAULT);
         }
 
         let (read_end, write_end) = Pipe::new();

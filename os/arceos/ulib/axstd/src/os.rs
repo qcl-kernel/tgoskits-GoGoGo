@@ -88,9 +88,6 @@ pub mod arceos {
 #[cfg(feature = "std-compat")]
 pub mod libc_compat;
 
-#[cfg(any(feature = "std-compat", all(test, feature = "host-test")))]
-mod futex;
-
 #[cfg(all(test, feature = "host-test"))]
 mod tests {
     use super::arceos::sync::{IrqSafeMutex, NoPreemptMutex, RawSpinLock};

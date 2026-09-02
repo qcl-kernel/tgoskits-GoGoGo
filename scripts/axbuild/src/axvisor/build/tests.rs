@@ -1,11 +1,44 @@
 use std::{
+    env,
+    ffi::{OsStr, OsString},
     fs,
     path::{Path, PathBuf},
+    sync::{LazyLock, Mutex},
 };
 
 use tempfile::tempdir;
 
 use super::*;
+
+static ENV_LOCK: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
+
+struct TempEnvVar {
+    key: &'static str,
+    original: Option<OsString>,
+}
+
+impl TempEnvVar {
+    fn set(key: &'static str, value: impl AsRef<OsStr>) -> Self {
+        let original = env::var_os(key);
+        unsafe {
+            env::set_var(key, value);
+        }
+        Self { key, original }
+    }
+}
+
+impl Drop for TempEnvVar {
+    fn drop(&mut self) {
+        match self.original.as_ref() {
+            Some(value) => unsafe {
+                env::set_var(self.key, value);
+            },
+            None => unsafe {
+                env::remove_var(self.key);
+            },
+        }
+    }
+}
 
 fn write_board(axvisor_dir: &Path, name: &str, body: &str) -> PathBuf {
     let path = axvisor_dir
@@ -32,6 +65,50 @@ fn request(path: PathBuf, arch: &str, target: &str) -> ResolvedAxvisorRequest {
         uboot_config: None,
         vmconfigs: vec![],
     }
+}
+
+#[test]
+fn axvisor_ax_std_dependency_declares_std_compat() {
+    let metadata = crate::build::workspace_metadata().unwrap();
+    let package = metadata
+        .packages
+        .iter()
+        .find(|package| package.name == AXVISOR_PACKAGE)
+        .unwrap();
+    let ax_std = package
+        .dependencies
+        .iter()
+        .find(|dependency| dependency.name == "ax-std")
+        .unwrap();
+
+    assert!(
+        ax_std
+            .features
+            .iter()
+            .any(|feature| feature == "std-compat"),
+        "Axvisor must declare ax-std/std-compat in its dependency instead of relying on axbuild"
+    );
+}
+
+#[test]
+fn axvisor_host_xtask_is_opt_in() {
+    let metadata = crate::build::workspace_metadata().unwrap();
+    let package = metadata
+        .packages
+        .iter()
+        .find(|package| package.name == AXVISOR_PACKAGE)
+        .unwrap();
+    let target = package
+        .targets
+        .iter()
+        .find(|target| target.name == "xtask")
+        .unwrap();
+
+    assert_eq!(
+        target.required_features,
+        ["host-xtask"],
+        "the host build tool must not be linked as part of kernel integration tests"
+    );
 }
 
 #[test]
@@ -443,23 +520,25 @@ log = "Info"
 }
 
 #[test]
-fn load_cargo_config_rejects_direct_axplat_dyn_feature() {
+fn load_cargo_config_accepts_top_level_three_guest_feature() {
     let root = tempdir().unwrap();
-    let config_path = root.path().join(".build.toml");
+    let config_path = root.path().join("qemu-aarch64-three-guest-net.toml");
     fs::write(
         &config_path,
         r#"
-features = ["axplat-dyn/efi"]
+target = "aarch64-unknown-none-softfloat"
+features = ["qemu-aarch64-three-guest-net"]
 log = "Info"
+vm_configs = []
 "#,
     )
     .unwrap();
 
-    let err = load_cargo_config(&ResolvedAxvisorRequest {
+    let cargo = load_cargo_config(&ResolvedAxvisorRequest {
         package: AXVISOR_PACKAGE.to_string(),
         axvisor_dir: root.path().join("os/axvisor"),
-        arch: "loongarch64".to_string(),
-        target: "loongarch64-unknown-none-softfloat".to_string(),
+        arch: "aarch64".to_string(),
+        target: "aarch64-unknown-none-softfloat".to_string(),
         smp: None,
         debug: false,
         build_info_path: config_path,
@@ -467,10 +546,60 @@ log = "Info"
         uboot_config: None,
         vmconfigs: vec![],
     })
-    .unwrap_err();
+    .unwrap();
 
-    assert!(err.to_string().contains("dynamic platform features"));
-    assert!(err.to_string().contains("axplat-dyn/efi"));
+    assert!(
+        cargo
+            .features
+            .contains(&"qemu-aarch64-three-guest-net".to_string())
+    );
+
+    let metadata = crate::build::workspace_metadata().unwrap();
+    let package = metadata
+        .packages
+        .iter()
+        .find(|package| package.name == AXVISOR_PACKAGE)
+        .unwrap();
+    assert!(
+        package
+            .features
+            .contains_key("qemu-aarch64-three-guest-net")
+    );
+}
+
+#[test]
+fn load_cargo_config_rejects_direct_axplat_dyn_features() {
+    for feature in ["axplat-dyn/efi", "axplat-dyn/qemu-aarch64-three-guest-net"] {
+        let root = tempdir().unwrap();
+        let config_path = root.path().join(".build.toml");
+        fs::write(
+            &config_path,
+            format!(
+                r#"
+features = ["{feature}"]
+log = "Info"
+"#
+            ),
+        )
+        .unwrap();
+
+        let err = load_cargo_config(&ResolvedAxvisorRequest {
+            package: AXVISOR_PACKAGE.to_string(),
+            axvisor_dir: root.path().join("os/axvisor"),
+            arch: "loongarch64".to_string(),
+            target: "loongarch64-unknown-none-softfloat".to_string(),
+            smp: None,
+            debug: false,
+            build_info_path: config_path,
+            qemu_config: None,
+            uboot_config: None,
+            vmconfigs: vec![],
+        })
+        .unwrap_err();
+
+        assert!(err.to_string().contains("dynamic platform features"));
+        assert!(err.to_string().contains(feature));
+    }
 }
 
 #[test]
@@ -550,6 +679,8 @@ log = "Info"
 
 #[test]
 fn load_cargo_config_applies_stack_protector_from_makefile_features() {
+    let _env_lock = ENV_LOCK.lock().unwrap();
+    let _features = TempEnvVar::set("FEATURES", "stack-protector");
     let root = tempdir().unwrap();
     let config_path = root.path().join(".build.toml");
     fs::write(
@@ -561,21 +692,18 @@ log = "Info"
     )
     .unwrap();
 
-    let cargo = load_cargo_config_with_makefile_features(
-        &ResolvedAxvisorRequest {
-            package: AXVISOR_PACKAGE.to_string(),
-            axvisor_dir: root.path().join("os/axvisor"),
-            arch: "x86_64".to_string(),
-            target: "x86_64-unknown-none".to_string(),
-            smp: None,
-            debug: false,
-            build_info_path: config_path,
-            qemu_config: None,
-            uboot_config: None,
-            vmconfigs: vec![],
-        },
-        &["stack-protector".to_string()],
-    )
+    let cargo = load_cargo_config(&ResolvedAxvisorRequest {
+        package: AXVISOR_PACKAGE.to_string(),
+        axvisor_dir: root.path().join("os/axvisor"),
+        arch: "x86_64".to_string(),
+        target: "x86_64-unknown-none".to_string(),
+        smp: None,
+        debug: false,
+        build_info_path: config_path,
+        qemu_config: None,
+        uboot_config: None,
+        vmconfigs: vec![],
+    })
     .unwrap();
 
     assert!(

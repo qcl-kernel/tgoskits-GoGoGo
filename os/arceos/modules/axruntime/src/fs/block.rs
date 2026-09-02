@@ -6,7 +6,6 @@ use core::{
 
 use ax_alloc::UsageKind;
 use ax_fs_ng::{
-    BlockError, BlockResult,
     block::runtime::{BlockIrqAction, BlockIrqSource, RdifBlockDevice, RdifBlockGroup},
     os::{
         BlockIrqOutcome, BlockIrqRegistrar, BlockIrqRegistration, BlockNotification,
@@ -18,10 +17,6 @@ struct RuntimeTimeProvider;
 
 impl BlockTimeProvider for RuntimeTimeProvider {
     fn wall_time(&self) -> Duration {
-        ax_hal::time::wall_time()
-    }
-
-    fn monotonic_time(&self) -> Duration {
         ax_hal::time::monotonic_time()
     }
 }
@@ -29,10 +24,10 @@ impl BlockTimeProvider for RuntimeTimeProvider {
 struct RuntimePageProvider;
 
 impl FsPageProvider for RuntimePageProvider {
-    fn alloc_page(&self) -> axfs_ng_vfs::VfsResult<FsPage> {
+    fn alloc_page(&self) -> ax_errno::AxResult<FsPage> {
         let addr = ax_alloc::global_allocator()
             .alloc_pages(1, ax_fs_ng::os::memory::PAGE_SIZE, UsageKind::PageCache)
-            .map_err(|_| axfs_ng_vfs::VfsError::NoMemory)?;
+            .map_err(|_| ax_errno::AxError::NoMemory)?;
         Ok(unsafe { FsPage::from_raw(addr) })
     }
 
@@ -113,9 +108,9 @@ impl BlockRuntimeOps for RuntimeTaskOps {
         name: String,
         cpu: usize,
         entry: Box<dyn FnOnce() + Send + 'static>,
-    ) -> BlockResult<Box<dyn BlockThread>> {
+    ) -> ax_errno::AxResult<Box<dyn BlockThread>> {
         if cpu >= ax_hal::cpu_num() {
-            return Err(BlockError::InvalidRequest);
+            return Err(ax_errno::AxError::InvalidInput);
         }
         let task = ax_task::spawn_raw(
             move || {
@@ -133,31 +128,34 @@ impl BlockRuntimeOps for RuntimeTaskOps {
     }
 }
 
+#[cfg(feature = "irq")]
 struct RuntimeBlockIrqRegistrar;
 
+#[cfg(feature = "irq")]
 struct RuntimeBlockIrqRegistration {
     name: String,
     handle: ax_hal::irq::IrqHandle,
 }
 
+#[cfg(feature = "irq")]
 impl BlockIrqRegistration for RuntimeBlockIrqRegistration {
-    fn enable(&self) -> BlockResult {
-        ax_hal::irq::enable_irq(self.handle)?;
-        Ok(())
+    fn enable(&self) -> ax_errno::AxResult {
+        ax_hal::irq::enable_irq(self.handle).map_err(map_block_irq_error)
     }
 
-    fn disable_and_synchronize(&self) -> BlockResult {
+    fn disable_and_synchronize(&self) -> ax_errno::AxResult {
         match ax_hal::irq::disable_irq(self.handle) {
             Ok(()) | Err(ax_hal::irq::IrqError::NotFound) => {}
-            Err(error) => return Err(error.into()),
+            Err(error) => return Err(map_block_irq_error(error)),
         }
         match ax_hal::irq::synchronize_irq(self.handle) {
             Ok(()) | Err(ax_hal::irq::IrqError::NotFound) => Ok(()),
-            Err(error) => Err(error.into()),
+            Err(error) => Err(map_block_irq_error(error)),
         }
     }
 }
 
+#[cfg(feature = "irq")]
 impl Drop for RuntimeBlockIrqRegistration {
     fn drop(&mut self) {
         if let Err(error) = ax_hal::irq::free_irq(self.handle) {
@@ -169,6 +167,25 @@ impl Drop for RuntimeBlockIrqRegistration {
     }
 }
 
+fn map_block_irq_error(err: ax_hal::irq::IrqError) -> ax_errno::AxError {
+    match err {
+        ax_hal::irq::IrqError::InvalidIrq | ax_hal::irq::IrqError::InvalidCpu => {
+            ax_errno::AxError::InvalidInput
+        }
+        ax_hal::irq::IrqError::CpuOffline | ax_hal::irq::IrqError::Unsupported => {
+            ax_errno::AxError::Unsupported
+        }
+        ax_hal::irq::IrqError::Busy | ax_hal::irq::IrqError::InIrqContext => {
+            ax_errno::AxError::ResourceBusy
+        }
+        ax_hal::irq::IrqError::Timeout => ax_errno::AxError::TimedOut,
+        ax_hal::irq::IrqError::NoMemory => ax_errno::AxError::NoMemory,
+        ax_hal::irq::IrqError::NotFound => ax_errno::AxError::NotFound,
+        ax_hal::irq::IrqError::Controller => ax_errno::AxError::Io,
+    }
+}
+
+#[cfg(feature = "irq")]
 impl BlockIrqRegistrar for RuntimeBlockIrqRegistrar {
     fn register(
         &self,
@@ -176,7 +193,7 @@ impl BlockIrqRegistrar for RuntimeBlockIrqRegistrar {
         irq: irq_framework::IrqId,
         cpu: usize,
         mut action: BlockIrqAction,
-    ) -> BlockResult<Box<dyn BlockIrqRegistration>> {
+    ) -> ax_errno::AxResult<Box<dyn BlockIrqRegistration>> {
         let request = ax_hal::irq::IrqRequest::new(move |_context| match action.run() {
             BlockIrqOutcome::Unhandled => ax_hal::irq::IrqReturn::Unhandled,
             BlockIrqOutcome::Handled => ax_hal::irq::IrqReturn::Handled,
@@ -186,7 +203,7 @@ impl BlockIrqRegistrar for RuntimeBlockIrqRegistrar {
         .share_mode(ax_hal::irq::ShareMode::Shared)
         .auto_enable(ax_hal::irq::AutoEnable::No)
         .affinity(ax_hal::irq::IrqAffinity::Fixed(ax_hal::irq::CpuId(cpu)));
-        let handle = ax_hal::irq::request_irq(irq, request)?;
+        let handle = ax_hal::irq::request_irq(irq, request).map_err(map_block_irq_error)?;
         Ok(Box::new(RuntimeBlockIrqRegistration { name, handle }))
     }
 }
@@ -194,9 +211,19 @@ impl BlockIrqRegistrar for RuntimeBlockIrqRegistrar {
 static TIME_PROVIDER: RuntimeTimeProvider = RuntimeTimeProvider;
 static PAGE_PROVIDER: RuntimePageProvider = RuntimePageProvider;
 static TASK_OPS: RuntimeTaskOps = RuntimeTaskOps;
+#[cfg(feature = "irq")]
 static IRQ_REGISTRAR: RuntimeBlockIrqRegistrar = RuntimeBlockIrqRegistrar;
 
 pub(super) fn init(bootargs: Option<&str>) {
+    install_runtime();
+    ax_fs_ng::root::init_root_from_rdif_sources(
+        take_rdif_block_devices(),
+        take_rdif_block_groups(),
+        bootargs,
+    );
+}
+
+pub(super) fn install_runtime() {
     ONLINE_BLOCK_CPUS.store(1, Ordering::Release);
     ax_fs_ng::os::install(
         &TIME_PROVIDER,
@@ -204,12 +231,6 @@ pub(super) fn init(bootargs: Option<&str>) {
         &TASK_OPS,
         axklib::dma::op(),
         irq_registrar(),
-        None,
-    );
-    ax_fs_ng::root::init_root_from_rdif_sources(
-        take_rdif_block_devices(),
-        take_rdif_block_groups(),
-        bootargs,
     );
 }
 
@@ -221,8 +242,14 @@ pub(super) fn online_smp() {
     }
 }
 
+#[cfg(feature = "irq")]
 fn irq_registrar() -> Option<&'static dyn BlockIrqRegistrar> {
     Some(&IRQ_REGISTRAR)
+}
+
+#[cfg(not(feature = "irq"))]
+fn irq_registrar() -> Option<&'static dyn BlockIrqRegistrar> {
+    None
 }
 
 fn take_rdif_block_devices() -> Vec<RdifBlockDevice> {
@@ -247,6 +274,7 @@ fn take_rdif_block_groups() -> Vec<RdifBlockGroup> {
         .collect()
 }
 
+#[cfg(feature = "irq")]
 fn resolve_block_irqs(bindings: Vec<ax_driver::BindingIrqBinding>) -> Vec<BlockIrqSource> {
     bindings
         .into_iter()
@@ -259,6 +287,12 @@ fn resolve_block_irqs(bindings: Vec<ax_driver::BindingIrqBinding>) -> Vec<BlockI
         .collect()
 }
 
+#[cfg(not(feature = "irq"))]
+fn resolve_block_irqs(_bindings: Vec<ax_driver::BindingIrqBinding>) -> Vec<BlockIrqSource> {
+    Vec::new()
+}
+
+#[cfg(feature = "irq")]
 fn resolve_block_irq(irq: ax_driver::BindingIrq) -> Option<irq_framework::IrqId> {
     match crate::irq::resolve_binding_irq(irq) {
         Ok(id) => Some(id),

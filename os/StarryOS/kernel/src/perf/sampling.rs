@@ -47,10 +47,7 @@ use ax_hal::irq::{IrqContext, IrqId, IrqReturn};
 use ax_task::IrqNotify;
 use kbpf_basic::linux_bpf::perf_event_mmap_page;
 
-use crate::{
-    sync::PreemptIrqSaveGuard,
-    task::{AsThread, PidNamespaceId, TgidNumber, TidNumber},
-};
+use crate::sync::PreemptIrqSaveGuard;
 
 fn pmu_irq() -> Result<IrqId, ax_hal::irq::IrqError> {
     ax_hal::pmu::irq()
@@ -176,8 +173,6 @@ pub struct SampleSlot {
     /// fields. `0` when the event was opened without per-event ids (the common
     /// case in this single-group implementation).
     pub id: u64,
-    /// PID namespace view captured by the event owner.
-    pub observer: PidNamespaceId,
     /// Raw pointer to the owning event's [`IrqNotify`], woken after each sample.
     /// Kept alive by the event's strong `Arc<IrqNotify>` for as long as the slot
     /// is registered (see module docs).
@@ -372,18 +367,17 @@ pub fn pmu_overflow_handler(_ctx: IrqContext) -> IrqReturn {
             let cur_period = slot.period;
 
             // Build one PERF_RECORD_SAMPLE honouring the event's `sample_type`
-            // (validated at open to set IP and only supported bits). PID fields
-            // use the view captured by the perf event; the scheduler TaskId
-            // never crosses the Linux perf ABI boundary. A system-wide counter
-            // can overflow while a kernel task is running, in which case there
-            // is no Linux PID identity and the wire fields remain zero.
-            let (pid, tid) = current_sample_ids(slot.observer);
+            // (validated at open to set IP and only supported bits). pid/tid are
+            // best-effort: the interrupted task's scheduler id (non-zero, stable per
+            // task) — enough for perf to parse + count samples; precise user TID is a
+            // future refinement. time/cpu are the real interrupt-time values.
+            let tid = ax_task::current().id().as_u64() as u32;
             let time = ax_runtime::hal::time::monotonic_time_nanos();
             let cpu = ax_hal::percpu::this_cpu_id() as u32;
             let mut record = [0u8; SAMPLE_RECORD_MAX_LEN];
             let data = SampleData {
                 ip,
-                pid,
+                pid: tid, // best-effort: same scheduler id for pid and tid
                 tid,
                 time,
                 addr: 0,
@@ -447,29 +441,6 @@ pub fn pmu_overflow_handler(_ctx: IrqContext) -> IrqReturn {
     IrqReturn::Handled
 }
 
-fn current_sample_ids(observer: PidNamespaceId) -> (Option<TgidNumber>, Option<TidNumber>) {
-    let task = ax_task::current();
-    let Some(thread) = task.try_as_thread() else {
-        return (None, None);
-    };
-    let tid = thread
-        .pid_identity()
-        .visible_number_in(observer)
-        .map(TidNumber::from);
-    let pid = thread
-        .proc_data
-        .identity()
-        .visible_number_in(observer)
-        .map(TgidNumber::from);
-    (pid, tid)
-}
-
-#[cfg(all(test, axtest))]
-fn kernel_task_sample_ids_are_empty_for_test() -> bool {
-    let (pid, tid) = current_sample_ids(crate::task::ROOT_PID_NS.id());
-    pid.is_none() && tid.is_none()
-}
-
 /// Lays out one `PERF_RECORD_SAMPLE` into `buf` per `sample_type`, returning its
 /// total length in bytes.
 ///
@@ -495,8 +466,8 @@ fn kernel_task_sample_ids_are_empty_for_test() -> bool {
 /// `sample_type` alone). Gathered by the overflow handler at interrupt time.
 struct SampleData {
     ip: u64,
-    pid: Option<TgidNumber>,
-    tid: Option<TidNumber>,
+    pid: u32,
+    tid: u32,
     time: u64,
     addr: u64,
     id: u64,
@@ -534,8 +505,8 @@ fn build_sample(buf: &mut [u8], sample_type: u64, misc: u16, d: &SampleData) -> 
     }
     if sample_type & PERF_SAMPLE_TID != 0 {
         // pid and tid are a packed `u32` pair in one 8-byte slot.
-        put!(d.pid.map_or(0, TgidNumber::get));
-        put!(d.tid.map_or(0, TidNumber::get));
+        put!(d.pid);
+        put!(d.tid);
     }
     if sample_type & PERF_SAMPLE_TIME != 0 {
         put!(d.time);
@@ -666,13 +637,4 @@ pub unsafe fn ring_write_process(ring_vaddr: usize, ring_len: usize, record: &[u
     // SAFETY: caller upholds the ring liveness contract; IRQs are masked so the
     // overflow handler cannot race this write on the current core.
     unsafe { ring_write(ring_vaddr, ring_len, record) };
-}
-
-#[cfg(test)]
-mod tests {
-    #[cfg(all(test, axtest, target_arch = "aarch64"))]
-    #[axtest::axtest]
-    fn kernel_task_sample_ids_are_empty() {
-        assert!(super::kernel_task_sample_ids_are_empty_for_test());
-    }
 }

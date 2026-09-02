@@ -16,6 +16,9 @@ use ax_lazyinit::OnceLock;
 #[cfg(feature = "dwarf")]
 mod dwarf;
 
+#[cfg(all(axtest, feature = "axtest"))]
+mod axtest;
+
 #[cfg(feature = "dwarf")]
 pub use dwarf::{DwarfReader, FrameIter};
 
@@ -163,16 +166,7 @@ impl CaptureBuf {
 /// Core frame pointer walking logic. Calls `callback` for each valid frame.
 /// The callback returns `false` to stop unwinding (e.g., buffer full).
 #[cfg(feature = "alloc")]
-fn unwind_core(fp: usize, callback: impl FnMut(Frame) -> bool) {
-    unwind_core_with_max_depth(fp, max_depth(), callback);
-}
-
-#[cfg(feature = "alloc")]
-fn unwind_core_with_max_depth(
-    mut fp: usize,
-    max_depth: usize,
-    mut callback: impl FnMut(Frame) -> bool,
-) {
+fn unwind_core(mut fp: usize, mut callback: impl FnMut(Frame) -> bool) {
     let Some(fp_range) = FP_RANGE.get() else {
         log::error!("Backtrace not initialized. Call `axbacktrace::init` first.");
         return;
@@ -180,6 +174,7 @@ fn unwind_core_with_max_depth(
 
     let ip_range = IP_RANGE.get();
     let mut depth = 0;
+    let max_depth = max_depth();
 
     while fp_range.contains(&fp)
         && depth < max_depth
@@ -466,6 +461,7 @@ mod tests {
 
     fn init_for_tests() {
         init(0..usize::MAX, 0..usize::MAX);
+        set_max_depth(32);
     }
 
     fn boxed_frame_chain(ips: &[usize]) -> (Box<[Frame]>, usize) {
@@ -649,17 +645,17 @@ mod tests {
     #[test]
     fn stress_deep_chain_truncation() {
         init_for_tests();
+        set_max_depth(16);
         let ips: Vec<usize> = (0..64).map(|i| 0xF000 + i).collect();
         let (chain, start_fp) = boxed_frame_chain(&ips);
 
-        let mut out = Vec::new();
-        unwind_core_with_max_depth(start_fp, 16, |frame| {
-            out.push(frame);
-            true
-        });
+        let out = unwind_stack(start_fp);
         assert_eq!(out.len(), 16);
         // Only the first 16 frames should be collected
         assert_eq!(out.as_slice(), &chain[..16]);
+
+        // Restore default
+        set_max_depth(CAPTURE_CAPACITY);
     }
 
     /// Repeatedly create and drop Backtrace objects to verify no leaks or corruption.

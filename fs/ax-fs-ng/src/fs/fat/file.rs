@@ -3,7 +3,7 @@ use core::{any::Any, mem, ops::Deref, task::Context};
 
 use axfs_ng_vfs::{
     FileNode, FileNodeOps, FilesystemOps, FsIoEvents, FsPollable, Metadata, MetadataUpdate,
-    NodeFlags, NodeOps, NodeType, VfsResult,
+    NodeFlags, NodeOps, NodeType, VfsError, VfsResult,
 };
 use fatfs::{Read, Seek, SeekFrom, Write};
 
@@ -148,6 +148,10 @@ impl FileNodeOps for FatFileNode {
         } else {
             grow_file(&fs, file, len)
         }
+    }
+
+    fn set_symlink(&self, _target: &str) -> VfsResult<()> {
+        Err(VfsError::PermissionDenied)
     }
 }
 

@@ -5,7 +5,7 @@
 //! publishes only the target-vCPU bit and wakes one pre-created worker.
 
 use std::sync::{
-    Arc, Mutex,
+    Arc, Mutex, Weak,
     atomic::{AtomicBool, AtomicUsize, Ordering},
 };
 
@@ -23,6 +23,7 @@ pub(crate) struct DeferredVcpuKick {
     stopping: AtomicBool,
     notify: IrqNotify,
     worker: Mutex<Option<crate::AxTaskRef>>,
+    runtime: Mutex<Option<Weak<crate::vm::VmRuntimeHandle>>>,
 }
 
 impl DeferredVcpuKick {
@@ -35,7 +36,17 @@ impl DeferredVcpuKick {
             stopping: AtomicBool::new(false),
             notify: IrqNotify::new(),
             worker: Mutex::new(None),
+            runtime: Mutex::new(None),
         })
+    }
+
+    /// Registers the runtime used by the task-context kick worker.
+    ///
+    /// The weak reference is installed before host IRQ input is enabled. The
+    /// IRQ handler itself never reads it; it only publishes the target bit and
+    /// signals `IrqNotify`.
+    pub(crate) fn bind_runtime(&self, runtime: &Arc<crate::vm::VmRuntimeHandle>) {
+        *self.runtime.lock_unpoisoned() = Some(Arc::downgrade(runtime));
     }
 
     /// Starts the task-context worker before an architecture enables IRQ input.
@@ -88,6 +99,7 @@ impl DeferredVcpuKick {
         if let Some(worker) = worker {
             worker.join();
         }
+        self.runtime.lock_unpoisoned().take();
         self.pending_vcpus.store(0, Ordering::Release);
     }
 
@@ -99,7 +111,16 @@ impl DeferredVcpuKick {
             }
             let pending = self.pending_vcpus.swap(0, Ordering::AcqRel);
             for vcpu_id in SetBits(pending) {
-                if let Err(error) = crate::runtime::vcpus::notify_vcpu(self.vm_id, vcpu_id) {
+                let result = self
+                    .runtime
+                    .lock_unpoisoned()
+                    .as_ref()
+                    .and_then(Weak::upgrade)
+                    .map_or_else(
+                        || crate::runtime::vcpus::notify_vcpu(self.vm_id, vcpu_id),
+                        |runtime| runtime.notify_vcpu(vcpu_id).map(|_| ()),
+                    );
+                if let Err(error) = result {
                     trace!(
                         "VM[{}] deferred IRQ kick for vCPU {vcpu_id} was not delivered: {error:?}",
                         self.vm_id

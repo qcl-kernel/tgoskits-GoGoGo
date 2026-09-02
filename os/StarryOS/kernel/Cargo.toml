@@ -1,6 +1,6 @@
 [package]
 name = "starry-kernel"
-version = "0.8.3"
+version = "0.8.0"
 edition.workspace = true
 description = "A Linux-compatible OS kernel built on ArceOS unikernel"
 authors = [
@@ -12,36 +12,6 @@ authors = [
 ]
 repository.workspace = true
 license.workspace = true
-
-[package.metadata.docs.rs]
-targets = [
-    "x86_64-unknown-none",
-    "aarch64-unknown-none-softfloat",
-    "riscv64gc-unknown-none-elf",
-    "loongarch64-unknown-none-softfloat",
-]
-
-[[package.metadata.clippy.configurations]]
-name = "riscv64-system"
-target = "riscv64gc-unknown-none-elf"
-features = [
-    "ax-driver/nvme",
-    "ax-driver/serial",
-    "ax-driver/virtio-gpu",
-    "ax-driver/virtio-input",
-    "ax-driver/virtio-net",
-    "ax-driver/virtio-socket",
-    "ax-driver/xhci-pci",
-    "ax-runtime/rtc",
-    "smp",
-    "starry-kernel/input",
-]
-
-[package.metadata.clippy.configurations.env]
-AX_ARCH = "riscv64"
-AX_LOG = "warn"
-AX_TARGET = "riscv64gc-unknown-none-elf"
-SMP = "4"
 
 [[package.metadata.clippy.configurations]]
 name = "aarch64-system"
@@ -58,7 +28,6 @@ features = [
     "ax-runtime/rtc",
     "smp",
     "starry-kernel/input",
-    "starry-kernel/user-access-fastpath",
     "starry-kernel/vsock",
 ]
 
@@ -93,140 +62,11 @@ AX_LOG = "warn"
 AX_TARGET = "aarch64-unknown-none-softfloat"
 SMP = "4"
 
-[[package.metadata.clippy.configurations]]
-name = "loongarch64-system"
-target = "loongarch64-unknown-none-softfloat"
-features = [
-    "ax-driver/nvme",
-    "ax-driver/virtio-gpu",
-    "ax-driver/virtio-input",
-    "ax-driver/virtio-net",
-    "ax-driver/virtio-socket",
-    "smp",
-    "starry-kernel/input",
-]
-
-[package.metadata.clippy.configurations.env]
-AX_ARCH = "loongarch64"
-AX_LOG = "warn"
-AX_TARGET = "loongarch64-unknown-none-softfloat"
-SMP = "4"
-
-[[package.metadata.clippy.configurations]]
-name = "x86_64-system"
-target = "x86_64-unknown-none"
-features = [
-    "ax-driver/nvme",
-    "ax-driver/virtio-gpu",
-    "ax-driver/virtio-input",
-    "ax-driver/virtio-net",
-    "ax-driver/virtio-socket",
-    "ax-driver/xhci-pci",
-    "smp",
-    "starry-kernel/input",
-]
-
-[package.metadata.clippy.configurations.env]
-AX_ARCH = "x86_64"
-AX_LOG = "warn"
-AX_TARGET = "x86_64-unknown-none"
-SMP = "4"
-
-[[package.metadata.clippy.configurations]]
-name = "riscv64-axtest-source"
-target = "riscv64gc-unknown-none-elf"
-features = [
-    "ax-driver/nvme",
-    "ax-driver/serial",
-    "ax-driver/virtio-gpu",
-    "ax-driver/virtio-input",
-    "ax-driver/virtio-net",
-    "ax-driver/virtio-socket",
-    "ax-runtime/display",
-    "ax-runtime/rtc",
-    "axtest",
-    "smp",
-    "starry-kernel/input",
-    "starry-kernel/vsock",
-]
-rustflags = ["--cfg", "axtest", "--check-cfg", "cfg(axtest)"]
-
-[package.metadata.clippy.configurations.env]
-AX_ARCH = "riscv64"
-AX_LOG = "warn"
-AX_TARGET = "riscv64gc-unknown-none-elf"
-
-[[package.metadata.clippy.configurations]]
-name = "aarch64-axtest-source"
-target = "aarch64-unknown-none-softfloat"
-features = [
-    "ax-driver/nvme",
-    "ax-driver/virtio-gpu",
-    "ax-driver/virtio-input",
-    "ax-driver/virtio-net",
-    "ax-driver/virtio-socket",
-    "axtest",
-    "smp",
-    "starry-kernel/input",
-    "starry-kernel/vsock",
-]
-rustflags = ["--cfg", "axtest", "--check-cfg", "cfg(axtest)"]
-
-[package.metadata.clippy.configurations.env]
-AX_ARCH = "aarch64"
-AX_LOG = "warn"
-AX_TARGET = "aarch64-unknown-none-softfloat"
-
-[[package.metadata.clippy.configurations]]
-name = "loongarch64-axtest-source"
-target = "loongarch64-unknown-none-softfloat"
-features = [
-    "ax-driver/nvme",
-    "ax-driver/virtio-gpu",
-    "ax-driver/virtio-input",
-    "ax-driver/virtio-net",
-    "ax-driver/virtio-socket",
-    "axplat-dyn/efi",
-    "axtest",
-    "smp",
-]
-rustflags = ["--cfg", "axtest", "--check-cfg", "cfg(axtest)"]
-
-[package.metadata.clippy.configurations.env]
-AX_ARCH = "loongarch64"
-AX_LOG = "warn"
-AX_TARGET = "loongarch64-unknown-none-softfloat"
-
-[[package.metadata.clippy.configurations]]
-name = "x86_64-axtest-source"
-target = "x86_64-unknown-none"
-features = [
-    "ax-driver/nvme",
-    "ax-driver/virtio-gpu",
-    "ax-driver/virtio-input",
-    "ax-driver/virtio-net",
-    "ax-driver/virtio-socket",
-    "axplat-dyn/efi",
-    "axtest",
-    "smp",
-]
-rustflags = ["--cfg", "axtest", "--check-cfg", "cfg(axtest)"]
-
-[package.metadata.clippy.configurations.env]
-AX_ARCH = "x86_64"
-AX_LOG = "warn"
-AX_TARGET = "x86_64-unknown-none"
-
 [features]
 default = ["dynamic_debug"]
 dev-log = []
-# Lock-free user-copy fast path: probe the HW page table (aarch64 `AT S1E0R/W`)
-# so a syscall copy of already-present, EL0-permitted pages skips the aspace lock
-# and `populate_area`. Off by default; misses fall to the unchanged locked slow
-# path. The probe itself is always compiled (rides ax-cpu `uspace`); this gate
-# only enables its use. Only meaningful on aarch64 (other arches stub to false).
-user-access-fastpath = []
-ext4 = ["ax-fs-ng/ext4"]
+ext4 = ["ax-fs-ng/ext4", "ax-runtime/ext4fs"]
+embedded-rootfs = ["ax-runtime/embedded-rootfs"]
 fat = ["ax-fs-ng/fat"]
 input = ["dep:ax-input", "ax-runtime/input"]
 ipi = ["ax-runtime/ipi"]
@@ -243,12 +83,20 @@ k230-kpu = ["ax-hal/xuantie-c9xx", "dep:k230-kpu"]
 vsock = ["ax-runtime/vsock"]
 dynamic_debug = ["ipi"]
 sg2002 = [
+    "ax-runtime/irq",
     "ax-driver/usb",
     "dep:rdif-pwm",
     "dep:sg2002-tpu",
     "dep:some-serial",
     "dep:sg200x-bsp",
     "dep:tock-registers",
+]
+# SG2002 AIC8800 SoftAP Wi-Fi. The whole bring-up (FDT probe + SoftAP + stack
+# registration) now lives in ax-driver / ax-runtime; the kernel just turns the
+# feature on. No direct chip-crate deps needed here anymore.
+sg2002-wifi = [
+    "sg2002",
+    "ax-runtime/aic8800-wifi",
 ]
 sg2002-cvi-usb-camera = [
     "sg2002",
@@ -279,15 +127,19 @@ ax-driver = { workspace = true, features = ["usb"] }
 axklib.workspace = true
 axplat-dyn.workspace = true
 ax-runtime = { workspace = true, features = [
+    "irq",
     "uspace",
+    "multitask",
     "rtc",
-    "ext4fs",
     "net",
+    "serial",
 ] }
 ax-task = { workspace = true, features = [
+    "multitask",
     "task-ext",
     "tracepoint-hooks",
     "sched-rr",
+    "axtest",
 ] }
 rockchip-rga = { workspace = true, optional = true }
 sg2002-tpu = { workspace = true, optional = true }
@@ -298,13 +150,13 @@ rdrive.workspace = true
 
 axbacktrace = { workspace = true }
 ax-cgroup = { workspace = true }
+ax-errno = { workspace = true }
+axnsproxy = { workspace = true }
 axfs-ng-vfs = { workspace = true }
 rdif-block = { workspace = true }
 rdif-pinctrl = { workspace = true, optional = true }
 rdif-pwm = { workspace = true, optional = true }
 ax-io = { workspace = true }
-axhvc = { workspace = true }
-axivc = { workspace = true }
 axpoll = { workspace = true }
 bitflags = "2.10"
 bitmaps = { version = "3.2", default-features = false }
@@ -341,11 +193,11 @@ rand = { version = "0.10", default-features = false, features = ["alloc", "chach
 ringbuf = { version = "0.4.8", default-features = false, features = ["alloc"] }
 scope-local = { workspace = true }
 slab = { version = "0.4.9", default-features = false }
+starry-process = { workspace = true }
 starry-signal = { workspace = true }
 starry-vm = { workspace = true }
 strum = { version = "0.28", default-features = false, features = ["derive"] }
-syscalls.workspace = true
-thiserror.workspace = true
+syscalls = { version = "0.8", default-features = false }
 uluru = "3.1.0"
 weak-map = "0.1.1"
 xmas-elf = "0.9"
@@ -365,31 +217,63 @@ sg200x-jpu = { workspace = true, optional = true }
 # 0.10 to match sg200x-bsp 0.7.x's internal tock-registers; the Writeable trait
 # must come from the same version as sg200x-bsp's ReadWrite types.
 tock-registers = { version = "0.10", optional = true }
-ax-tracepoint.workspace = true
+ktracepoint = "0.6"
 ksym = "0.6"
 kbpf-basic = "0.6"
 rbpf = { version = "0.4", default-features = false }
 
 [dev-dependencies]
-axtest = { path = "../../../components/axtest/axtest" }
-ax-std = { path = "../../arceos/ulib/axstd", default-features = false, features = [
+axtest.workspace = true
+axbacktrace = { workspace = true, features = ["axtest"] }
+ax-cpumask = { workspace = true, features = ["axtest"] }
+ax-driver = { workspace = true, features = ["axtest"] }
+ax-hal = { workspace = true, features = ["axtest"] }
+ax-std = { workspace = true, default-features = false, features = [
     "alloc",
     "fd",
     "ext-ld",
     "fs",
+    "multitask",
+    "irq",
 ] }
-
-[target.'cfg(not(target_os = "none"))'.dev-dependencies]
-ax-runtime = { workspace = true, features = ["host-test", "smp"] }
+ax-errno = { workspace = true, features = ["axtest"] }
+ax-memory-addr = { workspace = true, features = ["axtest"] }
+ax-memory-set = { workspace = true, features = ["axtest"] }
+axfs-ng-vfs = { workspace = true, features = ["axtest"] }
+ax-io = { workspace = true, features = ["axtest"] }
+ax-lazyinit = { workspace = true, features = ["axtest"] }
+ax-net = { workspace = true, features = ["axtest"] }
+axpoll = { workspace = true, features = ["axtest"] }
+dma-api = { workspace = true, features = ["axtest"] }
+irq-framework = { workspace = true, features = ["axtest"] }
+kernutil = { workspace = true, features = ["axtest"] }
+mmio-api = { workspace = true, features = ["axtest"] }
+rdif-base = { workspace = true, features = ["axtest"] }
+rdif-block = { workspace = true, features = ["axtest"] }
+rdif-def = { workspace = true, features = ["axtest"] }
+rdif-display = { workspace = true, features = ["axtest"] }
+rdif-eth = { workspace = true, features = ["axtest"] }
+rdif-input = { workspace = true, features = ["axtest"] }
+rdif-intc = { workspace = true, features = ["axtest"] }
+rdif-msi = { workspace = true, features = ["axtest"] }
+rdif-pcie = { workspace = true, features = ["axtest"] }
+rdif-pinctrl = { workspace = true, features = ["axtest"] }
+rdif-power = { workspace = true, features = ["axtest"] }
+rdif-reset = { workspace = true, features = ["axtest"] }
+rdif-serial = { workspace = true, features = ["axtest"] }
+rdif-vsock = { workspace = true, features = ["axtest"] }
+ranges-ext.workspace = true
+rdrive = { workspace = true, features = ["axtest"] }
+rsext4 = { workspace = true, features = ["axtest"] }
+scope-local = { workspace = true, features = ["axtest"] }
+buddy-slab-allocator = { workspace = true, features = ["axtest"] }
+page-table-generic = { workspace = true }
 
 [[test]]
 name = "axtest_kernel"
-path = "src/axtest_kernel.rs"
+path = "tests/axtest_kernel.rs"
 harness = false
-required-features = ["axtest", "smp"]
-
-[package.metadata.axtest]
-runtime = "starry"
+required-features = ["axtest"]
 
 [target.'cfg(target_arch = "x86_64")'.dependencies]
 x86 = "0.52"

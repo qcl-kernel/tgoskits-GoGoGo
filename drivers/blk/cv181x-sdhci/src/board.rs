@@ -2,7 +2,7 @@
 
 use tock_registers::interfaces::{ReadWriteable, Writeable};
 
-use super::{ControllerResources, Cv181xSdhci, host2::AfterBusOp};
+use super::{Cv181xSdhci, host2::AfterBusOp};
 use crate::platform::*;
 
 impl Cv181xSdhci {
@@ -84,28 +84,6 @@ impl Cv181xSdhci {
         registers.phy_config.set(PHY_CONFIG_DS_HS);
     }
 
-    pub(super) fn restore_controller_after_reset(&mut self) {
-        match self.controller {
-            ControllerResources::Sd => self.configure_sd_power_on(),
-            ControllerResources::Sdio1(mmio) => {
-                mmio.initialize();
-                self.restore_ds_hs_phy();
-            }
-        }
-    }
-
-    fn configure_controller_power_off(&mut self) {
-        if matches!(self.controller, ControllerResources::Sd) {
-            self.configure_sd_power_off();
-        }
-    }
-
-    fn restore_controller_3v3(&mut self) {
-        if matches!(self.controller, ControllerResources::Sd) {
-            self.restore_3v3_power();
-        }
-    }
-
     fn update_top_power(&mut self, low_bits: u32) {
         self.mmio
             .syscon_registers()
@@ -113,27 +91,13 @@ impl Cv181xSdhci {
             .modify(TOP_SD_PWRSW_CTRL::LOW_BITS.val(low_bits));
     }
 
-    pub(super) fn apply_after(&mut self, after: AfterBusOp) -> Result<(), sdmmc_host::Error> {
+    pub(super) fn apply_after(&mut self, after: AfterBusOp) -> Result<(), sdio_host2::Error> {
         match after {
             AfterBusOp::None => Ok(()),
             AfterBusOp::PowerOn | AfterBusOp::ResetAll => {
-                self.restore_controller_after_reset();
+                self.configure_sd_power_on();
                 Ok(())
             }
-            AfterBusOp::PowerOff => {
-                self.configure_controller_power_off();
-                Ok(())
-            }
-            AfterBusOp::Restore3v3 => {
-                self.restore_controller_3v3();
-                Ok(())
-            }
-            AfterBusOp::SetClock(speed) => self.set_clock_speed(speed),
-            AfterBusOp::SetClockHz(hz) => self.program_clock(
-                hz,
-                hz > DEFAULT_MAX_FREQUENCY_HZ,
-                HOST_CONTROL2::UHS_MODE::SDR12,
-            ),
         }
     }
 }

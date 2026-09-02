@@ -10,16 +10,9 @@ use axvmconfig::VirtualDeviceRequest;
 use crate::{machine::GuestSerialFirmwareIdentity, *};
 
 mod append;
-mod devices;
 
 pub use append::DefaultVirtualDeviceIntent;
 pub(crate) use append::append_configured_devices;
-
-pub(crate) fn register_devices(
-    catalog: &mut ConfiguredDeviceCatalog,
-) -> Result<(), ConfiguredDeviceError> {
-    devices::register_devices(catalog)
-}
 
 /// Creates one graph node from a validated, model-specific request.
 pub type ConfiguredModelConstructor = for<'a> fn(
@@ -34,12 +27,6 @@ pub type ConfiguredModelConstructor = for<'a> fn(
 pub struct ConfiguredModelRegistration {
     pub model: &'static str,
     pub create: ConfiguredModelConstructor,
-}
-
-#[derive(Clone)]
-struct RegisteredModel {
-    owner: &'static str,
-    registration: ConfiguredModelRegistration,
 }
 
 #[derive(Clone, Debug)]
@@ -185,52 +172,33 @@ impl Default for DeviceInstantiationContext {
 }
 
 pub struct ConfiguredDeviceCatalog {
-    registrations: BTreeMap<String, RegisteredModel>,
+    registrations: BTreeMap<String, ConfiguredModelRegistration>,
 }
 
 impl ConfiguredDeviceCatalog {
-    /// Creates an empty catalog. Every owning layer must register explicitly.
     pub fn new() -> Self {
-        Self {
+        let mut catalog = Self {
             registrations: BTreeMap::new(),
+        };
+        for registration in crate::machine::SERIAL_REGISTRATIONS {
+            let previous = catalog
+                .registrations
+                .insert(registration.model.into(), *registration);
+            debug_assert!(previous.is_none());
         }
+        catalog
     }
 
-    /// Registers one model and records the source module for diagnostics.
     pub fn register(
         &mut self,
-        owner: &'static str,
         registration: ConfiguredModelRegistration,
     ) -> Result<(), ConfiguredDeviceError> {
         let name = registration.model;
         validate_model_name(name)?;
-        if let Some(existing) = self.registrations.get(name) {
-            return Err(ConfiguredDeviceError::DuplicateModel {
-                model: name.into(),
-                first_owner: existing.owner.into(),
-                duplicate_owner: owner.into(),
-            });
+        if self.registrations.contains_key(name) {
+            return Err(ConfiguredDeviceError::DuplicateModel { model: name.into() });
         }
-        self.registrations.insert(
-            name.into(),
-            RegisteredModel {
-                owner,
-                registration,
-            },
-        );
-        Ok(())
-    }
-
-    /// Commits one owning layer's complete registration batch or none of it.
-    pub(crate) fn register_transaction(
-        &mut self,
-        register: impl FnOnce(&mut Self) -> Result<(), ConfiguredDeviceError>,
-    ) -> Result<(), ConfiguredDeviceError> {
-        let mut staged = Self {
-            registrations: self.registrations.clone(),
-        };
-        register(&mut staged)?;
-        *self = staged;
+        self.registrations.insert(name.into(), registration);
         Ok(())
     }
 
@@ -250,7 +218,7 @@ impl ConfiguredDeviceCatalog {
                 model: request.model.clone(),
             }
         })?;
-        (registration.registration.create)(id, request, context)
+        (registration.create)(id, request, context)
     }
 }
 
@@ -273,15 +241,8 @@ impl fmt::Debug for ConfiguredDeviceCatalog {
 pub enum ConfiguredDeviceError {
     #[error("unknown virtual device model '{model}'")]
     UnknownVirtualDeviceModel { model: String },
-    #[error(
-        "virtual device model '{model}' from '{duplicate_owner}' is already registered by \
-         '{first_owner}'"
-    )]
-    DuplicateModel {
-        model: String,
-        first_owner: String,
-        duplicate_owner: String,
-    },
+    #[error("virtual device model '{model}' is registered more than once")]
+    DuplicateModel { model: String },
     #[error("invalid virtual device model name '{model}'")]
     InvalidModelName { model: String },
     #[error("invalid options for virtual device '{device}' ({model}): {detail}")]

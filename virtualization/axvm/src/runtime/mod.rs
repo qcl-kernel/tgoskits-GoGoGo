@@ -13,7 +13,7 @@
 // limitations under the License.
 
 pub(crate) mod hvc;
-pub(crate) mod ivc;
+mod ivc;
 pub(crate) mod vcpus;
 
 mod dispatcher;
@@ -25,7 +25,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 #[allow(unused_imports)]
 pub(crate) use dispatcher::VcpuIrqDispatcher;
 
-use crate::{AxVmError, AxVmResult, StopReason, VmStatus, ax_err};
+use crate::{AxVmError, AxVmResult, StopReason, VmStatus, ax_err, config::HostTimerPolicy};
 
 /// The instantiated VM ref type (by `Arc`).
 pub type VMRef = crate::AxVMRef;
@@ -36,6 +36,69 @@ static VMM: crate::HostWaitQueueHandle = crate::HostWaitQueueHandle::new();
 
 /// The number of running VMs. This is used to determine when to exit the VMM.
 static RUNNING_VM_COUNT: AtomicUsize = AtomicUsize::new(0);
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum PeriodicTimerState {
+    Enabled,
+    Disabled,
+}
+
+trait CurrentCpuPeriodicTimer {
+    fn set_periodic_timer_state(&self, state: PeriodicTimerState);
+}
+
+struct CurrentCpuTimerControl;
+
+impl CurrentCpuPeriodicTimer for CurrentCpuTimerControl {
+    fn set_periodic_timer_state(&self, state: PeriodicTimerState) {
+        crate::host::task::set_current_cpu_periodic_timer_enabled(matches!(
+            state,
+            PeriodicTimerState::Enabled
+        ));
+    }
+}
+
+struct HostTimerPolicyScope<'a, T: CurrentCpuPeriodicTimer> {
+    timer: &'a T,
+    tickless: bool,
+}
+
+impl<'a, T: CurrentCpuPeriodicTimer> HostTimerPolicyScope<'a, T> {
+    fn enter(policy: HostTimerPolicy, timer: &'a T) -> Self {
+        let tickless = policy == HostTimerPolicy::Tickless;
+        if tickless {
+            timer.set_periodic_timer_state(PeriodicTimerState::Disabled);
+        }
+        Self { timer, tickless }
+    }
+}
+
+impl<T: CurrentCpuPeriodicTimer> Drop for HostTimerPolicyScope<'_, T> {
+    fn drop(&mut self) {
+        if self.tickless {
+            self.timer
+                .set_periodic_timer_state(PeriodicTimerState::Enabled);
+        }
+    }
+}
+
+fn with_vcpu_host_timer_policy<T, R>(
+    policy: HostTimerPolicy,
+    timer: &T,
+    guest_run: impl FnOnce() -> R,
+) -> R
+where
+    T: CurrentCpuPeriodicTimer,
+{
+    let _scope = HostTimerPolicyScope::enter(policy, timer);
+    guest_run()
+}
+
+#[cfg(target_arch = "aarch64")]
+pub(crate) fn run_vcpu_with_host_timer_policy<R>(vm: &VMRef, guest_run: impl FnOnce() -> R) -> R {
+    let policy = vm.with_config(|config| config.host_timer_policy());
+    with_vcpu_host_timer_policy(policy, &CurrentCpuTimerControl, guest_run)
+}
 
 /// Initialize runtime state for already registered VMs.
 pub fn init() {
@@ -109,95 +172,27 @@ pub fn start_vm(vm_id: usize) -> AxVmResult {
 }
 
 /// Wake the primary vCPU of a VM.
-///
-/// Single-vCPU guests retain pending device work across the WFI boundary.
-/// SMP guests keep the legacy wake-only behavior until AxVM provides a
-/// per-vCPU wait queue that can target vCPU0.
 pub fn notify_vm(vm_id: usize) -> AxVmResult {
-    let vm = vm_by_id(vm_id)?;
-    let vcpu_num = vm.vcpu_num();
-    // `WaitQueue::wait_until` evaluates the vCPU wake predicate while it
-    // holds both the wait-queue and run-queue locks. That predicate may read
-    // the VM lifecycle state and therefore lock `vm.machine`. Never retain
-    // `vm.machine` while notifying the same wait queue, or the notifier and a
-    // vCPU entering WFI can deadlock in opposite lock order.
-    let runtime = vm.runtime_handle()?;
-    notify_runtime_for_device_poll(&runtime, vcpu_num);
+    vm_by_id(vm_id)?;
+    notify_vm_with_wake(|| vcpus::notify_primary_vcpu(vm_id));
     Ok(())
 }
 
-fn notify_runtime_for_device_poll(runtime: &crate::vm::VmRuntimeHandle, vcpu_num: usize) {
-    if vcpu_num == 1 {
-        runtime.notify_device_poll();
-    } else {
-        // The runtime wait queue is shared by all vCPUs, so notify_one cannot
-        // target vCPU0. Keep the legacy wake semantics for SMP guests until a
-        // dedicated per-vCPU wake path is available; publishing the shared
-        // device-poll flag here could keep a secondary vCPU spinning while
-        // the primary vCPU remains asleep.
-        runtime.notify_one();
-    }
+pub fn request_vm_device_poll(vm_id: usize) -> AxVmResult {
+    let vm = vm_by_id(vm_id)?;
+    vm.with_runtime(|runtime| {
+        runtime.request_device_poll();
+        Ok(())
+    })
+}
+
+fn notify_vm_with_wake(wake_vcpu: impl FnOnce()) {
+    wake_vcpu();
 }
 
 pub fn stop_vm(vm_id: usize) -> AxVmResult {
     let vm = vm_by_id(vm_id)?;
-    if matches!(vm.status(), VmStatus::Running) {
-        // `start_vm` flips the status to `Running` synchronously while the
-        // vCPU task may still be queued on another CPU. Requesting a stop in
-        // that window strands the task in its startup gate (which needs a
-        // `Running` window it already missed), so wait for the first vCPU
-        // entry before accepting the stop.
-        wait_until_vcpu_entered(|| vm.running_vcpu_count() > 0, || vm.stopping())?;
-    }
     vm.stop(StopReason::Forced)?;
-    vcpus::notify_all_vcpus(vm_id);
-    Ok(())
-}
-
-/// Boundedly wait for at least one vCPU task to enter the guest run loop
-/// before a request-stop is accepted.
-///
-/// `start_vm` flips the VM status to `Running` synchronously while the vCPU
-/// task may still be queued on another CPU. If the stop is accepted in that
-/// window, the task's startup gate blocks on a `Running` window it already
-/// missed and parks forever, so the VM never reaches `Stopped`. Waiting for
-/// the first vCPU entry closes that window.
-///
-/// The wait is bounded (`MAX_YIELDS`, mirroring the `wait_until_stopped`
-/// pattern): a vCPU task that never runs yields an error instead of hanging
-/// the caller, leaving the VM `Running` so the stop can be retried.
-///
-/// `pub(crate)` because the destroy/reset quiesce path
-/// (`AxVM::stop_and_join_runtime`) applies the same guard: a client may POST
-/// `/start` and then immediately DELETE the VM, so `destroy()` must hold the
-/// request-stop until the first vCPU entry just like `stop_vm`.
-pub(crate) fn wait_until_vcpu_entered(
-    vcpu_entered: impl Fn() -> bool,
-    vm_stopping: impl Fn() -> bool,
-) -> AxVmResult {
-    const MAX_YIELDS: usize = 10_000;
-    for _ in 0..MAX_YIELDS {
-        if vcpu_entered() || vm_stopping() {
-            return Ok(());
-        }
-        crate::host::task::yield_now();
-    }
-    ax_err!(
-        BadState,
-        "vCPU task did not enter the guest before request-stop"
-    )
-}
-
-/// Pause a running VM.
-///
-/// `vm.pause()` flips the status to `Paused` synchronously; the running vCPUs
-/// observe the flag at their next run-loop iteration and park in the
-/// suspend-wait (`!suspending()`), so the guest actually suspends
-/// asynchronously. The notify wakes any vCPU parked in a WFI/event wait so it
-/// can reach that check.
-pub fn pause_vm(vm_id: usize) -> AxVmResult {
-    let vm = vm_by_id(vm_id)?;
-    vm.pause()?;
     vcpus::notify_all_vcpus(vm_id);
     Ok(())
 }
@@ -239,10 +234,7 @@ const fn missing_vm_error(vm_id: usize) -> AxVmError {
 
 #[cfg(test)]
 mod tests {
-    use std::{
-        cell::Cell,
-        sync::{Arc, atomic::AtomicBool},
-    };
+    use std::{cell::RefCell, panic::AssertUnwindSafe, vec, vec::Vec};
 
     use super::*;
 
@@ -269,90 +261,54 @@ mod tests {
     }
 
     #[test]
-    fn smp_notification_does_not_publish_a_shared_device_poll_request() {
-        let runtime = crate::vm::VmRuntimeHandle::new();
-        let observed_generation = runtime.notification_generation();
-
-        notify_runtime_for_device_poll(&runtime, 2);
-
-        assert!(!runtime.device_poll_requested());
-        assert_ne!(runtime.notification_generation(), observed_generation);
-    }
-
-    #[test]
-    fn single_vcpu_notification_publishes_a_device_poll_request() {
-        let runtime = crate::vm::VmRuntimeHandle::new();
-
-        notify_runtime_for_device_poll(&runtime, 1);
-
-        assert!(runtime.device_poll_requested());
-    }
-
-    #[test]
-    fn request_stop_wait_returns_immediately_once_a_vcpu_has_entered() {
-        assert!(wait_until_vcpu_entered(|| true, || false).is_ok());
-    }
-
-    #[test]
-    fn request_stop_wait_bails_out_when_vm_is_already_stopping() {
-        assert!(wait_until_vcpu_entered(|| false, || true).is_ok());
-    }
-
-    #[test]
-    fn request_stop_wait_times_out_instead_of_accepting_a_never_entering_vcpu() {
-        let err = wait_until_vcpu_entered(|| false, || false).unwrap_err();
-
-        assert!(matches!(err, AxVmError::InvalidState { .. }));
-    }
-
-    #[test]
-    fn request_stop_waits_for_vcpu_entry_when_stop_precedes_entry() {
-        // Force the scheduling order that previously stranded the vCPU task:
-        // the request-stop arrives while no vCPU task has entered the guest
-        // run loop, and the task only enters after the wait has begun. The
-        // stop must be held back until entry, never accepted-and-stranded.
-        let entered = Arc::new(AtomicBool::new(false));
-        let stopping = Arc::new(AtomicBool::new(false));
-        let first_poll = Arc::new(std::sync::Barrier::new(2));
-        let release_entered = Arc::new(std::sync::Barrier::new(2));
-
-        let entered_for_task = entered.clone();
-        let first_poll_for_task = first_poll.clone();
-        let release_entered_for_task = release_entered.clone();
-        let vcpu_task = std::thread::spawn(move || {
-            // The vCPU task is queued but has not entered the guest yet.
-            first_poll_for_task.wait();
-            release_entered_for_task.wait();
-            entered_for_task.store(true, Ordering::Release);
+    fn console_notification_does_not_poll_devices_from_the_host_input_task() {
+        let steps = RefCell::new(Vec::new());
+        notify_vm_with_wake(|| {
+            assert!(steps.borrow().is_empty());
+            steps.borrow_mut().push("wake");
         });
+        assert_eq!(steps.into_inner(), ["wake"]);
+    }
 
-        let entered_for_wait = entered.clone();
-        let stopping_for_wait = stopping.clone();
-        let poll_count = Cell::new(0);
-        let result = wait_until_vcpu_entered(
-            || {
-                let is_entered = entered_for_wait.load(Ordering::Acquire);
-                if poll_count.get() == 0 {
-                    // First poll observed the pre-entry state. Only now release
-                    // the vCPU task to enter the guest, deterministically
-                    // ordering stop-before-entry.
-                    poll_count.set(1);
-                    first_poll.wait();
-                    release_entered.wait();
-                }
-                is_entered
-            },
-            || stopping_for_wait.load(Ordering::Acquire),
-        );
+    #[derive(Default)]
+    struct RecordingTimerControl {
+        states: RefCell<Vec<super::PeriodicTimerState>>,
+    }
 
-        vcpu_task.join().unwrap();
-        assert!(
-            result.is_ok(),
-            "stop must wait for vCPU entry, not strand it"
+    impl super::CurrentCpuPeriodicTimer for RecordingTimerControl {
+        fn set_periodic_timer_state(&self, state: super::PeriodicTimerState) {
+            self.states.borrow_mut().push(state);
+        }
+    }
+
+    #[test]
+    fn tickless_host_timer_is_restored_after_guest_run_unwinds() {
+        let timer = RecordingTimerControl::default();
+
+        let result = std::panic::catch_unwind(AssertUnwindSafe(|| {
+            super::with_vcpu_host_timer_policy(super::HostTimerPolicy::Tickless, &timer, || {
+                panic!("guest run")
+            });
+        }));
+
+        assert!(result.is_err());
+        assert_eq!(
+            *timer.states.borrow(),
+            vec![
+                super::PeriodicTimerState::Disabled,
+                super::PeriodicTimerState::Enabled
+            ]
         );
-        assert!(
-            entered.load(Ordering::Acquire),
-            "vCPU task must have entered the guest run loop"
-        );
+    }
+
+    #[test]
+    fn periodic_host_timer_policy_does_not_toggle_the_timer() {
+        let timer = RecordingTimerControl::default();
+
+        let result =
+            super::with_vcpu_host_timer_policy(super::HostTimerPolicy::Periodic, &timer, || 42);
+
+        assert_eq!(result, 42);
+        assert!(timer.states.borrow().is_empty());
     }
 }

@@ -1,0 +1,162 @@
+{
+  "schema": 1,
+  "metrics": [
+    "stability_jitter",
+    "callback_exec"
+  ],
+  "core_metrics": [
+    "stability_jitter",
+    "callback_exec"
+  ],
+  "comparison": {
+    "stability_jitter": {
+      "A_native": {
+        "expected": 299999,
+        "collected": 299999,
+        "missing": 0,
+        "p50_ns": 624,
+        "p95_ns": 3200,
+        "p99_ns": 10608,
+        "p99_9_ns": 37280,
+        "max_ns": 176432,
+        "miss_100us": 15,
+        "miss_500us": 0,
+        "miss_1ms": 0,
+        "mean_ns": 1171
+      },
+      "B_axvisor_rtthread": {
+        "expected": 299999,
+        "collected": 299999,
+        "missing": 0,
+        "p50_ns": 3472,
+        "p95_ns": 14464,
+        "p99_ns": 23056,
+        "p99_9_ns": 148912,
+        "max_ns": 421280,
+        "miss_100us": 722,
+        "miss_500us": 0,
+        "miss_1ms": 0,
+        "mean_ns": 5411
+      },
+      "C_axvisor_linux_rtthread": {
+        "expected": 299999,
+        "collected": 299999,
+        "missing": 0,
+        "p50_ns": 66960,
+        "p95_ns": 370080,
+        "p99_ns": 422208,
+        "p99_9_ns": 443392,
+        "max_ns": 827280,
+        "miss_100us": 123235,
+        "miss_500us": 19,
+        "miss_1ms": 0,
+        "mean_ns": 114225
+      },
+      "B_over_A": {
+        "p50_ns": 5.564102564102564,
+        "p95_ns": 4.52,
+        "p99_ns": 2.1734539969834086,
+        "p99_9_ns": 3.994420600858369,
+        "max_ns": 2.3877754602339714,
+        "mean_ns": 4.620836891545688,
+        "miss_100us": 48.13333333333333,
+        "miss_500us": null,
+        "miss_1ms": null
+      },
+      "C_over_B": {
+        "p50_ns": 19.285714285714285,
+        "p95_ns": 25.586283185840706,
+        "p99_ns": 18.31228313671062,
+        "p99_9_ns": 2.9775437842484154,
+        "max_ns": 1.9637295860235473,
+        "mean_ns": 21.109776381445204,
+        "miss_100us": 170.68559556786704,
+        "miss_500us": null,
+        "miss_1ms": null
+      }
+    },
+    "callback_exec": {
+      "A_native": {
+        "expected": 299999,
+        "collected": 299999,
+        "missing": 0,
+        "p50_ns": 112,
+        "p95_ns": 176,
+        "p99_ns": 448,
+        "p99_9_ns": 8336,
+        "max_ns": 36672,
+        "miss_100us": 0,
+        "miss_500us": 0,
+        "miss_1ms": 0,
+        "mean_ns": 143
+      },
+      "B_axvisor_rtthread": {
+        "expected": 299999,
+        "collected": 299999,
+        "missing": 0,
+        "p50_ns": 464,
+        "p95_ns": 720,
+        "p99_ns": 2144,
+        "p99_9_ns": 6656,
+        "max_ns": 150464,
+        "miss_100us": 6,
+        "miss_500us": 0,
+        "miss_1ms": 0,
+        "mean_ns": 530
+      },
+      "C_axvisor_linux_rtthread": {
+        "expected": 299999,
+        "collected": 299999,
+        "missing": 0,
+        "p50_ns": 528,
+        "p95_ns": 720,
+        "p99_ns": 3088,
+        "p99_9_ns": 10288,
+        "max_ns": 172048,
+        "miss_100us": 62,
+        "miss_500us": 0,
+        "miss_1ms": 0,
+        "mean_ns": 618
+      },
+      "B_over_A": {
+        "p50_ns": 4.142857142857143,
+        "p95_ns": 4.090909090909091,
+        "p99_ns": 4.785714285714286,
+        "p99_9_ns": 0.7984644913627639,
+        "max_ns": 4.102966841186737,
+        "mean_ns": 3.7062937062937062,
+        "miss_100us": null,
+        "miss_500us": null,
+        "miss_1ms": null
+      },
+      "C_over_B": {
+        "p50_ns": 1.1379310344827587,
+        "p95_ns": 1.0,
+        "p99_ns": 1.4402985074626866,
+        "p99_9_ns": 1.5456730769230769,
+        "max_ns": 1.1434495959166313,
+        "mean_ns": 1.1660377358490566,
+        "miss_100us": 10.333333333333334,
+        "miss_500us": null,
+        "miss_1ms": null
+      }
+    }
+  },
+  "assessment": {
+    "A_native": {
+      "data_complete": true,
+      "strict_tail_pass": true,
+      "tail_degradation": 176432
+    },
+    "B_axvisor_rtthread": {
+      "data_complete": true,
+      "strict_tail_pass": true,
+      "tail_degradation": 421280
+    },
+    "C_axvisor_linux_rtthread": {
+      "data_complete": true,
+      "strict_tail_pass": true,
+      "tail_degradation": 827280
+    }
+  }
+}

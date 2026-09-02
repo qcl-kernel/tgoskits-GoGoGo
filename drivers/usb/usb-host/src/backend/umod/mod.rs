@@ -1,4 +1,4 @@
-use std::{collections::BTreeSet, sync::Arc, thread};
+use std::{sync::Arc, thread};
 
 use futures::FutureExt;
 use usb_if::err::USBError;
@@ -7,7 +7,7 @@ use crate::{
     USBHost,
     backend::{
         BackendOp,
-        ty::{DeviceInfoOp, ProbeChangesOp, ProbedDeviceInfoOp},
+        ty::{DeviceInfoOp, ProbedDeviceInfoOp},
     },
 };
 
@@ -30,7 +30,6 @@ impl USBHost {
 
 pub struct Libusb {
     ctx: Arc<context::Context>,
-    known_devices: BTreeSet<usize>,
 }
 
 impl Libusb {
@@ -49,24 +48,15 @@ impl Libusb {
             }
         });
 
-        Self {
-            ctx,
-            known_devices: BTreeSet::new(),
-        }
+        Self { ctx }
     }
 
-    async fn device_list(&mut self) -> Result<ProbeChangesOp, USBError> {
+    async fn device_list(&mut self) -> Result<Vec<ProbedDeviceInfoOp>, USBError> {
         let ctx = self.ctx.clone();
         let devices = ctx.device_list()?;
         let mut infos = Vec::new();
-        let mut current_devices = BTreeSet::new();
         for dev in devices {
             let info = device::DeviceInfo::new(dev)?;
-            let device_id = info.id();
-            current_devices.insert(device_id);
-            if self.known_devices.contains(&device_id) {
-                continue;
-            }
             let is_hub = info.descriptor().class == 0x09;
             let info = Box::new(info) as Box<dyn super::ty::DeviceInfoOp>;
             let info = if is_hub {
@@ -76,16 +66,7 @@ impl Libusb {
             };
             infos.push(info);
         }
-        let disconnected = self
-            .known_devices
-            .difference(&current_devices)
-            .copied()
-            .collect();
-        self.known_devices = current_devices;
-        Ok(ProbeChangesOp {
-            connected: infos,
-            disconnected,
-        })
+        Ok(infos)
     }
 
     async fn _open_device(
@@ -114,7 +95,7 @@ impl BackendOp for Libusb {
 
     fn device_list<'a>(
         &'a mut self,
-    ) -> futures::future::BoxFuture<'a, Result<ProbeChangesOp, USBError>> {
+    ) -> futures::future::BoxFuture<'a, Result<Vec<ProbedDeviceInfoOp>, USBError>> {
         self.device_list().boxed()
     }
 

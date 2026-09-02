@@ -4,19 +4,17 @@
 
 use alloc::{borrow::Cow, sync::Arc};
 
+use ax_errno::{AxError, AxResult};
 use ax_memory_addr::PhysAddrRange;
 use axpoll::{IoEvents, Pollable};
 use sg2002_tpu::ion::IonBuffer;
 
 use super::{FileLike, Kstat};
-use crate::{
-    StarryError, StarryResult,
-    pseudofs::{
-        DeviceMmap, DeviceOps,
-        dev::{
-            ION_DEVICE,
-            ion::{ION_IOC_FREE, IonHandleData},
-        },
+use crate::pseudofs::{
+    DeviceMmap, DeviceOps,
+    dev::{
+        ION_DEVICE,
+        ion::{ION_IOC_FREE, IonHandleData},
     },
 };
 
@@ -60,17 +58,17 @@ impl Pollable for IonBufferFile {
 }
 
 impl FileLike for IonBufferFile {
-    fn read(&self, _dst: &mut super::IoDst) -> StarryResult<usize> {
+    fn read(&self, _dst: &mut super::IoDst) -> AxResult<usize> {
         // Ion buffer 不支持直接读取
-        Err(StarryError::InvalidInput)
+        Err(AxError::InvalidInput)
     }
 
-    fn write(&self, _src: &mut super::IoSrc) -> StarryResult<usize> {
+    fn write(&self, _src: &mut super::IoSrc) -> AxResult<usize> {
         // Ion buffer 不支持直接写入
-        Err(StarryError::InvalidInput)
+        Err(AxError::InvalidInput)
     }
 
-    fn stat(&self) -> StarryResult<Kstat> {
+    fn stat(&self) -> AxResult<Kstat> {
         Ok(Kstat {
             size: self.buffer.size as u64,
             ..Default::default()
@@ -81,7 +79,7 @@ impl FileLike for IonBufferFile {
         Cow::Borrowed("/dev/ion_buffer")
     }
 
-    fn device_mmap(&self, _offset: u64, _length: u64) -> StarryResult<DeviceMmap> {
+    fn device_mmap(&self, _offset: u64, _length: u64) -> AxResult<DeviceMmap> {
         Ok(DeviceMmap::Physical(self.phys_range(), None))
     }
 }

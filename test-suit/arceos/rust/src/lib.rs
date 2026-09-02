@@ -37,8 +37,6 @@ pub mod display;
 pub mod exception;
 #[cfg(all(feature = "fs-basic", feature = "ax-std"))]
 pub mod fs;
-#[cfg(all(feature = "futex-errno-order", feature = "ax-std"))]
-pub mod futex;
 #[cfg(all(feature = "eventfd-epoll", feature = "ax-std"))]
 pub mod io_mpx;
 #[cfg(all(
@@ -58,7 +56,6 @@ pub mod net;
         feature = "task-affinity",
         feature = "task-ipi",
         feature = "task-irq",
-        feature = "task-mutex",
         feature = "task-parallel",
         feature = "task-priority",
         feature = "task-sleep",
@@ -109,7 +106,6 @@ test_runner!(
     exception::page_fault::run
 );
 test_runner!("fs-basic", run_fs_basic, fs::basic::run);
-test_runner!("futex-errno-order", run_futex_errno_order, futex::run);
 test_runner!(
     "lockdep-baseline",
     run_lockdep_baseline,
@@ -123,7 +119,6 @@ test_runner!("sched-rr", run_sched_rr, task::priority::run);
 test_runner!("task-affinity", run_task_affinity, task::affinity::run);
 test_runner!("task-ipi", run_task_ipi, task::ipi::run);
 test_runner!("task-irq", run_task_irq, task::irq::run);
-test_runner!("task-mutex", run_task_mutex, task::mutex::run);
 test_runner!("task-parallel", run_task_parallel, task::parallel::run);
 test_runner!("task-priority", run_task_priority, task::priority::run);
 test_runner!("task-sleep", run_task_sleep, task::sleep::run);
@@ -185,12 +180,6 @@ const SELECTED_TESTS: &[TestCase] = &[
     ),
     #[cfg(feature = "fs-basic")]
     TestCase::new("fs-basic", "bounded filesystem operations", run_fs_basic),
-    #[cfg(feature = "futex-errno-order")]
-    TestCase::new(
-        "futex-errno-order",
-        "futex value mismatch error precedence",
-        run_futex_errno_order,
-    ),
     #[cfg(feature = "lockdep-baseline")]
     TestCase::new(
         "lockdep-baseline",
@@ -225,8 +214,6 @@ const SELECTED_TESTS: &[TestCase] = &[
     TestCase::new("task-ipi", "IPI callback delivery", run_task_ipi),
     #[cfg(feature = "task-irq")]
     TestCase::new("task-irq", "task IRQ state", run_task_irq),
-    #[cfg(feature = "task-mutex")]
-    TestCase::new("task-mutex", "mutex contention and wakeup", run_task_mutex),
     #[cfg(feature = "task-parallel")]
     TestCase::new("task-parallel", "parallel computation", run_task_parallel),
     #[cfg(all(

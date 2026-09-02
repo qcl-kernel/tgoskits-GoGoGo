@@ -46,18 +46,12 @@ pub(super) fn try_with_gic<T>(
 struct PhysicalSpiSnapshot {
     enabled: bool,
     trigger: Trigger,
-    target: PhysicalSpiRegisterTarget,
-}
-
-#[derive(Clone, Copy, Debug)]
-enum PhysicalSpiRegisterTarget {
-    V2(arm_gic_driver::v2::TargetList),
-    V3(Option<arm_gic_driver::v3::Affinity>),
+    target: PhysicalSpiTarget,
 }
 
 #[derive(Clone, Copy, Debug)]
 enum PhysicalSpiTarget {
-    V2(arm_gic_driver::v2::CpuInterfaceTarget),
+    V2(arm_gic_driver::v2::TargetList),
     V3(Option<arm_gic_driver::v3::Affinity>),
 }
 
@@ -182,14 +176,14 @@ impl GicV3Backend for AxvmVgicBackend {
                 return Some(PhysicalSpiSnapshot {
                     enabled: gic.is_irq_enable(intid),
                     trigger: gic.get_cfg(intid),
-                    target: PhysicalSpiRegisterTarget::V2(gic.get_target_cpu(intid)),
+                    target: PhysicalSpiTarget::V2(gic.get_target_cpu(intid)),
                 });
             }
             if let Some(gic) = gic.typed_mut::<arm_gic_driver::v3::Gic>() {
                 return Some(PhysicalSpiSnapshot {
                     enabled: gic.is_irq_enable(intid),
                     trigger: gic.get_cfg(intid),
-                    target: PhysicalSpiRegisterTarget::V3(gic.get_target_cpu(intid)),
+                    target: PhysicalSpiTarget::V3(gic.get_target_cpu(intid)),
                 });
             }
             None
@@ -343,7 +337,7 @@ fn configure_physical_interrupt(
                 gic.typed_mut::<arm_gic_driver::v2::Gic>().map(|gic| {
                     gic.set_irq_enable(intid, false);
                     gic.set_cfg(intid, expected_trigger);
-                    gic.route_interrupt_to_cpu(intid, target);
+                    gic.set_target_cpu(intid, target);
                 })
             }
             (HostGicVersion::V3, PhysicalSpiTarget::V3(target)) => {
@@ -379,7 +373,7 @@ fn physical_spi_target(
             })?;
             let target = try_with_gic("target assigned physical interrupt", |intc| {
                 intc.typed_mut::<arm_gic_driver::v2::Gic>()
-                    .and_then(|gic| gic.cpu_interface_target_for_hardware_cpu(hardware_cpu_id))
+                    .and_then(|gic| gic.target_for_hardware_cpu(hardware_cpu_id))
             })?
             .ok_or_else(|| {
                 GicV3BackendError::new(
@@ -406,14 +400,14 @@ fn restore_physical_interrupt(
 ) -> Result<(), GicV3BackendError> {
     try_with_gic("restore assigned physical interrupt", |gic| {
         match (version, snapshot.target) {
-            (HostGicVersion::V2, PhysicalSpiRegisterTarget::V2(target)) => {
+            (HostGicVersion::V2, PhysicalSpiTarget::V2(target)) => {
                 gic.typed_mut::<arm_gic_driver::v2::Gic>().map(|gic| {
                     gic.set_cfg(intid, snapshot.trigger);
                     gic.set_target_cpu(intid, target);
                     gic.set_irq_enable(intid, snapshot.enabled);
                 })
             }
-            (HostGicVersion::V3, PhysicalSpiRegisterTarget::V3(target)) => {
+            (HostGicVersion::V3, PhysicalSpiTarget::V3(target)) => {
                 gic.typed_mut::<arm_gic_driver::v3::Gic>().map(|gic| {
                     gic.set_cfg(intid, snapshot.trigger);
                     gic.set_target_cpu(intid, target);
@@ -530,6 +524,12 @@ pub(crate) fn deactivate_host_irq(token: usize) {
 
 /// Dispatches an already acknowledged IRQ through the host dynamic framework.
 pub(crate) fn dispatch_acknowledged_host_irq(token: usize) {
+    // A guest exit may acknowledge a host IRQ without passing through the
+    // platform's raw-vector entry wrapper. Keep this path equivalent to
+    // `ax_hal::irq::handle_irq`: handlers may wake work, but the scheduler
+    // must not switch tasks while the IRQ-context marker is still set.
+    let _irq_guard = ax_std::os::arceos::sync::IrqSaveGuard::new();
+    let _preempt_guard = ax_std::os::arceos::sync::PreemptGuard::new();
     let raw = host_irq_intid(token);
     let irq = match ax_std::os::arceos::modules::ax_hal::irq::resolve_percpu_irq(
         ax_std::os::arceos::modules::ax_hal::irq::HwIrq(raw),

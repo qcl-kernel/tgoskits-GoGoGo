@@ -1,8 +1,7 @@
 use super::*;
 
 pub(super) const CURRENT_MODEL: ArchitectureCurrentModel = ArchitectureCurrentModel {
-    linux_current: CurrentContextSource::ArchitectureRegister,
-    unikernel_tls: CurrentContextSource::ArchitectureRegister,
+    current_source_aliases_kernel_tls: false,
 };
 
 fn current_el() -> Result<usize, CpuLocalError> {
@@ -20,13 +19,13 @@ pub(super) fn validate_environment() -> Result<(), CpuLocalError> {
     current_el().map(|_| ())
 }
 
-pub(super) unsafe fn install_cpu_base(area_base: usize, boot_context: usize) {
+pub(super) unsafe fn install_cpu_base(area_base: usize, boot_thread: usize) {
     match current_el().unwrap_or_else(|_| super::fatal_register_invariant()) {
         1 => unsafe { core::arch::asm!("msr TPIDR_EL1, {base}", base = in(reg) area_base) },
         2 => unsafe { core::arch::asm!("msr TPIDR_EL2, {base}", base = in(reg) area_base) },
         _ => unreachable!(),
     }
-    unsafe { core::arch::asm!("msr SP_EL0, {current}", current = in(reg) boot_context) };
+    unsafe { core::arch::asm!("msr SP_EL0, {current}", current = in(reg) boot_thread) };
 }
 
 pub(super) unsafe fn read_cpu_base() -> Result<usize, CpuLocalError> {
@@ -39,13 +38,13 @@ pub(super) unsafe fn read_cpu_base() -> Result<usize, CpuLocalError> {
     Ok(area_base)
 }
 
-pub(super) unsafe fn read_current_context(_area_base: usize) -> usize {
+pub(super) unsafe fn read_current_thread(_area_base: usize) -> usize {
     let current: usize;
     unsafe { core::arch::asm!("mrs {current}, SP_EL0", current = out(reg) current) };
     current
 }
 
-pub(super) unsafe fn write_current_context(value: usize) {
+pub(super) unsafe fn write_current_thread(value: usize) {
     unsafe { core::arch::asm!("msr SP_EL0, {value}", value = in(reg) value) };
 }
 

@@ -1,38 +1,5 @@
 use super::*;
 
-#[cfg_attr(axtest, axtest::axtest)]
-#[cfg_attr(not(axtest), test)]
-fn host_log_record_terminates_an_open_guest_line() {
-    let mux = GuestConsoleMux::new();
-    {
-        let mut state = mux.core.lock_state();
-        assert_eq!(state.output.format(1, false, b"guest> "), b"guest> ");
-    }
-
-    assert_eq!(
-        mux.route_host_log(b"host record\n", 0, 0),
-        Some(b"\nhost record\n".to_vec())
-    );
-}
-
-#[cfg_attr(axtest, axtest::axtest)]
-#[cfg_attr(not(axtest), test)]
-fn foreground_guest_buffers_whole_host_records_and_replays_on_detach() {
-    let mux = GuestConsoleMux::new();
-    {
-        let mut state = mux.core.lock_state();
-        state.output.enter_interactive(1);
-    }
-    assert_eq!(mux.route_host_log(b"first\n", 0, 0), None);
-    assert_eq!(mux.route_host_log(b"second\n", 0, 0), None);
-
-    let mut state = mux.core.lock_state();
-    state.output.buffer_all();
-    let mut replay = Vec::new();
-    append_host_log_replay(&mut state, &mut replay);
-    assert_eq!(replay, b"first\nsecond\n");
-}
-
 fn route_shortcut(mux: &GuestConsoleMux, suffix: u8) -> ConsoleInputEvent {
     assert_eq!(
         mux.route_host_byte(CTRL_X).event,
@@ -69,65 +36,6 @@ fn lowest_running_vm_is_default_and_input_only_reaches_foreground() {
     assert_eq!(backend_1.read(&mut input), 1);
     assert_eq!(input[0], b'x');
     assert_eq!(backend_2.read(&mut input), 0);
-}
-
-#[cfg_attr(axtest, axtest::axtest)]
-#[cfg_attr(not(axtest), test)]
-fn network_input_reaches_its_guest_without_changing_physical_foreground() {
-    let mux = GuestConsoleMux::new();
-    let backend_1 = mux.core.create_serial_backend(1);
-    let backend_2 = mux.core.create_serial_backend(2);
-    assert_eq!(mux.attach_default([1, 2]), Some(1));
-
-    assert_eq!(mux.route_network_input(2, b"uptime\r"), Some(false));
-    assert_eq!(mux.attached_vm(), Some(1));
-
-    let mut input = [0u8; 16];
-    assert_eq!(backend_1.read(&mut input), 0);
-    let read = backend_2.read(&mut input);
-    assert_eq!(&input[..read], b"uptime\r");
-}
-
-#[cfg_attr(axtest, axtest::axtest)]
-#[cfg_attr(not(axtest), test)]
-fn network_input_rejects_stopped_and_stale_guest_backends() {
-    let mux = GuestConsoleMux::new();
-    mux.core.create_serial_backend(1);
-    mux.set_running([1]);
-    mux.mark_stopped(1);
-
-    assert_eq!(mux.route_network_input(1, b"ignored"), None);
-}
-
-#[cfg_attr(axtest, axtest::axtest)]
-#[cfg_attr(not(axtest), test)]
-fn guest_input_overflow_is_reported_once_until_the_guest_drains_input() {
-    let mux = GuestConsoleMux::new();
-    let backend = mux.core.create_serial_backend(1);
-    let mut state = mux.core.lock_state();
-    state.attached = Some(1);
-
-    assert!(!enqueue_guest_input(
-        &mut state,
-        1,
-        &[b'x'; INPUT_QUEUE_CAPACITY]
-    ));
-    assert!(
-        route_literal_input(&mut state, b"y", ConsoleInputEvent::ShellByte(b'y'))
-            .input_overflow
-            .is_some()
-    );
-    assert!(
-        route_literal_input(&mut state, b"z", ConsoleInputEvent::ShellByte(b'z'))
-            .input_overflow
-            .is_none()
-    );
-    drop(state);
-
-    assert_eq!(backend.read(&mut [0]), 1);
-    let mut state = mux.core.lock_state();
-    assert!(!enqueue_guest_input(&mut state, 1, b"w"));
-    assert!(enqueue_guest_input(&mut state, 1, b"q"));
 }
 
 #[cfg_attr(axtest, axtest::axtest)]

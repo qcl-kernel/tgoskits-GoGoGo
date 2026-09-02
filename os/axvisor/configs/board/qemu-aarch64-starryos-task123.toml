@@ -1,0 +1,10 @@
+features = [
+    "ax-driver/virtio-net",
+    "qemu-aarch64-two-guest-net",
+]
+log = "Info"
+target = "aarch64-unknown-none-softfloat"
+vm_configs = [
+    "os/axvisor/configs/vms/qemu/aarch64/starryos-task123.toml",
+    "os/axvisor/configs/vms/qemu/aarch64/rtthread-net.toml",
+]

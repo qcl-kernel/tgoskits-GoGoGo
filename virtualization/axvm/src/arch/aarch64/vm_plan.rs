@@ -52,7 +52,7 @@ impl Aarch64VmPlan {
             config,
             nodes,
             &replacement_ranges,
-            super::resource_pools::create(vgic.config())?,
+            super::resource_pools::create(vgic.config(), config.id())?,
         )?;
         let firmware = Aarch64FirmwarePlan::new(config, vgic.config(), devices.graph())?;
         Ok(Self { devices, firmware })
@@ -72,10 +72,6 @@ impl Aarch64VmPlan {
 
     pub(crate) fn serial_devices(&self) -> &[ResolvedSerialDevice] {
         self.firmware.serials()
-    }
-
-    pub(crate) fn firmware_devices(&self) -> &[crate::boot::fdt::device::ResolvedFdtDevice] {
-        self.firmware.devices()
     }
 
     pub(crate) const fn timer_profile(&self) -> &GuestTimerProfile {

@@ -1,0 +1,10 @@
+features = [
+    "ax-driver/nvme",
+    "fs",
+]
+log = "Debug"
+target = "aarch64-unknown-none-softfloat"
+vm_configs = [
+  "os/axvisor/configs/vms/qemu/aarch64/linux-net.toml",
+  "os/axvisor/configs/vms/qemu/aarch64/rtthread-net.toml",
+]

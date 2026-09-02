@@ -42,6 +42,7 @@ use core::{
 };
 
 use ax_alloc::GlobalPage;
+use ax_errno::{AxError, AxResult};
 use ax_memory_addr::{PAGE_SIZE_4K, PhysAddrRange};
 use ax_runtime::hal::{mem::virt_to_phys, time::monotonic_time};
 use axfs_ng_vfs::{NodeFlags, VfsError, VfsResult};
@@ -78,7 +79,6 @@ use super::drm::{
     DrmUnique, DrmVersion, DrmWaitVblank,
 };
 use crate::{
-    StarryError, StarryResult,
     file::{FileLike, add_file_like},
     pseudofs::{DeviceMmap, DeviceOps},
     sync::Mutex,
@@ -251,15 +251,13 @@ impl FileLike for DmaBufGem {
         "anon_inode:dmabuf".into()
     }
 
-    fn device_mmap(&self, offset: u64, length: u64) -> StarryResult<DeviceMmap> {
+    fn device_mmap(&self, offset: u64, length: u64) -> AxResult<DeviceMmap> {
         // Validate that the requested sub-range fits within the buffer.
         // `checked_add` guards against a wrapping length that would
         // bypass the > self.size check.
-        let end = offset
-            .checked_add(length)
-            .ok_or(StarryError::InvalidInput)?;
+        let end = offset.checked_add(length).ok_or(AxError::InvalidInput)?;
         if end > self.size {
-            return Err(StarryError::InvalidInput);
+            return Err(AxError::InvalidInput);
         }
         // Return the *full* backing range.  The generic mmap layer
         // (mmap.rs, Physical arm) adds `offset` to `range.start` and

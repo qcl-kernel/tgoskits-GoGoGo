@@ -1,13 +1,12 @@
 use core::fmt;
 
+use ax_errno::LinuxResult;
 use ax_net::{
     RecvOptions, SocketAddrEx, SocketOps,
     unix::{DgramTransport, UnixSocket, UnixSocketAddr},
 };
 
-use crate::StarryResult;
-
-pub fn bind_dev_log() -> StarryResult<()> {
+pub fn bind_dev_log() -> LinuxResult<()> {
     let server = UnixSocket::new(DgramTransport::new(1));
     server.bind(SocketAddrEx::Unix(UnixSocketAddr::Path("/dev/log".into())))?;
     ax_task::spawn_with_name(

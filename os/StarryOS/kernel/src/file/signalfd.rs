@@ -5,6 +5,7 @@ use core::{
     task::Context,
 };
 
+use ax_errno::{AxError, AxResult};
 use ax_task::{
     current,
     future::{block_on, poll_io},
@@ -14,7 +15,6 @@ use starry_signal::{SignalInfo, SignalSet};
 use zerocopy::{Immutable, IntoBytes};
 
 use crate::{
-    StarryError, StarryResult,
     file::{FileLike, IoDst, IoSrc},
     sync::IrqMutex,
     task::AsThread,
@@ -127,9 +127,9 @@ impl Signalfd {
 }
 
 impl FileLike for Signalfd {
-    fn read(&self, dst: &mut IoDst) -> StarryResult<usize> {
+    fn read(&self, dst: &mut IoDst) -> AxResult<usize> {
         if dst.remaining_mut() < SIGNALFD_SIGINFO_SIZE {
-            return Err(StarryError::InvalidInput);
+            return Err(AxError::InvalidInput);
         }
 
         block_on(poll_io(self, IoEvents::IN, self.nonblocking(), || {
@@ -149,21 +149,21 @@ impl FileLike for Signalfd {
 
                 Ok(SIGNALFD_SIGINFO_SIZE)
             } else {
-                Err(StarryError::WouldBlock)
+                Err(AxError::WouldBlock)
             }
         }))
     }
 
-    fn write(&self, _src: &mut IoSrc) -> StarryResult<usize> {
+    fn write(&self, _src: &mut IoSrc) -> AxResult<usize> {
         // signalfd is read-only
-        Err(StarryError::BadFileDescriptor)
+        Err(AxError::BadFileDescriptor)
     }
 
     fn nonblocking(&self) -> bool {
         self.non_blocking.load(Ordering::Acquire)
     }
 
-    fn set_nonblocking(&self, non_blocking: bool) -> StarryResult {
+    fn set_nonblocking(&self, non_blocking: bool) -> AxResult {
         self.non_blocking.store(non_blocking, Ordering::Release);
         Ok(())
     }

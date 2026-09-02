@@ -1,7 +1,12 @@
 use alloc::{borrow::Cow, sync::Arc};
 use core::task::Context;
 
+use ax_errno::AxResult;
 use ax_fs_ng::MountNamespace as FsMountNamespace;
+use axnsproxy::{
+    CgroupNamespace, IpcNamespace, MntNamespace as ProxyMntNamespace, NetNamespace, PidNamespace,
+    UserNamespace, UtNamespace,
+};
 use axpoll::{IoEvents, Pollable};
 use linux_raw_sys::general::{
     CLONE_NEWCGROUP, CLONE_NEWIPC, CLONE_NEWNET, CLONE_NEWNS, CLONE_NEWPID, CLONE_NEWUSER,
@@ -9,14 +14,7 @@ use linux_raw_sys::general::{
 };
 
 use super::FileLike;
-use crate::{
-    StarryResult,
-    namespace::{
-        CgroupNamespace, IpcNamespace, MntNamespace as ProxyMntNamespace, NetNamespace,
-        UserNamespace, UtNamespace,
-    },
-    sync::IrqMutex,
-};
+use crate::sync::IrqMutex;
 
 /// A file descriptor that references a specific kernel namespace.
 ///
@@ -29,7 +27,7 @@ pub enum NsFd {
         ns: Arc<IrqMutex<ProxyMntNamespace>>,
         fs_ns: Arc<FsMountNamespace>,
     },
-    Pid(crate::namespace::PidNamespaceRef),
+    Pid(Arc<IrqMutex<PidNamespace>>),
     Net(Arc<IrqMutex<NetNamespace>>),
     User(Arc<IrqMutex<UserNamespace>>),
     Cgroup(Arc<IrqMutex<CgroupNamespace>>),
@@ -63,12 +61,12 @@ impl FileLike for NsFd {
         }
     }
 
-    fn stat(&self) -> StarryResult<super::Kstat> {
+    fn stat(&self) -> AxResult<super::Kstat> {
         let ino = match self {
             NsFd::Uts(ns) => ns.lock().id,
             NsFd::Ipc(ns) => ns.lock().ns_id,
             NsFd::Mnt { ns, .. } => ns.lock().id(),
-            NsFd::Pid(ns) => ns.id().get(),
+            NsFd::Pid(ns) => ns.lock().id,
             NsFd::Net(ns) => ns.lock().ns_id,
             NsFd::User(ns) => ns.lock().id,
             NsFd::Cgroup(ns) => ns.lock().id(),

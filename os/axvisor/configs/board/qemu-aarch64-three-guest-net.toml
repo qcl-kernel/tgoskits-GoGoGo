@@ -1,0 +1,8 @@
+features = [
+    "ax-driver/nvme",
+    "fs",
+    "qemu-aarch64-three-guest-net",
+]
+log = "Info"
+target = "aarch64-unknown-none-softfloat"
+vm_configs = []

@@ -234,6 +234,10 @@ impl FileNodeOps for SimpleFile {
             _ => Ok(()),
         }
     }
+
+    fn set_symlink(&self, target: &str) -> VfsResult<()> {
+        self.ops.write_all(target.as_bytes())
+    }
 }
 
 impl FsPollable for SimpleFile {
@@ -360,6 +364,10 @@ impl<T: DirectRwFsFileOps> FileNodeOps for SpecialFsFile<T> {
             // Shell redirection usually opens these files with O_TRUNC.
             return Ok(());
         }
+        Err(VfsError::InvalidInput)
+    }
+
+    fn set_symlink(&self, _target: &str) -> VfsResult<()> {
         Err(VfsError::InvalidInput)
     }
 }

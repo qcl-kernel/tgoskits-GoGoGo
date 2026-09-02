@@ -1,0 +1,67 @@
+diff --git a/components/drivers/virtio/virtio_net.h b/components/drivers/virtio/virtio_net.h
+index 5f7a4d9a..92c6f8d2 100644
+--- a/components/drivers/virtio/virtio_net.h
++++ b/components/drivers/virtio/virtio_net.h
+@@ -100,6 +100,9 @@ struct virtio_net_device
+ 
+     struct virtio_net_config *config;
+ 
++    /* Independent cursor for the benchmark RX interrupt hook. */
++    rt_uint16_t rx_irq_used_idx;
++
+     struct
+     {
+         /* Transmit hdr */
+diff --git a/components/drivers/virtio/virtio_net.c b/components/drivers/virtio/virtio_net.c
+index 3c96b3aa..7178e890 100644
+--- a/components/drivers/virtio/virtio_net.c
++++ b/components/drivers/virtio/virtio_net.c
+@@ -17,9 +17,13 @@
+ 
+ #include <virtio_net.h>
+ 
+-__attribute__((weak)) void rt_virtio_net_rx_irq_hook(rt_uint16_t used_idx)
++__attribute__((weak)) void rt_virtio_net_rx_irq_hook(rt_uint16_t used_idx,
++                                                    const void *payload,
++                                                    rt_uint32_t len)
+ {
+     (void)used_idx;
++    (void)payload;
++    (void)len;
+ }
+ 
+ static rt_err_t virtio_net_tx(rt_device_t dev, struct pbuf *p)
+@@ -151,3 +151,4 @@ static rt_err_t virtio_net_init(rt_device_t dev)
+     queue_rx->used_idx = queue_rx->used->idx;
++    virtio_net_dev->rx_irq_used_idx = queue_rx->used->idx;
+ 
+     queue_tx->avail->flags = VIRTQ_AVAIL_F_NO_INTERRUPT;
+@@ -214,8 +215,27 @@ static void virtio_net_isr(int irqno, void *param)
+ 
+     if (queue_rx->used_idx != queue_rx->used->idx)
+     {
++        rt_uint16_t scan_idx = virtio_net_dev->rx_irq_used_idx;
++        rt_uint16_t used_idx = queue_rx->used->idx;
++
+         rt_hw_dsb();
+-        rt_virtio_net_rx_irq_hook(queue_rx->used->idx);
++        while (scan_idx != used_idx)
++        {
++            rt_uint16_t used_id =
++                queue_rx->used->ring[scan_idx % queue_rx->num].id;
++            rt_uint32_t used_len =
++                queue_rx->used->ring[scan_idx % queue_rx->num].len;
++
++            if (used_len > VIRTIO_NET_HDR_SIZE)
++            {
++                rt_virtio_net_rx_irq_hook(
++                    scan_idx,
++                    virtio_net_dev->info[used_id / 2].rx_buffer,
++                    used_len - VIRTIO_NET_HDR_SIZE);
++            }
++            scan_idx++;
++        }
++        virtio_net_dev->rx_irq_used_idx = scan_idx;
+         eth_device_ready(&virtio_net_dev->parent);
+     }
+ }

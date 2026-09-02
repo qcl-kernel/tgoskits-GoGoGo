@@ -6,17 +6,21 @@ use alloc::{
 };
 use core::sync::atomic::{AtomicUsize, Ordering};
 
+use ax_errno::{AxError, AxResult};
 use ax_fs_ng::vfs::{CachedFile, FileFlags};
 use ax_memory_addr::{PAGE_SIZE_4K, PhysAddr, VirtAddr, VirtAddrRange};
 use ax_runtime::hal::paging::{MappingFlags, PageTable, PagingError};
-use axfs_ng_vfs::{Location, VfsError};
+use axfs_ng_vfs::Location;
 use weak_map::StrongRef;
 
 use super::{
     AddrSpace, Backend, BackendFileInfo, BackendOps, CloneMapAccounting, MemoryAccounting,
     PopulateCallback, RssKind, pages_in,
 };
-use crate::{StarryError, StarryResult, mm::flush_tlb_range_sync, sync::Mutex};
+use crate::{
+    mm::{flush_tlb_range_sync, paging_error_to_ax_error},
+    sync::Mutex,
+};
 
 #[doc(hidden)]
 pub struct FileBackendInner {
@@ -181,7 +185,7 @@ impl FileBackendInner {
 #[derive(Clone)]
 pub struct FileBackend(Arc<FileBackendInner>, Weak<Mutex<AddrSpace>>);
 impl FileBackend {
-    pub(crate) fn check_flags(&self, flags: MappingFlags) -> StarryResult {
+    pub(crate) fn check_flags(&self, flags: MappingFlags) -> AxResult {
         let mut required_flags = FileFlags::empty();
         if flags.contains(MappingFlags::READ) {
             required_flags |= FileFlags::READ;
@@ -191,7 +195,7 @@ impl FileBackend {
         }
 
         if !self.0.flags.contains(required_flags) {
-            return Err(StarryError::PermissionDenied);
+            return Err(AxError::PermissionDenied);
         }
         Ok(())
     }
@@ -251,7 +255,7 @@ impl FileBackend {
             + (va.as_usize().saturating_sub(file_data.start.as_usize())) as u64
     }
 
-    pub fn writeback_range(&self, range_start: VirtAddr, range_end: VirtAddr) -> StarryResult {
+    pub fn writeback_range(&self, range_start: VirtAddr, range_end: VirtAddr) -> AxResult {
         let file_data = self.0.file_data.lock();
 
         let offset_page = file_data.offset_page;
@@ -275,12 +279,12 @@ impl FileBackend {
         self.0
             .cache
             .writeback_pages(&dirty_pns)
-            .map_err(|_| StarryError::Io)?;
+            .map_err(|_| AxError::Io)?;
 
         Ok(())
     }
 
-    pub fn file_info(&self) -> StarryResult<BackendFileInfo> {
+    pub fn file_info(&self) -> AxResult<BackendFileInfo> {
         let loc = self.0.cache.location();
         let name = loc.absolute_path().map(|pb| pb.to_string())?;
         let offset = (self.0.file_data.lock().offset_page as u64) * PAGE_SIZE_4K as u64;
@@ -307,7 +311,7 @@ impl BackendOps for FileBackend {
         flags: MappingFlags,
         _acct: Option<&MemoryAccounting>,
         _pt: &mut PageTable,
-    ) -> StarryResult {
+    ) -> AxResult {
         self.check_flags(flags)
     }
 
@@ -316,7 +320,7 @@ impl BackendOps for FileBackend {
         range: VirtAddrRange,
         acct: Option<&MemoryAccounting>,
         pt: &mut PageTable,
-    ) -> StarryResult {
+    ) -> AxResult {
         let kind = self.rss_kind();
         for addr in pages_in(range, PAGE_SIZE_4K)? {
             match pt.unmap_page(addr) {
@@ -328,7 +332,7 @@ impl BackendOps for FileBackend {
                 Err(PagingError::NotMapped) => {}
                 Err(err) => {
                     warn!("Failed to unmap page {:?}: {:?}", addr, err);
-                    return Err(err.into());
+                    return Err(paging_error_to_ax_error(err));
                 }
             }
         }
@@ -340,7 +344,7 @@ impl BackendOps for FileBackend {
         _range: VirtAddrRange,
         new_flags: MappingFlags,
         _pt: &mut PageTable,
-    ) -> StarryResult {
+    ) -> AxResult {
         self.check_flags(new_flags)
     }
 
@@ -351,7 +355,7 @@ impl BackendOps for FileBackend {
         access_flags: MappingFlags,
         acct: Option<&MemoryAccounting>,
         pt: &mut PageTable,
-    ) -> StarryResult<(usize, Option<PopulateCallback>)> {
+    ) -> AxResult<(usize, Option<PopulateCallback>)> {
         let mut pages = 0;
         let mut to_be_evicted = Vec::new();
         let kind = self.rss_kind();
@@ -377,7 +381,8 @@ impl BackendOps for FileBackend {
                         && !page_flags.contains(MappingFlags::WRITE)
                     {
                         self.0.cache.mark_mmap_dirty_page(pn)?;
-                        pt.remap_page(addr, paddr, flags)?;
+                        pt.remap_page(addr, paddr, flags)
+                            .map_err(paging_error_to_ax_error)?;
                         pages += 1;
                     } else if page_flags.contains(access_flags) {
                         pages += 1;
@@ -406,11 +411,8 @@ impl BackendOps for FileBackend {
                             // through the stale mapping.
                             to_be_evicted.push(evicted);
                         }
-                        let paddr = page
-                            .paddr()
-                            .map_err(|error| VfsError::from(StarryError::from(error)))?;
-                        pt.map_page(addr, PhysAddr::from(paddr), PAGE_SIZE_4K, map_flags)
-                            .map_err(|error| VfsError::from(StarryError::from(error)))?;
+                        pt.map_page(addr, PhysAddr::from(page.paddr()?), PAGE_SIZE_4K, map_flags)
+                            .map_err(paging_error_to_ax_error)?;
                         if let Some(acct) = acct {
                             acct.inc(kind, 1);
                         }
@@ -418,7 +420,7 @@ impl BackendOps for FileBackend {
                         Ok(())
                     })?;
                 }
-                Err(_) => return Err(StarryError::BadAddress),
+                Err(_) => return Err(AxError::BadAddress),
             }
         }
         Ok((
@@ -470,7 +472,7 @@ impl BackendOps for FileBackend {
         _new_pt: &mut PageTable,
         new_aspace: &Arc<Mutex<AddrSpace>>,
         _acct: CloneMapAccounting<'_>,
-    ) -> StarryResult<Backend> {
+    ) -> AxResult<Backend> {
         let start = self.0.file_data.lock().start;
         Ok(Backend::File(self.with_start(start, new_aspace)))
     }

@@ -25,6 +25,7 @@
 
 use alloc::{vec, vec::Vec};
 
+use ax_errno::{AxError, AxResult};
 use ax_sync::Mutex;
 use hashbrown::HashMap;
 use smoltcp::{
@@ -33,7 +34,7 @@ use smoltcp::{
     wire::IpAddress,
 };
 
-use crate::{NetError, NetResult, addr::listen_addrs_conflict};
+use crate::addr::listen_addrs_conflict;
 
 /// One UDP bind ownership record. Several records share a port only when every
 /// binder requested SO_REUSEPORT on the identical local address, mirroring
@@ -91,7 +92,7 @@ impl<'a> SocketSetWrapper<'a> {
         addr: IpAddress,
         port: u16,
         reuse_port: bool,
-    ) -> NetResult {
+    ) -> AxResult {
         if port == 0 {
             return Ok(());
         }
@@ -102,7 +103,7 @@ impl<'a> SocketSetWrapper<'a> {
             .iter()
             .any(|entry| udp_binds_conflict(entry, addr, reuse_port))
         {
-            return Err(NetError::AddrInUse);
+            return Err(AxError::AddrInUse);
         }
         entries.push(UdpBoundEntry {
             addr,
@@ -194,12 +195,12 @@ mod tests {
         assert_eq!(
             w.udp_bind(h[2], addr(192, 0, 2, 10), 5353, false)
                 .unwrap_err(),
-            NetError::AddrInUse
+            AxError::AddrInUse
         );
         // A wildcard bind conflicts with any existing specific bind.
         assert_eq!(
             w.udp_bind(h[3], wildcard(), 5353, false).unwrap_err(),
-            NetError::AddrInUse
+            AxError::AddrInUse
         );
     }
 
@@ -211,7 +212,7 @@ mod tests {
         assert_eq!(
             w.udp_bind(h[1], addr(192, 0, 2, 10), 5354, false)
                 .unwrap_err(),
-            NetError::AddrInUse
+            AxError::AddrInUse
         );
     }
 
@@ -225,12 +226,12 @@ mod tests {
         w.udp_bind(h[0], local, 18101, false).unwrap();
         assert_eq!(
             w.udp_bind(h[1], local, 18101, false).unwrap_err(),
-            NetError::AddrInUse
+            AxError::AddrInUse
         );
         // SO_REUSEPORT cannot join a group started by a non-reuseport owner.
         assert_eq!(
             w.udp_bind(h[1], local, 18101, true).unwrap_err(),
-            NetError::AddrInUse
+            AxError::AddrInUse
         );
         w.udp_unbind(h[0]);
 
@@ -240,14 +241,14 @@ mod tests {
         // A plain binder still cannot steal a reuseport-owned port.
         assert_eq!(
             w.udp_bind(h[2], local, 18101, false).unwrap_err(),
-            NetError::AddrInUse
+            AxError::AddrInUse
         );
 
         // Releasing one member keeps the port owned by the remaining member.
         w.udp_unbind(h[0]);
         assert_eq!(
             w.udp_bind(h[3], local, 18101, false).unwrap_err(),
-            NetError::AddrInUse
+            AxError::AddrInUse
         );
         // Once fully released, a plain binder may take the port.
         w.udp_unbind(h[1]);

@@ -5,11 +5,14 @@
 //! consumers and adapts it to the OS-independent `ax-sync` bridge.
 
 pub mod api;
+#[cfg(all(axtest, feature = "axtest"))]
+mod axtest;
 #[doc(hidden)]
 pub mod bridge;
 mod context;
 #[cfg(feature = "lockdep")]
 mod lockdep;
+#[cfg(feature = "multitask")]
 mod mutex;
 mod spin;
 

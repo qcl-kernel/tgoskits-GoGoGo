@@ -2,7 +2,7 @@
 edition.workspace = true
 name = "enumerate"
 publish = false
-version = "0.1.1"
+version = "0.1.0"
 
 [dependencies]
 env_logger = "0.11"

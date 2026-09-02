@@ -21,11 +21,18 @@ macro_rules! convert_value_to_bytes {
 }
 
 /// Validate MMIO access width
+///
+/// The VirtIO MMIO specification states that all configuration registers
+/// (offset < 0x100) are 32-bit.  However, some guests (notably RT-Thread
+/// with RT_USING_VIRTIO_MMIO_ALIGN) may emit sub-32-bit loads or stores for
+/// individual struct fields when the compiler decides a byte/half-word access
+/// is safe.  Rather than rejecting these — which crashes the guest — we treat
+/// every access as a 32-bit access.  This is the same approach QEMU's
+/// virtio-mmio implementation takes: the transport logic only cares about the
+/// *register offset*, never the access width of a particular load/store.
 pub fn validate_access_width(width: AccessWidth) -> VirtioResult<()> {
-    // VirtIO MMIO requires 32-bit accesses for registers
-    if width != AccessWidth::Dword {
-        return Err(VirtioError::InvalidAccessWidth);
-    }
+    // Accept any access width — see doc comment above.
+    let _ = width;
     Ok(())
 }
 
@@ -53,10 +60,12 @@ pub fn validate_read_access(
     }
 
     // Validate access width for configuration registers
-    let offset = calculate_offset(addr, base_addr);
+    let mut offset = calculate_offset(addr, base_addr);
     if offset < VIRTIO_MMIO_CONFIG_OFFSET {
-        // Configuration registers require 32-bit access
         validate_access_width(width)?;
+        // Round down to the 4-byte register boundary so that sub-word
+        // reads at offset+0..3 map to the correct register.
+        offset &= !0x3;
     }
 
     Ok(offset)
@@ -75,10 +84,11 @@ pub fn validate_write_access(
     }
 
     // Validate access width for configuration registers
-    let offset = calculate_offset(addr, base_addr);
+    let mut offset = calculate_offset(addr, base_addr);
     if offset < VIRTIO_MMIO_CONFIG_OFFSET {
-        // Configuration registers require 32-bit access
         validate_access_width(width)?;
+        // Round down to the 4-byte register boundary.
+        offset &= !0x3;
     }
 
     Ok(offset)

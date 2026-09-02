@@ -4,31 +4,27 @@ use core::{
     task::Context,
 };
 
-use ax_task::AxTaskRef;
+use ax_errno::{AxError, AxResult};
 use axpoll::{IoEvents, PollSet, Pollable};
+use starry_process::{Pid, Process};
 
 use crate::{
-    StarryError, StarryResult,
     file::FileLike,
-    task::{PidIdentity, Process, ProcessData, Thread, TidNumber},
+    task::{ProcessData, ProcessIdentity, Thread},
 };
 
 pub struct PidFd {
-    /// Stable generation addressed by this fd (TID for thread pidfds).
-    identity: Arc<PidIdentity>,
-    /// Stable thread-group generation used by process-scoped operations.
-    process_identity: Arc<PidIdentity>,
+    identity: Arc<ProcessIdentity>,
     exit_event: Arc<PollSet>,
     thread_exit: Option<Arc<AtomicBool>>,
-    tid: Option<TidNumber>,
+    tid: Option<Pid>,
 
     non_blocking: AtomicBool,
 }
 impl PidFd {
-    pub(crate) fn new_process(identity: Arc<PidIdentity>) -> Self {
+    pub(crate) fn new_process(identity: Arc<ProcessIdentity>) -> Self {
         Self {
-            exit_event: identity.process_exit_event(),
-            process_identity: identity.clone(),
+            exit_event: identity.exit_event(),
             identity,
             thread_exit: None,
             tid: None,
@@ -37,9 +33,8 @@ impl PidFd {
         }
     }
 
-    pub(crate) fn new_thread(identity: Arc<PidIdentity>, thread: &Thread, tid: TidNumber) -> Self {
+    pub(crate) fn new_thread(identity: Arc<ProcessIdentity>, thread: &Thread, tid: Pid) -> Self {
         Self {
-            process_identity: thread.proc_data.identity(),
             identity,
             exit_event: thread.exit_event.clone(),
             thread_exit: Some(thread.exit.clone()),
@@ -50,14 +45,13 @@ impl PidFd {
     }
 
     /// Creates a thread pidfd for an exited thread-group leader.
-    pub(crate) fn new_exited_thread(identity: Arc<PidIdentity>) -> Self {
-        let tid = TidNumber::from(identity.root_number());
+    pub(crate) fn new_exited_thread(identity: Arc<ProcessIdentity>) -> Self {
+        let pid = identity.pid();
         Self {
-            exit_event: identity.process_exit_event(),
-            process_identity: identity.clone(),
+            exit_event: identity.exit_event(),
             identity,
             thread_exit: Some(Arc::new(AtomicBool::new(true))),
-            tid: Some(tid),
+            tid: Some(pid),
             non_blocking: AtomicBool::new(false),
         }
     }
@@ -66,52 +60,54 @@ impl PidFd {
         self.tid.is_some()
     }
 
-    pub(crate) fn identity(&self) -> Arc<PidIdentity> {
-        self.identity.clone()
+    pub fn process_pid(&self) -> Pid {
+        self.identity.pid()
     }
 
-    pub(crate) fn process_identity(&self) -> Arc<PidIdentity> {
-        self.process_identity.clone()
+    pub(crate) fn target_pid(&self) -> Pid {
+        self.tid.unwrap_or_else(|| self.identity.pid())
+    }
+
+    pub(crate) fn identity(&self) -> Arc<ProcessIdentity> {
+        self.identity.clone()
     }
 
     pub(crate) fn is_zombie(&self) -> bool {
         self.identity.is_zombie()
     }
 
-    fn public_process(&self) -> StarryResult<Arc<Process>> {
-        self.process_identity.public_process()
+    fn public_process(&self) -> AxResult<Arc<Process>> {
+        self.identity.public_process()
     }
 
     /// Resolves a process-scoped pidfd without requiring live runtime resources.
-    pub fn signal_process(&self) -> StarryResult<Arc<Process>> {
+    pub fn signal_process(&self) -> AxResult<Arc<Process>> {
         self.public_process()
     }
 
     /// Resolves a thread-scoped pidfd target.
-    pub fn signal_thread(&self) -> StarryResult<AxTaskRef> {
-        let tid = self.tid.ok_or(StarryError::InvalidInput)?;
+    pub fn signal_thread(&self) -> AxResult<(Arc<Process>, Pid)> {
+        let tid = self.tid.ok_or(AxError::InvalidInput)?;
         if self
             .thread_exit
             .as_ref()
             .is_some_and(|exited| exited.load(Ordering::Acquire))
-            && !(tid.pid_number() == self.identity.root_number() && self.identity.is_zombie())
+            && !(tid == self.identity.pid() && self.identity.is_zombie())
         {
-            return Err(StarryError::NoSuchProcess);
+            return Err(AxError::NoSuchProcess);
         }
-        self.identity.live_task().ok_or(StarryError::NoSuchProcess)
+        Ok((self.public_process()?, tid))
     }
 
-    pub fn process_data(&self) -> StarryResult<Arc<ProcessData>> {
+    pub fn process_data(&self) -> AxResult<Arc<ProcessData>> {
         // For threads, the pidfd is invalid once the thread exits, even if its
         // process is still alive.
         if let Some(thread_exit) = &self.thread_exit
             && thread_exit.load(Ordering::Acquire)
         {
-            return Err(StarryError::NoSuchProcess);
+            return Err(AxError::NoSuchProcess);
         }
-        self.process_identity
-            .live_data()
-            .ok_or(StarryError::NoSuchProcess)
+        self.identity.live_data().ok_or(AxError::NoSuchProcess)
     }
 }
 impl FileLike for PidFd {
@@ -119,7 +115,7 @@ impl FileLike for PidFd {
         "anon_inode:[pidfd]".into()
     }
 
-    fn set_nonblocking(&self, nonblocking: bool) -> StarryResult {
+    fn set_nonblocking(&self, nonblocking: bool) -> AxResult {
         self.non_blocking.store(nonblocking, Ordering::Release);
         Ok(())
     }
@@ -144,7 +140,7 @@ impl Pollable for PidFd {
             events.set(IoEvents::HUP, self.identity.is_reaped());
             events
         } else {
-            self.identity.process_poll_events()
+            self.identity.poll_events()
         }
     }
 

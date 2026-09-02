@@ -7,61 +7,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Added
-
-- Route typed ext4 preallocation, range mutation, extent inspection, and xattr
-  operations through the page-cache and inode adapters.
-- Propagate native block geometry, read-only, flush, and FUA capabilities
-  through the shared filesystem block cache.
-
-### Fixed
-
-- Serialize collapse/insert range mapping shifts with cached I/O and invalidate
-  pages from the shift point after stable-length revalidation.
-- Send FUA writes directly through the block runtime after overlapping dirty
-  cache writeback, then refresh or invalidate shared cache state from the
-  completion result.
-- Keep unlinked inode page-cache lifetime out of the global reclaim registry.
-
-## [0.9.3](https://github.com/rcore-os/tgoskits/compare/ax-fs-ng-v0.9.2...ax-fs-ng-v0.9.3) - 2026-08-27
-
-### Added
-
-- *(ax-fs-ng)* add shared block cache between block and filesystem layers ([#2171](https://github.com/rcore-os/tgoskits/pull/2171))
-
-## [0.9.2](https://github.com/rcore-os/tgoskits/compare/ax-fs-ng-v0.9.1...ax-fs-ng-v0.9.2) - 2026-08-25
-
-### Other
-
-- *(test)* consolidate Starry and ArceOS test suites ([#2173](https://github.com/rcore-os/tgoskits/pull/2173))
-
-## [0.9.1](https://github.com/rcore-os/tgoskits/compare/ax-fs-ng-v0.9.0...ax-fs-ng-v0.9.1) - 2026-08-25
-
-### Fixed
-
-- *(ax-fs-ng)* release reclaim registry lock before file locks ([#2170](https://github.com/rcore-os/tgoskits/pull/2170))
-- *(starry)* keep parent traversal inside chroot ([#2037](https://github.com/rcore-os/tgoskits/pull/2037))
-- *(ax-fs-ng)* stabilize block runtime lifecycle publication ([#2135](https://github.com/rcore-os/tgoskits/pull/2135))
-
-## [0.9.0](https://github.com/rcore-os/tgoskits/compare/ax-fs-ng-v0.8.7...ax-fs-ng-v0.9.0) - 2026-08-20
-
-### Added
-
-- *(dma-api)* [**breaking**] add device DMA coherency with uncached-alias remap ([#2106](https://github.com/rcore-os/tgoskits/pull/2106))
-- *(starry-nixos)* add Stage-2 NixOS userspace baseline ([#1923](https://github.com/rcore-os/tgoskits/pull/1923))
-
-### Fixed
-
-- *(sdmmc)* align Rockchip reset failure lifecycle ([#1987](https://github.com/rcore-os/tgoskits/pull/1987))
-- *(rsext4)* propagate journal I/O failures without panicking ([#1967](https://github.com/rcore-os/tgoskits/pull/1967))
-- *(ax-std)* implement futimens for regular files ([#1950](https://github.com/rcore-os/tgoskits/pull/1950))
-
-### Other
-
-- *(axtest)* standardize Cargo and QEMU test flow ([#2088](https://github.com/rcore-os/tgoskits/pull/2088))
-- *(errors)* introduce domain-owned error boundaries ([#2024](https://github.com/rcore-os/tgoskits/pull/2024))
-- *(sync)* unify lock primitives in ax-sync ([#1956](https://github.com/rcore-os/tgoskits/pull/1956))
-
 ## [0.8.7](https://github.com/rcore-os/tgoskits/compare/ax-fs-ng-v0.8.6...ax-fs-ng-v0.8.7) - 2026-08-09
 
 ### Fixed

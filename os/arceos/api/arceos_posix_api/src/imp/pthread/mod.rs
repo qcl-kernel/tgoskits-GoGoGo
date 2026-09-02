@@ -5,11 +5,12 @@ use core::{
     sync::atomic::{AtomicBool, Ordering},
 };
 
+use ax_errno::{LinuxError, LinuxResult};
 use ax_lazyinit::LazyLock;
 use ax_runtime::sync::SpinRwLock as RwLock;
 use ax_task::AxTaskRef;
 
-use crate::{PosixError, PosixResult, ctypes};
+use crate::ctypes;
 
 pub mod mutex;
 
@@ -46,7 +47,7 @@ impl Pthread {
         _attr: *const ctypes::pthread_attr_t,
         start_routine: extern "C" fn(arg: *mut c_void) -> *mut c_void,
         arg: *mut c_void,
-    ) -> PosixResult<ctypes::pthread_t> {
+    ) -> LinuxResult<ctypes::pthread_t> {
         let arg_wrapper = ForceSendSync(arg);
 
         let my_packet: Arc<Packet<*mut c_void>> = Arc::new(Packet {
@@ -98,9 +99,9 @@ impl Pthread {
     }
 
     #[track_caller]
-    fn join(ptr: ctypes::pthread_t) -> PosixResult<*mut c_void> {
+    fn join(ptr: ctypes::pthread_t) -> LinuxResult<*mut c_void> {
         if core::ptr::eq(ptr, Self::current_ptr() as _) {
-            return Err(PosixError::EDEADLK);
+            return Err(LinuxError::EDEADLK);
         }
 
         let thread = unsafe { Box::from_raw(ptr as *mut Pthread) };

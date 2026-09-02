@@ -1,6 +1,6 @@
 [package]
 name = "mingo"
-version = "0.8.3"
+version = "0.8.0"
 authors = ["Andre Richter <andre.o.richter@gmail.com>"]
 edition.workspace = true
 license = "Apache-2.0"

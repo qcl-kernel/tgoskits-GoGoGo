@@ -21,7 +21,7 @@
 //!
 //! # Polling
 //!
-//! UDP send/recv operations request the unique protocol executor after socket
+//! UDP send/recv operations request the shared net-poll worker after socket
 //! state changes. They do not run the interface poll loop directly.
 
 use alloc::{boxed::Box, vec, vec::Vec};
@@ -30,6 +30,7 @@ use core::{
     task::Context,
 };
 
+use ax_errno::{AxError, AxResult, ax_bail, ax_err_type};
 use ax_io::prelude::*;
 use ax_sync::Mutex;
 use axpoll::{IoEvents, Pollable};
@@ -42,8 +43,8 @@ use smoltcp::{
 };
 
 use crate::{
-    IpCmsg, NetError, NetResult, RecvFlags, RecvOptions, SOCKET_SET, SendFlags, SendOptions,
-    Shutdown, SocketAddrEx, SocketOps,
+    IpCmsg, RecvFlags, RecvOptions, SOCKET_SET, SendFlags, SendOptions, Shutdown, SocketAddrEx,
+    SocketOps,
     addr::allocate_ephemeral_port,
     config::{DeviceBinding, InterfaceId},
     consts::{UDP_RX_BUF_LEN, UDP_TX_BUF_LEN},
@@ -105,9 +106,9 @@ impl UdpSocket {
     }
 
     /// Restricts this socket to one interface for route selection.
-    pub fn bind_device(&self, interface_id: InterfaceId) -> NetResult {
+    pub fn bind_device(&self, interface_id: InterfaceId) -> AxResult {
         if interface_by_id(interface_id).is_none() {
-            return Err(NetError::NoSuchDevice);
+            return Err(AxError::NoSuchDevice);
         }
         self.general.set_device_binding(DeviceBinding {
             bound_if: Some(interface_id),
@@ -121,21 +122,21 @@ impl UdpSocket {
     }
 
     /// Returns the connected peer and cached source address.
-    fn remote_endpoint(&self) -> NetResult<(IpEndpoint, IpAddress)> {
+    fn remote_endpoint(&self) -> AxResult<(IpEndpoint, IpAddress)> {
         match self.peer_addr.try_lock() {
-            Some(addr) => addr.ok_or(NetError::NotConnected),
-            None => Err(NetError::NotConnected),
+            Some(addr) => addr.ok_or(AxError::NotConnected),
+            None => Err(AxError::NotConnected),
         }
     }
 
     /// Selects the source address used to reach `remote`.
-    fn source_for_remote(&self, remote: &IpAddress) -> NetResult<IpAddress> {
+    fn source_for_remote(&self, remote: &IpAddress) -> AxResult<IpAddress> {
         Ok(get_control()
             .select_route_with_binding(remote, self.general.device_binding())?
             .source)
     }
 
-    fn send_source_for_remote(&self, remote: &IpAddress) -> NetResult<IpAddress> {
+    fn send_source_for_remote(&self, remote: &IpAddress) -> AxResult<IpAddress> {
         if let Some(local_ep) = *self.local_addr.lock()
             && !local_ep.addr.is_unspecified()
         {
@@ -148,7 +149,7 @@ impl UdpSocket {
     fn source_and_binding_update_for_remote(
         &self,
         remote: &IpAddress,
-    ) -> NetResult<(IpAddress, bool)> {
+    ) -> AxResult<(IpAddress, bool)> {
         if let Some(local_ep) = *self.local_addr.lock()
             && !local_ep.addr.is_unspecified()
         {
@@ -198,7 +199,7 @@ impl UdpSocket {
 }
 
 impl Configurable for UdpSocket {
-    fn get_option_inner(&self, option: &mut GetSocketOption) -> NetResult<bool> {
+    fn get_option_inner(&self, option: &mut GetSocketOption) -> AxResult<bool> {
         use GetSocketOption as O;
 
         if self.general.get_option_inner(option)? {
@@ -221,7 +222,7 @@ impl Configurable for UdpSocket {
         Ok(true)
     }
 
-    fn set_option_inner(&self, option: SetSocketOption) -> NetResult<bool> {
+    fn set_option_inner(&self, option: SetSocketOption) -> AxResult<bool> {
         use SetSocketOption as O;
 
         if let O::IpTos(tos) = option {
@@ -246,12 +247,12 @@ impl Configurable for UdpSocket {
 }
 impl SocketOps for UdpSocket {
     /// Binds the UDP socket and records public port ownership.
-    fn bind(&self, local_addr: SocketAddrEx) -> NetResult {
+    fn bind(&self, local_addr: SocketAddrEx) -> AxResult {
         let mut local_addr = local_addr.into_ip()?;
         let _bind_guard = self.bind_lock.lock();
 
         if self.local_addr.lock().is_some() {
-            return Err(NetError::InvalidInput);
+            ax_bail!(InvalidInput, "already bound");
         }
         if local_addr.port() == 0 {
             local_addr.set_port(get_ephemeral_port()?);
@@ -266,8 +267,8 @@ impl SocketOps for UdpSocket {
 
         self.with_smol_socket(|socket| {
             socket.bind(endpoint).map_err(|e| match e {
-                smol::BindError::InvalidState => NetError::InvalidInput,
-                smol::BindError::Unaddressable => NetError::ConnectionRefused,
+                smol::BindError::InvalidState => ax_err_type!(InvalidInput, "already bound"),
+                smol::BindError::Unaddressable => ax_err_type!(ConnectionRefused, "unaddressable"),
             })
         })?;
         if let Err(err) = SOCKET_SET.udp_bind(
@@ -289,7 +290,7 @@ impl SocketOps for UdpSocket {
     }
 
     /// Stores a default peer and source address for connected UDP semantics.
-    fn connect(&self, remote_addr: SocketAddrEx) -> NetResult {
+    fn connect(&self, remote_addr: SocketAddrEx) -> AxResult {
         let remote_addr = remote_addr.into_ip()?;
         let mut guard = self.peer_addr.lock();
 
@@ -320,10 +321,10 @@ impl SocketOps for UdpSocket {
     }
 
     /// Sends one datagram, or appends to/flushed a MSG_MORE corked datagram.
-    fn send(&self, mut src: impl Read + IoBuf, options: SendOptions) -> NetResult<usize> {
+    fn send(&self, mut src: impl Read + IoBuf, options: SendOptions) -> AxResult<usize> {
         // MSG_OOB is only valid on stream sockets (SOCK_STREAM), not DGRAM.
         if options.flags.contains(SendFlags::OOB) {
-            return Err(NetError::OperationNotSupported);
+            ax_bail!(OperationNotSupported);
         }
 
         if self.local_addr.lock().is_none() {
@@ -347,15 +348,15 @@ impl SocketOps for UdpSocket {
                 }
                 None => match self.remote_endpoint() {
                     Ok((endpoint, src)) => (endpoint, src),
-                    Err(_) => return Err(NetError::DestAddrRequired),
+                    Err(_) => ax_bail!(DestAddrRequired),
                 },
             };
             if remote_addr.port == 0 || remote_addr.addr.is_unspecified() {
-                return Err(NetError::InvalidInput);
+                ax_bail!(InvalidInput, "invalid address");
             }
             let len = src.remaining();
             if len > CORK_MAX {
-                return Err(NetError::MessageTooLong);
+                ax_bail!(MessageTooLong);
             }
             let mut tmp = alloc::vec![0u8; len];
             let read = src.read(&mut tmp)?;
@@ -368,9 +369,9 @@ impl SocketOps for UdpSocket {
                 });
             } else {
                 let prev = cork.as_ref().unwrap().buf.len();
-                let new_len = prev.checked_add(read).ok_or(NetError::MessageTooLong)?;
+                let new_len = prev.checked_add(read).ok_or(AxError::MessageTooLong)?;
                 if new_len > CORK_MAX {
-                    return Err(NetError::MessageTooLong);
+                    ax_bail!(MessageTooLong);
                 }
                 cork.as_mut().unwrap().buf.extend_from_slice(&tmp[..read]);
             }
@@ -400,28 +401,28 @@ impl SocketOps for UdpSocket {
                     .buf
                     .len()
                     .checked_add(src.remaining())
-                    .ok_or(NetError::MessageTooLong)?;
+                    .ok_or(AxError::MessageTooLong)?;
                 if total > CORK_MAX {
-                    return Err(NetError::MessageTooLong);
+                    ax_bail!(MessageTooLong);
                 }
                 (c.remote, Some(c.source), total)
             } else {
                 match resolved {
                     Some((remote, source)) => {
                         if remote.port == 0 || remote.addr.is_unspecified() {
-                            return Err(NetError::InvalidInput);
+                            ax_bail!(InvalidInput, "invalid address");
                         }
                         (remote, Some(source), src.remaining())
                     }
-                    None => return Err(NetError::DestAddrRequired),
+                    None => ax_bail!(DestAddrRequired),
                 }
             };
             let result = self.with_smol_socket(|socket| {
                 if !socket.is_open() {
                     // not connected
-                    Err(NetError::NotConnected)
+                    Err(ax_err_type!(NotConnected))
                 } else if !socket.can_send() {
-                    Err(NetError::WouldBlock)
+                    Err(AxError::WouldBlock)
                 } else {
                     self.track_egress_ip_tos(local_addr, endpoint);
                     // UDP allows zero-length payloads (IP header + UDP header only).
@@ -436,8 +437,10 @@ impl SocketOps for UdpSocket {
                                 },
                             )
                             .map_err(|e| match e {
-                                smol::SendError::BufferFull => NetError::WouldBlock,
-                                smol::SendError::Unaddressable => NetError::ConnectionRefused,
+                                smol::SendError::BufferFull => AxError::WouldBlock,
+                                smol::SendError::Unaddressable => {
+                                    ax_err_type!(ConnectionRefused, "unaddressable")
+                                }
                             })?;
                         *cork_guard = None;
                         return Ok(0);
@@ -452,8 +455,10 @@ impl SocketOps for UdpSocket {
                             },
                         )
                         .map_err(|e| match e {
-                            smol::SendError::BufferFull => NetError::WouldBlock,
-                            smol::SendError::Unaddressable => NetError::ConnectionRefused,
+                            smol::SendError::BufferFull => AxError::WouldBlock,
+                            smol::SendError::Unaddressable => {
+                                ax_err_type!(ConnectionRefused, "unaddressable")
+                            }
                         })?;
                     let mut total_written = 0;
                     let mut cur_read = 0;
@@ -479,7 +484,7 @@ impl SocketOps for UdpSocket {
     }
 
     /// Receives one datagram while honoring peer filters and recv flags.
-    fn recv(&self, mut dst: impl Write, mut options: RecvOptions) -> NetResult<usize> {
+    fn recv(&self, mut dst: impl Write, mut options: RecvOptions) -> AxResult<usize> {
         enum ExpectedRemote<'a> {
             Any(&'a mut SocketAddrEx),
             AnyDiscard,
@@ -498,7 +503,7 @@ impl SocketOps for UdpSocket {
             request_poll();
             self.with_smol_socket(|socket| {
                 if !socket.can_recv() {
-                    Err(NetError::WouldBlock)
+                    Err(AxError::WouldBlock)
                 } else {
                     let result = if options.flags.contains(RecvFlags::PEEK) {
                         socket.peek().map(|(data, meta)| (data, *meta))
@@ -520,7 +525,7 @@ impl SocketOps for UdpSocket {
                                         || (expected.port != 0
                                             && expected.port != meta.endpoint.port)
                                     {
-                                        return Err(NetError::WouldBlock);
+                                        return Err(AxError::WouldBlock);
                                     }
                                 }
                             }
@@ -560,7 +565,7 @@ impl SocketOps for UdpSocket {
                                 read
                             })
                         }
-                        Err(smol::RecvError::Exhausted) => Err(NetError::WouldBlock),
+                        Err(smol::RecvError::Exhausted) => Err(AxError::WouldBlock),
                         Err(smol::RecvError::Truncated) => {
                             unreachable!("UDP socket recv never returns Err(Truncated)")
                         }
@@ -570,23 +575,23 @@ impl SocketOps for UdpSocket {
         })
     }
 
-    fn local_addr(&self) -> NetResult<SocketAddrEx> {
+    fn local_addr(&self) -> AxResult<SocketAddrEx> {
         match self.local_addr.try_lock() {
             Some(addr) => addr
                 .map(Into::into)
                 .map(SocketAddrEx::Ip)
-                .ok_or(NetError::NotConnected),
-            None => Err(NetError::NotConnected),
+                .ok_or(AxError::NotConnected),
+            None => Err(AxError::NotConnected),
         }
     }
 
-    fn peer_addr(&self) -> NetResult<SocketAddrEx> {
+    fn peer_addr(&self) -> AxResult<SocketAddrEx> {
         self.remote_endpoint()
             .map(|it| it.0.into())
             .map(SocketAddrEx::Ip)
     }
 
-    fn shutdown(&self, _how: Shutdown) -> NetResult {
+    fn shutdown(&self, _how: Shutdown) -> AxResult {
         // TODO(mivik): shutdown
         request_poll();
 
@@ -651,7 +656,7 @@ impl Drop for UdpSocket {
     }
 }
 
-fn get_ephemeral_port() -> NetResult<u16> {
+fn get_ephemeral_port() -> AxResult<u16> {
     allocate_ephemeral_port(|port| {
         SOCKET_SET.udp_port_available(IpAddress::Ipv4(Ipv4Addr::UNSPECIFIED), port)
     })

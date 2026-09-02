@@ -8,6 +8,7 @@
 
 use alloc::sync::Arc;
 
+use ax_errno::{AxError, AxResult, LinuxError};
 use linux_raw_sys::general::{
     __kernel_mode_t, __kernel_timespec, O_ACCMODE, O_CREAT, O_EXCL, O_NONBLOCK, O_RDONLY, O_RDWR,
     O_WRONLY, RLIMIT_MSGQUEUE, SIGEV_NONE, SIGEV_SIGNAL, SIGEV_THREAD, sigevent,
@@ -15,7 +16,6 @@ use linux_raw_sys::general::{
 use starry_vm::{VmMutPtr, VmPtr, vm_load, vm_write_slice};
 
 use crate::{
-    Errno, StarryError, StarryResult,
     file::{add_file_like, get_file_like, netlink::NetlinkSocket},
     ipc::mqueue::{
         MQ_NSIG, MQ_REGISTRY, MessageQueue, MqAttr, MqDescriptor, NOTIFY_COOKIE_LEN, NotifyRequest,
@@ -23,16 +23,14 @@ use crate::{
         queues_max, validate_name,
     },
     mm::vm_load_string,
-    task::{AsThread, current_pid_view},
+    task::AsThread,
     time::TimeValueLike,
 };
 
 /// Resolve an optional absolute `CLOCK_REALTIME` timeout pointer into a
 /// wall-clock deadline. A null pointer means "wait forever"; a supplied
 /// timespec is validated the way Linux does (`EINVAL` on out-of-range nsec).
-fn load_deadline(
-    abs_timeout: *const __kernel_timespec,
-) -> StarryResult<Option<core::time::Duration>> {
+fn load_deadline(abs_timeout: *const __kernel_timespec) -> AxResult<Option<core::time::Duration>> {
     if abs_timeout.is_null() {
         return Ok(None);
     }
@@ -51,7 +49,7 @@ pub fn sys_mq_open(
     oflag: i32,
     mode: __kernel_mode_t,
     attr: *const MqAttr,
-) -> StarryResult<isize> {
+) -> AxResult<isize> {
     let raw = vm_load_string(name)?;
     let short = validate_name(&raw)?;
     let key = {
@@ -89,13 +87,13 @@ pub fn sys_mq_open(
     let queue = match registry.get(&key) {
         Some(existing) => {
             if oflag & O_CREAT != 0 && oflag & O_EXCL != 0 {
-                return Err(Errno::EEXIST.into());
+                return Err(LinuxError::EEXIST.into());
             }
             // Linux `prepare_open`: the invalid access mode `O_RDWR|O_WRONLY`
             // (the 0b11 `O_ACCMODE` value) is rejected before the permission
             // check when opening an existing queue.
             if oflag & O_ACCMODE == O_RDWR | O_WRONLY {
-                return Err(Errno::EINVAL.into());
+                return Err(LinuxError::EINVAL.into());
             }
             // Opening an existing queue is a permission-checked open, mirroring
             // Linux `do_open` -> `inode_permission`; `CAP_DAC_OVERRIDE` bypasses.
@@ -108,7 +106,7 @@ pub fn sys_mq_open(
         }
         None => {
             if oflag & O_CREAT == 0 {
-                return Err(Errno::ENOENT.into());
+                return Err(LinuxError::ENOENT.into());
             }
             // Linux `mqueue_create_attr`: a `CAP_SYS_RESOURCE` caller may
             // exceed `mq_queues_max`; only unprivileged callers hit the cap.
@@ -116,7 +114,7 @@ pub fn sys_mq_open(
             // a queue unlinked while still open keeps counting - use the live
             // queue count rather than `registry.len()`.
             if queues_count() >= queues_max() && !can_sys_resource {
-                return Err(Errno::ENOSPC.into());
+                return Err(LinuxError::ENOSPC.into());
             }
             let (max_msg, msg_size) = if attr.is_null() {
                 // Linux seeds an attr-less queue with min(mq_msg_max,
@@ -137,14 +135,14 @@ pub fn sys_mq_open(
                     || a.mq_maxmsg as usize > msg_cap
                     || a.mq_msgsize as usize > size_cap
                 {
-                    return Err(Errno::EINVAL.into());
+                    return Err(LinuxError::EINVAL.into());
                 }
                 let (max_msg, msg_size) = (a.mq_maxmsg as usize, a.mq_msgsize as usize);
                 // Linux checks `mq_msgsize > ULONG_MAX / mq_maxmsg` and returns
                 // EOVERFLOW: the per-field bounds above pass independently but
                 // their product (total queue bytes) must not wrap `usize`.
                 if msg_size > usize::MAX / max_msg {
-                    return Err(Errno::EOVERFLOW.into());
+                    return Err(LinuxError::EOVERFLOW.into());
                 }
                 (max_msg, msg_size)
             };
@@ -209,7 +207,7 @@ pub fn sys_mq_open(
 /// dir (the mqueuefs root, created at mount as root, so fsuid == 0), or holds
 /// `CAP_FOWNER`; otherwise `-EPERM`. The dir is world-writable so no extra
 /// `MAY_WRITE`/`MAY_EXEC` gate applies. We enforce the same before removing.
-pub fn sys_mq_unlink(name: *const core::ffi::c_char) -> StarryResult<isize> {
+pub fn sys_mq_unlink(name: *const core::ffi::c_char) -> AxResult<isize> {
     let raw = vm_load_string(name)?;
     let short = validate_name(&raw)?;
     let key = {
@@ -225,12 +223,12 @@ pub fn sys_mq_unlink(name: *const core::ffi::c_char) -> StarryResult<isize> {
 
     let mut registry = MQ_REGISTRY.lock();
     let Some(queue) = registry.get(&key) else {
-        return Err(Errno::ENOENT.into());
+        return Err(LinuxError::ENOENT.into());
     };
     // `check_sticky`: owner of victim, owner of the sticky dir (mqueuefs root,
     // uid 0), or CAP_FOWNER.
     if fsuid != queue.uid() && fsuid != 0 && !can_fowner {
-        return Err(Errno::EPERM.into());
+        return Err(LinuxError::EPERM.into());
     }
     registry.remove(&key);
     Ok(0)
@@ -238,14 +236,14 @@ pub fn sys_mq_unlink(name: *const core::ffi::c_char) -> StarryResult<isize> {
 
 /// Fetch the per-fd descriptor behind an mqd, rejecting non-mqueue fds with
 /// `EBADF`.
-fn descriptor_from_fd(mqdes: i32) -> StarryResult<Arc<MqDescriptor>> {
+fn descriptor_from_fd(mqdes: i32) -> AxResult<Arc<MqDescriptor>> {
     get_file_like(mqdes)?
         .downcast_arc::<MqDescriptor>()
-        .map_err(|_| StarryError::from(Errno::EBADF))
+        .map_err(|_| AxError::from(LinuxError::EBADF))
 }
 
 /// Fetch the shared queue behind an mqd (access mode not checked here).
-fn queue_from_fd(mqdes: i32) -> StarryResult<Arc<MessageQueue>> {
+fn queue_from_fd(mqdes: i32) -> AxResult<Arc<MessageQueue>> {
     Ok(descriptor_from_fd(mqdes)?.queue().clone())
 }
 
@@ -256,18 +254,14 @@ pub fn sys_mq_timedsend(
     msg_len: usize,
     msg_prio: u32,
     abs_timeout: *const __kernel_timespec,
-) -> StarryResult<isize> {
+) -> AxResult<isize> {
     let desc = descriptor_from_fd(mqdes)?;
     // A queue opened O_RDONLY may not be sent to (Linux returns EBADF).
     if desc.access() == O_RDONLY {
-        return Err(Errno::EBADF.into());
+        return Err(LinuxError::EBADF.into());
     }
     let queue = desc.queue();
     let deadline = load_deadline(abs_timeout)?;
-    // Check the queue's fixed limit before copying user-controlled `msg_len`
-    // bytes. Linux's `do_mq_timedsend` likewise returns EMSGSIZE before
-    // `load_msg`, so an oversize message must win over a bad message pointer.
-    queue.check_send_len(msg_len)?;
     let data = vm_load(msg_ptr, msg_len)?;
     queue.send(&data, msg_prio, deadline, desc.is_nonblocking())?;
     Ok(0)
@@ -283,11 +277,11 @@ pub fn sys_mq_timedreceive(
     msg_len: usize,
     msg_prio: *mut u32,
     abs_timeout: *const __kernel_timespec,
-) -> StarryResult<isize> {
+) -> AxResult<isize> {
     let desc = descriptor_from_fd(mqdes)?;
     // A queue opened O_WRONLY may not be received from (Linux returns EBADF).
     if desc.access() == O_WRONLY {
-        return Err(Errno::EBADF.into());
+        return Err(LinuxError::EBADF.into());
     }
     let queue = desc.queue();
     let deadline = load_deadline(abs_timeout)?;
@@ -308,12 +302,9 @@ pub fn sys_mq_timedreceive(
 /// `sigev_notify = SIGEV_THREAD`, `sigev_signo = <netlink fd>` and
 /// `sigev_value.sival_ptr = <cookie buffer>`; the kernel pushes the cookie over
 /// that socket on message arrival (ipc/mqueue.c:1287-1351, `netlink_sendskb`).
-pub fn sys_mq_notify(mqdes: i32, sevp: *const sigevent) -> StarryResult<isize> {
+pub fn sys_mq_notify(mqdes: i32, sevp: *const sigevent) -> AxResult<isize> {
     let queue = queue_from_fd(mqdes)?;
-    let owner = ax_task::current().as_thread().proc_data.identity();
-    let owner_number = current_pid_view()
-        .visible_number(&owner)
-        .expect("mq_notify owner is visible in its active PID namespace");
+    let pid = ax_task::current().as_thread().proc_data.proc.pid();
 
     let req = if sevp.is_null() {
         NotifyRequest::Unregister
@@ -328,7 +319,7 @@ pub fn sys_mq_notify(mqdes: i32, sevp: *const sigevent) -> StarryResult<isize> {
                 // it registers and consumes the slot but never delivers.
                 let signo = sev.sigev_signo as u32;
                 if signo > MQ_NSIG {
-                    return Err(Errno::EINVAL.into());
+                    return Err(LinuxError::EINVAL.into());
                 }
                 // `sigev_value` is a union; Linux stores the whole word in
                 // `info->notify.sigev_value` and returns it as `si_value` when
@@ -350,17 +341,17 @@ pub fn sys_mq_notify(mqdes: i32, sevp: *const sigevent) -> StarryResult<isize> {
                 let fd = sev.sigev_signo;
                 let sock = get_file_like(fd)?
                     .downcast_arc::<NetlinkSocket>()
-                    .map_err(|_| StarryError::from(Errno::EINVAL))?;
+                    .map_err(|_| AxError::from(LinuxError::EINVAL))?;
                 let cookie_ptr = unsafe { sev.sigev_value.sival_ptr } as *const u8;
                 let bytes = vm_load(cookie_ptr, NOTIFY_COOKIE_LEN)?;
                 let mut cookie = [0u8; NOTIFY_COOKIE_LEN];
                 cookie.copy_from_slice(&bytes);
                 NotifyRequest::Thread { sock, cookie }
             }
-            _ => return Err(Errno::EINVAL.into()),
+            _ => return Err(LinuxError::EINVAL.into()),
         }
     };
-    queue.register_notify(req, owner, owner_number)?;
+    queue.register_notify(req, pid)?;
     Ok(0)
 }
 
@@ -374,7 +365,7 @@ pub fn sys_mq_getsetattr(
     mqdes: i32,
     newattr: *const MqAttr,
     oldattr: *mut MqAttr,
-) -> StarryResult<isize> {
+) -> AxResult<isize> {
     let desc = descriptor_from_fd(mqdes)?;
     let queue = desc.queue();
 
@@ -390,7 +381,7 @@ pub fn sys_mq_getsetattr(
         // Linux `do_mq_getsetattr` rejects any bit other than `O_NONBLOCK` in
         // `mq_flags` with `EINVAL` before applying the change.
         if new.mq_flags & !(O_NONBLOCK as i64) != 0 {
-            return Err(Errno::EINVAL.into());
+            return Err(LinuxError::EINVAL.into());
         }
         desc.set_nonblocking_flag(new.mq_flags & O_NONBLOCK as i64 != 0);
         // Applying a new attr bumps the inode's atime+ctime (ipc/mqueue.c:1420).

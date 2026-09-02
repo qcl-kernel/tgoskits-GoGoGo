@@ -7,20 +7,18 @@ use core::{
     net::{Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6},
 };
 
+use ax_errno::{AxError, AxResult, LinuxError};
 #[cfg(feature = "vsock")]
 use ax_net::vsock::VsockAddr;
 use ax_net::{SocketAddrEx, unix::UnixSocketAddr};
 use linux_raw_sys::{net::*, netlink::sockaddr_nl};
 
-use crate::{
-    Errno, StarryError, StarryResult,
-    mm::{UserConstPtr, UserPtr},
-};
+use crate::mm::{UserConstPtr, UserPtr};
 
 pub fn normalize_socket_addr_ex_for_ip_stack(
     addr: SocketAddrEx,
     is_bind: bool,
-) -> StarryResult<SocketAddrEx> {
+) -> AxResult<SocketAddrEx> {
     match addr {
         SocketAddrEx::Ip(SocketAddr::V4(_)) => Ok(addr),
         SocketAddrEx::Ip(SocketAddr::V6(v6)) => {
@@ -29,15 +27,15 @@ pub fn normalize_socket_addr_ex_for_ip_stack(
                 v4
             } else if ip.is_unspecified() {
                 if !is_bind {
-                    return Err(StarryError::from(Errno::EINVAL));
+                    return Err(AxError::from(LinuxError::EINVAL));
                 }
                 Ipv4Addr::UNSPECIFIED
             } else if ip == Ipv6Addr::LOCALHOST {
                 Ipv4Addr::LOCALHOST
             } else if is_bind {
-                return Err(StarryError::from(Errno::EADDRNOTAVAIL));
+                return Err(AxError::from(LinuxError::EADDRNOTAVAIL));
             } else {
-                return Err(StarryError::from(Errno::ENETUNREACH));
+                return Err(AxError::from(LinuxError::ENETUNREACH));
             };
             Ok(SocketAddrEx::Ip(SocketAddr::V4(SocketAddrV4::new(
                 v4,
@@ -71,20 +69,20 @@ pub fn socket_addr_v4_to_mapped_v6(v4: &SocketAddrV4) -> SocketAddrV6 {
 pub trait SocketAddrExt: Sized {
     /// This method attempts to interpret the data pointed to by `addr` with the
     /// given `addrlen` as a valid socket address of the implementing type.
-    fn read_from_user(addr: UserConstPtr<sockaddr>, addrlen: socklen_t) -> StarryResult<Self>;
+    fn read_from_user(addr: UserConstPtr<sockaddr>, addrlen: socklen_t) -> AxResult<Self>;
 
     /// This method serializes the current socket address instance into the
     /// [`sockaddr`] structure pointed to by `addr` in user space.
-    fn write_to_user(&self, addr: UserPtr<sockaddr>, addrlen: &mut socklen_t) -> StarryResult<()>;
+    fn write_to_user(&self, addr: UserPtr<sockaddr>, addrlen: &mut socklen_t) -> AxResult<()>;
 
     /// Gets the address family of the socket address.
     #[allow(dead_code)]
     fn family(&self) -> u16;
 }
 
-fn read_family(addr: UserConstPtr<sockaddr>, addrlen: socklen_t) -> StarryResult<u16> {
+fn read_family(addr: UserConstPtr<sockaddr>, addrlen: socklen_t) -> AxResult<u16> {
     if size_of::<__kernel_sa_family_t>() > addrlen as usize {
-        return Err(StarryError::InvalidInput);
+        return Err(AxError::InvalidInput);
     }
     let family = *addr.cast::<__kernel_sa_family_t>().get_as_ref()?;
     Ok(family)
@@ -92,7 +90,7 @@ fn read_family(addr: UserConstPtr<sockaddr>, addrlen: socklen_t) -> StarryResult
 unsafe fn cast_to_slice<T>(value: &T) -> &[u8] {
     unsafe { core::slice::from_raw_parts(value as *const T as *const u8, size_of::<T>()) }
 }
-fn fill_addr(addr: UserPtr<sockaddr>, addrlen: &mut socklen_t, data: &[u8]) -> StarryResult<()> {
+fn fill_addr(addr: UserPtr<sockaddr>, addrlen: &mut socklen_t, data: &[u8]) -> AxResult<()> {
     let len = (*addrlen as usize).min(data.len());
     addr.cast::<u8>()
         .get_as_mut_slice(len)?
@@ -104,17 +102,17 @@ fn fill_addr(addr: UserPtr<sockaddr>, addrlen: &mut socklen_t, data: &[u8]) -> S
 pub fn read_netlink_addr(
     addr: UserConstPtr<sockaddr>,
     addrlen: socklen_t,
-) -> StarryResult<sockaddr_nl> {
+) -> AxResult<sockaddr_nl> {
     // Linux `netlink_bind`/`netlink_connect` reject only `addrlen < sizeof(sockaddr_nl)`;
     // a larger length is accepted and the trailing bytes ignored. Callers commonly zero a
     // `sockaddr_storage` and pass its full size, so requiring an exact match wrongly
     // returned EINVAL for legitimate binds/connects. Read just the leading sockaddr_nl.
     if (addrlen as usize) < size_of::<sockaddr_nl>() {
-        return Err(StarryError::InvalidInput);
+        return Err(AxError::InvalidInput);
     }
     let addr_nl = addr.cast::<sockaddr_nl>().get_as_ref()?;
     if addr_nl.nl_family as u32 != AF_NETLINK {
-        return Err(StarryError::from(Errno::EAFNOSUPPORT));
+        return Err(AxError::from(LinuxError::EAFNOSUPPORT));
     }
     Ok(*addr_nl)
 }
@@ -123,20 +121,20 @@ pub fn write_netlink_addr(
     addr_nl: &sockaddr_nl,
     addr: UserPtr<sockaddr>,
     addrlen: &mut socklen_t,
-) -> StarryResult<()> {
+) -> AxResult<()> {
     fill_addr(addr, addrlen, unsafe { cast_to_slice(addr_nl) })
 }
 
 impl SocketAddrExt for SocketAddr {
-    fn read_from_user(addr: UserConstPtr<sockaddr>, addrlen: socklen_t) -> StarryResult<Self> {
+    fn read_from_user(addr: UserConstPtr<sockaddr>, addrlen: socklen_t) -> AxResult<Self> {
         match read_family(addr, addrlen)? as u32 {
             AF_INET => SocketAddrV4::read_from_user(addr, addrlen).map(Self::V4),
             AF_INET6 => SocketAddrV6::read_from_user(addr, addrlen).map(Self::V6),
-            _ => Err(StarryError::from(Errno::EAFNOSUPPORT)),
+            _ => Err(AxError::from(LinuxError::EAFNOSUPPORT)),
         }
     }
 
-    fn write_to_user(&self, addr: UserPtr<sockaddr>, addrlen: &mut socklen_t) -> StarryResult<()> {
+    fn write_to_user(&self, addr: UserPtr<sockaddr>, addrlen: &mut socklen_t) -> AxResult<()> {
         match self {
             SocketAddr::V4(v4) => v4.write_to_user(addr, addrlen),
             SocketAddr::V6(v6) => v6.write_to_user(addr, addrlen),
@@ -152,13 +150,13 @@ impl SocketAddrExt for SocketAddr {
 }
 
 impl SocketAddrExt for SocketAddrV4 {
-    fn read_from_user(addr: UserConstPtr<sockaddr>, addrlen: socklen_t) -> StarryResult<Self> {
+    fn read_from_user(addr: UserConstPtr<sockaddr>, addrlen: socklen_t) -> AxResult<Self> {
         if addrlen < size_of::<sockaddr_in>() as socklen_t {
-            return Err(StarryError::InvalidInput);
+            return Err(AxError::InvalidInput);
         }
         let addr_in = addr.cast::<sockaddr_in>().get_as_ref()?;
         if addr_in.sin_family as u32 != AF_INET {
-            return Err(StarryError::from(Errno::EAFNOSUPPORT));
+            return Err(AxError::from(LinuxError::EAFNOSUPPORT));
         }
 
         Ok(SocketAddrV4::new(
@@ -167,7 +165,7 @@ impl SocketAddrExt for SocketAddrV4 {
         ))
     }
 
-    fn write_to_user(&self, addr: UserPtr<sockaddr>, addrlen: &mut socklen_t) -> StarryResult<()> {
+    fn write_to_user(&self, addr: UserPtr<sockaddr>, addrlen: &mut socklen_t) -> AxResult<()> {
         let sockin_addr = sockaddr_in {
             sin_family: AF_INET as _,
             sin_port: self.port().to_be(),
@@ -185,13 +183,13 @@ impl SocketAddrExt for SocketAddrV4 {
 }
 
 impl SocketAddrExt for SocketAddrV6 {
-    fn read_from_user(addr: UserConstPtr<sockaddr>, addrlen: socklen_t) -> StarryResult<Self> {
+    fn read_from_user(addr: UserConstPtr<sockaddr>, addrlen: socklen_t) -> AxResult<Self> {
         if addrlen < size_of::<sockaddr_in6>() as socklen_t {
-            return Err(StarryError::InvalidInput);
+            return Err(AxError::InvalidInput);
         }
         let addr_in6 = addr.cast::<sockaddr_in6>().get_as_ref()?;
         if addr_in6.sin6_family as u32 != AF_INET6 {
-            return Err(StarryError::from(Errno::EAFNOSUPPORT));
+            return Err(AxError::from(LinuxError::EAFNOSUPPORT));
         }
 
         Ok(SocketAddrV6::new(
@@ -202,7 +200,7 @@ impl SocketAddrExt for SocketAddrV6 {
         ))
     }
 
-    fn write_to_user(&self, addr: UserPtr<sockaddr>, addrlen: &mut socklen_t) -> StarryResult<()> {
+    fn write_to_user(&self, addr: UserPtr<sockaddr>, addrlen: &mut socklen_t) -> AxResult<()> {
         let sockin_addr = sockaddr_in6 {
             sin6_family: AF_INET6 as _,
             sin6_port: self.port().to_be(),
@@ -223,9 +221,9 @@ impl SocketAddrExt for SocketAddrV6 {
 }
 
 impl SocketAddrExt for UnixSocketAddr {
-    fn read_from_user(addr: UserConstPtr<sockaddr>, addrlen: socklen_t) -> StarryResult<Self> {
+    fn read_from_user(addr: UserConstPtr<sockaddr>, addrlen: socklen_t) -> AxResult<Self> {
         if read_family(addr, addrlen)? as u32 != AF_UNIX {
-            return Err(StarryError::from(Errno::EAFNOSUPPORT));
+            return Err(AxError::from(LinuxError::EAFNOSUPPORT));
         }
         let offset = size_of::<__kernel_sa_family_t>();
         let ptr = UserConstPtr::<u8>::from(addr.address().as_usize() + offset);
@@ -238,13 +236,13 @@ impl SocketAddrExt for UnixSocketAddr {
             let end = data.iter().position(|&c| c == 0).unwrap_or(data.len());
             Self::Path(
                 str::from_utf8(&data[..end])
-                    .map_err(|_| StarryError::InvalidInput)?
+                    .map_err(|_| AxError::InvalidInput)?
                     .into(),
             )
         })
     }
 
-    fn write_to_user(&self, addr: UserPtr<sockaddr>, addrlen: &mut socklen_t) -> StarryResult<()> {
+    fn write_to_user(&self, addr: UserPtr<sockaddr>, addrlen: &mut socklen_t) -> AxResult<()> {
         let data_len = match self {
             UnixSocketAddr::Unnamed => 0,
             UnixSocketAddr::Abstract(name) => name.len() + 1,
@@ -291,14 +289,14 @@ pub struct sockaddr_vm {
 
 #[cfg(feature = "vsock")]
 impl SocketAddrExt for VsockAddr {
-    fn read_from_user(addr: UserConstPtr<sockaddr>, addrlen: socklen_t) -> StarryResult<Self> {
+    fn read_from_user(addr: UserConstPtr<sockaddr>, addrlen: socklen_t) -> AxResult<Self> {
         if addrlen != size_of::<sockaddr_vm>() as socklen_t {
-            return Err(StarryError::InvalidInput);
+            return Err(AxError::InvalidInput);
         }
 
         let addr_vsock = addr.cast::<sockaddr_vm>().get_as_ref()?;
         if addr_vsock.svm_family as u32 != AF_VSOCK {
-            return Err(StarryError::from(Errno::EAFNOSUPPORT));
+            return Err(AxError::from(LinuxError::EAFNOSUPPORT));
         }
         Ok(VsockAddr {
             cid: addr_vsock.svm_cid as _,
@@ -306,7 +304,7 @@ impl SocketAddrExt for VsockAddr {
         })
     }
 
-    fn write_to_user(&self, addr: UserPtr<sockaddr>, addrlen: &mut socklen_t) -> StarryResult<()> {
+    fn write_to_user(&self, addr: UserPtr<sockaddr>, addrlen: &mut socklen_t) -> AxResult<()> {
         let sockvm_addr = sockaddr_vm {
             svm_family: AF_VSOCK as _,
             svm_reserved1: 0,
@@ -323,17 +321,17 @@ impl SocketAddrExt for VsockAddr {
 }
 
 impl SocketAddrExt for SocketAddrEx {
-    fn read_from_user(addr: UserConstPtr<sockaddr>, addrlen: socklen_t) -> StarryResult<Self> {
+    fn read_from_user(addr: UserConstPtr<sockaddr>, addrlen: socklen_t) -> AxResult<Self> {
         match read_family(addr, addrlen)? as u32 {
             AF_INET | AF_INET6 => SocketAddr::read_from_user(addr, addrlen).map(Self::Ip),
             AF_UNIX => UnixSocketAddr::read_from_user(addr, addrlen).map(Self::Unix),
             #[cfg(feature = "vsock")]
             AF_VSOCK => VsockAddr::read_from_user(addr, addrlen).map(Self::Vsock),
-            _ => Err(StarryError::from(Errno::EAFNOSUPPORT)),
+            _ => Err(AxError::from(LinuxError::EAFNOSUPPORT)),
         }
     }
 
-    fn write_to_user(&self, addr: UserPtr<sockaddr>, addrlen: &mut socklen_t) -> StarryResult<()> {
+    fn write_to_user(&self, addr: UserPtr<sockaddr>, addrlen: &mut socklen_t) -> AxResult<()> {
         match self {
             SocketAddrEx::Ip(ip_addr) => ip_addr.write_to_user(addr, addrlen),
             SocketAddrEx::Unix(unix_addr) => unix_addr.write_to_user(addr, addrlen),
@@ -352,8 +350,8 @@ impl SocketAddrExt for SocketAddrEx {
     }
 }
 
-#[cfg(all(test, not(axtest)))]
-fn net_addr_conversion_rules_hold_for_test() -> bool {
+#[cfg(axtest)]
+pub(crate) fn net_addr_conversion_rules_hold_for_test() -> bool {
     use core::net::{Ipv4Addr, SocketAddrV4};
 
     // Test socket_addr_v4_to_mapped_v6 conversion
@@ -369,12 +367,4 @@ fn net_addr_conversion_rules_hold_for_test() -> bool {
     assert!(localhost_v6.port() == 80);
 
     true
-}
-
-#[cfg(all(test, not(axtest)))]
-mod tests {
-    #[test]
-    fn net_addr_conversion_rules_hold() {
-        assert!(super::net_addr_conversion_rules_hold_for_test());
-    }
 }

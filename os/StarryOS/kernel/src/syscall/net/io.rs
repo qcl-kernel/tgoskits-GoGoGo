@@ -1,6 +1,7 @@
 use alloc::{boxed::Box, vec::Vec};
 use core::{net::Ipv4Addr, time::Duration};
 
+use ax_errno::{AxError, AxResult};
 use ax_io::prelude::*;
 use ax_net::{
     CMsgData, IpCmsg, RecvFlags, RecvOptions, SendFlags, SendOptions, SocketAddrEx, SocketCmsg,
@@ -20,7 +21,6 @@ use super::addr::{
     SocketAddrExt, normalize_socket_addr_ex_for_ip_stack, socket_addr_ex_for_user_name,
 };
 use crate::{
-    StarryError, StarryResult,
     file::{FileLike, PacketSocket, Socket, add_file_like, get_file_like, netlink::NetlinkSocket},
     mm::{IoVec, IoVectorBuf, UserConstPtr, UserPtr, VmBytes, VmBytesMut},
     syscall::net::{CMsg, CMsgBuilder, cmsg_space},
@@ -34,7 +34,7 @@ const MMSG_MAX_VLEN: u32 = 1024;
 const MSG_WAITFORONE: u32 = 0x10000;
 const PROTO_IP: u32 = linux_raw_sys::net::IPPROTO_IP as u32;
 
-fn parse_recvmmsg_timeout(timeout: UserConstPtr<timespec>) -> StarryResult<Option<Duration>> {
+fn parse_recvmmsg_timeout(timeout: UserConstPtr<timespec>) -> AxResult<Option<Duration>> {
     if timeout.is_null() {
         return Ok(None);
     }
@@ -43,16 +43,14 @@ fn parse_recvmmsg_timeout(timeout: UserConstPtr<timespec>) -> StarryResult<Optio
     Ok(Some(Duration::new(tv.as_secs(), tv.subsec_nanos())))
 }
 
-fn parse_send_cmsgs(control_ptr: usize, control_len: usize) -> StarryResult<Vec<CMsgData>> {
+fn parse_send_cmsgs(control_ptr: usize, control_len: usize) -> AxResult<Vec<CMsgData>> {
     let mut cmsg = Vec::new();
     if control_ptr == 0 || control_len == 0 {
         return Ok(cmsg);
     }
 
     let mut ptr = control_ptr;
-    let ptr_end = ptr
-        .checked_add(control_len)
-        .ok_or(StarryError::InvalidInput)?;
+    let ptr_end = ptr.checked_add(control_len).ok_or(AxError::InvalidInput)?;
 
     while let Some(next) = ptr.checked_add(size_of::<cmsghdr>()) {
         if next > ptr_end {
@@ -61,13 +59,13 @@ fn parse_send_cmsgs(control_ptr: usize, control_len: usize) -> StarryResult<Vec<
 
         let hdr = UserConstPtr::<cmsghdr>::from(ptr).get_as_ref()?;
         if hdr.cmsg_len < size_of::<cmsghdr>() || ptr_end - ptr < hdr.cmsg_len {
-            return Err(StarryError::InvalidInput);
+            return Err(AxError::InvalidInput);
         }
 
         let Some(next_ptr) = cmsg_space(hdr.cmsg_len - size_of::<cmsghdr>())
             .and_then(|space| ptr.checked_add(space))
         else {
-            return Err(StarryError::InvalidInput);
+            return Err(AxError::InvalidInput);
         };
 
         cmsg.push(Box::new(CMsg::parse(hdr)?) as CMsgData);
@@ -84,7 +82,7 @@ fn send_impl(
     addr: UserConstPtr<sockaddr>,
     addrlen: socklen_t,
     cmsg: Vec<CMsgData>,
-) -> StarryResult<isize> {
+) -> AxResult<isize> {
     if let Ok(packet) = PacketSocket::from_fd(fd) {
         return Ok(packet.send_packet(&mut src)? as isize);
     }
@@ -96,7 +94,7 @@ fn send_impl(
             // returns EDESTADDRREQ on unconnected socket, never EINVAL.
             None
         } else if addrlen == 0 {
-            return Err(StarryError::InvalidInput);
+            return Err(AxError::InvalidInput);
         } else {
             let mut addr = SocketAddrEx::read_from_user(addr, addrlen)?;
             if socket.ip_domain() == linux_raw_sys::net::AF_INET6 {
@@ -128,7 +126,7 @@ fn send_impl(
     }
 
     get_file_like(fd)?;
-    Err(StarryError::NotASocket)
+    Err(AxError::NotASocket)
 }
 
 pub fn sys_sendto(
@@ -138,11 +136,11 @@ pub fn sys_sendto(
     flags: u32,
     addr: UserConstPtr<sockaddr>,
     addrlen: socklen_t,
-) -> StarryResult<isize> {
+) -> AxResult<isize> {
     send_impl(fd, VmBytes::new(buf, len), flags, addr, addrlen, Vec::new())
 }
 
-pub fn sys_sendmsg(fd: i32, msg: UserConstPtr<msghdr>, flags: u32) -> StarryResult<isize> {
+pub fn sys_sendmsg(fd: i32, msg: UserConstPtr<msghdr>, flags: u32) -> AxResult<isize> {
     let msg = msg.get_as_ref()?;
     let cmsg = parse_send_cmsgs(msg.msg_control as usize, msg.msg_controllen)?;
     send_impl(
@@ -168,7 +166,7 @@ fn recv_impl(
     mut cmsg_builder: Option<CMsgBuilder>,
     truncated_out: &mut bool,
     control_truncated_out: &mut bool,
-) -> StarryResult<isize> {
+) -> AxResult<isize> {
     debug!("sys_recv <= fd: {fd}, flags: {flags}");
 
     if let Ok(packet) = PacketSocket::from_fd(fd) {
@@ -215,7 +213,7 @@ fn recv_impl(
         }
 
         get_file_like(fd)?;
-        return Err(StarryError::NotASocket);
+        return Err(AxError::NotASocket);
     };
     let mut recv_flags = RecvFlags::empty();
     if flags & MSG_PEEK != 0 {
@@ -314,30 +312,27 @@ fn recv_impl(
                     },
                     Err(cmsg) => match cmsg.downcast::<SocketCmsg>() {
                         Ok(cmsg) => match *cmsg {
-                            SocketCmsg::Credentials(credentials) => {
-                                let credentials = Socket::project_unix_credentials(&credentials);
-                                builder.push_sized(
-                                    SOL_SOCKET,
-                                    SCM_CREDENTIALS,
-                                    size_of::<ucred>(),
-                                    |data| {
-                                        let credentials = ucred {
-                                            pid: credentials.pid as _,
-                                            uid: credentials.uid,
-                                            gid: credentials.gid,
-                                        };
-                                        // SAFETY: `credentials` lives through the
-                                        // copy, and `ucred` is a plain C ABI record.
-                                        data.copy_from_slice(unsafe {
-                                            core::slice::from_raw_parts(
-                                                (&credentials as *const ucred).cast::<u8>(),
-                                                size_of::<ucred>(),
-                                            )
-                                        });
-                                        Ok(size_of::<ucred>())
-                                    },
-                                )?
-                            }
+                            SocketCmsg::Credentials(credentials) => builder.push_sized(
+                                SOL_SOCKET,
+                                SCM_CREDENTIALS,
+                                size_of::<ucred>(),
+                                |data| {
+                                    let credentials = ucred {
+                                        pid: credentials.pid as _,
+                                        uid: credentials.uid,
+                                        gid: credentials.gid,
+                                    };
+                                    // SAFETY: `credentials` lives through the
+                                    // copy, and `ucred` is a plain C ABI record.
+                                    data.copy_from_slice(unsafe {
+                                        core::slice::from_raw_parts(
+                                            (&credentials as *const ucred).cast::<u8>(),
+                                            size_of::<ucred>(),
+                                        )
+                                    });
+                                    Ok(size_of::<ucred>())
+                                },
+                            )?,
                             SocketCmsg::Timestamp(timestamp) => builder.push_sized(
                                 SOL_SOCKET,
                                 SCM_TIMESTAMP,
@@ -384,7 +379,7 @@ pub fn sys_recvfrom(
     flags: u32,
     addr: UserPtr<sockaddr>,
     addrlen: UserPtr<socklen_t>,
-) -> StarryResult<isize> {
+) -> AxResult<isize> {
     recv_impl(
         fd,
         VmBytesMut::new(buf, len),
@@ -397,7 +392,7 @@ pub fn sys_recvfrom(
     )
 }
 
-pub fn sys_recvmsg(fd: i32, msg: UserPtr<msghdr>, flags: u32) -> StarryResult<isize> {
+pub fn sys_recvmsg(fd: i32, msg: UserPtr<msghdr>, flags: u32) -> AxResult<isize> {
     let msg = msg.get_as_mut()?;
     let mut truncated = false;
     let mut control_truncated = false;
@@ -431,12 +426,7 @@ pub fn sys_recvmsg(fd: i32, msg: UserPtr<msghdr>, flags: u32) -> StarryResult<is
 }
 
 /// Send multiple datagrams in one syscall.
-pub fn sys_sendmmsg(
-    fd: i32,
-    msgvec: UserPtr<mmsghdr>,
-    vlen: u32,
-    flags: u32,
-) -> StarryResult<isize> {
+pub fn sys_sendmmsg(fd: i32, msgvec: UserPtr<mmsghdr>, vlen: u32, flags: u32) -> AxResult<isize> {
     if vlen == 0 {
         return Ok(0);
     }
@@ -479,7 +469,7 @@ pub fn sys_recvmmsg(
     vlen: u32,
     flags: u32,
     timeout: UserConstPtr<timespec>,
-) -> StarryResult<isize> {
+) -> AxResult<isize> {
     if vlen == 0 {
         return Ok(0);
     }
@@ -504,7 +494,7 @@ pub fn sys_recvmmsg(
             && wall_time() >= deadline
         {
             if received == 0 {
-                return Err(StarryError::WouldBlock);
+                return Err(AxError::WouldBlock);
             }
             break;
         }
@@ -550,20 +540,13 @@ pub fn sys_recvmmsg(
     Ok(received)
 }
 
-#[cfg(all(test, not(axtest)))]
-fn net_io_constants_hold_for_test() -> bool {
-    const {
-        assert!(MMSG_MAX_VLEN == 1024);
-        assert!(PROTO_IP == 0);
-    }
+#[cfg(axtest)]
+pub(crate) fn net_io_constants_hold_for_test() -> bool {
+    // MMSG_MAX_VLEN constant
+    assert!(MMSG_MAX_VLEN == 1024);
+
+    // PROTO_IP constant
+    assert!(PROTO_IP == 0);
 
     true
-}
-
-#[cfg(all(test, not(axtest)))]
-mod tests {
-    #[test]
-    fn net_io_constants_hold() {
-        assert!(super::net_io_constants_hold_for_test());
-    }
 }

@@ -30,6 +30,9 @@ static mut KIMAGE_END: PhysAddr = PhysAddr::from_usize(0);
 
 const MEMORY_MAP_CAPACITY: usize = 512;
 
+#[cfg(all(target_arch = "aarch64", feature = "qemu-aarch64-three-guest-net"))]
+const QEMU_AARCH64_THREE_GUEST_RAM: Range<usize> = 0x8000_0000..0xb000_0000;
+
 pub type MemoryMap = heapless::Vec<MemoryDescriptor, MEMORY_MAP_CAPACITY>;
 
 pub(crate) fn setup_entry(
@@ -88,19 +91,23 @@ pub fn dcache_range(op: DCacheOp, addr: *const u8, size: usize) {
     Arch::dcache_range(op, addr as _, size);
 }
 
-pub fn dma_coherent_before_map_uncached(addr: *const u8, size: usize) {
-    Arch::dma_coherent_before_map_uncached(addr as _, size);
+pub fn dma_coherent_before_make_uncached(addr: *const u8, size: usize) {
+    Arch::dma_coherent_before_make_uncached(addr as _, size);
 }
 
-pub fn dma_coherent_before_unmap_uncached(addr: *const u8, size: usize) {
-    Arch::dma_coherent_before_unmap_uncached(addr as _, size);
+pub fn dma_coherent_before_restore_cached(addr: *const u8, size: usize) {
+    Arch::dma_coherent_before_restore_cached(addr as _, size);
 }
 
 pub fn dma_coherent_after_mapping_update() {
     Arch::dma_coherent_after_mapping_update();
 }
 
-#[cfg(any(test, all(target_arch = "riscv64", feature = "thead-mae")))]
+#[cfg(any(
+    test,
+    all(axtest, feature = "axtest"),
+    all(target_arch = "riscv64", feature = "thead-mae")
+))]
 pub(crate) fn cache_line_range(
     addr: usize,
     size: usize,
@@ -111,6 +118,36 @@ pub(crate) fn cache_line_range(
     }
     let end = addr.checked_add(size)?;
     Some((addr & !(line_size - 1), end))
+}
+
+#[cfg(all(axtest, feature = "axtest"))]
+pub(crate) fn mem_constants_and_cache_line_rules_hold_for_test() -> bool {
+    // KB/MB/GB constants
+    assert!(KB == 1024);
+    assert!(MB == 1024 * KB);
+    assert!(GB == 1024 * MB);
+
+    // KIMAGE_MAP_ALIGN
+    assert!(KIMAGE_MAP_ALIGN == 2 * MB);
+
+    // cache_line_range: valid inputs
+    let result = cache_line_range(0x1000, 64, 64).unwrap();
+    assert!(result.0 == 0x1000); // aligned down
+    assert!(result.1 == 0x1040); // addr + size
+
+    // cache_line_range: zero size returns None
+    assert!(cache_line_range(0x1000, 0, 64).is_none());
+
+    // cache_line_range: zero line_size returns None
+    assert!(cache_line_range(0x1000, 64, 0).is_none());
+
+    // cache_line_range: non-power-of-2 line_size returns None
+    assert!(cache_line_range(0x1000, 64, 63).is_none());
+
+    // cache_line_range: overflow returns None
+    assert!(cache_line_range(usize::MAX, 1, 64).is_none());
+
+    true
 }
 
 /// 物理RAM实际转换为的内核虚拟地址
@@ -176,6 +213,13 @@ pub(crate) fn early_init() {
 }
 
 fn reserve_arch_early_ranges() {
+    #[cfg(all(target_arch = "aarch64", feature = "qemu-aarch64-three-guest-net"))]
+    unsafe {
+        MEMORY_MAP.update(|map| {
+            apply_early_reserved_ranges(map, &[QEMU_AARCH64_THREE_GUEST_RAM]);
+        });
+    }
+
     #[cfg(target_arch = "x86_64")]
     {
         // AP trampoline lives in low memory and must stay reserved.
@@ -192,6 +236,80 @@ fn reserve_arch_early_ranges() {
             Err(err) => panic!("failed to reserve x86 AP trampoline: {err:?}"),
         }
     }
+}
+
+#[cfg(any(
+    test,
+    all(target_arch = "aarch64", feature = "qemu-aarch64-three-guest-net")
+))]
+fn apply_early_reserved_ranges(map: &mut MemoryMap, ranges: &[Range<usize>]) {
+    const ALIGNMENT: usize = 4 * KB;
+
+    for (index, range) in ranges.iter().enumerate() {
+        let size = range.end.checked_sub(range.start).unwrap_or_else(|| {
+            panic!("invalid early reserved range {range:#x?}: expected non-empty ordered range")
+        });
+        assert!(
+            size != 0,
+            "invalid early reserved range {range:#x?}: expected non-empty ordered range"
+        );
+        assert!(
+            range.start.is_multiple_of(ALIGNMENT) && range.end.is_multiple_of(ALIGNMENT),
+            "invalid early reserved range {range:#x?}: start and end must be 4 KiB aligned"
+        );
+
+        for previous in &ranges[..index] {
+            assert!(
+                range.start >= previous.end || range.end <= previous.start,
+                "invalid early reserved range {range:#x?}: requested ranges overlap {previous:#x?}"
+            );
+        }
+
+        let mut contained_in_free = false;
+        let mut non_free_overlap = None;
+        for desc in map.iter() {
+            let desc_end = desc
+                .physical_start
+                .checked_add(desc.size_in_bytes)
+                .unwrap_or_else(|| {
+                    panic!(
+                        "cannot validate early reserved range {range:#x?}: memory descriptor \
+                         overflows: {desc:?}"
+                    )
+                });
+            if desc.memory_type == MemoryType::Free
+                && desc.physical_start <= range.start
+                && range.end <= desc_end
+            {
+                contained_in_free = true;
+            }
+            if desc.memory_type != MemoryType::Free
+                && range.start < desc_end
+                && range.end > desc.physical_start
+            {
+                non_free_overlap = Some((desc.memory_type, desc.physical_start..desc_end));
+            }
+        }
+
+        if let Some((memory_type, existing)) = non_free_overlap {
+            panic!(
+                "invalid early reserved range {range:#x?}: overlaps {memory_type:?} descriptor \
+                 {existing:#x?}"
+            );
+        }
+        if !contained_in_free {
+            panic!("invalid early reserved range {range:#x?}: outside FREE RAM");
+        }
+    }
+
+    let mut updated = map.clone();
+    for range in ranges {
+        let desc = MemoryDescriptor::new_with_range(range.clone(), MemoryType::Reserved);
+        updated.merge_add(desc).unwrap_or_else(|err| {
+            panic!("failed to add early reserved range {range:#x?}: {err:?}")
+        });
+    }
+    *map = updated;
 }
 
 /// Get the physical range of the kernel image
@@ -256,7 +374,32 @@ pub fn kernel_space() -> Range<usize> {
 
 #[cfg(test)]
 mod tests {
+    extern crate std;
+
+    use std::panic::{AssertUnwindSafe, catch_unwind};
+
     use super::*;
+
+    fn memory_map_with(range: Range<usize>, memory_type: MemoryType) -> MemoryMap {
+        let mut map = MemoryMap::new();
+        map.merge_add(MemoryDescriptor::new_with_range(range, memory_type))
+            .unwrap();
+        map
+    }
+
+    fn assert_memory_types(map: &mut MemoryMap, expected: &[(Range<usize>, MemoryType)]) {
+        map.sort_by_key(|desc| desc.physical_start);
+        let actual: heapless::Vec<_, MEMORY_MAP_CAPACITY> = map
+            .iter()
+            .map(|desc| {
+                (
+                    desc.physical_start..desc.physical_start + desc.size_in_bytes,
+                    desc.memory_type,
+                )
+            })
+            .collect();
+        assert_eq!(actual.as_slice(), expected);
+    }
 
     #[test]
     fn cache_line_range_covers_unaligned_buffer() {
@@ -271,76 +414,224 @@ mod tests {
         assert_eq!(cache_line_range(0x1000, 1, 63), None);
         assert_eq!(cache_line_range(usize::MAX, 2, 64), None);
     }
+
+    #[test]
+    fn qemu_aarch64_three_guest_reservation_splits_free_ram() {
+        let mut map = memory_map_with(0x4000_0000..0x2_4000_0000, MemoryType::Free);
+
+        apply_early_reserved_ranges(&mut map, &[0x8000_0000..0xb000_0000]);
+
+        assert_memory_types(
+            &mut map,
+            &[
+                (0x4000_0000..0x8000_0000, MemoryType::Free),
+                (0x8000_0000..0xb000_0000, MemoryType::Reserved),
+                (0xb000_0000..0x2_4000_0000, MemoryType::Free),
+            ],
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "outside FREE RAM")]
+    fn qemu_aarch64_three_guest_reservation_rejects_too_small_ram() {
+        let mut map = memory_map_with(0x4000_0000..0x9000_0000, MemoryType::Free);
+        apply_early_reserved_ranges(&mut map, &[0x8000_0000..0xb000_0000]);
+    }
+
+    #[test]
+    #[should_panic(expected = "4 KiB aligned")]
+    fn qemu_aarch64_three_guest_reservation_rejects_misaligned_start() {
+        let mut map = memory_map_with(0x4000_0000..0x2_4000_0000, MemoryType::Free);
+        apply_early_reserved_ranges(&mut map, &[0x8000_0001..0xb000_0000]);
+    }
+
+    #[test]
+    #[should_panic(expected = "4 KiB aligned")]
+    fn qemu_aarch64_three_guest_reservation_rejects_misaligned_end() {
+        let mut map = memory_map_with(0x4000_0000..0x2_4000_0000, MemoryType::Free);
+        apply_early_reserved_ranges(&mut map, &[0x8000_0000..0xafff_ffff]);
+    }
+
+    #[test]
+    #[should_panic(expected = "non-empty ordered range")]
+    fn qemu_aarch64_three_guest_reservation_rejects_empty_range() {
+        let mut map = memory_map_with(0x4000_0000..0x2_4000_0000, MemoryType::Free);
+        apply_early_reserved_ranges(&mut map, &[0x8000_0000..0x8000_0000]);
+    }
+
+    #[test]
+    #[should_panic(expected = "non-empty ordered range")]
+    fn qemu_aarch64_three_guest_reservation_rejects_reversed_range() {
+        let mut map = memory_map_with(0x4000_0000..0x2_4000_0000, MemoryType::Free);
+        apply_early_reserved_ranges(&mut map, &[0xb000_0000..0x8000_0000]);
+    }
+
+    #[test]
+    #[should_panic(expected = "overlaps KImage")]
+    fn qemu_aarch64_three_guest_reservation_rejects_kimage_overlap() {
+        let mut map = memory_map_with(0x4000_0000..0x2_4000_0000, MemoryType::Free);
+        map.merge_add(MemoryDescriptor::new_with_range(
+            0x9000_0000..0x9100_0000,
+            MemoryType::KImage,
+        ))
+        .unwrap();
+        apply_early_reserved_ranges(&mut map, &[0x8000_0000..0xb000_0000]);
+    }
+
+    #[test]
+    #[should_panic(expected = "overlaps Reserved")]
+    fn qemu_aarch64_three_guest_reservation_rejects_firmware_reservation_overlap() {
+        let mut map = memory_map_with(0x4000_0000..0x2_4000_0000, MemoryType::Free);
+        map.merge_add(MemoryDescriptor::new_with_range(
+            0x9000_0000..0x9100_0000,
+            MemoryType::Reserved,
+        ))
+        .unwrap();
+        apply_early_reserved_ranges(&mut map, &[0x8000_0000..0xb000_0000]);
+    }
+
+    #[test]
+    #[should_panic(expected = "overlaps Mmio")]
+    fn qemu_aarch64_three_guest_reservation_rejects_other_non_free_overlap() {
+        let mut map = memory_map_with(0x4000_0000..0x2_4000_0000, MemoryType::Free);
+        map.merge_add(MemoryDescriptor::new_with_range(
+            0x9000_0000..0x9100_0000,
+            MemoryType::Mmio,
+        ))
+        .unwrap();
+        apply_early_reserved_ranges(&mut map, &[0x8000_0000..0xb000_0000]);
+    }
+
+    #[test]
+    #[should_panic(expected = "overlaps Reserved")]
+    fn early_reservation_scans_later_reserved_descriptor_after_containing_free() {
+        let mut map = MemoryMap::new();
+        map.push(MemoryDescriptor::new_with_range(
+            0x4000_0000..0x2_4000_0000,
+            MemoryType::Free,
+        ))
+        .unwrap();
+        map.push(MemoryDescriptor::new_with_range(
+            0x9000_0000..0x9100_0000,
+            MemoryType::Reserved,
+        ))
+        .unwrap();
+
+        apply_early_reserved_ranges(&mut map, &[0x8000_0000..0xb000_0000]);
+    }
+
+    #[test]
+    #[should_panic(expected = "overlaps KImage")]
+    fn early_reservation_scans_later_kimage_descriptor_after_containing_free() {
+        let mut map = MemoryMap::new();
+        map.push(MemoryDescriptor::new_with_range(
+            0x4000_0000..0x2_4000_0000,
+            MemoryType::Free,
+        ))
+        .unwrap();
+        map.push(MemoryDescriptor::new_with_range(
+            0x9000_0000..0x9100_0000,
+            MemoryType::KImage,
+        ))
+        .unwrap();
+
+        apply_early_reserved_ranges(&mut map, &[0x8000_0000..0xb000_0000]);
+    }
+
+    #[test]
+    #[should_panic(expected = "memory descriptor overflows")]
+    fn early_reservation_scans_later_overflowing_descriptor_after_containing_free() {
+        let mut map = MemoryMap::new();
+        map.push(MemoryDescriptor::new_with_range(
+            0x4000_0000..0x2_4000_0000,
+            MemoryType::Free,
+        ))
+        .unwrap();
+        map.push(MemoryDescriptor {
+            physical_start: usize::MAX - 0xfff,
+            size_in_bytes: 0x2000,
+            memory_type: MemoryType::Reserved,
+        })
+        .unwrap();
+
+        apply_early_reserved_ranges(&mut map, &[0x8000_0000..0xb000_0000]);
+    }
+
+    #[test]
+    fn early_reservation_capacity_failure_leaves_map_unchanged() {
+        let mut map = memory_map_with(0x4000_0000..0x2_4000_0000, MemoryType::Free);
+        for index in 0..MEMORY_MAP_CAPACITY - 1 {
+            let start = index * 0x2000;
+            map.push(MemoryDescriptor::new_with_range(
+                start..start + 0x1000,
+                MemoryType::Reserved,
+            ))
+            .unwrap();
+        }
+        assert_eq!(map.len(), MEMORY_MAP_CAPACITY);
+        let original = map.clone();
+
+        let result = catch_unwind(AssertUnwindSafe(|| {
+            apply_early_reserved_ranges(&mut map, &[0x8000_0000..0xb000_0000]);
+        }));
+
+        assert!(result.is_err());
+        assert_eq!(map, original);
+    }
+
+    #[test]
+    fn early_reservation_applies_two_disjoint_ranges() {
+        let mut map = memory_map_with(0x4000_0000..0x1_4000_0000, MemoryType::Free);
+
+        apply_early_reserved_ranges(
+            &mut map,
+            &[0x8000_0000..0x9000_0000, 0xa000_0000..0xb000_0000],
+        );
+
+        assert_memory_types(
+            &mut map,
+            &[
+                (0x4000_0000..0x8000_0000, MemoryType::Free),
+                (0x8000_0000..0x9000_0000, MemoryType::Reserved),
+                (0x9000_0000..0xa000_0000, MemoryType::Free),
+                (0xa000_0000..0xb000_0000, MemoryType::Reserved),
+                (0xb000_0000..0x1_4000_0000, MemoryType::Free),
+            ],
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "requested ranges overlap")]
+    fn qemu_aarch64_three_guest_reservation_rejects_requested_range_overlap() {
+        let mut map = memory_map_with(0x4000_0000..0x2_4000_0000, MemoryType::Free);
+        apply_early_reserved_ranges(
+            &mut map,
+            &[0x8000_0000..0xa000_0000, 0x9000_0000..0xb000_0000],
+        );
+    }
 }
 
-#[cfg(test)]
-mod coverage_tests {
-    use super::*;
+#[cfg(all(axtest, feature = "axtest"))]
+pub(crate) fn mem_constants_and_types_hold_for_test() -> bool {
+    // Test memory constants
+    assert_eq!(KB, 1024);
+    assert_eq!(MB, 1024 * 1024);
+    assert_eq!(GB, 1024 * 1024 * 1024);
+    assert_eq!(KIMAGE_MAP_ALIGN, 2 * MB);
 
-    fn mem_constants_and_cache_line_rules_hold_for_test() -> bool {
-        // KB/MB/GB constants
-        assert!(KB == 1024);
-        assert!(MB == 1024 * KB);
-        assert!(GB == 1024 * MB);
+    // Test MemoryMap capacity
+    assert_eq!(MEMORY_MAP_CAPACITY, 512);
 
-        // KIMAGE_MAP_ALIGN
-        assert!(KIMAGE_MAP_ALIGN == 2 * MB);
+    true
+}
 
-        // cache_line_range: valid inputs
-        let result = cache_line_range(0x1000, 64, 64).unwrap();
-        assert!(result.0 == 0x1000); // aligned down
-        assert!(result.1 == 0x1040); // addr + size
+#[cfg(all(axtest, feature = "axtest"))]
+pub(crate) fn mem_byte_unit_types_hold_for_test() -> bool {
+    // Test byte_unit types exist
+    use byte_unit::Byte;
 
-        // cache_line_range: zero size returns None
-        assert!(cache_line_range(0x1000, 0, 64).is_none());
+    // Test that Byte can be created
+    let _byte = Byte::from_u64(1024);
 
-        // cache_line_range: zero line_size returns None
-        assert!(cache_line_range(0x1000, 64, 0).is_none());
-
-        // cache_line_range: non-power-of-2 line_size returns None
-        assert!(cache_line_range(0x1000, 64, 63).is_none());
-
-        // cache_line_range: overflow returns None
-        assert!(cache_line_range(usize::MAX, 1, 64).is_none());
-
-        true
-    }
-
-    fn mem_constants_and_types_hold_for_test() -> bool {
-        // Test memory constants
-        assert_eq!(KB, 1024);
-        assert_eq!(MB, 1024 * 1024);
-        assert_eq!(GB, 1024 * 1024 * 1024);
-        assert_eq!(KIMAGE_MAP_ALIGN, 2 * MB);
-
-        // Test MemoryMap capacity
-        assert_eq!(MEMORY_MAP_CAPACITY, 512);
-
-        true
-    }
-
-    fn mem_byte_unit_types_hold_for_test() -> bool {
-        // Test byte_unit types exist
-        use byte_unit::Byte;
-
-        // Test that Byte can be created
-        let _byte = Byte::from_u64(1024);
-
-        true
-    }
-
-    #[test]
-    fn mem_constants_and_cache_line_rules_hold() {
-        assert!(mem_constants_and_cache_line_rules_hold_for_test());
-    }
-
-    #[test]
-    fn mem_constants_and_types_hold() {
-        assert!(mem_constants_and_types_hold_for_test());
-    }
-
-    #[test]
-    fn mem_byte_unit_types_hold() {
-        assert!(mem_byte_unit_types_hold_for_test());
-    }
+    true
 }

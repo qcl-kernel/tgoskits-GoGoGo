@@ -45,6 +45,7 @@ __pycache__/
 /.cargo/.config-local.toml
 .axconfig*
 *.img
+!.claude/skills/*
 /tmp/*
 *.vi
 
@@ -54,11 +55,9 @@ __pycache__/
 .board*
 
 # Tooling artifacts
-.direnv/
+/.docker-cache/
 .codex
-/.agents/*
-!/.agents/skills/
-!/.agents/skills/**
+.agents
 .image.toml
 coverage/
 third_party/
@@ -74,3 +73,6 @@ loongarch64-axvisor-guest-tests.md
 /logs/offline-monitor/
 /images/linux-qemu/
 offline-monitor-analysis*.html
+
+# Task123 local run logs, raw serial captures, plots, and build artifacts
+/@logs/
